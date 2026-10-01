@@ -30,7 +30,9 @@ describe("WikiExport", () => {
   });
 
   it("rejects schema version 1, whose history held metadata only", () => {
-    expect(WikiExport.safeParse({ ...makeExport(), schemaVersion: 1 }).success).toBe(false);
+    const result = WikiExport.safeParse({ ...makeExport(), schemaVersion: 1 });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(["schemaVersion"]);
   });
 
   it("rejects pages for features missing from the manifest", () => {
