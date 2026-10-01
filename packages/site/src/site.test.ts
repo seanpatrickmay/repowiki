@@ -242,24 +242,27 @@ describe(".astro dir confinement", () => {
 });
 
 describe("page shell", () => {
-  it("links one local stylesheet with dark-mode and phone-width rules", () => {
-    const sheets = [
-      ...(site!
-        .read("index.html")
-        .matchAll(/<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/g) ?? []),
-    ];
+  it("links one local stylesheet with dark-mode, phone-width, and overflow rules", () => {
+    const html = site!.read("index.html");
+    const sheets = [...html.matchAll(/<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/g)];
     expect(sheets).toHaveLength(1);
     const css = site!.read(sheets[0]?.[1] ?? "");
     expect(css).toContain("prefers-color-scheme:dark");
     expect(css).toMatch(/max-width:720px|width<=720px/);
+    expect(css).toContain("overflow-wrap:anywhere");
   });
 
   it("has a skip link, a labelled site nav and a main landmark", () => {
-    expect(site!.read("index.html")).toContain(
-      '<a class="skip-link" href="#content">Jump to content</a>',
-    );
-    expect(site!.read("index.html")).toContain('<nav class="site-nav" aria-label="Site">');
-    expect(site!.read("index.html")).toContain('<main id="content" class="content">');
-    expect(site!.read("index.html")).toContain("<title>Main page - demo-repo wiki</title>");
+    const html = site!.read("index.html");
+    expect(html).toContain('<a class="skip-link" href="#content">Jump to content</a>');
+    expect(html).toContain('<nav class="site-nav" aria-label="Site">');
+    expect(html).toContain('<main id="content" class="content">');
+    expect(html).toContain("<title>Main page - demo-repo wiki</title>");
+  });
+
+  it("uses data: favicon and has no off-site links", () => {
+    const html = site!.read("index.html");
+    expect(html).toContain('<link rel="icon" href="data:,">');
+    expect(html).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
   });
 });
