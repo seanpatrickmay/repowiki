@@ -61,6 +61,41 @@ describe("python resolution", () => {
     expect(resolver.resolve("src/pkg/a.py", py("os"))).toEqual({ targets: [], external: true });
   });
 
+  describe("external classification", () => {
+    const internal = createResolver(
+      ["tests/__init__.py", "tests/helpers.py", "src/pkg/__init__.py", "src/pkg/a.py", "tool.py"],
+      [],
+    );
+
+    it("marks an unresolved import under an existing package as an internal miss", () => {
+      expect(internal.resolve("src/pkg/a.py", py("tests.odyssey_data", ["x"]))).toEqual({
+        targets: [],
+        external: false,
+      });
+    });
+
+    it("marks an unresolved import under a package inside a src/ root as an internal miss", () => {
+      expect(internal.resolve("tests/helpers.py", py("pkg.missing"))).toEqual({
+        targets: [],
+        external: false,
+      });
+    });
+
+    it("marks an unresolved import whose first segment is a module file as an internal miss", () => {
+      expect(internal.resolve("tests/helpers.py", py("tool.missing"))).toEqual({
+        targets: [],
+        external: false,
+      });
+    });
+
+    it("marks an import whose first segment matches nothing as external", () => {
+      expect(internal.resolve("tests/helpers.py", py("numpy.linalg", ["norm"]))).toEqual({
+        targets: [],
+        external: true,
+      });
+    });
+  });
+
   it("marks unresolvable relative imports as internal misses", () => {
     expect(resolver.resolve("src/pkg/a.py", py("nope", [], 1))).toEqual({
       targets: [],
@@ -106,6 +141,24 @@ describe("es resolution", () => {
 
   it("marks npm packages as external", () => {
     expect(resolver.resolve("web/src/main.tsx", es("react-dom/client"))).toEqual({
+      targets: [],
+      external: true,
+    });
+  });
+
+  it.each([
+    ["tsconfig @/ alias", "@/lib/missing"],
+    ["tsconfig ~/ alias", "~/lib/missing"],
+    ["package.json # import", "#internal/thing"],
+  ])("leaves an unresolved %s as an internal miss", (_name, specifier) => {
+    expect(resolver.resolve("web/src/main.tsx", es(specifier))).toEqual({
+      targets: [],
+      external: false,
+    });
+  });
+
+  it("still marks a scoped package that no workspace package matches as external", () => {
+    expect(resolver.resolve("web/src/main.tsx", es("@scope/other/deep"))).toEqual({
       targets: [],
       external: true,
     });

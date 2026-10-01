@@ -92,6 +92,19 @@ export function createResolver(
   }
   const roots = [...pythonRoots].sort();
 
+  // First segments an absolute import can name: a module file or a directory holding Python files.
+  const pythonTopNames = new Set<string>();
+  for (const path of files) {
+    if (!path.endsWith(".py")) continue;
+    for (const root of roots) {
+      const rest =
+        root === "" ? path : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null;
+      if (rest === null) continue;
+      const slash = rest.indexOf("/");
+      pythonTopNames.add(slash === -1 ? rest.slice(0, -".py".length) : rest.slice(0, slash));
+    }
+  }
+
   const pythonModule = (base: string, dotted: string): string | null => {
     const asPath = dotted
       .split(".")
@@ -136,7 +149,10 @@ export function createResolver(
       const module = find(raw.module);
       if (module !== null) targets.add(module);
     }
-    return { targets: [...targets].sort(), external: raw.level === 0 && targets.size === 0 };
+    // Absolute and unresolved: external only if the first segment names nothing in the repo.
+    const external =
+      raw.level === 0 && targets.size === 0 && !pythonTopNames.has(raw.module.split(".")[0] ?? "");
+    return { targets: [...targets].sort(), external };
   };
 
   const resolveFile = (candidate: string): string | null => {
@@ -177,7 +193,11 @@ export function createResolver(
     const segments = specifier.split("/");
     const nameLength = specifier.startsWith("@") ? 2 : 1;
     const pkg = byName.get(segments.slice(0, nameLength).join("/"));
-    if (pkg === undefined) return { targets: [], external: true };
+    if (pkg === undefined) {
+      // tsconfig-style aliases name repo files we cannot map without reading tsconfig: internal misses.
+      const alias = /^(?:@\/|~\/|#)/.test(specifier);
+      return { targets: [], external: !alias };
+    }
     const rest = segments.slice(nameLength).join("/");
     const target = pkg.exports[rest === "" ? "." : `./${rest}`];
     const hit = target === undefined ? null : resolveFile(target);
