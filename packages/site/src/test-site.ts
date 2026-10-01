@@ -1,13 +1,5 @@
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,18 +14,19 @@ export interface CliResult {
 }
 
 /** Runs the site CLI in a child process, as `pnpm site:build` does. */
-export function runCli(args: readonly string[]): CliResult {
-  const cwd = mkdtempSync(join(tmpdir(), "repowiki-cli-"));
+export function runCli(args: readonly string[], cwd?: string): CliResult {
+  const tempCwd = cwd || mkdtempSync(join(tmpdir(), "repowiki-cli-"));
+  const shouldCleanup = !cwd;
   try {
     const result = spawnSync(process.execPath, [CLI, ...args], {
       encoding: "utf8",
       timeout: 110_000,
-      cwd,
+      cwd: tempCwd,
       env: { ...process.env, NODE_ENV: "production" },
     });
     return { status: result.status, stdout: result.stdout, stderr: result.stderr };
   } finally {
-    rmSync(cwd, { recursive: true, force: true });
+    if (shouldCleanup) rmSync(tempCwd, { recursive: true, force: true });
   }
 }
 
@@ -53,7 +46,6 @@ export function buildFixtureSite(extraArgs: readonly string[] = []): BuiltSite {
     const exportFile = join(dir, "export.json");
     writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
     const outDir = join(dir, "site");
-    mkdirSync(outDir, { recursive: true });
     const result = runCli(["build", "--export", exportFile, "--out", outDir, ...extraArgs]);
     if (result.status !== 0)
       throw new Error(`site build failed:\n${result.stderr}${result.stdout}`);
@@ -97,7 +89,8 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
   for (const page of pages) {
     const html = readFileSync(join(outDir, page), "utf8");
     const ids = new Set<string>();
-    for (const [, id = ""] of html.matchAll(/id="([^"]*)"/g)) {
+    // Regex: whitespace or start of string, then id="...", to avoid matching data-id
+    for (const [, id = ""] of html.matchAll(/(?:^|\s)id="([^"]*)"/g)) {
       ids.add(id);
     }
     pageIds.set(page, ids);
@@ -112,7 +105,7 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
       // Fragment-only links (e.g., "#section")
       if (link.startsWith("#")) {
         if (link.length > 1) {
-          const frag = link.slice(1);
+          const frag = decodeURIComponent(link.slice(1));
           if (!pageIds.get(page)?.has(frag)) {
             broken.push(`${page} -> ${link}`);
           }
@@ -123,7 +116,6 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
 
       // Absolute URLs (http:// or https:// or //)
       if (link.startsWith("http://") || link.startsWith("https://") || link.startsWith("//")) {
-        checked++;
         continue;
       }
 
@@ -136,7 +128,9 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
       const hashIndex = link.indexOf("#");
       const pathPart = hashIndex >= 0 ? link.slice(0, hashIndex) : link;
       const fragPart = hashIndex >= 0 ? link.slice(hashIndex + 1) : undefined;
-      const decodedPath = decodeURIComponent(pathPart);
+      // Strip query string before decoding
+      const pathWithoutQuery = pathPart.replace(/\?.*$/, "");
+      const decodedPath = decodeURIComponent(pathWithoutQuery);
       const target = decodedPath.endsWith("/") ? `${decodedPath}index.html` : decodedPath;
 
       if (!existsSync(join(outDir, target))) {
@@ -146,8 +140,9 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
 
       // Check fragment if present
       if (fragPart) {
+        const decodedFrag = decodeURIComponent(fragPart);
         const targetPage = target.replace(/^\//, "");
-        if (!pageIds.get(targetPage)?.has(fragPart)) {
+        if (!pageIds.get(targetPage)?.has(decodedFrag)) {
           broken.push(`${page} -> ${link}`);
         }
       }

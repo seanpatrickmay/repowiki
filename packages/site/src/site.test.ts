@@ -27,9 +27,7 @@ describe("site build", () => {
 
   it("references no off-site scripts, styles or fonts", () => {
     for (const page of htmlFiles(site!.outDir)) {
-      expect(site!.read(page)).not.toMatch(
-        /(?:src|href)="(?:https?:)?\/\/[^"]*\.(?:js|css|woff2?)"/,
-      );
+      expect(site!.read(page)).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
     }
   });
 });
@@ -134,6 +132,53 @@ describe("site build directory safety", () => {
       site.cleanup();
     }
   }, 120_000);
+
+  it("succeeds with a non-existent out dir and writes the marker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-new-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const outDir = join(dir, "nonexistent", "nested", "site");
+      const result = runCli(["build", "--export", exportFile, "--out", outDir]);
+      expect(result.status).toBe(0);
+      expect(existsSync(join(outDir, "index.html"))).toBe(true);
+      expect(existsSync(join(outDir, ".repowiki-site"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("succeeds with an empty existing out dir", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-empty-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const outDir = join(dir, "site");
+      mkdirSync(outDir);
+      const result = runCli(["build", "--export", exportFile, "--out", outDir]);
+      expect(result.status).toBe(0);
+      expect(existsSync(join(outDir, "index.html"))).toBe(true);
+      expect(existsSync(join(outDir, ".repowiki-site"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("succeeds with the default out dir (no --out argument)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-default-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      // No --out argument means it defaults to <export dir>/site
+      const result = runCli(["build", "--export", exportFile]);
+      expect(result.status).toBe(0);
+      const defaultOutDir = join(dir, "site");
+      expect(existsSync(join(defaultOutDir, "index.html"))).toBe(true);
+      expect(existsSync(join(defaultOutDir, ".repowiki-site"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
 
 describe("link crawl", () => {
@@ -177,18 +222,21 @@ describe("link crawl", () => {
 });
 
 describe(".astro dir confinement", () => {
-  it("does not leave .astro in the cwd", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "repowiki-site-cwd-"));
+  it("does not leave .astro in the spawn cwd", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-dirs-"));
+    const cliCwd = mkdtempSync(join(tmpdir(), "repowiki-cli-cwd-"));
     try {
-      const exportFile = join(cwd, "export.json");
+      const exportFile = join(dir, "export.json");
       writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
-      const outDir = join(cwd, "site");
-      mkdirSync(outDir);
-      const result = runCli(["build", "--export", exportFile, "--out", outDir]);
+      const outDir = join(dir, "site");
+      // Spawn CLI in a different cwd
+      const result = runCli(["build", "--export", exportFile, "--out", outDir], cliCwd);
       expect(result.status).toBe(0);
-      expect(existsSync(join(cwd, ".astro"))).toBe(false);
+      // .astro should NOT exist in the CLI's spawn cwd
+      expect(existsSync(join(cliCwd, ".astro"))).toBe(false);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(cliCwd, { recursive: true, force: true });
     }
   }, 120_000);
 });

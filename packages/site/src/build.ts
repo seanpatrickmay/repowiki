@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
@@ -11,8 +12,22 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 /** Validate that the output directory is safe and won't destroy user data. */
 function validateOutDir(exportFile: string, outDir: string): void {
   const exportRealpath = realpathSync(exportFile);
-  const outRealpath = realpathSync(outDir);
   const cwdRealpath = realpathSync(process.cwd());
+
+  // For non-existent out dirs, realpath the nearest existing ancestor
+  let outRealpath: string;
+  if (existsSync(outDir)) {
+    outRealpath = realpathSync(outDir);
+  } else {
+    // Find the nearest existing ancestor
+    let parent = outDir;
+    while (!existsSync(parent)) {
+      parent = dirname(parent);
+    }
+    const ancestor = realpathSync(parent);
+    const suffix = outDir.slice(parent.length);
+    outRealpath = ancestor + suffix;
+  }
 
   // (a) out dir cannot contain the export file
   if (exportRealpath.startsWith(outRealpath + "/") || exportRealpath === outRealpath) {
@@ -21,8 +36,8 @@ function validateOutDir(exportFile: string, outDir: string): void {
     );
   }
 
-  // (b) out dir cannot contain .git
-  if (existsSync(`${outRealpath}/.git`)) {
+  // (b) out dir cannot contain .git (only if it exists)
+  if (existsSync(outRealpath) && existsSync(`${outRealpath}/.git`)) {
     throw new UsageError(`--out cannot be or contain a git repository (found .git in ${outDir})`);
   }
 
