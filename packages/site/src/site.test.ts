@@ -477,6 +477,21 @@ describe("history pages", () => {
     expect(html).toContain('<a href="/wiki/signals/history/2/">Revision as of 10 March 2026</a>');
   });
 
+  it("puts the older revision's label before the newer one's", () => {
+    const html = site.read("wiki/signals/diff/2/index.html");
+    const older = html.indexOf("Revision as of 3 February 2026");
+    const newer = html.indexOf("Revision as of 10 March 2026");
+    expect(older).toBeGreaterThan(-1);
+    expect(newer).toBeGreaterThan(older);
+  });
+
+  it("says so when two revisions have the same article text", () => {
+    const html = site.read("wiki/deliverables/diff/2/index.html");
+    expect(html).toContain("<p>No difference in the article text.</p>");
+    expect(html).not.toContain("diff-section");
+    expect(html).not.toContain("diff-row");
+  });
+
   it("emits a diff page only for revisions after the first", () => {
     // hostile-title and exporter have one revision each, so they get no diff page.
     for (const feature of ["hostile-title", "exporter", "reports", "scheduler"]) {
