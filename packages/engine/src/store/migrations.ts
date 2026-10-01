@@ -76,8 +76,9 @@ interface StoredManifest {
  * - Add rename's fromTitle to aliases if missing
  * - Remove all ending events (merge, split, retire)
  * - Re-add the ONE ending that matches the status, using existing sha where possible
- * Works on raw JSON so later schema changes cannot alter it. At the end, validates all
- * repaired bodies using the current core Manifest schema; if any fail, throws and rolls back.
+ * Works on raw JSON only and touches no core schema, so later schema changes cannot alter it.
+ * Whether the repaired bodies match the current schema is checked by migrate(), after the
+ * whole chain (including any later repair migration) has run.
  */
 function repairLineageStatus(db: Database.Database): void {
   const rows = db.prepare("SELECT sha, body FROM manifests").all() as {
@@ -154,29 +155,42 @@ function repairLineageStatus(db: Database.Database): void {
       update.run(JSON.stringify(manifest), row.sha);
     }
   }
-  // Verify all manifests parse successfully using the current core Manifest schema. Future
-  // schema changes must keep older bodies repairable (by a later migration), or migration 2's
-  // check will throw and the store will fail loudly instead of wedging on read.
-  const rows2 = db.prepare("SELECT sha, body FROM manifests").all() as {
+}
+
+export function migrate(db: Database.Database): void {
+  runMigrations(db, MIGRATIONS, verifyStoredManifests);
+}
+
+/**
+ * Throws if any stored manifest body does not parse with the current core schema, so a store
+ * fails loudly at open rather than on read. It runs after the whole migration chain, never
+ * inside a migration: a migration that validated against the live schema would block every
+ * later migration that rewrites bodies for a schema change.
+ */
+export function verifyStoredManifests(db: Database.Database): void {
+  const rows = db.prepare("SELECT sha, body FROM manifests").all() as {
     sha: string;
     body: string;
   }[];
-  for (const row of rows2) {
+  for (const row of rows) {
     const result = Manifest.safeParse(JSON.parse(row.body));
     if (!result.success) {
       throw new Error(
-        `Migration 2: manifest ${row.sha} failed to parse after repair: ${JSON.stringify(result.error.issues)}`,
+        `manifest ${row.sha} does not match the current schema after migrating: ${JSON.stringify(result.error.issues)}`,
       );
     }
   }
 }
 
-export function migrate(db: Database.Database): void {
-  runMigrations(db, MIGRATIONS);
-}
-
-/** Applies the migrations a database has not seen, all in one transaction. */
-export function runMigrations(db: Database.Database, migrations: readonly Migration[]): void {
+/**
+ * Applies the migrations a database has not seen, all in one transaction. When any ran,
+ * `verify` then checks the result inside the same transaction; a throw rolls everything back.
+ */
+export function runMigrations(
+  db: Database.Database,
+  migrations: readonly Migration[],
+  verify?: (db: Database.Database) => void,
+): void {
   const current = db.pragma("user_version", { simple: true }) as number;
   if (current > migrations.length) throw new UnsupportedSchemaError(current, migrations.length);
   db.transaction(() => {
@@ -186,5 +200,6 @@ export function runMigrations(db: Database.Database, migrations: readonly Migrat
       else migration(db);
       db.pragma(`user_version = ${index + 1}`);
     }
+    if (current < migrations.length) verify?.(db);
   })();
 }
