@@ -58,10 +58,6 @@ function mergeDuplicates(symbols: SymbolDef[]): SymbolDef[] {
 
 function collectPython(container: Node, owner: string | null, out: SymbolDef[]): void {
   for (const child of container.namedChildren) {
-    if (child.type === "ERROR") {
-      collectPython(child, owner, out);
-      continue;
-    }
     if (child.type === "expression_statement") {
       // Module-level public bindings: `router = APIRouter()`, `MAX_RETRIES = 3`.
       if (owner !== null) continue;
@@ -94,19 +90,6 @@ const FUNCTION_VALUES = new Set(["arrow_function", "function_expression", "gener
 
 function collectTypeScript(root: Node, out: SymbolDef[]): void {
   for (const child of root.namedChildren) {
-    if (child.type === "ERROR") {
-      // Recursively search inside ERROR nodes at all depths for valid declarations
-      searchErrorNode(child, out);
-      continue;
-    }
-    // Check if this node contains ERROR nodes and search them
-    if (child.namedChildren.some((c) => c.type === "ERROR")) {
-      for (const grandchild of child.namedChildren) {
-        if (grandchild.type === "ERROR") {
-          searchErrorNode(grandchild, out);
-        }
-      }
-    }
     if (child.type !== "export_statement") {
       collectDeclaration(child, child, false, out);
       continue;
@@ -120,78 +103,6 @@ function collectTypeScript(root: Node, out: SymbolDef[]): void {
     if (value && FUNCTION_VALUES.has(value.type))
       out.push(symbol("default", "function", child, true));
     else if (value?.type === "class") out.push(symbol("default", "class", child, true));
-  }
-}
-
-function searchErrorNode(errorNode: Node, out: SymbolDef[]): void {
-  for (const child of errorNode.namedChildren) {
-    if (child.type === "ERROR") {
-      // Recurse into nested ERROR nodes
-      searchErrorNode(child, out);
-      continue;
-    }
-    if (child.type === "export_statement") {
-      const declaration = child.childForFieldName("declaration");
-      if (declaration) {
-        collectDeclaration(declaration, child, true, out);
-      } else {
-        const value = child.childForFieldName("value");
-        if (value && FUNCTION_VALUES.has(value.type))
-          out.push(symbol("default", "function", child, true));
-        else if (value?.type === "class") out.push(symbol("default", "class", child, true));
-      }
-      continue;
-    }
-    // Handle nodes that look like declarations even if malformed
-    if (child.type === "method_definition") {
-      const name = child.childForFieldName("name")?.text;
-      if (name) out.push(symbol(name, "function", child, true));
-      continue;
-    }
-    if (child.type === "function_declaration" || child.type === "generator_function_declaration") {
-      const name = child.childForFieldName("name")?.text;
-      if (name) out.push(symbol(name, "function", child, true));
-      continue;
-    }
-    if (child.type === "variable_declaration" || child.type === "lexical_declaration") {
-      for (const declarator of child.namedChildren) {
-        if (declarator.type !== "variable_declarator") continue;
-        const id = declarator.childForFieldName("name");
-        if (id?.type === "identifier") out.push(symbol(id.text, "variable", child, true));
-      }
-      continue;
-    }
-    // Handle variable patterns that might appear in ERROR nodes
-    if (
-      child.type === "object_assignment_pattern" ||
-      child.type === "shorthand_property_identifier_pattern"
-    ) {
-      const name = child.text.split(/[=\s]/)[0];
-      if (name && !name.startsWith("(") && !name.includes("}")) {
-        out.push(symbol(name, "variable", child, true));
-      }
-      continue;
-    }
-    // Handle simple identifiers that might be variable names
-    if (
-      child.type === "identifier" &&
-      child.text !== "export" &&
-      child.text !== "function" &&
-      child.text !== "class" &&
-      child.text !== "const" &&
-      child.text !== "let" &&
-      child.text !== "var"
-    ) {
-      // This might be a variable name, but we need context to be sure
-      // Skip for now to avoid false positives
-      continue;
-    }
-    // Try to collect as a declaration
-    collectDeclaration(child, child, false, out);
-    // Also recursively search this child for more nodes
-    if (child.namedChildren.length > 0) {
-      searchErrorNode(child, out);
-    }
   }
 }
 

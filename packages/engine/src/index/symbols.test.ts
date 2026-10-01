@@ -90,26 +90,6 @@ describe("extractSymbols (python)", () => {
     expect(result.hasError).toBe(true);
     expect(result.symbols.map((s) => s.qualifiedName)).toContain("ok");
   });
-
-  it("keeps symbols that follow a syntax error in the middle", () => {
-    const source = [
-      "def ok():",
-      "    pass",
-      "",
-      "def broken(:",
-      "    pass",
-      "",
-      "def after():",
-      "    pass",
-      "",
-      "x = 1",
-    ].join("\n");
-    const result = symbolsOf("python", source);
-    expect(result.hasError).toBe(true);
-    expect(result.symbols.map((s) => s.qualifiedName)).toContain("ok");
-    expect(result.symbols.map((s) => s.qualifiedName)).toContain("after");
-    expect(result.symbols.map((s) => s.qualifiedName)).toContain("x");
-  });
 });
 
 describe("extractSymbols (typescript)", () => {
@@ -161,12 +141,28 @@ describe("extractSymbols (typescript)", () => {
     expect(names("tsx", source)).toEqual(["function Button", "function Page"]);
   });
 
-  it("keeps symbols that follow a syntax error in the middle", () => {
+  it("stops collecting symbols at syntax error regions", () => {
     const source =
-      "export function ok() {}\nexport function bad( {\nexport function after() {}\nexport const k = 1;";
+      "export function ok() {}\nexport function bad( {\nexport function after() {}\nexport const k = 1;\n";
     const result = symbolsOf("typescript", source);
     expect(result.hasError).toBe(true);
-    expect(result.symbols.map((s) => s.qualifiedName)).toEqual(["ok", "after", "k"]);
-    expect(result.symbols.map((s) => s.exported)).toEqual([true, true, true]);
+    expect(result.symbols).toEqual([
+      { qualifiedName: "ok", kind: "function", startLine: 1, endLine: 1, exported: true },
+    ]);
+  });
+
+  it("does not emit function locals or keywords as symbols", () => {
+    const source =
+      "export function outer() {\n  function inner() {}\n  const loc = 1;\n  if ( {\n  function inner2() {}\n}\nexport function after() {}\n";
+    const result = symbolsOf("typescript", source);
+    expect(result.hasError).toBe(true);
+    // When there's a syntax error, we only emit well-formed root-level declarations
+    // Do NOT emit: function locals (inner, loc, inner2), keywords (function, export)
+    const names = result.symbols.map((s) => s.qualifiedName);
+    expect(names).not.toContain("inner");
+    expect(names).not.toContain("loc");
+    expect(names).not.toContain("inner2");
+    expect(names).not.toContain("function");
+    expect(names).not.toContain("export");
   });
 });
