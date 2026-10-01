@@ -1,11 +1,15 @@
 export {
+  buildExport,
+  type CitingClaim,
   DroppedFeatureError,
   DuplicateManifestError,
   EmptyStoreError,
+  type ExportOptions,
+  openStore,
   StaleParentError,
+  type Store,
   StoreError,
   UnknownFeatureError,
   UnsupportedSchemaError,
-} from "./store/errors.ts";
-export { buildExport, type ExportOptions, writeExport } from "./store/export.ts";
-export { type CitingClaim, openStore, type Store } from "./store/store.ts";
+  writeExport,
+} from "./store/index.ts";
