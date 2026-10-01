@@ -63,3 +63,143 @@ describe("escapeHtml", () => {
     );
   });
 });
+
+describe("XSS regression tests", () => {
+  it("escapes script tags in claim text", () => {
+    const result = renderInline("<script>alert(1)</script>", known);
+    expect(result).not.toContain("<script");
+    expect(result).toContain("&lt;script&gt;");
+  });
+
+  it("escapes img tags with onerror in claim text", () => {
+    const result = renderInline("<img src=x onerror=alert(1)>", known);
+    expect(result).not.toContain("<img");
+    expect(result).toContain("&lt;img");
+    expect(result).toContain("&gt;");
+  });
+
+  it("escapes svg injection attempts in claim text", () => {
+    const result = renderInline('"><svg onload=1>', known);
+    expect(result).not.toContain("<svg");
+    expect(result).toContain("&lt;svg");
+    expect(result).toContain("&gt;");
+  });
+
+  it("escapes ampersand in claim text", () => {
+    const result = renderInline("&amp;", known);
+    expect(result).toContain("&amp;amp;");
+  });
+
+  it("escapes less-than in claim text", () => {
+    const result = renderInline("&lt;", known);
+    expect(result).toContain("&amp;lt;");
+  });
+
+  it("keeps markup escaped inside code blocks", () => {
+    const result = renderInline("`<script>`", known);
+    expect(result).toContain("<code>&lt;script&gt;</code>");
+    expect(result).not.toContain("<script");
+  });
+
+  it("keeps markup escaped inside bold", () => {
+    const result = renderInline("**<b>**", known);
+    expect(result).toContain("<b>&lt;b&gt;</b>");
+    expect(result).not.toMatch(/<b><b/);
+  });
+
+  it("keeps markup escaped inside italic", () => {
+    const result = renderInline("*<i>*", known);
+    expect(result).toContain("<i>&lt;i&gt;</i>");
+    expect(result).not.toMatch(/<i><i/);
+  });
+
+  it("keeps markup escaped in labels", () => {
+    const result = renderInline("**<b>**", known);
+    expect(result).not.toContain("<b><b");
+  });
+
+  it("encodes malicious URLs in Wikipedia links", () => {
+    const result = renderInline("[[wp:javascript:alert(1)]]", known);
+    expect(result).toContain("https://en.wikipedia.org/wiki/javascript%3Aalert(1)");
+    expect(result).toContain('href="https://en.wikipedia.org/wiki/javascript');
+  });
+
+  it("percent-encodes quotes in Wikipedia links", () => {
+    const result = renderInline('[[wp:"><script>]]', known);
+    expect(result).toContain('href="https://en.wikipedia.org/wiki/');
+    expect(result).not.toContain('"<script');
+  });
+
+  it("percent-encodes special characters in Wikipedia links", () => {
+    const result = renderInline("[[wp:../../w/index.php?x=1#y]]", known);
+    const href = result.match(/href="([^"]+)"/)?.[1] ?? "";
+    expect(href).toContain("%2F");
+    expect(href).toContain("%3F");
+    expect(href).toContain("%23");
+  });
+
+  it("escapes unknown feature links with malicious labels", () => {
+    const result = renderInline("[[ghost|<img onerror=1>]]", known);
+    expect(result).not.toContain("<img");
+    expect(result).toContain("&lt;img");
+  });
+
+  it("renders lone surrogates in wp titles without throwing", () => {
+    expect(() => renderInline("[[wp:\ud800]]", known)).not.toThrow();
+    const result = renderInline("[[wp:\ud800]]", known);
+    expect(result).toContain("https://en.wikipedia.org/wiki/");
+    expect(result).not.toMatch(/javascript:|onerror|onload/);
+  });
+
+  it("keeps placeholder characters inert in claim text", () => {
+    const result = renderInline(
+      `text${String.fromCharCode(0xe000)}${String.fromCharCode(0xe001)}end`,
+      known,
+    );
+    expect(result).toBe("textend");
+  });
+
+  it("keeps placeholder characters inert in feature titles", () => {
+    const titleWithPlaceholder: InlineOptions = {
+      link: (id) =>
+        id === "test"
+          ? {
+              href: "/wiki/test/",
+              title: `Title${String.fromCharCode(0xe000)}${String.fromCharCode(0xe001)}Text`,
+            }
+          : null,
+    };
+    const result = renderInline("[[test]]", titleWithPlaceholder);
+    expect(result).toContain("TitleText");
+    expect(result).not.toContain(String.fromCharCode(0xe000));
+    expect(result).not.toContain(String.fromCharCode(0xe001));
+  });
+});
+
+describe("empty labels and targets", () => {
+  it("renders empty target as escaped token", () => {
+    const result = renderInline("[[ ]]", known);
+    expect(result).toContain("[[ ]]");
+  });
+
+  it("renders empty wp target as escaped token", () => {
+    const result = renderInline("[[wp:]]", known);
+    expect(result).toContain("[[wp:]]");
+  });
+
+  it("uses title when label is empty", () => {
+    const result = renderInline("[[deliverables| ]]", known);
+    expect(result).toContain("The &quot;Deliverables&quot;");
+  });
+
+  it("renders code with markup inside it", () => {
+    const result = renderInline("`**a**`", known);
+    expect(result).toContain("<code>**a**</code>");
+  });
+
+  it("escapes backticks and treats content as code", () => {
+    const result = renderInline("`` `x` ``", known);
+    expect(result).not.toContain("javascript:");
+    expect(result).not.toContain("onerror");
+  });
+});

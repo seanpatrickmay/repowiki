@@ -35,11 +35,11 @@ export function renderInline(text: string, options: InlineOptions): string {
   const hold = (html: string): string => `${OPEN}${slots.push(html) - 1}${CLOSE}`;
   const held = text
     .replace(PLACEHOLDER_CHARS, "")
-    .replace(TOKEN, (_match, code: string | undefined, target = "", label?: string) =>
+    .replace(TOKEN, (match, code: string | undefined, target = "", label?: string) =>
       hold(
         code !== undefined
           ? `<code>${escapeHtml(code)}</code>`
-          : renderLink(target.trim(), label?.trim(), options),
+          : renderLink(target.trim(), label?.trim(), options, match),
       ),
     );
   return escapeHtml(held)
@@ -48,17 +48,25 @@ export function renderInline(text: string, options: InlineOptions): string {
     .replace(SLOT, (_match, index: string) => slots[Number(index)] ?? "");
 }
 
-function renderLink(target: string, label: string | undefined, options: InlineOptions): string {
+function renderLink(
+  target: string,
+  label: string | undefined,
+  options: InlineOptions,
+  originalToken: string,
+): string {
   const links = options.links !== false;
   if (target.startsWith("wp:")) {
     const title = target.slice(3).trim();
+    if (title === "") return escapeHtml(originalToken);
     const text = escapeHtml(label ?? title);
-    if (!links || title === "") return text;
-    return `<a class="external" href="${escapeHtml(wikipediaUrl(title))}" title="Wikipedia: ${escapeHtml(title)}">${text}</a>`;
+    if (!links) return text;
+    return `<a class="external" href="${escapeHtml(wikipediaUrl(title.toWellFormed()))}" title="Wikipedia: ${escapeHtml(title)}">${text}</a>`;
   }
+  if (target === "") return escapeHtml(originalToken);
   const resolved = options.link(target);
-  const text = escapeHtml(label ?? resolved?.title ?? target);
+  const cleanTitle = resolved?.title.replace(PLACEHOLDER_CHARS, "");
+  const text = escapeHtml(label || cleanTitle || target);
   if (!links || resolved === null) return text;
   // data-preview is read by the hover-preview script.
-  return `<a class="wikilink" href="${escapeHtml(resolved.href)}" title="${escapeHtml(resolved.title)}" data-preview="${escapeHtml(target)}">${text}</a>`;
+  return `<a class="wikilink" href="${escapeHtml(resolved.href)}" title="${escapeHtml(cleanTitle ?? resolved.title)}" data-preview="${escapeHtml(target)}">${text}</a>`;
 }
