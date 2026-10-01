@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Manifest } from "./manifest.ts";
-import { makeFeature, makeManifest } from "./test-fixtures.ts";
+import { makeFeature, makeManifest, SHA_A, SHA_B } from "./test-fixtures.ts";
 
 describe("Manifest", () => {
   it("accepts a consistent manifest", () => {
@@ -9,7 +9,8 @@ describe("Manifest", () => {
 
   it("rejects duplicate feature ids", () => {
     expect(
-      Manifest.safeParse(makeManifest({ features: [makeFeature(), makeFeature()] })).success,
+      Manifest.safeParse(makeManifest({ features: [makeFeature(), makeFeature()], membership: {} }))
+        .success,
     ).toBe(false);
   });
 
@@ -24,6 +25,10 @@ describe("Manifest", () => {
       makeFeature({
         id: "deliverables",
         title: "Deliverables",
+        lineage: [
+          { kind: "create", sha: SHA_A },
+          { kind: "merge", sha: SHA_B, into: "signals" },
+        ],
         status: { kind: "redirect", to: "signals" },
       }),
     ];
@@ -35,8 +40,107 @@ describe("Manifest", () => {
     expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(false);
   });
 
-  it("rejects weights outside (0, 1]", () => {
-    const membership = { "src/x.py": { featureId: "signals", weight: 1.5 } };
+  it.each([0, -0.1, 1.5])("rejects weight %s", (weight) => {
+    const membership = { "src/x.py": { featureId: "signals", weight } };
     expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(false);
+  });
+
+  it.each([1, 0.01, 0.5])("accepts weight %s", (weight) => {
+    const membership = { "src/x.py": { featureId: "signals", weight } };
+    expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(true);
+  });
+
+  it("rejects merged feature without matching lineage event", () => {
+    const features = [
+      makeFeature({ status: { kind: "redirect", to: "signals" } }),
+      makeFeature({ id: "signals" }),
+    ];
+    expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(false);
+  });
+
+  it("accepts merged feature with matching lineage", () => {
+    const features = [
+      makeFeature({
+        id: "deliverables",
+        lineage: [
+          { kind: "create", sha: SHA_A },
+          { kind: "merge", sha: SHA_B, into: "signals" },
+        ],
+        status: { kind: "redirect", to: "signals" },
+      }),
+      makeFeature({ id: "signals" }),
+    ];
+    expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(true);
+  });
+
+  it("rejects split feature without matching lineage event", () => {
+    const features = [
+      makeFeature({
+        status: { kind: "disambiguation", to: ["signal-ingest", "signal-scoring"] },
+      }),
+    ];
+    expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(false);
+  });
+
+  it("accepts split feature with matching lineage", () => {
+    const features = [
+      makeFeature({
+        lineage: [
+          { kind: "create", sha: SHA_A },
+          { kind: "split", sha: SHA_B, into: ["signal-ingest", "signal-scoring"] },
+        ],
+        status: { kind: "disambiguation", to: ["signal-ingest", "signal-scoring"] },
+      }),
+      makeFeature({ id: "signal-ingest", title: "Signal Ingest" }),
+      makeFeature({ id: "signal-scoring", title: "Signal Scoring" }),
+    ];
+    expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(true);
+  });
+
+  it("rejects redirect cycles", () => {
+    const features = [
+      makeFeature({
+        id: "a",
+        lineage: [
+          { kind: "create", sha: SHA_A },
+          { kind: "merge", sha: SHA_B, into: "b" },
+        ],
+        status: { kind: "redirect", to: "b" },
+      }),
+      makeFeature({
+        id: "b",
+        lineage: [
+          { kind: "create", sha: SHA_A },
+          { kind: "merge", sha: SHA_B, into: "a" },
+        ],
+        status: { kind: "redirect", to: "a" },
+      }),
+    ];
+    expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(false);
+  });
+
+  it("rejects lineage merge/split targets that do not exist", () => {
+    const features = [
+      makeFeature({
+        lineage: [
+          { kind: "create", sha: SHA_A },
+          { kind: "merge", sha: SHA_B, into: "ghost" },
+        ],
+      }),
+    ];
+    expect(Manifest.safeParse(makeManifest({ features, membership: {} })).success).toBe(false);
+  });
+
+  it.each(["../x.py", "/abs.py", "src\\a.py", "src/a.py#", "#fn"])(
+    "rejects invalid member id %j",
+    (memberId) => {
+      const membership = { [memberId]: { featureId: "signals", weight: 0.5 } };
+      expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(false);
+    },
+  );
+
+  it.each(["src/a.py", "src/a.py#fn"])("accepts valid member id %j", (memberId) => {
+    const membership = { [memberId]: { featureId: "signals", weight: 0.5 } };
+    expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(true);
   });
 });

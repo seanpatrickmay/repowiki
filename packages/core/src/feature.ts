@@ -47,5 +47,82 @@ export const Feature = z
         path: ["status"],
       });
     }
+
+    // Disambiguation validation
+    if (feature.status.kind === "disambiguation") {
+      const targets = feature.status.to;
+      if (targets.includes(feature.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "disambiguation cannot include self",
+          path: ["status", "to"],
+        });
+      }
+      if (new Set(targets).size !== targets.length) {
+        ctx.addIssue({
+          code: "custom",
+          message: "disambiguation targets must be unique",
+          path: ["status", "to"],
+        });
+      }
+    }
+
+    // Lineage validation
+    for (const [index, event] of feature.lineage.entries()) {
+      if (event.kind === "merge") {
+        if (event.into === feature.id) {
+          ctx.addIssue({
+            code: "custom",
+            message: "merge lineage cannot target self",
+            path: ["lineage", index, "into"],
+          });
+        }
+      } else if (event.kind === "split") {
+        if (event.into.includes(feature.id)) {
+          ctx.addIssue({
+            code: "custom",
+            message: "split lineage cannot include self",
+            path: ["lineage", index, "into"],
+          });
+        }
+        if (new Set(event.into).size !== event.into.length) {
+          ctx.addIssue({
+            code: "custom",
+            message: "split targets must be unique",
+            path: ["lineage", index, "into"],
+          });
+        }
+      }
+    }
+
+    // Status-lineage correspondence
+    if (feature.status.kind === "redirect") {
+      const redirectTo = feature.status.to;
+      const hasMerge = feature.lineage.some((e) => e.kind === "merge" && e.into === redirectTo);
+      if (!hasMerge) {
+        ctx.addIssue({
+          code: "custom",
+          message: "redirect status requires a merge lineage event",
+          path: ["status"],
+        });
+      }
+    }
+
+    if (feature.status.kind === "disambiguation") {
+      const targetSet = new Set(feature.status.to);
+      const hasSplit = feature.lineage.some(
+        (e) =>
+          e.kind === "split" &&
+          new Set(e.into).size === targetSet.size &&
+          e.into.every((t) => targetSet.has(t)),
+      );
+      if (!hasSplit) {
+        ctx.addIssue({
+          code: "custom",
+          message: "disambiguation status requires a matching split lineage event",
+          path: ["status"],
+        });
+      }
+    }
   });
 export type Feature = z.infer<typeof Feature>;

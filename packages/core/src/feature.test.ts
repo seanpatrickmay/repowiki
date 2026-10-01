@@ -44,4 +44,38 @@ describe("Feature", () => {
     const status = { kind: "disambiguation" as const, to: ["signal-ingest", "signal-scoring"] };
     expect(Feature.safeParse(makeFeature({ lineage, status })).success).toBe(true);
   });
+
+  it("rejects disambiguation that includes self", () => {
+    const status = { kind: "disambiguation" as const, to: ["signals", "signal-ingest"] };
+    expect(Feature.safeParse(makeFeature({ status })).success).toBe(false);
+  });
+
+  it("rejects disambiguation with duplicate targets", () => {
+    const status = { kind: "disambiguation" as const, to: ["signal-ingest", "signal-ingest"] };
+    expect(Feature.safeParse(makeFeature({ status })).success).toBe(false);
+  });
+
+  it("rejects merge lineage that targets self", () => {
+    const lineage = [
+      { kind: "create" as const, sha: SHA_A },
+      { kind: "merge" as const, sha: SHA_B, into: "signals" },
+    ];
+    expect(Feature.safeParse(makeFeature({ lineage })).success).toBe(false);
+  });
+
+  it("rejects split lineage that includes self", () => {
+    const lineage = [
+      { kind: "create" as const, sha: SHA_A },
+      { kind: "split" as const, sha: SHA_B, into: ["signals", "signal-ingest"] },
+    ];
+    expect(Feature.safeParse(makeFeature({ lineage })).success).toBe(false);
+  });
+
+  it("rejects split lineage with duplicate targets", () => {
+    const lineage = [
+      { kind: "create" as const, sha: SHA_A },
+      { kind: "split" as const, sha: SHA_B, into: ["signal-ingest", "signal-ingest"] },
+    ];
+    expect(Feature.safeParse(makeFeature({ lineage })).success).toBe(false);
+  });
 });
