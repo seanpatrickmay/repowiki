@@ -60,7 +60,10 @@ describe("Feature", () => {
       { kind: "split" as const, sha: SHA_B, into: ["signals", "signal-ingest"] },
     ];
     const status = { kind: "disambiguation" as const, to: ["signals", "signal-ingest"] };
-    expect(Feature.safeParse(makeFeature({ lineage, status })).success).toBe(false);
+    const result = Feature.safeParse(makeFeature({ lineage, status }));
+    expect(
+      result.error?.issues.some((i) => i.message.includes("disambiguation cannot include self")),
+    ).toBe(true);
   });
 
   it("rejects disambiguation with duplicate targets", () => {
@@ -69,7 +72,10 @@ describe("Feature", () => {
       { kind: "split" as const, sha: SHA_B, into: ["signal-ingest", "signal-ingest"] },
     ];
     const status = { kind: "disambiguation" as const, to: ["signal-ingest", "signal-ingest"] };
-    expect(Feature.safeParse(makeFeature({ lineage, status })).success).toBe(false);
+    const result = Feature.safeParse(makeFeature({ lineage, status }));
+    expect(
+      result.error?.issues.some((i) => i.message.includes("disambiguation targets must be unique")),
+    ).toBe(true);
   });
 
   it("rejects merge lineage that targets self", () => {

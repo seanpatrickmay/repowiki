@@ -180,8 +180,11 @@ describe("Manifest", () => {
     },
   );
 
-  it.each(["src/a.py", "src/a.py#fn"])("accepts valid member id %j", (memberId) => {
-    const membership = { [memberId]: { featureId: "signals", weight: 0.5 } };
-    expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(true);
-  });
+  it.each(["src/a.py", "src/a.py#fn", "src/a.py#Outer#inner"])(
+    "accepts valid member id %j",
+    (memberId) => {
+      const membership = { [memberId]: { featureId: "signals", weight: 0.5 } };
+      expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(true);
+    },
+  );
 });
