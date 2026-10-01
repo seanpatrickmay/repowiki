@@ -25,9 +25,14 @@ export interface Store {
    * Stores a manifest and makes it the latest. Every feature id in the previous latest manifest
    * must still appear: ids are permanent, so retired features stay with a redirect/retired status.
    */
-  putManifest(manifest: Manifest): void;
+  putManifest(manifest: Manifest, options?: PutManifestOptions): void;
   getManifest(sha: string): Manifest | null;
   getLatestManifest(): Manifest | null;
+  /**
+   * The most recent manifest stored with llmRevised: true. Manifest drift (spec §6.1 step 4) is
+   * measured against it; manifests that only gained members do not move the baseline.
+   */
+  getDriftBaseline(): Manifest | null;
   /** Appends one LLM call to the token ledger. */
   appendLedger(entry: LedgerEntry): void;
   /** Ledger entries in the order they were appended, optionally only those of one run. */
@@ -48,6 +53,11 @@ export interface Store {
   listHistory(featureId: string): Revision[];
   /** Current claims with a code citation in path overlapping [startLine, endLine], bounds inclusive. */
   findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
+}
+
+export interface PutManifestOptions {
+  /** True when an LLM call produced or revised this manifest (build, or a drift revision). */
+  llmRevised?: boolean;
 }
 
 interface BodyRow {
@@ -90,7 +100,7 @@ export function openStore(path: string): Store {
     close: () => db.close(),
     transaction: (fn) => db.transaction(fn)(),
 
-    putManifest(manifest) {
+    putManifest(manifest, options = {}) {
       const parsed = Manifest.parse(manifest);
       db.transaction(() => {
         if (db.prepare("SELECT 1 FROM manifests WHERE sha = ?").get(parsed.sha) !== undefined) {
@@ -103,8 +113,8 @@ export function openStore(path: string): Store {
           if (missing.length > 0) throw new DroppedFeatureError(parsed.sha, missing);
         }
         db.prepare(
-          "INSERT INTO manifests (sha, seq, body) VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM manifests), ?)",
-        ).run(parsed.sha, JSON.stringify(parsed));
+          "INSERT INTO manifests (sha, seq, body, llm_revised) VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM manifests), ?, ?)",
+        ).run(parsed.sha, JSON.stringify(parsed), options.llmRevised === true ? 1 : 0);
       })();
     },
 
@@ -131,6 +141,13 @@ export function openStore(path: string): Store {
       ),
 
     getLatestManifest: latestManifest,
+
+    getDriftBaseline: () =>
+      readManifest(
+        db
+          .prepare("SELECT body FROM manifests WHERE llm_revised = 1 ORDER BY seq DESC LIMIT 1")
+          .get() as BodyRow | undefined,
+      ),
 
     setHead(sha) {
       db.prepare(
