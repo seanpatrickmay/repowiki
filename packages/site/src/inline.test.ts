@@ -113,9 +113,11 @@ describe("XSS regression tests", () => {
     expect(result).not.toMatch(/<i><i/);
   });
 
-  it("keeps markup escaped in labels", () => {
-    const result = renderInline("**<b>**", known);
-    expect(result).not.toContain("<b><b");
+  it("renders markup inside link labels", () => {
+    const result = renderInline("[[deliverables|**b** `c` <i>]]", known);
+    expect(result).toContain(
+      '<a class="wikilink" href="/wiki/deliverables/" title="The &quot;Deliverables&quot;" data-preview="deliverables">**b** `c` &lt;i&gt;</a>',
+    );
   });
 
   it("encodes malicious URLs in Wikipedia links", () => {
@@ -124,10 +126,18 @@ describe("XSS regression tests", () => {
     expect(result).toContain('href="https://en.wikipedia.org/wiki/javascript');
   });
 
+  it("escapes javascript: protocol in unknown feature links", () => {
+    const result = renderInline("[[javascript:alert(1)]]", known);
+    expect(result).not.toContain("<a");
+    expect(result).toBe("javascript:alert(1)");
+  });
+
   it("percent-encodes quotes in Wikipedia links", () => {
-    const result = renderInline('[[wp:"><script>]]', known);
-    expect(result).toContain('href="https://en.wikipedia.org/wiki/');
-    expect(result).not.toContain('"<script');
+    const result = renderInline('[[wp:x" onmouseover="alert(1)]]', known);
+    expect(result).toContain('href="https://en.wikipedia.org/wiki/x%22_onmouseover%3D%22alert(1)"');
+    expect(result).toContain('title="Wikipedia: x&quot; onmouseover=&quot;alert(1)"');
+    expect(result).toContain(">x&quot; onmouseover=&quot;alert(1)</a>");
+    expect(result).not.toContain('" onmouseover=');
   });
 
   it("percent-encodes special characters in Wikipedia links", () => {
@@ -192,14 +202,8 @@ describe("empty labels and targets", () => {
     expect(result).toContain("The &quot;Deliverables&quot;");
   });
 
-  it("renders code with markup inside it", () => {
-    const result = renderInline("`**a**`", known);
-    expect(result).toContain("<code>**a**</code>");
-  });
-
-  it("escapes backticks and treats content as code", () => {
-    const result = renderInline("`` `x` ``", known);
-    expect(result).not.toContain("javascript:");
-    expect(result).not.toContain("onerror");
+  it("escapes HTML tags inside code blocks", () => {
+    const result = renderInline("`<img src=x onerror=1>`", known);
+    expect(result).toBe("<code>&lt;img src=x onerror=1&gt;</code>");
   });
 });
