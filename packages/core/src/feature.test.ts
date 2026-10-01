@@ -26,14 +26,23 @@ describe("Feature", () => {
   });
 
   it("rejects a redirect to itself", () => {
-    expect(
-      Feature.safeParse(makeFeature({ status: { kind: "redirect", to: "signals" } })).success,
-    ).toBe(false);
+    const lineage = [
+      { kind: "create" as const, sha: SHA_A },
+      { kind: "merge" as const, sha: SHA_B, into: "signals" },
+    ];
+    const result = Feature.safeParse(
+      makeFeature({ lineage, status: { kind: "redirect", to: "signals" } }),
+    );
+    expect(result.error?.issues.some((i) => i.message.includes("cannot redirect to itself"))).toBe(
+      true,
+    );
   });
 
   it("requires a disambiguation to list at least two targets", () => {
     const status = { kind: "disambiguation" as const, to: ["signal-ingest"] };
-    expect(Feature.safeParse(makeFeature({ status })).success).toBe(false);
+    const result = Feature.safeParse(makeFeature({ status }));
+    // Only the min(2) rule on status.to fires; cannot match with a split lineage
+    expect(result.error?.issues.some((i) => i.path?.includes("to"))).toBe(true);
   });
 
   it("accepts merge and split lineage events", () => {
@@ -46,13 +55,21 @@ describe("Feature", () => {
   });
 
   it("rejects disambiguation that includes self", () => {
+    const lineage = [
+      { kind: "create" as const, sha: SHA_A },
+      { kind: "split" as const, sha: SHA_B, into: ["signals", "signal-ingest"] },
+    ];
     const status = { kind: "disambiguation" as const, to: ["signals", "signal-ingest"] };
-    expect(Feature.safeParse(makeFeature({ status })).success).toBe(false);
+    expect(Feature.safeParse(makeFeature({ lineage, status })).success).toBe(false);
   });
 
   it("rejects disambiguation with duplicate targets", () => {
+    const lineage = [
+      { kind: "create" as const, sha: SHA_A },
+      { kind: "split" as const, sha: SHA_B, into: ["signal-ingest", "signal-ingest"] },
+    ];
     const status = { kind: "disambiguation" as const, to: ["signal-ingest", "signal-ingest"] };
-    expect(Feature.safeParse(makeFeature({ status })).success).toBe(false);
+    expect(Feature.safeParse(makeFeature({ lineage, status })).success).toBe(false);
   });
 
   it("rejects merge lineage that targets self", () => {
@@ -77,5 +94,19 @@ describe("Feature", () => {
       { kind: "split" as const, sha: SHA_B, into: ["signal-ingest", "signal-ingest"] },
     ];
     expect(Feature.safeParse(makeFeature({ lineage })).success).toBe(false);
+  });
+
+  it("rejects redirect without matching merge lineage", () => {
+    const status = { kind: "redirect" as const, to: "deliverables" };
+    const result = Feature.safeParse(makeFeature({ status }));
+    expect(result.error?.issues.some((i) => i.message.includes("requires a merge"))).toBe(true);
+  });
+
+  it("rejects disambiguation without matching split lineage", () => {
+    const status = { kind: "disambiguation" as const, to: ["signal-ingest", "signal-scoring"] };
+    const result = Feature.safeParse(makeFeature({ status }));
+    expect(result.error?.issues.some((i) => i.message.includes("requires a matching split"))).toBe(
+      true,
+    );
   });
 });

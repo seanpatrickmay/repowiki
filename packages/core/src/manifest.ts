@@ -7,12 +7,15 @@ export const MemberId = z
   .string()
   .min(1)
   .refine((memberId) => {
-    const [path, symbol] = memberId.split("#");
+    const hashIndex = memberId.indexOf("#");
+    const path = hashIndex === -1 ? memberId : memberId.substring(0, hashIndex);
+    const symbol = hashIndex === -1 ? undefined : memberId.substring(hashIndex + 1);
+
     if (!path) return false; // empty path part
     // Validate path part with RepoPath
     if (!RepoPath.safeParse(path).success) return false;
-    // If symbol part exists, it must be non-empty
-    if (symbol !== undefined && symbol === "") return false;
+    // If symbol part exists (hashIndex !== -1), it must be non-empty
+    if (hashIndex !== -1 && symbol === "") return false;
     return true;
   }, "member id must be 'path' or 'path#symbol' where path is a valid repo path and symbol is non-empty");
 
