@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { ensureManifest, indexRepo, openStore, renderManifestSummary } from "@repowiki/engine";
-import { createClaudeProvider, createLedger, totalsOf } from "@repowiki/llm";
+import { createClaudeProvider, createLedger, type Provider, totalsOf } from "@repowiki/llm";
 import {
   CliError,
   exitCodeFor,
@@ -33,15 +33,22 @@ async function main(): Promise<void> {
   try {
     const runId = `manifest-build-${new Date().toISOString()}`;
     const ledger = createLedger((entry) => store.appendLedger(entry));
-    const provider = createClaudeProvider({
-      models,
-      ledger,
-      runId,
-      onBatchProgress: (p) =>
-        console.error(
-          `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
-        ),
-    });
+    // Built on the first call, so a run that reuses the stored manifest needs no API key.
+    let claude: Provider | undefined;
+    const provider: Provider = {
+      generate: (request) => {
+        claude ??= createClaudeProvider({
+          models,
+          ledger,
+          runId,
+          onBatchProgress: (p) =>
+            console.error(
+              `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
+            ),
+        });
+        return claude.generate(request);
+      },
+    };
     const { manifest, build } = await ensureManifest(store, index, {
       provider,
       repoName,

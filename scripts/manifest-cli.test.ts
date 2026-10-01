@@ -2,8 +2,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeLedgerEntry } from "@repowiki/core/test-fixtures";
-import { GitError, ManifestBuildError, manifestCacheKey } from "@repowiki/engine";
+import { makeLedgerEntry, makeManifest } from "@repowiki/core/test-fixtures";
+import { GitError, ManifestBuildError, manifestCacheKey, openStore } from "@repowiki/engine";
 import { LlmError, LlmOutputError } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -155,6 +155,20 @@ describe("manifest-build.ts as a process (no network)", () => {
     git("commit", "-q", "-m", "init");
     return repo;
   }
+
+  it("reuses a stored manifest without an API key", () => {
+    const repo = gitRepo();
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest({ sha }));
+    store.close();
+    const result = run(repo, "--out", out);
+    expect(result.stderr).toBe(`reusing the stored manifest for ${sha}\n`);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`manifest-${sha.slice(0, 7)}.md`);
+  });
 
   it("reports a missing API key in one line, exit 1, before any call", () => {
     const result = run(gitRepo(), "--out", join(dir, "o"));
