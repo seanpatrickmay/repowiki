@@ -65,6 +65,8 @@ export type Seed = z.infer<typeof Seed>;
 export interface ExistingIssue {
   number: number;
   title: string;
+  state: "OPEN" | "CLOSED";
+  parentNumber: number | null;
 }
 
 export type Action =
@@ -73,20 +75,32 @@ export type Action =
   | { kind: "link-parent"; childKey: string; parentKey: string }
   | { kind: "close-issue"; key: string };
 
-/** Plans an idempotent sync: labels are always upserted; issues are matched by exact title. */
+/**
+ * Plans an idempotent, resumable sync. Labels are always upserted; issues are matched by exact
+ * title. Links and closes are derived from observed GitHub state (a missing parent, an open
+ * issue), so a run that died part-way is finished by the next run.
+ */
 export function planSeed(seed: Seed, existing: readonly ExistingIssue[]): Action[] {
-  const existingTitles = new Set(existing.map((issue) => issue.title));
-  const fresh = seed.issues.filter((issue) => !existingTitles.has(issue.title));
+  const byTitle = new Map(existing.map((issue) => [issue.title, issue]));
+  const fresh = seed.issues.filter((issue) => !byTitle.has(issue.title));
+  const needsLink = seed.issues.filter((issue) => {
+    if (issue.parent === undefined) return false;
+    const found = byTitle.get(issue.title);
+    return found === undefined || found.parentNumber === null;
+  });
+  const needsClose = seed.issues.filter((issue) => {
+    if (issue.closed !== true) return false;
+    const found = byTitle.get(issue.title);
+    return found === undefined || found.state === "OPEN";
+  });
   return [
     ...seed.labels.map((label): Action => ({ kind: "upsert-label", label })),
     ...fresh.map((issue): Action => ({ kind: "create-issue", issue })),
-    ...fresh.flatMap((issue): Action[] =>
+    ...needsLink.flatMap((issue): Action[] =>
       issue.parent === undefined
         ? []
         : [{ kind: "link-parent", childKey: issue.key, parentKey: issue.parent }],
     ),
-    ...fresh.flatMap((issue): Action[] =>
-      issue.closed === true ? [{ kind: "close-issue", key: issue.key }] : [],
-    ),
+    ...needsClose.map((issue): Action => ({ kind: "close-issue", key: issue.key })),
   ];
 }

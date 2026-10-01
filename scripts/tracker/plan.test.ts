@@ -64,18 +64,38 @@ describe("planSeed", () => {
     ]);
   });
 
-  it("skips issues whose title already exists, and never relinks or recloses them", () => {
+  it("plans no create, link, or close for issues already seeded, linked, and closed", () => {
     const actions = planSeed(seed, [
-      { number: 1, title: "[F01] Aliases" },
-      { number: 2, title: "[M0] Scaffold" },
+      { number: 1, title: "[F01] Aliases", state: "OPEN", parentNumber: null },
+      { number: 2, title: "[M0] Scaffold", state: "CLOSED", parentNumber: 1 },
+      { number: 3, title: "[M1] Schemas", state: "OPEN", parentNumber: 1 },
     ]);
-    expect(actions.filter((a) => a.kind === "create-issue")).toEqual([
+    expect(actions.filter((a) => a.kind !== "upsert-label")).toEqual([]);
+  });
+
+  it("resumes a partial run: links unlinked children and closes open ones without recreating", () => {
+    const actions = planSeed(seed, [
+      { number: 1, title: "[F01] Aliases", state: "OPEN", parentNumber: null },
+      { number: 2, title: "[M0] Scaffold", state: "OPEN", parentNumber: null },
+    ]);
+    expect(actions.filter((a) => a.kind !== "upsert-label")).toEqual([
       { kind: "create-issue", issue: seed.issues[2] },
-    ]);
-    expect(actions.filter((a) => a.kind === "link-parent")).toEqual([
+      { kind: "link-parent", childKey: "M0-1", parentKey: "F01" },
       { kind: "link-parent", childKey: "M1-1", parentKey: "F01" },
+      { kind: "close-issue", key: "M0-1" },
     ]);
-    expect(actions.some((a) => a.kind === "close-issue")).toBe(false);
+  });
+
+  it("does not create when every issue exists but links and closes are missing", () => {
+    const actions = planSeed(seed, [
+      { number: 1, title: "[F01] Aliases", state: "OPEN", parentNumber: null },
+      { number: 2, title: "[M0] Scaffold", state: "OPEN", parentNumber: 1 },
+      { number: 3, title: "[M1] Schemas", state: "OPEN", parentNumber: null },
+    ]);
+    expect(actions.filter((a) => a.kind !== "upsert-label")).toEqual([
+      { kind: "link-parent", childKey: "M1-1", parentKey: "F01" },
+      { kind: "close-issue", key: "M0-1" },
+    ]);
   });
 });
 

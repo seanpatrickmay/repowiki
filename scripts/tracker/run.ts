@@ -6,6 +6,52 @@ function gh(args: string[]): string {
   return execFileSync("gh", args, { encoding: "utf8" }).trim();
 }
 
+const ISSUES_QUERY = `query($owner: String!, $name: String!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 100, after: $endCursor, states: [OPEN, CLOSED]) {
+      nodes { number title state parent { number } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`;
+
+interface IssueNode {
+  number: number;
+  title: string;
+  state: "OPEN" | "CLOSED";
+  parent: { number: number } | null;
+}
+
+/** Reads every issue with its state and sub-issue parent, so the plan reflects real GitHub state. */
+function fetchExisting(repo: string): ExistingIssue[] {
+  const [owner = "", name = ""] = repo.split("/");
+  const out = gh([
+    "api",
+    "graphql",
+    "--paginate",
+    "-F",
+    `owner=${owner}`,
+    "-F",
+    `name=${name}`,
+    "-f",
+    `query=${ISSUES_QUERY}`,
+    "--jq",
+    ".data.repository.issues.nodes[]",
+  ]);
+  return out
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const node = JSON.parse(line) as IssueNode;
+      return {
+        number: node.number,
+        title: node.title,
+        state: node.state,
+        parentNumber: node.parent?.number ?? null,
+      };
+    });
+}
+
 function describe(action: Action): string {
   switch (action.kind) {
     case "upsert-label":
@@ -28,20 +74,7 @@ function main(argv: readonly string[]): void {
     JSON.parse(readFileSync(new URL("./seed.json", import.meta.url), "utf8")),
   );
   const repo = gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
-  const existing = JSON.parse(
-    gh([
-      "issue",
-      "list",
-      "--repo",
-      repo,
-      "--state",
-      "all",
-      "--limit",
-      "1000",
-      "--json",
-      "number,title",
-    ]),
-  ) as ExistingIssue[];
+  const existing = fetchExisting(repo);
   const actions = planSeed(seed, existing);
 
   for (const action of actions) console.log(describe(action));
