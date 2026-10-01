@@ -1,0 +1,23 @@
+name: Bug
+description: Something RepoWiki does wrong.
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Repo, sha, and command.
+    validations:
+      required: true

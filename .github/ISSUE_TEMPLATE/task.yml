@@ -1,0 +1,25 @@
+name: Task
+description: One PR-sized piece of work under a feature or milestone.
+title: "[Mn] "
+labels: ["type:task"]
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Parent feature
+      description: "The [Fnn] issue this task advances, e.g. #3."
+    validations:
+      required: true
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: The observable check that closes this task.
+    validations:
+      required: true
