@@ -55,7 +55,7 @@ a verdict. Each row becomes one GitHub feature issue titled `[Fnn] …`. Rows ma
 
 | ID | Original point | Interpretation | Verdict |
 |---|---|---|---|
-| F01 | Alternative names | Redirects: the LLM proposes 3–8 aliases per page, plus aliases taken from code identifiers (routes, table names, env vars). They feed search and redirect URLs. | v1 |
+| F01 | Alternative names | Redirects: the LLM proposes 3–8 aliases per page, plus aliases taken from code identifiers (routes, table names, env vars). They feed search and redirect URLs (`/wiki/<alias-slug>/`, §4 Reader). | v1 |
 | F02 | Hyperlinks to related pages | Links in the body text on first mention of each concept, plus a "See also" list computed from graph neighbours. | v1 |
 | F03 | Works cited with code lines | A numbered References section of `path:Lstart-Lend@sha` permalinks. The citations are also the staleness mechanism (§6). | v1 |
 | F04 | Pages by feature, not folder | Features come from clustering a combined import/co-change graph, and are kept in a manifest with stable IDs. | v1 (core) |
@@ -121,10 +121,18 @@ packages/
 - `export`: writes the JSON for the current revisions plus `llms.txt`.
 - `serve`: builds and serves the Astro site from the export.
 
+### Reader (M5)
+
+- **Commands:** `pnpm site:build --export <file|dir> [--out <dir>] [--repo-url <url>]` validates the export with `WikiExport` (a bad export fails the build, naming the file and field), runs `astro build`, then indexes the output with Pagefind. The default `--out` is `site/` next to the export. `pnpm site:preview` serves the result on `127.0.0.1:4321`, and `pnpm site:demo` does both for a fixture export. The `cli` package's `serve` wraps these.
+- **Static and offline:** the output is plain files. Mermaid and the Pagefind UI ship with the site, Astro telemetry is off, and no page loads anything from another host.
+- **Pages:** `/` (Main Page), `/wiki/<id>/` (an article, a redirect or a disambiguation), `/wiki/<id>/history/`, `/wiki/<id>/history/<n>/` (an old revision; `n` is its 1-based position, oldest first), `/wiki/<id>/diff/<n>/` (revision `n` against `n - 1`), `/wiki/<alias-slug>/`, `/random/`, `/special/all-pages/`, `/search/`, and `/api/preview/<id>.json` (hover-preview data).
+- **Code citations** link to `<repo-url>/blob/<sha>/<path>#L<start>-L<end>` (GitHub-style, with each path segment percent-encoded) when `--repo-url` is given; otherwise they are plain text. The export carries no source, so there is no embedded code view.
+- **Dates** shown to readers are the calendar date written in `commitDate` (rule 5), never converted to the build machine's time zone.
+
 ## 5. Data model
 
 ```ts
-Feature   { id: string /* permanent slug */, title, aliases: string[],
+Feature   { id: string /* permanent slug, at most 64 chars */, title, aliases: string[],
             status: { kind: "active" }
                   | { kind: "redirect", to: string }
                   | { kind: "disambiguation", to: string[] }
@@ -153,6 +161,10 @@ Claim     { id, text /* markdown with link tokens */, kind: "fact" | "limitation
 
 Citation  = { kind: "code", path, startLine, endLine, sha, symbol: string | null, contentHash }
           | { kind: "commit", sha, subject, pr: number | null }
+
+WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
+             pages: Revision[] /* current revision per feature */,
+             history: Record<FeatureId, Revision[]> /* every revision, oldest first */ }
 ```
 
 ### Rules
@@ -164,6 +176,9 @@ Citation  = { kind: "code", path, startLine, endLine, sha, symbol: string | null
 5. **`commitDate` is the date shown to readers.** `generatedAt` and `tokens` are kept as cost evidence (F25).
 6. **`contentHash`** is the SHA-256 of the cited lines with line endings normalized. It is the only test of whether cited code changed.
 7. **Member ids** (`SymbolOrFileId`) are `path` or `path#symbol`, produced only by `memberId()` in `@repowiki/core`. The path part percent-encodes `%` as `%25` and `#` as `%23`, so the first `#` always separates the path from the symbol, while the symbol itself may contain `#` (for TS private members).
+8. **Feature ids are URL path segments.** They are lowercase kebab-case slugs of at most 64 characters (`FEATURE_ID_MAX_LENGTH`). The cap shipped before any feature-id producer (M3), so no stored body could break it and no store migration was needed.
+9. **The export carries full history.** `history[id]` holds every stored revision body, oldest first. Its last entry is the page, and each entry's `parentId` is the previous entry's id. The reader computes diffs from these bodies.
+10. **Claim text** is a small markdown subset: `**bold**`, `*italic*`, `` `code` `` and the link tokens `[[id]]`, `[[id|label]]`, `[[wp:Title]]` and `[[wp:Title|label]]`. Anything else is shown literally, HTML-escaped.
 
 ## 6. Freshness
 
@@ -216,11 +231,11 @@ prompt-cached prefix for every write call.
 ### 7.3 Computed rather than generated
 
 - **Infobox:** computed from the index and git.
-- **Aliases (F01):** LLM synonyms plus code identifiers (HTTP routes, table names, env vars, CLI commands) belonging to the feature's members.
+- **Aliases (F01):** LLM synonyms plus code identifiers (HTTP routes, table names, env vars, CLI commands) belonging to the feature's members. Each alias slug (ASCII kebab-case, at most 64 chars) gets a page that redirects to its feature, or a disambiguation page when two features share it. A feature id always wins over an alias slug. Aliases appear in the infobox, which is how search finds them.
 - **Links (F02):** the LLM may emit `[[featureId]]` or `[[featureId|label]]` only for manifest IDs and aliases. Unknown targets become plain text. Each concept is linked on first mention only. "See also" lists the top 5 graph neighbours by combined edge weight.
-- **Wikipedia links (F13):** `[[wp:Title]]`, checked with `GET https://en.wikipedia.org/api/rest_v1/page/summary/{title}`. A 404 makes the link plain text. Summaries are cached in the store and used as hover previews.
-- **Diagrams (F10):** a Mermaid flowchart per page, built from import and call edges among members and to neighbouring features. The LLM chooses at most 12 nodes and labels the edges. Every node must exist in the index, and every node links to its page or its source.
-- **Main Page (F12):** the feature map, a featured article (rotated per export), "Did you know…" (claims with `hook: true`), recently updated pages, and Random article.
+- **Wikipedia links (F13):** `[[wp:Title]]`, checked with `GET https://en.wikipedia.org/api/rest_v1/page/summary/{title}`. A 404 makes the link plain text. Summaries are cached in the store and used as hover previews. The reader shows those previews once M4 adds the summary cache to the export; until then `[[wp:Title]]` renders as an outbound link.
+- **Diagrams (F10):** a Mermaid flowchart per page, built from import and call edges among members and to neighbouring features. The LLM chooses at most 12 nodes and labels the edges. Every node must exist in the index, and every node links to its page or its source. The reader draws diagrams in the browser with the bundled Mermaid (`securityLevel: "strict"`), redrawing them when the color scheme changes. A diagram sits at the top of Data flow, or after the lead when the page has no Data flow section.
+- **Main Page (F12):** the feature map, a featured article (rotated per export), "Did you know…" (claims with `hook: true`), recently updated pages, and Random article. The rotation is seeded by the head sha, so one export always renders the same page. Did you know… shows up to 5 hooks from active articles as "... that <claim>?". Recently updated lists 5 pages by commit date. The feature map draws one node per active article and one edge per See also pair. Random article picks in the browser.
 
 ## 8. Testing
 
@@ -228,7 +243,7 @@ prompt-cached prefix for every write call.
 - **Property tests (`fast-check`)** for citation remapping: random edits above, below, overlapping, and inside cited ranges, plus renames, each checked against the expected fresh/stale outcome.
 - **A fixture repo builder** creates small git repos with scripted histories inside tests. `index`, `freshness`, and `replay` are tested against them in CI.
 - **LLM record/replay cassettes.** CI never calls a live API. Live calls happen only in `eval` and in manual runs.
-- **Golden snapshots** of HTML rendered from a fixture store.
+- **Golden snapshots** of HTML rendered from a fixture export (the site reads only the export), plus a crawl that fails on any same-site link to a missing page or anchor.
 - **Schema validation:** every export is validated with the `core` zod schemas, and the site imports the same types.
 - **Replay invariants** on next-chief-of-staff (run manually, results recorded in the M6 PR):
   - every code citation resolves at its sha with a matching hash;
