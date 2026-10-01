@@ -90,6 +90,26 @@ describe("extractSymbols (python)", () => {
     expect(result.hasError).toBe(true);
     expect(result.symbols.map((s) => s.qualifiedName)).toContain("ok");
   });
+
+  it("keeps symbols that follow a syntax error in the middle", () => {
+    const source = [
+      "def ok():",
+      "    pass",
+      "",
+      "def broken(:",
+      "    pass",
+      "",
+      "def after():",
+      "    pass",
+      "",
+      "x = 1",
+    ].join("\n");
+    const result = symbolsOf("python", source);
+    expect(result.hasError).toBe(true);
+    expect(result.symbols.map((s) => s.qualifiedName)).toContain("ok");
+    expect(result.symbols.map((s) => s.qualifiedName)).toContain("after");
+    expect(result.symbols.map((s) => s.qualifiedName)).toContain("x");
+  });
 });
 
 describe("extractSymbols (typescript)", () => {
@@ -139,5 +159,14 @@ describe("extractSymbols (typescript)", () => {
     const source =
       "export const Button = () => <button />;\nexport function Page() { return <main />; }\n";
     expect(names("tsx", source)).toEqual(["function Button", "function Page"]);
+  });
+
+  it("keeps symbols that follow a syntax error in the middle", () => {
+    const source =
+      "export function ok() {}\nexport function bad( {\nexport function after() {}\nexport const k = 1;";
+    const result = symbolsOf("typescript", source);
+    expect(result.hasError).toBe(true);
+    expect(result.symbols.map((s) => s.qualifiedName)).toEqual(["ok", "after", "k"]);
+    expect(result.symbols.map((s) => s.exported)).toEqual([true, true, true]);
   });
 });
