@@ -367,3 +367,69 @@ describe("hostile fixture content", () => {
     }
   });
 });
+
+describe("redirect and disambiguation pages", () => {
+  it("redirects a merged feature to its target and names where the reader came from", () => {
+    const html = site.read("wiki/legacy-signals/index.html");
+    expect(html).toContain(
+      '<meta http-equiv="refresh" content="0; url=/wiki/signals/?redirectedfrom=Legacy%20signals">',
+    );
+    expect(html).toContain('<link rel="canonical" href="/wiki/signals/">');
+    expect(html).toMatch(
+      /Redirect to:\s*<a class="wikilink" href="\/wiki\/signals\/">Signal ingestion<\/a>/,
+    );
+    expect(site.read("wiki/signals/index.html")).toContain(
+      '<p class="redirect-note" id="redirected-from" hidden></p>',
+    );
+  });
+
+  it("lists the targets of a split feature with their leads", () => {
+    const html = site.read("wiki/reports/index.html");
+    expect(html).toContain("<p><b>Reports</b> may refer to:</p>");
+    expect(html).toContain('<a class="wikilink" href="/wiki/deliverables/">Deliverables</a>');
+    expect(html).toContain(": <b>Deliverables</b> are the records that Signal ingestion feed.");
+  });
+
+  it("gives aliases redirect URLs, and a disambiguation page when two features share one", () => {
+    expect(site.read("wiki/signals-table/index.html")).toContain(
+      "url=/wiki/signals/?redirectedfrom=SIGNALS_TABLE",
+    );
+    expect(site.read("wiki/api-signals/index.html")).toContain("redirectedfrom=%2Fapi%2Fsignals");
+    expect(site.read("wiki/signal-pipeline/index.html")).toContain(
+      "<p><b>signal pipeline</b> may refer to:</p>",
+    );
+  });
+
+  it("links article text to redirect pages instead of dropping the link", () => {
+    expect(site.read("wiki/signals/index.html")).toContain(
+      'href="/wiki/legacy-signals/" title="Legacy signals" data-preview="legacy-signals">Legacy signals</a>',
+    );
+  });
+
+  it("escapes a hostile alias on its redirect page and percent-encodes it in the refresh URL", () => {
+    const html = site.read("wiki/i-x-i/index.html");
+    expect(html).toContain('<h1 class="page-title">&lt;i&gt;x&lt;/i&gt;</h1>');
+    expect(html).toContain("<title>&lt;i&gt;x&lt;/i&gt; - demo-repo wiki</title>");
+    expect(html).toContain(
+      'content="0; url=/wiki/hostile-title/?redirectedfrom=%3Ci%3Ex%3C%2Fi%3E"',
+    );
+    expect(html).not.toContain("<i>x</i>");
+  });
+
+  it("escapes a hostile target title on the redirect page", () => {
+    const html = site.read("wiki/i-x-i/index.html");
+    expect(html).toMatch(
+      /Redirect to:\s*<a class="wikilink" href="\/wiki\/hostile-title\/">&lt;img src=x onerror=alert\(1\)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001<\/a>/,
+    );
+    expect(html).not.toContain("<img src=x");
+  });
+
+  it("matches the golden snapshots", async () => {
+    await expect(normalized("wiki/legacy-signals/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-legacy-signals.html",
+    );
+    await expect(normalized("wiki/reports/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-reports.html",
+    );
+  });
+});

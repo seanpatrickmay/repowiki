@@ -39,9 +39,10 @@ export function aliasSlug(alias: string): string {
     .replace(/-+$/, "");
 }
 
-/** True when /wiki/<id>/ is a page: an active or retired feature that has a revision. */
+/** True when /wiki/<id>/ is a page: a redirect, a disambiguation, or a feature with a revision. */
 export function hasArticleRoute(site: SiteModel, id: string): boolean {
   const kind = site.features.get(id)?.status.kind;
+  if (kind === "redirect" || kind === "disambiguation") return true;
   return (kind === "active" || kind === "retired") && site.pages.has(id);
 }
 

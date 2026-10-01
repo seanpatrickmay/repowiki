@@ -18,9 +18,16 @@ describe("aliasSlug", () => {
 });
 
 describe("buildSiteModel", () => {
-  it("routes active and retired features that have a page", () => {
+  it("routes features that have a page, a redirect or a disambiguation", () => {
     const routed = [...site.features.keys()].filter((id) => hasArticleRoute(site, id));
-    expect(routed.sort()).toEqual(["deliverables", "exporter", "hostile-title", "signals"]);
+    expect(routed.sort()).toEqual([
+      "deliverables",
+      "exporter",
+      "hostile-title",
+      "legacy-signals",
+      "reports",
+      "signals",
+    ]);
     expect(hasArticleRoute(site, "scheduler")).toBe(false);
     expect(hasArticleRoute(site, "ghost")).toBe(false);
   });
