@@ -1,3 +1,4 @@
+import { Manifest } from "@repowiki/core";
 import type Database from "better-sqlite3";
 import { UnsupportedSchemaError } from "./errors.ts";
 
@@ -143,8 +144,9 @@ function repairLineageStatus(db: Database.Database): void {
       update.run(JSON.stringify(manifest), row.sha);
     }
   }
-  // Verify all manifests parse successfully using the same parse the store uses
-  const { Manifest } = require("@repowiki/core") as typeof import("@repowiki/core");
+  // Verify all manifests parse successfully using the current core Manifest schema. Future
+  // schema changes must keep older bodies repairable (by a later migration), or migration 2's
+  // check will throw and the store will fail loudly instead of wedging on read.
   const rows2 = db.prepare("SELECT sha, body FROM manifests").all() as {
     sha: string;
     body: string;

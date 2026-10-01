@@ -269,8 +269,8 @@ describe("migration 2: two-way lineage and status", () => {
 
   it("(f) idempotency: running the repair twice gives the same bodies", () => {
     const path = tempDbPath();
-    const old = new Database(path);
-    runMigrations(old, MIGRATIONS.slice(0, 1));
+    const db = new Database(path);
+    runMigrations(db, MIGRATIONS.slice(0, 1));
     const stored = makeManifest({
       features: [
         makeFeature({
@@ -284,29 +284,39 @@ describe("migration 2: two-way lineage and status", () => {
       ],
       membership: {},
     });
-    old
-      .prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)")
-      .run(stored.sha, JSON.stringify(stored));
-    old.close();
+    db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run(
+      stored.sha,
+      JSON.stringify(stored),
+    );
 
-    const store1 = openStore(path);
-    const body1 = JSON.stringify(store1.getManifest(stored.sha));
-    store1.close();
+    // Run migration 1 + 2 (which includes the repair)
+    runMigrations(db, MIGRATIONS);
+    const after1 = db.prepare("SELECT body FROM manifests WHERE sha = ?").get(stored.sha) as {
+      body: string;
+    };
 
-    const store2 = openStore(path);
-    const body2 = JSON.stringify(store2.getManifest(stored.sha));
-    store2.close();
+    // Reset user_version and rerun migration 2 to test idempotency
+    db.pragma("user_version = 1");
+    runMigrations(db, MIGRATIONS);
+    const after2 = db.prepare("SELECT body FROM manifests WHERE sha = ?").get(stored.sha) as {
+      body: string;
+    };
 
-    expect(body1).toBe(body2);
+    db.close();
+
+    // First and second repair should produce identical results
+    expect(after1.body).toBe(after2.body);
   });
 
   it("(g) an already-consistent manifest is byte-identical after the migration", () => {
     const path = tempDbPath();
-    const old = new Database(path);
-    runMigrations(old, MIGRATIONS.slice(0, 1));
+    const db = new Database(path);
+    runMigrations(db, MIGRATIONS.slice(0, 1));
     const consistent = makeManifest({
       features: [
+        // active with renames (consistent: rename in lineage, fromTitle in aliases)
         makeFeature({
+          id: "active-feature",
           aliases: ["signal pipeline", "Signals"],
           lineage: [
             { kind: "create", sha: SHA_A },
@@ -314,20 +324,83 @@ describe("migration 2: two-way lineage and status", () => {
           ],
           status: { kind: "active" },
         }),
+        // redirect with merge event
+        makeFeature({
+          id: "redirect-feature",
+          lineage: [
+            { kind: "create", sha: SHA_A },
+            { kind: "merge", sha: SHA_B, into: "target-feature" },
+          ],
+          status: { kind: "redirect", to: "target-feature" },
+        }),
+        // the target feature that redirect-feature merges into
+        makeFeature({
+          id: "target-feature",
+          lineage: [{ kind: "create", sha: SHA_A }],
+          status: { kind: "active" },
+        }),
+        // disambiguation with split event
+        makeFeature({
+          id: "disambiguation-feature",
+          lineage: [
+            { kind: "create", sha: SHA_A },
+            { kind: "split", sha: SHA_B, into: ["target-a", "target-b"] },
+          ],
+          status: { kind: "disambiguation", to: ["target-a", "target-b"] },
+        }),
+        // the target features that disambiguation-feature splits into
+        makeFeature({
+          id: "target-a",
+          lineage: [{ kind: "create", sha: SHA_A }],
+          status: { kind: "active" },
+        }),
+        makeFeature({
+          id: "target-b",
+          lineage: [{ kind: "create", sha: SHA_A }],
+          status: { kind: "active" },
+        }),
+        // retired with retire event
+        makeFeature({
+          id: "retired-feature",
+          lineage: [
+            { kind: "create", sha: SHA_A },
+            { kind: "retire", sha: SHA_B },
+          ],
+          status: { kind: "retired" },
+        }),
       ],
       membership: {},
     });
     const originalBody = JSON.stringify(consistent);
-    old
-      .prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)")
-      .run(consistent.sha, originalBody);
-    old.close();
+    db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run(
+      consistent.sha,
+      originalBody,
+    );
 
+    // Read raw body before migration
+    const beforeRaw = db
+      .prepare("SELECT body FROM manifests WHERE sha = ?")
+      .get(consistent.sha) as {
+      body: string;
+    };
+
+    db.close();
+
+    // Run full migration (which includes migration 2 repair)
     const store = openStore(path);
-    const readBody = JSON.stringify(store.getManifest(consistent.sha));
     store.close();
 
-    expect(readBody).toBe(originalBody);
+    const db2 = new Database(path);
+    // Read raw body after migration
+    const afterRaw = db2
+      .prepare("SELECT body FROM manifests WHERE sha = ?")
+      .get(consistent.sha) as {
+      body: string;
+    };
+    db2.close();
+
+    // Raw bytes should be identical (no changes were needed)
+    expect(afterRaw.body).toBe(beforeRaw.body);
   });
 
   it("(h) two stored manifests are both repaired", () => {
@@ -374,31 +447,56 @@ describe("migration 2: two-way lineage and status", () => {
     store.close();
   });
 
-  it("(i) all repaired manifests parse successfully via store methods", () => {
+  it("(i) unrepairable manifest causes openStore to throw, user_version stays 1, raw row unchanged", () => {
     const path = tempDbPath();
-    const old = new Database(path);
-    runMigrations(old, MIGRATIONS.slice(0, 1));
-    const problematic = makeManifest({
+    const db = new Database(path);
+    runMigrations(db, MIGRATIONS.slice(0, 1));
+    // Store a manifest with a redirect to a feature that doesn't exist in the features array
+    // This cannot be repaired because the target doesn't exist, violating the core schema
+    const unrepairable = {
+      sha: "3".repeat(40),
+      seq: 1,
       features: [
-        makeFeature({
-          lineage: [
-            { kind: "create", sha: SHA_A },
-            { kind: "retire", sha: SHA_B },
-          ],
-          status: { kind: "active" },
-        }),
+        {
+          id: "broken",
+          title: "Broken",
+          aliases: [],
+          status: { kind: "redirect", to: "nonexistent-feature" },
+          lineage: [{ kind: "create", sha: SHA_A }],
+        },
       ],
       membership: {},
-    });
-    old
-      .prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)")
-      .run(problematic.sha, JSON.stringify(problematic));
-    old.close();
+    };
+    const unreparableBody = JSON.stringify(unrepairable);
+    db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run(
+      unrepairable.sha,
+      unreparableBody,
+    );
 
-    const store = openStore(path);
-    const manifest = store.getManifest(problematic.sha);
-    expect(manifest).toBeDefined();
-    expect(manifest?.features[0]?.status).toEqual({ kind: "active" });
-    store.close();
+    // Read raw body before attempt
+    const beforeRaw = db
+      .prepare("SELECT body FROM manifests WHERE sha = ?")
+      .get(unrepairable.sha) as {
+      body: string;
+    };
+    const versionBefore = db.pragma("user_version", { simple: true }) as number;
+    db.close();
+
+    // Attempt to open the store should throw during migration 2
+    expect(() => openStore(path)).toThrow();
+
+    // Verify that user_version is still 1 (rollback happened)
+    const db2 = new Database(path);
+    const versionAfter = db2.pragma("user_version", { simple: true }) as number;
+    expect(versionAfter).toBe(versionBefore);
+
+    // Verify that the raw row is unchanged (rollback happened)
+    const afterRaw = db2
+      .prepare("SELECT body FROM manifests WHERE sha = ?")
+      .get(unrepairable.sha) as {
+      body: string;
+    };
+    expect(afterRaw.body).toBe(beforeRaw.body);
+    db2.close();
   });
 });
