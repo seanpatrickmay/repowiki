@@ -10,6 +10,7 @@ const FILES = [
   "tests/test_a.py",
   "tools/run.py",
   "web/src/main.tsx",
+  "web/src/index.ts",
   "web/src/lib/index.ts",
   "web/src/lib/util.ts",
   "web/src/components/Button.tsx",
@@ -88,6 +89,16 @@ describe("es resolution", () => {
     ["workspace package root export", "@x/core", ["packages/core/src/index.ts"]],
   ])("%s", (_name, specifier, targets) => {
     expect(resolver.resolve("web/src/main.tsx", es(specifier))).toEqual({
+      targets,
+      external: false,
+    });
+  });
+
+  it.each([
+    ["trailing slash for current directory", "./", ["web/src/lib/index.ts"]],
+    ["trailing slash for parent directory", "../", ["web/src/index.ts"]],
+  ])("%s", (_name, specifier, targets) => {
+    expect(resolver.resolve("web/src/lib/util.ts", es(specifier))).toEqual({
       targets,
       external: false,
     });

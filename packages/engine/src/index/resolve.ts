@@ -167,8 +167,9 @@ export function createResolver(
       specifier.startsWith("./") ||
       specifier.startsWith("../")
     ) {
-      const joined = posix.normalize(posix.join(parentDir(fromPath) || ".", specifier));
+      let joined = posix.normalize(posix.join(parentDir(fromPath) || ".", specifier));
       if (joined === ".." || joined.startsWith("../")) return { targets: [], external: false };
+      joined = joined.replace(/\/+$/, "");
       const hit = resolveFile(joined === "." ? "" : joined);
       return { targets: hit === null ? [] : [hit], external: false };
     }
