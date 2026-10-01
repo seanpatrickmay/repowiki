@@ -39,7 +39,46 @@ export const MIGRATIONS: readonly Migration[] = [
   );
   CREATE INDEX citation_ranges_lookup ON citation_ranges(path, start_line, end_line);
   `,
+  repairLineageStatus,
 ];
+
+interface StoredFeature {
+  aliases: string[];
+  status: { kind: string; to?: string | string[] };
+  lineage: { kind: string; fromTitle?: string; into?: string | string[] }[];
+}
+
+/**
+ * Migration 2: lineage and status became two-way (issue #53). In every stored manifest, a rename's
+ * old title joins the aliases, and an active feature with one merge, split, or retire event takes
+ * the status that event implies. Works on raw JSON so later schema changes cannot alter it.
+ */
+function repairLineageStatus(db: Database.Database): void {
+  const rows = db.prepare("SELECT sha, body FROM manifests").all() as {
+    sha: string;
+    body: string;
+  }[];
+  const update = db.prepare("UPDATE manifests SET body = ? WHERE sha = ?");
+  for (const row of rows) {
+    const manifest = JSON.parse(row.body) as { features: StoredFeature[] };
+    for (const feature of manifest.features) {
+      for (const event of feature.lineage) {
+        if (event.kind === "rename" && event.fromTitle !== undefined) {
+          if (!feature.aliases.includes(event.fromTitle)) feature.aliases.push(event.fromTitle);
+        }
+      }
+      const endings = feature.lineage.filter((e) => ["merge", "split", "retire"].includes(e.kind));
+      const ending = endings[0];
+      if (feature.status.kind !== "active" || endings.length !== 1 || ending === undefined) {
+        continue;
+      }
+      if (ending.kind === "retire") feature.status = { kind: "retired" };
+      else if (ending.kind === "merge") feature.status = { kind: "redirect", to: ending.into };
+      else feature.status = { kind: "disambiguation", to: ending.into };
+    }
+    update.run(JSON.stringify(manifest), row.sha);
+  }
+}
 
 export function migrate(db: Database.Database): void {
   runMigrations(db, MIGRATIONS);

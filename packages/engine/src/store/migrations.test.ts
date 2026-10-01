@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { makeManifest } from "@repowiki/core/test-fixtures";
+import { makeFeature, makeManifest, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { UnsupportedSchemaError } from "./errors.ts";
@@ -102,5 +102,43 @@ describe("migrations", () => {
       expect(db.pragma("user_version", { simple: true })).toBe(0);
       db.close();
     });
+  });
+});
+
+describe("migration 2: two-way lineage and status", () => {
+  it("repairs manifests stored under the one-way rules", () => {
+    const path = tempDbPath();
+    const old = new Database(path);
+    runMigrations(old, MIGRATIONS.slice(0, 1));
+    const stored = makeManifest({
+      features: [
+        makeFeature({
+          lineage: [
+            { kind: "create", sha: SHA_A },
+            { kind: "rename", sha: SHA_B, fromTitle: "Signals" },
+          ],
+        }),
+        makeFeature({
+          id: "deliverables",
+          title: "Deliverables",
+          aliases: [],
+          lineage: [
+            { kind: "create", sha: SHA_A },
+            { kind: "retire", sha: SHA_B },
+          ],
+        }),
+      ],
+      membership: { "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 } },
+    });
+    old
+      .prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)")
+      .run(stored.sha, JSON.stringify(stored));
+    old.close();
+
+    const store = openStore(path);
+    const [signals, deliverables] = store.getManifest(stored.sha)?.features ?? [];
+    expect(signals?.aliases).toEqual(["signal pipeline", "Signals"]);
+    expect(deliverables?.status).toEqual({ kind: "retired" });
+    store.close();
   });
 });
