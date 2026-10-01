@@ -1,31 +1,33 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport } from "./test-fixtures.ts";
 import { type BuiltSite, brokenLinks, buildFixtureSite, htmlFiles, runCli } from "./test-site.ts";
 
-let site: BuiltSite;
+let site: BuiltSite | undefined;
 beforeAll(() => {
   site = buildFixtureSite(["--repo-url", "https://github.com/acme/demo-repo"]);
 }, 120_000);
-afterAll(() => site.cleanup());
+afterAll(() => site?.cleanup());
 
 describe("site build", () => {
   it("renders the Main Page and a Pagefind index", () => {
-    expect(site.read("index.html")).toContain("Welcome to the demo-repo wiki");
-    expect(existsSync(join(site.outDir, "pagefind", "pagefind.js"))).toBe(true);
-    expect(site.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
+    expect(site!.read("index.html")).toContain("Welcome to the demo-repo wiki");
+    expect(existsSync(join(site!.outDir, "pagefind", "pagefind.js"))).toBe(true);
+    expect(site!.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
   });
 
   it("has no same-site links to missing pages or anchors", () => {
-    expect(htmlFiles(site.outDir).length).toBeGreaterThan(0);
-    expect(brokenLinks(site.outDir)).toEqual([]);
+    expect(htmlFiles(site!.outDir).length).toBeGreaterThan(0);
+    // The fixture may have zero internal links; that's legitimate.
+    const result = brokenLinks(site!.outDir);
+    expect(result.broken).toEqual([]);
   });
 
   it("references no off-site scripts, styles or fonts", () => {
-    for (const page of htmlFiles(site.outDir)) {
-      expect(site.read(page)).not.toMatch(
+    for (const page of htmlFiles(site!.outDir)) {
+      expect(site!.read(page)).not.toMatch(
         /(?:src|href)="(?:https?:)?\/\/[^"]*\.(?:js|css|woff2?)"/,
       );
     }
@@ -59,5 +61,134 @@ describe("site build input validation", () => {
     const result = runCli(["build"]);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("--export is required");
+  }, 30_000);
+});
+
+describe("site build directory safety", () => {
+  it("refuses when out dir contains the export file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-danger-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const result = runCli(["build", "--export", exportFile, "--out", dir]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("--out cannot contain");
+      // Verify export.json is still there
+      expect(existsSync(exportFile)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("refuses a non-empty dir without the marker file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-occupied-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const outDir = join(dir, "site");
+      mkdirSync(outDir);
+      const foreignFile = join(outDir, "important.txt");
+      writeFileSync(foreignFile, "do not delete");
+      const result = runCli(["build", "--export", exportFile, "--out", outDir]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("--out must be empty");
+      // Verify the file is still there
+      expect(readFileSync(foreignFile, "utf8")).toBe("do not delete");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("refuses a dir containing .git", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-repo-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const outDir = join(dir, "site");
+      mkdirSync(outDir);
+      mkdirSync(join(outDir, ".git"));
+      const result = runCli(["build", "--export", exportFile, "--out", outDir]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(".git");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("allows a rebuild into a previous site dir with the marker", () => {
+    const site = buildFixtureSite();
+    try {
+      // Mark it
+      writeFileSync(join(site.outDir, ".repowiki-site"), "");
+      // Rebuild into the same dir
+      const result = runCli([
+        "build",
+        "--export",
+        join(site.dir, "export.json"),
+        "--out",
+        site.outDir,
+      ]);
+      expect(result.status).toBe(0);
+      expect(existsSync(join(site.outDir, ".repowiki-site"))).toBe(true);
+    } finally {
+      site.cleanup();
+    }
+  }, 120_000);
+});
+
+describe("link crawl", () => {
+  it("detects good and broken links in a site with links", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-links-"));
+    try {
+      const outDir = join(dir, "site");
+      mkdirSync(outDir);
+      // Page 1: good page link, broken page link, good same-page anchor, broken same-page anchor
+      mkdirSync(join(outDir, "page1"));
+      writeFileSync(
+        join(outDir, "page1", "index.html"),
+        `<html><body id="top">
+          <a href="/page2/">good page</a>
+          <a href="/missing/">broken page</a>
+          <a href="#section">good anchor</a>
+          <a href="#missing-section">broken anchor</a>
+          <div id="section">Section</div>
+        </body></html>`,
+      );
+      // Page 2: good cross-page anchor, broken cross-page anchor
+      mkdirSync(join(outDir, "page2"));
+      writeFileSync(
+        join(outDir, "page2", "index.html"),
+        `<html><body>
+          <div id="target">Target</div>
+          <a href="/page1/#section">good cross-page anchor</a>
+          <a href="/page1/#broken-cross">broken cross-page anchor</a>
+        </body></html>`,
+      );
+      const result = brokenLinks(outDir);
+      expect(result.broken).toContain("page1/index.html -> /missing/");
+      expect(result.broken).toContain("page1/index.html -> #missing-section");
+      expect(result.broken).toContain("page2/index.html -> /page1/#broken-cross");
+      expect(result.broken.length).toBe(3);
+      expect(result.checked).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
+});
+
+describe(".astro dir confinement", () => {
+  it("does not leave .astro in the cwd", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "repowiki-site-cwd-"));
+    try {
+      const exportFile = join(cwd, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const outDir = join(cwd, "site");
+      mkdirSync(outDir);
+      const result = runCli(["build", "--export", exportFile, "--out", outDir]);
+      expect(result.status).toBe(0);
+      expect(existsSync(join(cwd, ".astro"))).toBe(false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
