@@ -14,6 +14,9 @@ importers:
       '@repowiki/core':
         specifier: workspace:*
         version: link:packages/core
+      '@repowiki/engine':
+        specifier: workspace:*
+        version: link:packages/engine
       '@types/node':
         specifier: 24.19.0
         version: 24.19.0
