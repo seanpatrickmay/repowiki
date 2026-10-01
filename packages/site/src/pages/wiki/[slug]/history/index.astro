@@ -21,10 +21,14 @@ const { title, rows } = historyPage(getSite(), featureId);
 <Layout title={`${title}: Revision history`}>
   <PageTabs featureId={featureId} current="history" />
   <h1 class="page-title">{title}: Revision history</h1>
-  <p class="history-help">Newest first. Dates are the dates of the commits each revision documents.</p>
+  <p class="history-help">
+    Newest first. Dates are the dates of the commits each revision documents. "prev" shows what
+    that revision changed.
+  </p>
   <ul class="history">
     {rows.map((row) => (
       <li>
+        ({row.diffHref === null ? <span>prev</span> : <a href={row.diffHref}>prev</a>})
         <a href={row.oldHref}>{row.date}</a>
         <span class="history-commit" set:html={row.commitHtml} />
         <span class="history-summary" set:html={row.summaryHtml} />

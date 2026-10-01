@@ -1,0 +1,46 @@
+---
+import PageTabs from "../../../../components/PageTabs.astro";
+import { diffRoutes, diffView } from "../../../../history.ts";
+import Layout from "../../../../layouts/Layout.astro";
+import { getSite } from "../../../../site.ts";
+import { articleUrl } from "../../../../urls.ts";
+
+export function getStaticPaths() {
+  return diffRoutes(getSite()).map(({ featureId, n }) => ({
+    params: { slug: featureId, n: String(n) },
+    props: { featureId, n },
+  }));
+}
+
+interface Props {
+  featureId: string;
+  n: number;
+}
+
+const { featureId, n } = Astro.props;
+const { title, beforeHtml, afterHtml, sections } = diffView(getSite(), featureId, n);
+---
+<Layout title={`${title}: Difference between revisions`}>
+  <Fragment slot="head">
+    <link rel="canonical" href={articleUrl(featureId)} />
+  </Fragment>
+  <PageTabs featureId={featureId} current="history" />
+  <h1 class="page-title">{title}: Difference between revisions</h1>
+  <div class="diff-header">
+    <p set:html={beforeHtml} />
+    <p set:html={afterHtml} />
+  </div>
+  {sections.length === 0 && <p>No difference in the article text.</p>}
+  {sections.map((section) => (
+    <section class="diff-section">
+      <h2>{section.title}</h2>
+      {section.rows.map((row) => (
+        <div class={`diff-row diff-${row.kind}`}>
+          <span class="diff-sign" aria-hidden="true">{row.sign}</span>
+          <span class="visually-hidden">{row.label}: </span>
+          <span class="diff-text" set:html={row.html} />
+        </div>
+      ))}
+    </section>
+  ))}
+</Layout>

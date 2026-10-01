@@ -329,7 +329,7 @@ a.external::after {
   color: var(--text-muted);
 }
 
-/* Page tabs and history */
+/* Page tabs, history and diffs */
 .page-tabs {
   display: flex;
   gap: 1rem;
@@ -363,4 +363,58 @@ a.external::after {
 .history-cost {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+.diff-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2rem;
+}
+
+.diff-row {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.25rem 0;
+  padding: 0.25rem 0.5rem;
+  border-left: 4px solid var(--border-subtle);
+}
+
+.diff-removed {
+  border-left-color: #d33;
+}
+
+.diff-added {
+  border-left-color: #14866d;
+}
+
+.diff-changed {
+  border-left-color: var(--notice-border);
+}
+
+.diff-context {
+  color: var(--text-muted);
+}
+
+.diff-sign {
+  flex: 0 0 1ch;
+  font-family: var(--font-mono);
+}
+
+del {
+  background: rgba(221, 51, 51, 0.2);
+  text-decoration: line-through;
+}
+
+ins {
+  background: rgba(20, 134, 109, 0.2);
+  text-decoration: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
