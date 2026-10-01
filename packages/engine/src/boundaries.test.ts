@@ -73,6 +73,9 @@ describe("engine module boundaries", () => {
 
   it("holds for the engine source tree", () => {
     const sources = readSources(dirname(fileURLToPath(import.meta.url)));
+    // An empty or mis-rooted tree would pass vacuously.
+    expect(sources.has("store/index.ts")).toBe(true);
+    expect(sources.has("index/index.ts")).toBe(true);
     expect(boundaryViolations(sources)).toEqual([]);
   });
 });
