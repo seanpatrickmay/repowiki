@@ -28,7 +28,7 @@ describe("resolveOutDir", () => {
     ["the repo itself", () => repo],
     ["a directory inside it", () => join(repo, "src")],
     ["a new directory inside it", () => join(repo, "wiki", "data")],
-    ["a path through ..", () => join(root, "x", "..", "repo", "wiki")],
+    ["a path through ..", () => `${root}/x/../repo/wiki`],
   ])("refuses %s", (_name, out) => {
     expect(resolveOutDir(repo, out())).toBeNull();
   });
