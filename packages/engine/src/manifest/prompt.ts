@@ -44,6 +44,14 @@ const MAX_NAME_LENGTH = 200;
  */
 const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
 
+/** The distinct characters plain() would replace, in order of appearance, as "U+XXXX". */
+export function controlCharacters(text: string): string[] {
+  const found = (text.match(CONTROL_CHARACTERS) ?? []).map(
+    (c) => `U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`,
+  );
+  return [...new Set(found)];
+}
+
 /**
  * A repository-controlled string (path, directory, symbol, package or repository name), safe to
  * put in the prompt. Git paths can hold newlines and any other text, so a path could otherwise

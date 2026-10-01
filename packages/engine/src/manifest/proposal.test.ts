@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   cleanAliases,
+  MAX_ALIAS_LENGTH,
   MAX_FEATURE_ID_LENGTH,
   MAX_REPORTED_PROBLEMS,
+  MAX_TITLE_LENGTH,
   type ManifestProposal,
   proposalProblems,
 } from "./proposal.ts";
@@ -380,5 +382,62 @@ describe("cleanAliases", () => {
   it("folds case with toLowerCase only: Unicode case folding is out of scope", () => {
     expect(cleanAliases("t", ["Straße", "STRASSE"])).toEqual(["Straße", "STRASSE"]);
     expect(cleanAliases("t", ["Ünï", "üNÏ"])).toEqual(["Ünï"]);
+  });
+});
+
+describe("proposalProblems title and alias limits", () => {
+  const problems = (features: ManifestProposal["features"]) =>
+    proposalProblems(proposal({ features }), clusters);
+
+  it("caps titles at 80 code points and aliases at 60", () => {
+    expect(MAX_TITLE_LENGTH).toBe(80);
+    expect(MAX_ALIAS_LENGTH).toBe(60);
+    const title = "😀".repeat(80);
+    const alias = "é".repeat(60);
+    expect(problems([{ ...API, title, aliases: [...API.aliases, alias] }, WEB])).toEqual([]);
+  });
+
+  it("reports a title over 80 code points", () => {
+    const found = problems([{ ...API, title: "t".repeat(81) }, WEB]);
+    expect(found).toEqual(['feature "http-api" has a title of 81 characters; use at most 80']);
+  });
+
+  it("reports an alias over 60 code points, quoted and cut", () => {
+    const alias = "a".repeat(61);
+    const found = problems([{ ...API, aliases: [...API.aliases, alias] }, WEB]);
+    expect(found).toEqual([
+      `feature "http-api" has an alias "${alias}" of 61 characters; use at most 60`,
+    ]);
+  });
+
+  it.each([
+    ["a newline", "\n", "U+000A"],
+    ["a tab", "\t", "U+0009"],
+    ["DEL", "\u007F", "U+007F"],
+    ["a C1 control", "\u0085", "U+0085"],
+    ["a line separator", "\u2028", "U+2028"],
+    ["a paragraph separator", "\u2029", "U+2029"],
+    ["a bidi override", "\u202E", "U+202E"],
+    ["a bidi embedding", "\u202A", "U+202A"],
+    ["a bidi isolate", "\u2066", "U+2066"],
+    ["a pop isolate", "\u2069", "U+2069"],
+    ["a byte order mark", "\uFEFF", "U+FEFF"],
+  ])("reports %s in a title or an alias, naming the code point", (_name, char, code) => {
+    const found = problems([
+      { ...API, title: `HTTP${char}API` },
+      { ...WEB, aliases: [...WEB.aliases, `web${char}app`] },
+    ]);
+    expect(found).toEqual([
+      `feature "http-api" has a control or invisible character in its title (${code})`,
+      `feature "web-frontend" has a control or invisible character in an alias (${code})`,
+    ]);
+  });
+
+  it("lets ZWJ and ZWNJ through, as plain() does", () => {
+    const found = problems([
+      { ...API, title: "HTTP\u200DAPI", aliases: [...API.aliases, "x\u200Cy"] },
+      WEB,
+    ]);
+    expect(found).toEqual([]);
   });
 });

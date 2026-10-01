@@ -1,6 +1,7 @@
 import { FeatureId } from "@repowiki/core";
 import { z } from "zod";
 import type { Cluster } from "../cluster/index.ts";
+import { controlCharacters } from "./prompt.ts";
 
 /**
  * What the manifest call returns: the features, then one assignment per cluster. Assigning each
@@ -19,6 +20,9 @@ export type ManifestProposal = z.infer<typeof ManifestProposal>;
 export const MIN_ALIASES = 3;
 export const MAX_ALIASES = 8;
 export const MAX_FEATURE_ID_LENGTH = 40;
+/** Titles and aliases go into page headings and every write call's prompt, so they stay short. */
+export const MAX_TITLE_LENGTH = 80;
+export const MAX_ALIAS_LENGTH = 60;
 /** Longest list of problems sent back to the model; the rest are summarized as a count. */
 export const MAX_REPORTED_PROBLEMS = 20;
 const MAX_QUOTED_LENGTH = 80;
@@ -71,10 +75,36 @@ export function proposalProblems(
       if (titles.has(title.toLowerCase())) problems.push(`title ${quote(title)} is used twice`);
       titles.add(title.toLowerCase());
     }
-    const aliases = cleanAliases(title, feature.aliases).length;
-    if (aliases < MIN_ALIASES) {
+    const titleLength = [...title].length;
+    if (titleLength > MAX_TITLE_LENGTH) {
       problems.push(
-        `feature ${quote(feature.id)} has ${aliases} distinct aliases; give ${MIN_ALIASES} to ${MAX_ALIASES}`,
+        `feature ${quote(feature.id)} has a title of ${titleLength} characters; use at most ${MAX_TITLE_LENGTH}`,
+      );
+    }
+    const titleControls = controlCharacters(title);
+    if (titleControls.length > 0) {
+      problems.push(
+        `feature ${quote(feature.id)} has a control or invisible character in its title (${titleControls.join(", ")})`,
+      );
+    }
+    const aliases = cleanAliases(title, feature.aliases);
+    if (aliases.length < MIN_ALIASES) {
+      problems.push(
+        `feature ${quote(feature.id)} has ${aliases.length} distinct aliases; give ${MIN_ALIASES} to ${MAX_ALIASES}`,
+      );
+    }
+    for (const alias of aliases) {
+      const length = [...alias].length;
+      if (length > MAX_ALIAS_LENGTH) {
+        problems.push(
+          `feature ${quote(feature.id)} has an alias ${quote(alias)} of ${length} characters; use at most ${MAX_ALIAS_LENGTH}`,
+        );
+      }
+    }
+    const aliasControls = [...new Set(aliases.flatMap(controlCharacters))];
+    if (aliasControls.length > 0) {
+      problems.push(
+        `feature ${quote(feature.id)} has a control or invisible character in an alias (${aliasControls.join(", ")})`,
       );
     }
   }
