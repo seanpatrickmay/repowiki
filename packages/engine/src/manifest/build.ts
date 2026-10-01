@@ -87,6 +87,7 @@ export async function buildManifest(
   for (let attempt = 1; ; attempt++) {
     let problems: string[];
     let answer: string;
+    let outputError: LlmOutputError | undefined;
     try {
       const { output } = await options.provider.generate({
         purpose: "manifest",
@@ -112,10 +113,12 @@ export async function buildManifest(
       if (!(error instanceof LlmOutputError)) throw error;
       problems = [error.message];
       answer = error.text;
+      outputError = error;
     }
     if (attempt === MAX_ATTEMPTS) {
       throw new ManifestBuildError(
-        `the manifest answer was rejected twice: ${problems.join("; ")}`,
+        `the manifest answer was rejected twice. first answer: ${rejected.join("; ")}; retry: ${problems.join("; ")}`,
+        outputError === undefined ? undefined : { cause: outputError },
       );
     }
     rejected = problems;

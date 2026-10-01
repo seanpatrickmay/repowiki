@@ -57,11 +57,31 @@ describe("buildManifest", () => {
     expect(requests[1]?.messages[1]).toEqual({ role: "assistant", content: "oops" });
   });
 
-  it("gives up after a second rejection", async () => {
-    const { provider } = scriptedProvider(MISSING_C03, MISSING_C03);
-    await expect(buildManifest(sampleIndex(), options(provider))).rejects.toThrow(
-      ManifestBuildError,
+  it("gives up after a second rejection, reporting both rounds' problems", async () => {
+    const missingC02: ManifestProposal = {
+      ...GOOD,
+      clusters: GOOD.clusters.filter((c) => c.cluster !== "c02"),
+    };
+    const { provider, requests } = scriptedProvider(MISSING_C03, missingC02);
+    const failure = buildManifest(sampleIndex(), options(provider));
+    await expect(failure).rejects.toThrow(ManifestBuildError);
+    await expect(failure).rejects.toThrow(
+      'first answer: cluster "c03" is not assigned; retry: cluster "c02" is not assigned',
     );
+    await expect(failure).rejects.not.toHaveProperty("cause");
+    expect(requests).toHaveLength(2);
+  });
+
+  it("gives up after two unusable answers, keeping the second error as the cause", async () => {
+    const first = new LlmOutputError("first answer is not JSON", "oops");
+    const second = new LlmOutputError("second answer is not JSON", "again");
+    const { provider } = scriptedProvider(first, second);
+    const failure = buildManifest(sampleIndex(), options(provider));
+    await expect(failure).rejects.toThrow(ManifestBuildError);
+    await expect(failure).rejects.toThrow(
+      "first answer: first answer is not JSON; retry: second answer is not JSON",
+    );
+    await expect(failure).rejects.toMatchObject({ cause: second });
   });
 
   it("does not retry provider failures; the SDK already retried them", async () => {
@@ -98,8 +118,8 @@ describe("buildManifest", () => {
 
   it("refuses a commit with no files", async () => {
     const empty = { ...sampleIndex(), files: [], imports: [], unresolved: [] };
-    await expect(buildManifest(empty, options(scriptedProvider(GOOD).provider))).rejects.toThrow(
-      /no files/,
-    );
+    const { provider, requests } = scriptedProvider(GOOD);
+    await expect(buildManifest(empty, options(provider))).rejects.toThrow(/no files/);
+    expect(requests).toHaveLength(0);
   });
 });
