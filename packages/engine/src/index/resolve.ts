@@ -92,16 +92,15 @@ export function createResolver(
   }
   const roots = [...pythonRoots].sort();
 
-  // First segments an absolute import can name: a module file or a directory holding Python files.
+  // First segments an absolute import can name: a module file or a package (has __init__.py) under
+  // a source root. A directory of loose .py files (alembic/, scripts/) is not importable as one.
   const pythonTopNames = new Set<string>();
   for (const path of files) {
-    if (!path.endsWith(".py")) continue;
     for (const root of roots) {
       const rest =
         root === "" ? path : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null;
-      if (rest === null) continue;
-      const slash = rest.indexOf("/");
-      pythonTopNames.add(slash === -1 ? rest.slice(0, -".py".length) : rest.slice(0, slash));
+      const top = rest === null ? null : /^([^/]+)(?:\.py|\/__init__\.py)$/.exec(rest)?.[1];
+      if (top) pythonTopNames.add(top);
     }
   }
 

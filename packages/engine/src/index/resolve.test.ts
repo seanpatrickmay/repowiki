@@ -63,7 +63,14 @@ describe("python resolution", () => {
 
   describe("external classification", () => {
     const internal = createResolver(
-      ["tests/__init__.py", "tests/helpers.py", "src/pkg/__init__.py", "src/pkg/a.py", "tool.py"],
+      [
+        "tests/__init__.py",
+        "tests/helpers.py",
+        "src/pkg/__init__.py",
+        "src/pkg/a.py",
+        "tool.py",
+        "alembic/env.py",
+      ],
       [],
     );
 
@@ -85,6 +92,13 @@ describe("python resolution", () => {
       expect(internal.resolve("tests/helpers.py", py("tool.missing"))).toEqual({
         targets: [],
         external: false,
+      });
+    });
+
+    it("marks a directory without __init__.py as external (a migrations dir is not a package)", () => {
+      expect(internal.resolve("alembic/env.py", py("alembic", ["context"]))).toEqual({
+        targets: [],
+        external: true,
       });
     });
 
