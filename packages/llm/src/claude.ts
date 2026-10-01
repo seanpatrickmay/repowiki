@@ -40,6 +40,15 @@ function usageOf(message: Message): TokenUsage {
   };
 }
 
+/** JSON with object keys sorted, so equal schemas hash equal whatever their key order. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
 /**
  * The Claude API provider. Output is structured JSON (output_config.format, which Haiku 4.5
  * supports); no thinking is requested. A cacheKey puts a cache breakpoint on the system prompt.
@@ -61,15 +70,18 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
   return {
     async generate<T>(request: GenerateRequest<T>) {
       const model = options.models[request.purpose];
+      const { type, schema } = zodOutputFormat(request.schema);
       if (request.cacheKey !== undefined) {
-        const prefix = createHash("sha256").update(`${model}\0${request.system}`).digest("hex");
+        // Everything that breaks the cache: the model, the output format, and the system text.
+        const prefix = createHash("sha256")
+          .update(`${model}\0${stableJson(schema)}\0${request.system}`)
+          .digest("hex");
         const seen = prefixes.get(request.cacheKey);
         if (seen !== undefined && seen !== prefix) {
           throw new LlmError(`cacheKey ${request.cacheKey} was reused with a different prefix`);
         }
         prefixes.set(request.cacheKey, prefix);
       }
-      const { type, schema } = zodOutputFormat(request.schema);
       const params: MessageCreateParamsNonStreaming = {
         model,
         max_tokens: request.maxTokens,

@@ -79,7 +79,39 @@ describe("createClaudeProvider", () => {
     await provider.generate({ ...request, cacheKey: "k" });
     const changed = provider.generate({ ...request, system: "changed", cacheKey: "k" });
     await expect(changed).rejects.toThrow(LlmError);
+    await expect(changed).rejects.toThrow("cacheKey k was reused with a different prefix");
     expect(bodies).toHaveLength(1);
+  });
+
+  it("refuses a cacheKey reused with the same system but a different model", async () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    const { provider } = setup(fetch, { ...DEFAULT_MODELS, write: "claude-sonnet-5-5" });
+    await provider.generate({ ...request, cacheKey: "k" });
+    const changed = provider.generate({ ...request, purpose: "write", cacheKey: "k" });
+    await expect(changed).rejects.toThrow("cacheKey k was reused with a different prefix");
+    expect(bodies).toHaveLength(1);
+  });
+
+  it("refuses a cacheKey reused with the same system but a different output schema", async () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    const { provider } = setup(fetch);
+    await provider.generate({ ...request, cacheKey: "k" });
+    const City = z.object({ city: z.string() });
+    const changed = provider.generate({ ...request, schema: City, cacheKey: "k" });
+    await expect(changed).rejects.toThrow("cacheKey k was reused with a different prefix");
+    expect(bodies).toHaveLength(1);
+  });
+
+  it("accepts a cacheKey reused with an identical model, system and schema", async () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    const { provider } = setup(fetch);
+    await provider.generate({ ...request, cacheKey: "k" });
+    await provider.generate({
+      ...request,
+      schema: z.object({ city: z.string(), country: z.string() }),
+      cacheKey: "k",
+    });
+    expect(bodies).toHaveLength(2);
   });
 
   it.each([
