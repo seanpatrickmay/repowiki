@@ -418,3 +418,31 @@ ins {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Hover previews */
+.preview-card {
+  position: absolute;
+  z-index: 10;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.preview-card p {
+  margin: 0.25rem 0;
+}
+
+.preview-title {
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+}
+
+.preview-facts {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}

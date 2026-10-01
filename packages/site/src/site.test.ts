@@ -584,3 +584,52 @@ describe("history pages", () => {
     );
   });
 });
+
+describe("hover previews", () => {
+  /** Every data-preview value on every built page, with the pages that carry it. */
+  function previewRequests(): Map<string, string[]> {
+    const requests = new Map<string, string[]>();
+    for (const page of htmlFiles(site.outDir)) {
+      for (const [, id = ""] of site.read(page).matchAll(/data-preview="([^"]*)"/g)) {
+        requests.set(id, [...(requests.get(id) ?? []), page]);
+      }
+    }
+    return requests;
+  }
+
+  it("writes a preview file for every link that asks for one", () => {
+    // Redirect and disambiguation ids get previews of their own, so a link to
+    // `legacy-signals` needs no resolving in the page markup.
+    const requests = previewRequests();
+    expect([...requests.keys()].sort()).toEqual(["deliverables", "legacy-signals", "signals"]);
+    for (const [id, pages] of requests) {
+      const file = join(site.outDir, "api", "preview", `${id}.json`);
+      expect(existsSync(file), `${id} (asked for by ${pages.join(", ")})`).toBe(true);
+      expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ url: expect.any(String) });
+    }
+  });
+
+  it("serves the target's lead for a redirect", () => {
+    const preview = JSON.parse(site.read("api/preview/legacy-signals.json"));
+    expect(preview.title).toBe("Signal ingestion");
+    expect(preview.url).toBe("/wiki/signals/");
+    expect(preview.html).toContain("<b>Signal ingestion</b> is the subsystem of demo-repo");
+  });
+
+  it("serves a disambiguation's targets", () => {
+    const preview = JSON.parse(site.read("api/preview/reports.json"));
+    expect(preview.html).toBe(
+      "<p><b>Reports</b> may refer to: Signal ingestion, Deliverables.</p>",
+    );
+  });
+
+  it("writes no preview for a feature without a page", () => {
+    expect(existsSync(join(site.outDir, "api", "preview", "scheduler.json"))).toBe(false);
+  });
+
+  it("loads the preview script on every page", () => {
+    for (const page of ["index.html", "wiki/signals/index.html", "wiki/reports/index.html"]) {
+      expect(site.read(page)).toMatch(/<script type="module" src="\/_astro\/[^"]+\.js"><\/script>/);
+    }
+  });
+});
