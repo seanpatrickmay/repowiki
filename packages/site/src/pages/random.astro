@@ -1,13 +1,9 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import { randomTargets } from "../main-page.ts";
 import { getSite } from "../site.ts";
-import { articleUrl } from "../urls.ts";
 
-const site = getSite();
-const urls = [...site.pages.keys()]
-  .filter((id) => site.features.get(id)?.status.kind === "active")
-  .sort()
-  .map(articleUrl);
+const urls = randomTargets(getSite());
 ---
 <Layout title="Random article">
   <h1 class="page-title">Random article</h1>

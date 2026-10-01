@@ -685,7 +685,7 @@ describe("Main Page, Random article and All articles", () => {
     expect(html).not.toContain("Scheduler");
   });
 
-  it("escapes the hostile feature's title and alias on All articles", () => {
+  it("escapes the hostile feature's title on All articles", () => {
     const html = site.read("special/all-pages/index.html");
     const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
     expect(html).toContain(`<a href="/wiki/hostile-title/">${title}</a>`);
