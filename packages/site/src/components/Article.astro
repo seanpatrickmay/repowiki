@@ -1,16 +1,20 @@
 ---
 import { type ArticleView, STALE_NOTICE } from "../article.ts";
 import { getSite } from "../site.ts";
+import PageTabs from "./PageTabs.astro";
 
 interface Props {
   view: ArticleView;
   /** True only for the current revision, so search indexes each article once. */
   indexed: boolean;
+  /** Which page tab is highlighted: the article, or (for old revisions) its history. */
+  tab?: "article" | "history";
 }
 
-const { view, indexed } = Astro.props;
+const { view, indexed, tab = "article" } = Astro.props;
 const { wiki } = getSite();
 ---
+<PageTabs featureId={view.featureId} current={tab} />
 <article class="article" data-pagefind-body={indexed ? "" : undefined}>
   <h1 class="page-title">{view.title}</h1>
   <p class="tagline">From the {wiki.repo} wiki</p>

@@ -1,5 +1,6 @@
 ---
 import Article from "../../../components/Article.astro";
+import { historyHref } from "../../../history.ts";
 import Layout from "../../../layouts/Layout.astro";
 import { pageFor, type WikiRoute, wikiRoutes } from "../../../routes.ts";
 import { getSite } from "../../../site.ts";
@@ -13,7 +14,9 @@ interface Props {
 }
 
 const { route } = Astro.props;
-const page = pageFor(getSite(), route);
+const site = getSite();
+const page = pageFor(site, route);
+const history = historyHref(site, route.slug);
 ---
 {page.kind === "article" ? (
   <Layout title={page.view.title}>
@@ -35,6 +38,7 @@ const page = pageFor(getSite(), route);
         <a class="wikilink" href={page.target.href}>{page.target.title}</a>
       )}
     </p>
+    {history !== null && <p><a href={history}>View history</a></p>}
   </Layout>
 ) : (
   <Layout title={page.title}>
@@ -49,5 +53,6 @@ const page = pageFor(getSite(), route);
       ))}
     </ul>
     <p class="dab-note">This disambiguation page lists articles associated with the title <i>{page.title}</i>.</p>
+    {history !== null && <p><a href={history}>View history</a></p>}
   </Layout>
 )}

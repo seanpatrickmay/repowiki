@@ -1,0 +1,35 @@
+---
+import PageTabs from "../../../../components/PageTabs.astro";
+import { hasHistory, historyPage } from "../../../../history.ts";
+import Layout from "../../../../layouts/Layout.astro";
+import { getSite } from "../../../../site.ts";
+
+export function getStaticPaths() {
+  const site = getSite();
+  return [...site.history.keys()]
+    .filter((featureId) => hasHistory(site, featureId))
+    .map((featureId) => ({ params: { slug: featureId }, props: { featureId } }));
+}
+
+interface Props {
+  featureId: string;
+}
+
+const { featureId } = Astro.props;
+const { title, rows } = historyPage(getSite(), featureId);
+---
+<Layout title={`${title}: Revision history`}>
+  <PageTabs featureId={featureId} current="history" />
+  <h1 class="page-title">{title}: Revision history</h1>
+  <p class="history-help">Newest first. Dates are the dates of the commits each revision documents.</p>
+  <ul class="history">
+    {rows.map((row) => (
+      <li>
+        <a href={row.oldHref}>{row.date}</a>
+        <span class="history-commit" set:html={row.commitHtml} />
+        <span class="history-summary" set:html={row.summaryHtml} />
+        <span class="history-cost">{row.cost}</span>
+      </li>
+    ))}
+  </ul>
+</Layout>
