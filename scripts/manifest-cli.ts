@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { GitError, ManifestBuildError } from "@repowiki/engine";
+import type { LedgerEntry } from "@repowiki/core";
+import { GitError, ManifestBuildError, manifestCacheKey } from "@repowiki/engine";
 import { resolveModels } from "@repowiki/llm";
 
 const USAGE =
@@ -89,4 +90,19 @@ export function exitCodeFor(err: unknown): 1 | 2 | null {
   if (err instanceof CliError) return 2;
   if (err instanceof ManifestBuildError || err instanceof GitError) return 1;
   return null;
+}
+
+/**
+ * The ledger rows that paid for the manifest of `sha`: manifest calls whose cacheKey belongs to
+ * that sha (the bare per-sha key predates the prompt hash). Other purposes, such as M4's write
+ * calls appended to the same store, are left out of the manifest's cost.
+ */
+export function manifestLedgerRows(entries: readonly LedgerEntry[], sha: string): LedgerEntry[] {
+  const key = manifestCacheKey(sha);
+  return entries.filter(
+    (e) =>
+      e.purpose === "manifest" &&
+      e.cacheKey !== null &&
+      (e.cacheKey === key || e.cacheKey.startsWith(`${key}-`)),
+  );
 }

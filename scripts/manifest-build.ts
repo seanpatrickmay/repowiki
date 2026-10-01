@@ -3,7 +3,13 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { ensureManifest, indexRepo, openStore, renderManifestSummary } from "@repowiki/engine";
 import { createClaudeProvider, createLedger, totalsOf } from "@repowiki/llm";
-import { CliError, exitCodeFor, loadModels, parseManifestArgs } from "./manifest-cli.ts";
+import {
+  CliError,
+  exitCodeFor,
+  loadModels,
+  manifestLedgerRows,
+  parseManifestArgs,
+} from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 
 async function main(): Promise<void> {
@@ -48,8 +54,8 @@ async function main(): Promise<void> {
         console.error(`first answer rejected, retried once: ${build.rejected.join("; ")}`);
       }
     }
-    // The store's whole ledger, so a reuse run reproduces the cost section of the first run's summary.
-    const recorded = store.listLedger();
+    // Every stored manifest call for this sha, so a reuse run reproduces the first run's cost.
+    const recorded = manifestLedgerRows(store.listLedger(), index.sha);
     const summary = renderManifestSummary(
       repoName,
       manifest,

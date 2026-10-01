@@ -2,9 +2,16 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GitError, ManifestBuildError } from "@repowiki/engine";
+import { makeLedgerEntry } from "@repowiki/core/test-fixtures";
+import { GitError, ManifestBuildError, manifestCacheKey } from "@repowiki/engine";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CliError, exitCodeFor, loadModels, parseManifestArgs } from "./manifest-cli.ts";
+import {
+  CliError,
+  exitCodeFor,
+  loadModels,
+  manifestLedgerRows,
+  parseManifestArgs,
+} from "./manifest-cli.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -85,6 +92,24 @@ describe("loadModels", () => {
     writeFileSync(file, text);
     return file;
   }
+});
+
+describe("manifestLedgerRows", () => {
+  it("keeps only this sha's manifest calls, whatever the prompt hash", () => {
+    const sha = "a".repeat(40);
+    const mine = makeLedgerEntry({ purpose: "manifest", cacheKey: manifestCacheKey(sha, "p") });
+    const legacy = makeLedgerEntry({ purpose: "manifest", cacheKey: `manifest-${sha}` });
+    const otherSha = makeLedgerEntry({
+      purpose: "manifest",
+      cacheKey: manifestCacheKey("b".repeat(40), "p"),
+    });
+    const write = makeLedgerEntry({ purpose: "write", cacheKey: manifestCacheKey(sha, "p") });
+    const uncached = makeLedgerEntry({ purpose: "write", cacheKey: null });
+    expect(manifestLedgerRows([mine, legacy, otherSha, write, uncached], sha)).toEqual([
+      mine,
+      legacy,
+    ]);
+  });
 });
 
 describe("exitCodeFor", () => {
