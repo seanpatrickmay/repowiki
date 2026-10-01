@@ -1,9 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeLedgerEntry } from "@repowiki/core/test-fixtures";
 import { GitError, ManifestBuildError, manifestCacheKey } from "@repowiki/engine";
+import { LlmError, LlmOutputError } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CliError,
@@ -63,11 +64,7 @@ describe("loadModels", () => {
   it.each([
     ["a missing file", () => join(dir, "missing.json"), /cannot read config .*missing\.json/],
     ["invalid JSON", () => write("{nope"), /not valid JSON/],
-    [
-      "an unknown key",
-      () => write('{"models":{},"extra":1}'),
-      /invalid config .*extra|invalid config/,
-    ],
+    ["an unknown key", () => write('{"models":{},"extra":1}'), /invalid config .*: .*"extra"/],
     [
       "an empty model id",
       () => write('{"models":{"manifest":""}}'),
@@ -113,21 +110,57 @@ describe("manifestLedgerRows", () => {
 });
 
 describe("exitCodeFor", () => {
-  it("maps usage errors to 2, build and git failures to 1, and leaves bugs alone", () => {
+  it("maps usage errors to 2, build, git and LLM failures to 1, and leaves bugs alone", () => {
     expect(exitCodeFor(new CliError("x"))).toBe(2);
     expect(exitCodeFor(new ManifestBuildError("x"))).toBe(1);
     expect(exitCodeFor(new GitError("x"))).toBe(1);
+    expect(exitCodeFor(new LlmError("x"))).toBe(1);
+    expect(exitCodeFor(new LlmOutputError("x", "text"))).toBe(1);
     expect(exitCodeFor(new TypeError("x"))).toBeNull();
     expect(exitCodeFor("x")).toBeNull();
   });
 });
 
 describe("manifest-build.ts as a process (no network)", () => {
-  const run = (...args: string[]) =>
-    spawnSync(process.execPath, ["scripts/manifest-build.ts", ...args], {
+  const run = (...args: string[]) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.REPOWIKI_CASSETTE;
+    return spawnSync(process.execPath, ["scripts/manifest-build.ts", ...args], {
       encoding: "utf8",
-      env: { ...process.env, HOME: dir },
+      env,
     });
+  };
+
+  /** A one-commit git repository under the scratch dir, isolated from the user's git config. */
+  function gitRepo(): string {
+    const repo = join(dir, "repo");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "app.ts"), "export const app = 1;\n");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: repo,
+        env: {
+          PATH: process.env.PATH,
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_AUTHOR_NAME: "Fixture",
+          GIT_AUTHOR_EMAIL: "fixture@example.com",
+          GIT_COMMITTER_NAME: "Fixture",
+          GIT_COMMITTER_EMAIL: "fixture@example.com",
+        },
+      });
+    git("init", "-q", "-b", "main");
+    git("add", "-A");
+    git("commit", "-q", "-m", "init");
+    return repo;
+  }
+
+  it("reports a missing API key in one line, exit 1, before any call", () => {
+    const result = run(gitRepo(), "--out", join(dir, "o"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe("ANTHROPIC_API_KEY is not set; run with node --env-file=.env\n");
+  });
 
   it("prints one line and exits 2 for a bad flag", () => {
     const result = run("r", "--nope");

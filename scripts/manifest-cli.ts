@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import type { LedgerEntry } from "@repowiki/core";
 import { GitError, ManifestBuildError, manifestCacheKey } from "@repowiki/engine";
-import { resolveModels } from "@repowiki/llm";
+import { LlmError, resolveModels } from "@repowiki/llm";
 
 const USAGE =
   "usage: pnpm manifest:build <repo-path> [rev] [--out dir] [--config file.json] [--no-batch]";
@@ -85,10 +85,12 @@ export function loadModels(configPath: string | null): ReturnType<typeof resolve
   }
 }
 
-/** The exit code for an expected failure (2 usage, 1 build or git), or null for a bug to surface. */
+/** The exit code for an expected failure (2 usage, 1 build, git or LLM), or null for a bug. */
 export function exitCodeFor(err: unknown): 1 | 2 | null {
   if (err instanceof CliError) return 2;
-  if (err instanceof ManifestBuildError || err instanceof GitError) return 1;
+  if (err instanceof ManifestBuildError || err instanceof GitError || err instanceof LlmError) {
+    return 1;
+  }
   return null;
 }
 

@@ -37,8 +37,8 @@ export interface Provider {
 }
 
 export class LlmError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = new.target.name;
   }
 }
