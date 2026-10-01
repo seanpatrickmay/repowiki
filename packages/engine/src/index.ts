@@ -32,6 +32,16 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  buildManifest,
+  DEFAULT_MAX_PROMPT_TOKENS,
+  ensureManifest,
+  type ManifestBuild,
+  ManifestBuildError,
+  type ManifestBuildOptions,
+  ManifestProposal,
+  renderManifestSummary,
+} from "./manifest/index.ts";
+export {
   buildExport,
   type CitingClaim,
   DroppedFeatureError,
