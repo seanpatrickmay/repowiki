@@ -11,13 +11,15 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm lint && pnpm test"
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "tracker:seed": "node scripts/tracker/run.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@repowiki/core": "workspace:*",
     "@types/node": "24.19.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "zod": "4.6.5"
   }
 }
