@@ -274,6 +274,77 @@
       "labels": ["v1", "type:task", "area:engine"],
       "parent": "F07",
       "body": "**Deliverable:** buildExport() and writeExport() producing a validated WikiExport.\n\n**Done when:** export tests pass, including the empty-store error. Plan Task 12."
+    },
+    {
+      "key": "M2-1",
+      "title": "[M2] tracker: M2 tickets",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "closed": true,
+      "body": "**Deliverable:** M2 tickets in seed.json.\n\n**Done when:** the seed creates M2-1..M2-10. Plan: docs/superpowers/plans/2026-09-30-repowiki-m2-indexer.md Task 1."
+    },
+    {
+      "key": "M2-2",
+      "title": "[M2] core: memberId encoding",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** memberId()/parseMemberId() with %-encoding of % and # in the path part; MemberId schema uses it (issue #53).\n\n**Done when:** round-trip tests pass. Plan Task 2."
+    },
+    {
+      "key": "M2-3",
+      "title": "[M2] engine: module boundaries",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F19",
+      "body": "**Deliverable:** store/index.ts and a test that engine modules import each other only through index.ts (issue #53).\n\n**Done when:** boundary test passes on the real tree. Plan Task 3."
+    },
+    {
+      "key": "M2-4",
+      "title": "[M2] index: git plumbing and fixture repos",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** read-only git access (resolveCommit, listBlobs, readBlobs, commitFiles) and createTestRepo().\n\n**Done when:** git tests pass, incl. awkward paths, symlinks, submodules. Plan Task 4."
+    },
+    {
+      "key": "M2-5",
+      "title": "[M2] index: tree-sitter symbols",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** WASM parsers for Python/TS/TSX and extractSymbols.\n\n**Done when:** symbol tests pass, incl. syntax errors. Plan Task 5."
+    },
+    {
+      "key": "M2-6",
+      "title": "[M2] index: import extraction",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** extractImports for Python and ES modules.\n\n**Done when:** import tests pass. Plan Task 6."
+    },
+    {
+      "key": "M2-7",
+      "title": "[M2] index: import resolution",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** createResolver (Python roots, relative imports, ES extensions/index/workspace packages) and parseWorkspacePackage.\n\n**Done when:** resolver tests pass. Plan Task 7."
+    },
+    {
+      "key": "M2-8",
+      "title": "[M2] index: co-change",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** computeCoChange with sweep-commit skipping.\n\n**Done when:** co-change tests pass. Plan Task 8."
+    },
+    {
+      "key": "M2-9",
+      "title": "[M2] index: indexRepo",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** indexRepo → RepoIndex, module entry, engine exports.\n\n**Done when:** end-to-end fixture tests pass, incl. determinism and untouched target repo. Plan Task 9."
+    },
+    {
+      "key": "M2-10",
+      "title": "[M2] index: dev command and next-chief-of-staff run",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** pnpm index:repo dev command.\n\n**Done when:** next-chief-of-staff at 7247d28 indexes with 0 parse errors and 0 unresolved internal imports. Plan Task 10."
     }
   ]
 }
