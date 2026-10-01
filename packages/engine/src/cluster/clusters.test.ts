@@ -3,21 +3,19 @@ import { clusterFiles } from "./clusters.ts";
 import { buildFileGraph, type FileGraph } from "./graph.ts";
 import { makeIndex } from "./test-index.ts";
 
+const clique = (files: string[]): [string, string][] =>
+  files.flatMap((x, i) => files.slice(i + 1).map((y): [string, string] => [x, y]));
+
 /** Two tightly importing groups of four files plus whatever `extra` adds. */
 function twoGroups(extra: string[] = [], imports: [string, string][] = []) {
   const api = ["api/a.py", "api/b.py", "api/c.py", "api/d.py"];
   const web = ["web/a.ts", "web/b.ts", "web/c.ts", "web/d.ts"];
-  const clique = (files: string[]) =>
-    files.flatMap((x, i) => files.slice(i + 1).map((y): [string, string] => [x, y]));
   return buildFileGraph(
     makeIndex([...api, ...web, ...extra], {
       imports: [...clique(api), ...clique(web), ...imports],
     }),
   );
 }
-
-const clique = (files: string[]): [string, string][] =>
-  files.flatMap((x, i) => files.slice(i + 1).map((y): [string, string] => [x, y]));
 
 /** Index-built graph over `paths`, with a clique of imports inside each group and `imports` between. */
 function grouped(groups: string[][], paths: string[], imports: [string, string][] = []) {
@@ -183,5 +181,49 @@ describe("clusterFiles", () => {
         [...big, "p/1.py", "p/2.py", "q/1.py", "q/2.py"],
       ]);
     });
+
+    it("scores directory depth over every file of the small cluster, not just its first", () => {
+      // The pair's first file (a/x.py) shares a level with the a/ cluster; its second file
+      // (z/deep/y.py) shares two levels with the z/deep/ cluster, which must win.
+      const near = ["z/deep/q1.py", "z/deep/q2.py", "z/deep/q3.py", "z/deep/q4.py"];
+      const far = ["a/b1.py", "a/b2.py", "a/b3.py", "a/b4.py", "a/b5.py"];
+      const pair = ["a/x.py", "z/deep/y.py"];
+      const graph = weighted([
+        ...clique(near).map(([a, b]): [string, string, number] => [a, b, 10]),
+        ...clique(far).map(([a, b]): [string, string, number] => [a, b, 10]),
+        [pair[0] ?? "", pair[1] ?? "", 10],
+      ]);
+      expect(filesOf(clusterFiles(graph, options(1)))).toEqual([far, near, pair]);
+      expect(filesOf(clusterFiles(graph, options(3)))).toEqual([
+        [...pair.slice(0, 1), ...near, ...pair.slice(1)],
+        far,
+      ]);
+    });
+
+    it("collapses everything into one cluster when every cluster is small", () => {
+      const graph = weighted([
+        ["a/1.py", "a/2.py", 10],
+        ["b/1.py", "b/2.py", 10],
+        ["c/1.py", "c/2.py", 10],
+      ]);
+      expect(filesOf(clusterFiles(graph, options(1)))).toHaveLength(3);
+      expect(filesOf(clusterFiles(graph, options(5)))).toEqual([
+        ["a/1.py", "a/2.py", "b/1.py", "b/2.py", "c/1.py", "c/2.py"],
+      ]);
+    });
+  });
+
+  it("widens ids so they sort lexically with more than 99 clusters", () => {
+    const groups = Array.from({ length: 120 }, (_, i) =>
+      Array.from({ length: 5 }, (_, j) => `m${String(i).padStart(3, "0")}/f${j}.py`),
+    );
+    const graph = weighted(
+      groups.flatMap((g) => clique(g).map(([a, b]): [string, string, number] => [a, b, 1])),
+    );
+    const ids = clusterFiles(graph, { resolution: 1, minClusterSize: 5 }).map((c) => c.id);
+    expect(ids).toHaveLength(120);
+    expect(ids[0]).toBe("c001");
+    expect(ids[119]).toBe("c120");
+    expect(ids).toEqual([...ids].sort());
   });
 });

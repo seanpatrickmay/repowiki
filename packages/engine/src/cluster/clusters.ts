@@ -71,7 +71,7 @@ export function clusterFiles(
     }
     const score = (c: number, members: string[]): [number, number, number] => [
       weightTo.get(c) ?? 0,
-      Math.max(...members.map((m) => sharedPrefixDepth(m, files[0] ?? ""))),
+      Math.max(...members.flatMap((m) => files.map((f) => sharedPrefixDepth(m, f)))),
       members.length,
     ];
     let target: number | null = null;
@@ -93,8 +93,10 @@ export function clusterFiles(
     groups.delete(id);
   }
 
-  return [...groups.values()]
+  const sorted = [...groups.values()]
     .map((files) => [...files].sort())
-    .sort((x, y) => y.length - x.length || ((x[0] ?? "") < (y[0] ?? "") ? -1 : 1))
-    .map((files, i) => ({ id: `c${String(i + 1).padStart(2, "0")}`, files }));
+    .sort((x, y) => y.length - x.length || ((x[0] ?? "") < (y[0] ?? "") ? -1 : 1));
+  // Wide enough that ids sort lexically in list order: c01..c99, then c001.. past 99 clusters.
+  const width = Math.max(2, String(sorted.length).length);
+  return sorted.map((files, i) => ({ id: `c${String(i + 1).padStart(width, "0")}`, files }));
 }
