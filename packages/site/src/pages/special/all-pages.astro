@@ -1,0 +1,34 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { featureLink } from "../../model.ts";
+import { getSite } from "../../site.ts";
+
+const site = getSite();
+const entries = site.wiki.manifest.features
+  .flatMap((feature) => {
+    const link = featureLink(site, feature.id);
+    if (link === null) return [];
+    const { status } = feature;
+    const note =
+      status.kind === "redirect"
+        ? `redirect to ${site.features.get(status.to)?.title ?? status.to}`
+        : status.kind === "disambiguation"
+          ? "disambiguation"
+          : status.kind === "retired"
+            ? "retired"
+            : null;
+    return [{ href: link.href, title: feature.title, note }];
+  })
+  .sort((a, b) => a.title.localeCompare(b.title, "en"));
+---
+<Layout title="All articles">
+  <h1 class="page-title">All articles</h1>
+  <ul class="all-pages">
+    {entries.map((entry) => (
+      <li>
+        <a href={entry.href} class={entry.note === null ? undefined : "all-pages-other"}>{entry.title}</a>
+        {entry.note !== null && <span class="all-pages-note">({entry.note})</span>}
+      </li>
+    ))}
+  </ul>
+</Layout>

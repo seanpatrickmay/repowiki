@@ -1,0 +1,22 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getSite } from "../site.ts";
+import { articleUrl } from "../urls.ts";
+
+const site = getSite();
+const urls = [...site.pages.keys()]
+  .filter((id) => site.features.get(id)?.status.kind === "active")
+  .sort()
+  .map(articleUrl);
+---
+<Layout title="Random article">
+  <h1 class="page-title">Random article</h1>
+  <p id="random-status">
+    Choosing a random article... If nothing happens, pick one from
+    <a href="/special/all-pages/">All articles</a>.
+  </p>
+  <script type="application/json" id="random-targets" set:html={JSON.stringify(urls).replace(/</g, "\\u003c")} />
+  <script>
+    import "../client/random.ts";
+  </script>
+</Layout>

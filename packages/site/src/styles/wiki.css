@@ -446,3 +446,54 @@ ins {
   color: var(--text-muted);
   font-size: 0.8rem;
 }
+
+/* Main Page and special pages */
+.mp-welcome {
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  text-align: center;
+}
+
+.mp-title {
+  font-family: var(--font-serif);
+  font-size: 1.8rem;
+  font-weight: normal;
+  margin: 0;
+}
+
+.mp-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+
+.mp-box {
+  padding: 0 1rem 0.5rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.mp-box h2 {
+  margin: 0 -1rem 0.5rem;
+  padding: 0.25rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mp-box ul {
+  padding-left: 1.25rem;
+}
+
+.mp-date,
+.dyk-source,
+.all-pages-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.all-pages-other {
+  font-style: italic;
+}

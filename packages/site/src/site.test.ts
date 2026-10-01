@@ -638,3 +638,77 @@ describe("hover previews", () => {
     }
   });
 });
+
+describe("Main Page, Random article and All articles", () => {
+  it("shows the featured article, Did you know hooks and recent updates", () => {
+    const html = site.read("index.html");
+    // deliverables, hostile-title and signals are the active features with a page.
+    expect(html).toContain("3 articles.");
+    expect(html).toContain('(<a href="/wiki/deliverables/">Full article...</a>)');
+    expect(html).toContain(
+      '... that signal ingestion was introduced in PR #45?</span> <span class="dyk-source">(<a href="/wiki/signals/">Signal ingestion</a>)</span>',
+    );
+    expect(html.indexOf("10 March 2026")).toBeLessThan(html.indexOf("25 February 2026"));
+    expect(html.indexOf("25 February 2026")).toBeLessThan(html.indexOf("20 February 2026"));
+    expect(html.indexOf("20 February 2026")).toBeLessThan(html.indexOf("15 January 2026"));
+  });
+
+  it("escapes the hostile feature's title on the Main Page", () => {
+    const html = site.read("index.html");
+    const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
+    expect(html).toContain(
+      `<li><a href="/wiki/hostile-title/">${title}</a> <span class="mp-date">25 February 2026</span></li>`,
+    );
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<i>x</i>");
+  });
+
+  it("asks for a hover preview only where a preview file exists", () => {
+    // The previews test crawls every data-preview on every page; the Main Page must stay in it.
+    const html = site.read("index.html");
+    for (const [, id = ""] of html.matchAll(/data-preview="([^"]*)"/g)) {
+      expect(existsSync(join(site.outDir, "api", "preview", `${id}.json`)), id).toBe(true);
+    }
+  });
+
+  it("sends Random article to one of the active articles", () => {
+    expect(site.read("random/index.html")).toContain(
+      '<script type="application/json" id="random-targets">["/wiki/deliverables/","/wiki/hostile-title/","/wiki/signals/"]</script>',
+    );
+  });
+
+  it("lists every routed feature, marking redirects and disambiguations", () => {
+    const html = site.read("special/all-pages/index.html");
+    expect(html).toContain('<span class="all-pages-note">(redirect to Signal ingestion)</span>');
+    expect(html).toContain('<span class="all-pages-note">(disambiguation)</span>');
+    expect(html).toContain('<span class="all-pages-note">(retired)</span>');
+    expect(html).not.toContain("Scheduler");
+  });
+
+  it("escapes the hostile feature's title and alias on All articles", () => {
+    const html = site.read("special/all-pages/index.html");
+    const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
+    expect(html).toContain(`<a href="/wiki/hostile-title/">${title}</a>`);
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<i>x</i>");
+  });
+
+  it("links Random article and All articles from every page", () => {
+    expect(site.read("wiki/signals/index.html")).toContain('<a href="/random/">Random article</a>');
+    for (const page of htmlFiles(site.outDir)) {
+      const html = site.read(page);
+      expect(html, page).toContain('<a href="/random/">Random article</a>');
+      expect(html, page).toContain('<a href="/special/all-pages/">All articles</a>');
+    }
+  });
+
+  it("crawls the new pages without a broken link", () => {
+    const { broken, checked } = brokenLinks(site.outDir);
+    expect(broken).toEqual([]);
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("matches the golden snapshot", async () => {
+    await expect(normalized("index.html")).toMatchFileSnapshot("__snapshots__/index.html");
+  });
+});
