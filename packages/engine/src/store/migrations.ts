@@ -45,13 +45,28 @@ export const MIGRATIONS: readonly Migration[] = [
 interface StoredFeature {
   aliases: string[];
   status: { kind: string; to?: string | string[] };
-  lineage: { kind: string; fromTitle?: string; into?: string | string[] }[];
+  lineage: {
+    kind: string;
+    sha?: string;
+    fromTitle?: string;
+    into?: string | string[];
+  }[];
+}
+
+interface StoredManifest {
+  sha: string;
+  features: StoredFeature[];
+  membership: Record<string, { featureId: string; weight: number }>;
 }
 
 /**
- * Migration 2: lineage and status became two-way (issue #53). In every stored manifest, a rename's
- * old title joins the aliases, and an active feature with one merge, split, or retire event takes
- * the status that event implies. Works on raw JSON so later schema changes cannot alter it.
+ * Migration 2: lineage and status became two-way (issue #53). STATUS IS AUTHORITATIVE.
+ * For each feature, repair lineage and aliases to agree with the status:
+ * - Keep first create, drop any later creates
+ * - Add rename's fromTitle to aliases if missing
+ * - Remove all ending events (merge, split, retire)
+ * - Re-add the ONE ending that matches the status, using existing sha where possible
+ * Works on raw JSON so later schema changes cannot alter it.
  */
 function repairLineageStatus(db: Database.Database): void {
   const rows = db.prepare("SELECT sha, body FROM manifests").all() as {
@@ -60,23 +75,87 @@ function repairLineageStatus(db: Database.Database): void {
   }[];
   const update = db.prepare("UPDATE manifests SET body = ? WHERE sha = ?");
   for (const row of rows) {
-    const manifest = JSON.parse(row.body) as { features: StoredFeature[] };
+    const manifest = JSON.parse(row.body) as StoredManifest;
+    let manifestChanged = false;
     for (const feature of manifest.features) {
-      for (const event of feature.lineage) {
-        if (event.kind === "rename" && event.fromTitle !== undefined) {
-          if (!feature.aliases.includes(event.fromTitle)) feature.aliases.push(event.fromTitle);
+      const original = JSON.stringify(feature);
+      // Keep first create, drop any later creates
+      let createIndex = -1;
+      const toRemove: number[] = [];
+      for (let i = 0; i < feature.lineage.length; i++) {
+        const event = feature.lineage[i];
+        if (event && event.kind === "create") {
+          if (createIndex === -1) {
+            createIndex = i;
+          } else {
+            toRemove.push(i);
+          }
         }
       }
-      const endings = feature.lineage.filter((e) => ["merge", "split", "retire"].includes(e.kind));
-      const ending = endings[0];
-      if (feature.status.kind !== "active" || endings.length !== 1 || ending === undefined) {
-        continue;
+      // Remove creates (in reverse order to maintain indices)
+      for (let i = toRemove.length - 1; i >= 0; i--) {
+        const idx = toRemove[i];
+        if (idx !== undefined) {
+          feature.lineage.splice(idx, 1);
+        }
       }
-      if (ending.kind === "retire") feature.status = { kind: "retired" };
-      else if (ending.kind === "merge") feature.status = { kind: "redirect", to: ending.into };
-      else feature.status = { kind: "disambiguation", to: ending.into };
+      // Add rename's fromTitle to aliases if missing
+      for (const event of feature.lineage) {
+        if (event.kind === "rename" && event.fromTitle !== undefined) {
+          if (!feature.aliases.includes(event.fromTitle)) {
+            feature.aliases.push(event.fromTitle);
+          }
+        }
+      }
+      // Find existing ending events to reuse sha
+      const existingEndings = feature.lineage.filter((e) =>
+        ["merge", "split", "retire"].includes(e.kind),
+      );
+      const existingRetire = existingEndings.find((e) => e.kind === "retire");
+      const existingMerge = existingEndings.find((e) => e.kind === "merge");
+      const existingSplit = existingEndings.find((e) => e.kind === "split");
+      // Remove all endings
+      feature.lineage = feature.lineage.filter(
+        (e) => !["merge", "split", "retire"].includes(e.kind),
+      );
+      // Add the ending that matches status
+      const status = feature.status;
+      if (status.kind === "active") {
+        // No ending needed
+      } else if (status.kind === "retired") {
+        const sha = existingRetire?.sha ?? row.sha;
+        feature.lineage.push({ kind: "retire", sha });
+      } else if (status.kind === "redirect") {
+        const targetId = status.to as string;
+        const sha = existingMerge?.into === targetId ? (existingMerge.sha as string) : row.sha;
+        feature.lineage.push({ kind: "merge", sha, into: targetId });
+      } else if (status.kind === "disambiguation") {
+        const targets = status.to as string[];
+        const sha = existingSplit ? (existingSplit.sha as string) : row.sha;
+        feature.lineage.push({ kind: "split", sha, into: targets });
+      }
+      // Track if anything changed
+      if (JSON.stringify(feature) !== original) {
+        manifestChanged = true;
+      }
     }
-    update.run(JSON.stringify(manifest), row.sha);
+    if (manifestChanged) {
+      update.run(JSON.stringify(manifest), row.sha);
+    }
+  }
+  // Verify all manifests parse successfully using the same parse the store uses
+  const { Manifest } = require("@repowiki/core") as typeof import("@repowiki/core");
+  const rows2 = db.prepare("SELECT sha, body FROM manifests").all() as {
+    sha: string;
+    body: string;
+  }[];
+  for (const row of rows2) {
+    const result = Manifest.safeParse(JSON.parse(row.body));
+    if (!result.success) {
+      throw new Error(
+        `Migration 2: manifest ${row.sha} failed to parse after repair: ${JSON.stringify(result.error.issues)}`,
+      );
+    }
   }
 }
 
