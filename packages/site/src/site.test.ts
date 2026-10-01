@@ -27,7 +27,11 @@ describe("site build", () => {
 
   it("references no off-site scripts, styles or fonts", () => {
     for (const page of htmlFiles(site!.outDir)) {
-      expect(site!.read(page)).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
+      // Articles legitimately carry outbound <a href> links to the repo host and cited URLs.
+      // The check is for resources the page loads, so anchors are excluded.
+      expect(site!.read(page)).not.toMatch(
+        /<(?!a[\s>])[a-z][^>]*\s(?:src|href)="(?:https?:\/\/|\/\/)/,
+      );
     }
   });
 });
@@ -264,5 +268,52 @@ describe("page shell", () => {
     const html = site!.read("index.html");
     expect(html).toContain('<link rel="icon" href="data:,">');
     expect(html).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
+  });
+});
+
+/** Hashed asset names change with any CSS or script edit; snapshots should not. */
+function normalized(path: string): string {
+  return site!.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
+}
+
+describe("article page", () => {
+  it("renders the lead, sections, references and infobox", () => {
+    const html = site!.read("wiki/signals/index.html");
+    expect(html).toContain('<h1 class="page-title">Signal ingestion</h1>');
+    expect(html).toContain("<b>Signal ingestion</b> is the subsystem of demo-repo");
+    expect(html).toContain(
+      '<a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">deliverable records</a>',
+    );
+    expect(html).toContain('href="https://en.wikipedia.org/wiki/Exponential_backoff"');
+    expect(html).toContain('<li id="cite-note-5">');
+    expect(html).toContain(
+      "/blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/src/signals/odd%20name%231.py#L1-L9",
+    );
+    expect(html.match(/This section may be out of date\./g)).toHaveLength(1);
+    expect(html).toContain("<td>1,312</td>");
+  });
+
+  it("escapes markup in claim text and leaves unknown links as plain text", () => {
+    const html = site!.read("wiki/signals/index.html");
+    expect(html).toContain(
+      "<code>&lt;script&gt;</code> tags are stored escaped, and so is &lt;b&gt;this&lt;/b&gt;.",
+    );
+    expect(html).toContain("The scheduler triggers ingestion");
+    expect(html).toContain("ghost described the old approach");
+    expect(html).not.toContain("/wiki/ghost/");
+  });
+
+  it("indexes current articles for search and marks retired ones", () => {
+    expect(site!.read("wiki/signals/index.html")).toContain(
+      '<article class="article" data-pagefind-body>',
+    );
+    expect(site!.read("wiki/exporter/index.html")).toContain("This feature was retired at commit");
+    expect(existsSync(join(site!.outDir, "wiki", "scheduler"))).toBe(false);
+  });
+
+  it("matches the golden snapshot", async () => {
+    await expect(normalized("wiki/signals/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-signals.html",
+    );
   });
 });
