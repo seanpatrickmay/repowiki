@@ -1,6 +1,11 @@
 import { GitSha, Manifest, Revision } from "@repowiki/core";
 import Database from "better-sqlite3";
-import { DuplicateManifestError, StaleParentError } from "./errors.ts";
+import {
+  DroppedFeatureError,
+  DuplicateManifestError,
+  StaleParentError,
+  UnknownFeatureError,
+} from "./errors.ts";
 import { migrate } from "./migrations.ts";
 
 /** A current claim whose code citation overlaps a queried line range. */
@@ -16,13 +21,20 @@ export interface Store {
   close(): void;
   /** Runs fn atomically; nested calls become savepoints. */
   transaction<T>(fn: () => T): T;
+  /**
+   * Stores a manifest and makes it the latest. Every feature id in the previous latest manifest
+   * must still appear: ids are permanent, so retired features stay with a redirect/retired status.
+   */
   putManifest(manifest: Manifest): void;
   getManifest(sha: string): Manifest | null;
   getLatestManifest(): Manifest | null;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
-  /** Stores a revision and makes it current. parentId must equal the feature's current revision id. */
+  /**
+   * Stores a revision and makes it current. parentId must equal the feature's current revision id,
+   * and the feature must be in the latest stored manifest.
+   */
   putRevision(revision: Revision): void;
   getRevision(id: string): Revision | null;
   getCurrentRevision(featureId: string): Revision | null;
@@ -63,18 +75,33 @@ export function openStore(path: string): Store {
     return row?.revision_id ?? null;
   };
 
+  const latestManifest = (): Manifest | null =>
+    readManifest(
+      db.prepare("SELECT body FROM manifests ORDER BY seq DESC LIMIT 1").get() as
+        | BodyRow
+        | undefined,
+    );
+
   return {
     close: () => db.close(),
     transaction: (fn) => db.transaction(fn)(),
 
     putManifest(manifest) {
       const parsed = Manifest.parse(manifest);
-      if (db.prepare("SELECT 1 FROM manifests WHERE sha = ?").get(parsed.sha) !== undefined) {
-        throw new DuplicateManifestError(parsed.sha);
-      }
-      db.prepare(
-        "INSERT INTO manifests (sha, seq, body) VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM manifests), ?)",
-      ).run(parsed.sha, JSON.stringify(parsed));
+      db.transaction(() => {
+        if (db.prepare("SELECT 1 FROM manifests WHERE sha = ?").get(parsed.sha) !== undefined) {
+          throw new DuplicateManifestError(parsed.sha);
+        }
+        const previous = latestManifest();
+        if (previous !== null) {
+          const kept = new Set(parsed.features.map((feature) => feature.id));
+          const missing = previous.features.map((f) => f.id).filter((id) => !kept.has(id));
+          if (missing.length > 0) throw new DroppedFeatureError(parsed.sha, missing);
+        }
+        db.prepare(
+          "INSERT INTO manifests (sha, seq, body) VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM manifests), ?)",
+        ).run(parsed.sha, JSON.stringify(parsed));
+      })();
     },
 
     getManifest: (sha) =>
@@ -82,12 +109,7 @@ export function openStore(path: string): Store {
         db.prepare("SELECT body FROM manifests WHERE sha = ?").get(sha) as BodyRow | undefined,
       ),
 
-    getLatestManifest: () =>
-      readManifest(
-        db.prepare("SELECT body FROM manifests ORDER BY seq DESC LIMIT 1").get() as
-          | BodyRow
-          | undefined,
-      ),
+    getLatestManifest: latestManifest,
 
     setHead(sha) {
       db.prepare(
@@ -105,6 +127,9 @@ export function openStore(path: string): Store {
     putRevision(revision) {
       const parsed = Revision.parse(revision);
       db.transaction(() => {
+        if (!latestManifest()?.features.some((feature) => feature.id === parsed.featureId)) {
+          throw new UnknownFeatureError(parsed.featureId);
+        }
         const current = currentRevisionId(parsed.featureId);
         if (current !== parsed.parentId) {
           throw new StaleParentError(parsed.featureId, current, parsed.parentId);

@@ -3,6 +3,7 @@ import {
   codeCitation,
   commitCitation,
   leadClaim,
+  makeManifest,
   makeRevision,
   SHA_B,
 } from "@repowiki/core/test-fixtures";
@@ -12,6 +13,7 @@ import { openStore, type Store } from "./store.ts";
 let store: Store;
 beforeEach(() => {
   store = openStore(":memory:");
+  store.putManifest(makeManifest());
   store.putRevision(makeRevision()); // c-1 cites src/signals/ingest.py L10-24
 });
 afterEach(() => store.close());

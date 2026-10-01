@@ -1,6 +1,6 @@
-import { makeManifest, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
+import { makeFeature, makeManifest, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DuplicateManifestError } from "./errors.ts";
+import { DroppedFeatureError, DuplicateManifestError } from "./errors.ts";
 import { openStore, type Store } from "./store.ts";
 
 let store: Store;
@@ -26,6 +26,30 @@ describe("manifests", () => {
   it("refuses a second manifest for the same sha", () => {
     store.putManifest(makeManifest());
     expect(() => store.putManifest(makeManifest())).toThrow(DuplicateManifestError);
+  });
+
+  it("refuses a manifest that drops a feature id, and keeps the latest manifest unchanged", () => {
+    store.putManifest(makeManifest());
+    const dropped = makeManifest({
+      sha: SHA_B,
+      features: [makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] })],
+      membership: { "src/deliverables/crud.py": { featureId: "deliverables", weight: 0.7 } },
+    });
+    expect(() => store.putManifest(dropped)).toThrow(DroppedFeatureError);
+    expect(() => store.putManifest(dropped)).toThrow(/signals/);
+    expect(store.getManifest(SHA_B)).toBeNull();
+    expect(store.getLatestManifest()).toEqual(makeManifest());
+  });
+
+  it("accepts a manifest that keeps every feature id and adds one", () => {
+    store.putManifest(makeManifest());
+    const base = makeManifest();
+    const grown = makeManifest({
+      sha: SHA_B,
+      features: [...base.features, makeFeature({ id: "billing", title: "Billing", aliases: [] })],
+    });
+    store.putManifest(grown);
+    expect(store.getLatestManifest()).toEqual(grown);
   });
 
   it("validates before storing", () => {

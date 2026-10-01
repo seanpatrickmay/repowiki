@@ -1,11 +1,18 @@
-import { bodyClaim, leadClaim, makeRevision, SHA_B } from "@repowiki/core/test-fixtures";
+import {
+  bodyClaim,
+  leadClaim,
+  makeManifest,
+  makeRevision,
+  SHA_B,
+} from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { StaleParentError } from "./errors.ts";
+import { StaleParentError, UnknownFeatureError } from "./errors.ts";
 import { openStore, type Store } from "./store.ts";
 
 let store: Store;
 beforeEach(() => {
   store = openStore(":memory:");
+  store.putManifest(makeManifest()); // features: signals, deliverables
 });
 afterEach(() => store.close());
 
@@ -57,6 +64,24 @@ describe("revisions", () => {
     expect(() => store.putRevision(sibling)).toThrow(StaleParentError);
     expect(store.getRevision("rev-2b")).toBeNull();
     expect(store.getCurrentRevision("signals")?.id).toBe("rev-2");
+  });
+
+  it("rejects a revision for a feature missing from the latest manifest, and stores nothing", () => {
+    const ghost = makeRevision({ id: "rev-g", featureId: "ghost", seeAlso: [] });
+    expect(() => store.putRevision(ghost)).toThrow(UnknownFeatureError);
+    expect(() => store.putRevision(ghost)).toThrow(/ghost/);
+    expect(store.getRevision("rev-g")).toBeNull();
+    expect(store.getCurrentRevision("ghost")).toBeNull();
+  });
+
+  it("rejects a revision stored before any manifest, and stores nothing", () => {
+    const empty = openStore(":memory:");
+    try {
+      expect(() => empty.putRevision(makeRevision())).toThrow(UnknownFeatureError);
+      expect(empty.getRevision("rev-1")).toBeNull();
+    } finally {
+      empty.close();
+    }
   });
 
   it("validates before storing", () => {

@@ -27,6 +27,22 @@ export class StaleParentError extends StoreError {
   }
 }
 
+export class DroppedFeatureError extends StoreError {
+  constructor(sha: string, missing: string[]) {
+    super(
+      `manifest ${sha} drops feature ${missing.join(", ")}; feature ids are permanent, so a merged, split, or retired feature must stay in the manifest with a redirect, disambiguation, or retired status`,
+    );
+  }
+}
+
+export class UnknownFeatureError extends StoreError {
+  constructor(featureId: string) {
+    super(
+      `feature ${featureId} is not in the latest stored manifest; store the manifest first with putManifest`,
+    );
+  }
+}
+
 export class EmptyStoreError extends StoreError {
   constructor() {
     super(
