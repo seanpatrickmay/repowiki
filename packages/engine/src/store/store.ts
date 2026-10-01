@@ -3,6 +3,15 @@ import Database from "better-sqlite3";
 import { DuplicateManifestError, StaleParentError } from "./errors.ts";
 import { migrate } from "./migrations.ts";
 
+/** A current claim whose code citation overlaps a queried line range. */
+export interface CitingClaim {
+  featureId: string;
+  revisionId: string;
+  claimId: string;
+  startLine: number;
+  endLine: number;
+}
+
 export interface Store {
   close(): void;
   /** Runs fn atomically; nested calls become savepoints. */
@@ -21,6 +30,8 @@ export interface Store {
   listCurrentRevisions(): Revision[];
   /** Every revision of a feature, oldest first. */
   listHistory(featureId: string): Revision[];
+  /** Current claims with a code citation in path overlapping [startLine, endLine], bounds inclusive. */
+  findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
 }
 
 interface BodyRow {
@@ -153,5 +164,20 @@ export function openStore(path: string): Store {
           .prepare("SELECT body FROM revisions WHERE feature_id = ? ORDER BY rowid")
           .all(featureId) as BodyRow[]
       ).map((row) => Revision.parse(JSON.parse(row.body))),
+
+    findClaimsCitingRange(path, startLine, endLine) {
+      if (startLine > endLine) throw new RangeError(`startLine ${startLine} > endLine ${endLine}`);
+      return db
+        .prepare(
+          `SELECT r.feature_id AS featureId, c.revision_id AS revisionId, c.claim_id AS claimId,
+                  c.start_line AS startLine, c.end_line AS endLine
+           FROM citation_ranges c
+           JOIN current_revisions cur ON cur.revision_id = c.revision_id
+           JOIN revisions r ON r.id = c.revision_id
+           WHERE c.path = ? AND c.start_line <= ? AND c.end_line >= ?
+           ORDER BY r.feature_id, c.claim_id, c.start_line`,
+        )
+        .all(path, endLine, startLine) as CitingClaim[];
+    },
   };
 }
