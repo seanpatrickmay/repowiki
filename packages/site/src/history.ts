@@ -66,11 +66,16 @@ export function oldRevisionRoutes(site: SiteModel): { featureId: string; n: numb
   );
 }
 
-/** The article view of revision n of a feature, under the old-revision notice. */
+/**
+ * The article view of revision n of a feature. The old-revision notice comes first; a retired
+ * feature keeps its retired banner after it.
+ */
 export function oldRevisionView(site: SiteModel, featureId: string, n: number): ArticleView {
   const revision = site.history.get(featureId)?.[n - 1];
   if (revision === undefined) throw new Error(`no revision ${n} of ${featureId}`);
-  return { ...articleView(site, revision), notice: oldRevisionNotice(site, revision) };
+  const view = articleView(site, revision);
+  const notice = oldRevisionNotice(site, revision);
+  return { ...view, notice: view.notice === null ? notice : `${notice}<br>${view.notice}` };
 }
 
 function commitHtml(site: SiteModel, revision: Revision): string {

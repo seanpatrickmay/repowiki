@@ -472,6 +472,22 @@ describe("history pages", () => {
     expect(site.read("wiki/legacy-signals/history/index.html")).toContain("Legacy signals");
   });
 
+  it("keeps the retired banner on old revisions of a retired feature", () => {
+    const html = site.read("wiki/exporter/history/1/index.html");
+    expect(html).toContain("This is the current revision of this page, as of 15 January 2026");
+    expect(html).toContain("This feature was retired at commit");
+    expect(html.indexOf("This is the current revision")).toBeLessThan(
+      html.indexOf("This feature was retired"),
+    );
+  });
+
+  it("points old revisions at the current article as canonical", () => {
+    expect(site.read("wiki/signals/history/1/index.html")).toContain(
+      '<link rel="canonical" href="/wiki/signals/">',
+    );
+    expect(site.read("wiki/signals/index.html")).not.toContain('rel="canonical"');
+  });
+
   it("links history only where a history page exists", () => {
     // `reports` is a disambiguation with no revisions; alias slugs are never feature ids.
     for (const page of ["wiki/reports", "wiki/signal-pipeline", "wiki/i-x-i"]) {

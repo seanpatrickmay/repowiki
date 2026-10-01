@@ -1,3 +1,4 @@
+import type { Revision } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
 import {
   hasHistory,
@@ -55,6 +56,30 @@ describe("historyRows", () => {
       expect(html).toContain('href="https://x.test/a&quot;&gt;&lt;img src=x onerror=1&gt;/');
       expect(html).not.toContain("<img");
     }
+  });
+});
+
+describe("historyRows with a hostile reason", () => {
+  it("escapes a reason that bypasses the schema enum, with and without a PR", () => {
+    const reason = "<img src=x onerror=alert(1)> \"q\" & 'p'" as Revision["reason"];
+    const escaped = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;";
+    const hostile = {
+      ...site,
+      history: new Map([
+        [
+          "signals",
+          [
+            { ...first, reason, pr: null },
+            { ...second, reason },
+          ],
+        ],
+      ]),
+    };
+    const [withPr, withoutPr] = historyRows(hostile, "signals");
+    expect(withPr?.summaryHtml).toBe(
+      `${escaped} (<a class="external" href="${REPO}/pull/88">PR #88</a>)`,
+    );
+    expect(withoutPr?.summaryHtml).toBe(escaped);
   });
 });
 
@@ -122,6 +147,19 @@ describe("oldRevisionView", () => {
     expect(view.notice).toBe(oldRevisionNotice(site, first));
     expect(view.leadHtml).toBe("<b>Signal ingestion</b> turns chunks into signals.");
     expect(view.sections[0]?.html).toContain("Signals are built from chunks.");
+  });
+
+  it("keeps the retired banner after the old-revision notice for a retired feature", () => {
+    const view = oldRevisionView(site, "exporter", 1);
+    const [exporter] = site.history.get("exporter") ?? [];
+    if (exporter === undefined) throw new Error("fixture needs an exporter revision");
+    expect(view.notice).toBe(
+      `${oldRevisionNotice(site, exporter)}<br>This feature was retired at commit <code>ccccccc</code>. The article describes it as of its last revision.`,
+    );
+  });
+
+  it("shows only the old-revision notice for a feature that is not retired", () => {
+    expect(oldRevisionView(site, "signals", 1).notice).toBe(oldRevisionNotice(site, first));
   });
 
   it("throws on a revision that does not exist", () => {
