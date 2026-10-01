@@ -11,6 +11,7 @@ import {
   exitCodeFor,
   loadModels,
   manifestLedgerRows,
+  manifestRunId,
   parseManifestArgs,
 } from "./manifest-cli.ts";
 
@@ -106,6 +107,21 @@ describe("manifestLedgerRows", () => {
       mine,
       legacy,
     ]);
+  });
+
+  it("keeps a batched call, which has no cacheKey, by the sha in its run id", () => {
+    const sha = "a".repeat(40);
+    const at = new Date("2026-10-01T12:00:00Z");
+    const runId = manifestRunId(sha, at);
+    expect(runId).toBe(`manifest-build-${sha}-2026-10-01T12:00:00.000Z`);
+    const batched = makeLedgerEntry({ purpose: "manifest", cacheKey: null, runId });
+    const otherSha = makeLedgerEntry({
+      purpose: "manifest",
+      cacheKey: null,
+      runId: manifestRunId("b".repeat(40), at),
+    });
+    const write = makeLedgerEntry({ purpose: "write", cacheKey: null, runId });
+    expect(manifestLedgerRows([batched, otherSha, write], sha)).toEqual([batched]);
   });
 });
 

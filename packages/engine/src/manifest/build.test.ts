@@ -14,7 +14,7 @@ const options = (provider: Provider) => ({
 });
 
 describe("buildManifest", () => {
-  it("makes one batched, cached manifest call over the cluster digest", async () => {
+  it("makes one batched, uncached manifest call over the cluster digest", async () => {
     const { provider, requests } = scriptedProvider(GOOD);
     const build = await buildManifest(sampleIndex(), options(provider));
     expect(build.manifest.features.map((f) => f.id)).toEqual(["http-api", "web-frontend"]);
@@ -24,9 +24,10 @@ describe("buildManifest", () => {
     expect(requests[0]).toMatchObject({
       purpose: "manifest",
       batch: true,
-      cacheKey: manifestCacheKey("c".repeat(40), requests[0]?.system ?? ""),
       messages: [{ role: "user", content: "Group these clusters into the wiki's feature pages." }],
     });
+    // A batched retry arrives after the 5-minute cache TTL, so a cache write would never be read.
+    expect(requests[0]?.cacheKey).toBeUndefined();
     expect(requests[0]?.system).toContain(`# Repository sample at ${"c".repeat(40)}: 3 clusters`);
     expect(requests[0]?.system).toContain("## c03: 2 files, 2 symbols (tsx 1, typescript 1)");
     expect(requests[0]?.system).toContain(
@@ -50,15 +51,26 @@ describe("buildManifest", () => {
     expect(requests[1]?.cacheKey).not.toBe(requests[0]?.cacheKey);
   });
 
-  it("can make the call without the Batches API", async () => {
+  it("can make the call without the Batches API, caching the prefix for a quick retry", async () => {
     const { provider, requests } = scriptedProvider(GOOD);
     await buildManifest(sampleIndex(), { ...options(provider), batch: false });
     expect(requests[0]?.batch).toBe(false);
+    expect(requests[0]?.cacheKey).toBe(manifestCacheKey("c".repeat(40), requests[0]?.system));
+  });
+
+  it("sends no cacheKey on a batched retry either", async () => {
+    const { provider, requests } = scriptedProvider(MISSING_C03, GOOD);
+    await buildManifest(sampleIndex(), options(provider));
+    expect(requests.map((r) => [r.batch, r.cacheKey])).toEqual([
+      [true, undefined],
+      [true, undefined],
+    ]);
   });
 
   it("retries once with the reasons, keeping the cached prefix", async () => {
     const { provider, requests } = scriptedProvider(MISSING_C03, GOOD);
-    const build = await buildManifest(sampleIndex(), options(provider));
+    const build = await buildManifest(sampleIndex(), { ...options(provider), batch: false });
+    expect(requests[0]?.cacheKey).toBeDefined();
     expect(build.rejected).toEqual(['cluster "c03" is not assigned']);
     expect(requests[1]?.system).toBe(requests[0]?.system);
     expect(requests[1]?.cacheKey).toBe(requests[0]?.cacheKey);

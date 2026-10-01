@@ -22,7 +22,10 @@ import { proposalToManifest } from "./to-manifest.ts";
 export interface ManifestBuildOptions {
   provider: Provider;
   repoName: string;
-  /** Use the Message Batches API (half price). Default true: no one waits on a build. */
+  /**
+   * Use the Message Batches API (half price). Default true: no one waits on a build. Only an
+   * unbatched build caches its prompt prefix.
+   */
   batch?: boolean;
   /** Haiku 4.5 has a 200K context; the prompt must leave room for the answer. */
   maxPromptTokens?: number;
@@ -91,8 +94,12 @@ export async function buildManifest(
     system = manifestSystemPrompt(options.repoName, index.sha, summaries);
   }
 
-  // The retry reuses `system` and the cacheKey unchanged: the provider requires a cached prefix
-  // to be byte-identical, and only the messages after it carry the rejection.
+  // Cache the prefix only off the Batches API, where a retry follows within seconds. A batched
+  // retry arrives long after the 5-minute TTL, so a batched cache write (1.25x input) is never
+  // read. The retry reuses `system` and the cacheKey unchanged: the provider requires a cached
+  // prefix to be byte-identical, and only the messages after it carry the rejection.
+  const batch = options.batch ?? true;
+  const cacheKey = batch ? undefined : manifestCacheKey(index.sha, system);
   let messages: LlmMessage[] = [{ role: "user", content: MANIFEST_REQUEST }];
   let rejected: string[] = [];
   for (let attempt = 1; ; attempt++) {
@@ -106,8 +113,8 @@ export async function buildManifest(
         messages,
         schema: ManifestProposal,
         maxTokens: MAX_OUTPUT_TOKENS,
-        cacheKey: manifestCacheKey(index.sha, system),
-        batch: options.batch ?? true,
+        ...(cacheKey === undefined ? {} : { cacheKey }),
+        batch,
       });
       problems = proposalProblems(output, clusters);
       if (problems.length === 0) {

@@ -8,6 +8,7 @@ import {
   exitCodeFor,
   loadModels,
   manifestLedgerRows,
+  manifestRunId,
   parseManifestArgs,
 } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
   mkdirSync(out, { recursive: true });
   const store = openStore(join(out, "wiki.db"));
   try {
-    const runId = `manifest-build-${new Date().toISOString()}`;
+    const runId = manifestRunId(index.sha, new Date());
     const ledger = createLedger((entry) => store.appendLedger(entry));
     // Built on the first call, so a run that reuses the stored manifest needs no API key.
     let claude: Provider | undefined;
