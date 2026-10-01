@@ -14,7 +14,7 @@ export interface ClusterSummary {
   directories: { dir: string; files: number }[];
   /** The best-connected files inside the cluster. */
   files: string[];
-  /** Exported symbols of those files, as "path#name". */
+  /** Exported symbols of the listed files, as "path#name". */
   symbols: string[];
   /** Third-party packages the cluster imports, most used first. */
   externalImports: string[];
@@ -51,18 +51,45 @@ const KIND_RANK: Record<SymbolKind, number> = {
   variable: 2,
 };
 
+/** Rounds each weight first, so that weights equal as printed rank by name. */
+function rounded(weights: Map<string, number> | undefined): Map<string, number> {
+  return new Map([...(weights ?? [])].map(([id, weight]) => [id, round(weight)]));
+}
+
 /** Most common first; ties alphabetical. */
 function ranked(counts: Map<string, number>): [string, number][] {
   return [...counts].sort(([a, x], [b, y]) => y - x || (a < b ? -1 : a > b ? 1 : 0));
 }
 
-/** "os.path" from a .py file is "os"; "@scope/pkg/sub" is "@scope/pkg"; "react-dom/client" is "react-dom". */
-function packageOf(from: string, specifier: string): string {
-  if (from.endsWith(".py")) return specifier.split(".")[0] ?? specifier;
-  return specifier
-    .split("/")
-    .slice(0, specifier.startsWith("@") ? 2 : 1)
-    .join("/");
+const MAX_PACKAGE_LENGTH = 64;
+const NPM_PACKAGE = /^(@[a-z0-9][\w.~-]*\/)?[a-z0-9][\w.~-]*$/;
+const NODE_BUILTIN = /^node:[a-z0-9_/]+$/;
+const PYTHON_MODULE = /^[A-Za-z_]\w*$/;
+
+/**
+ * The package a third-party import names: "os.path" from a .py file is "os", "@scope/pkg/sub" is
+ * "@scope/pkg", "react-dom/client?raw" is "react-dom", "node:fs/promises" is "node:fs". An import
+ * specifier is arbitrary text from a string literal, so anything that is not shaped like a package
+ * name (a URL, a data: literal, prose, an over-long string) is dropped: a summary holds names only.
+ */
+function packageOf(from: string, rawSpecifier: string): string | null {
+  const specifier = rawSpecifier.replace(/[?#][\s\S]*$/, "");
+  let root: string;
+  if (from.endsWith(".py")) {
+    root = specifier.split(".")[0] ?? "";
+    if (!PYTHON_MODULE.test(root)) return null;
+  } else if (specifier.startsWith("node:")) {
+    if (!NODE_BUILTIN.test(specifier)) return null;
+    root = `node:${specifier.slice("node:".length).split("/")[0]}`;
+    if (root === "node:") return null;
+  } else {
+    root = specifier
+      .split("/")
+      .slice(0, specifier.startsWith("@") ? 2 : 1)
+      .join("/");
+    if (!NPM_PACKAGE.test(root)) return null;
+  }
+  return root.length > MAX_PACKAGE_LENGTH ? null : root;
 }
 
 export function summarizeClusters(
@@ -100,6 +127,7 @@ export function summarizeClusters(
     const id = clusterOf.get(miss.from);
     if (!miss.external || id === undefined) continue;
     const pkg = packageOf(miss.from, miss.specifier);
+    if (pkg === null) continue;
     const map = external.get(id) ?? new Map<string, number>();
     map.set(pkg, (map.get(pkg) ?? 0) + 1);
     external.set(id, map);
@@ -116,9 +144,12 @@ export function summarizeClusters(
       dirs.set(dir, (dirs.get(dir) ?? 0) + 1);
     }
     const central = [...files].sort(
-      (x, y) => (inner.get(y.path) ?? 0) - (inner.get(x.path) ?? 0) || (x.path < y.path ? -1 : 1),
+      (x, y) =>
+        (inner.get(y.path) ?? 0) - (inner.get(x.path) ?? 0) ||
+        (x.path < y.path ? -1 : x.path > y.path ? 1 : 0),
     );
-    const symbols = central
+    const listed = central.slice(0, limits.files);
+    const symbols = listed
       .flatMap((file) => file.symbols.filter((s) => s.exported && s.kind !== "method"))
       .sort((x, y) => KIND_RANK[x.kind] - KIND_RANK[y.kind])
       .slice(0, limits.symbols)
@@ -131,14 +162,14 @@ export function summarizeClusters(
       directories: ranked(dirs)
         .slice(0, limits.directories)
         .map(([dir, n]) => ({ dir: dir === "." ? "(root)" : dir, files: n })),
-      files: central.slice(0, limits.files).map((file) => file.path),
+      files: listed.map((file) => file.path),
       symbols,
       externalImports: ranked(external.get(cluster.id) ?? new Map())
         .slice(0, limits.externalImports)
         .map(([pkg]) => pkg),
-      neighbours: ranked(between.get(cluster.id) ?? new Map())
+      neighbours: ranked(rounded(between.get(cluster.id)))
         .slice(0, limits.neighbours)
-        .map(([id, weight]) => ({ id, weight: round(weight) })),
+        .map(([id, weight]) => ({ id, weight })),
     };
   });
 }
