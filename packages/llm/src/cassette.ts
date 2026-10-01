@@ -52,6 +52,10 @@ export function cassetteFetch(
   mode: CassetteMode,
   upstream: FetchLike = fetch,
 ): FetchLike {
+  // Fail closed: only an explicit "record" may reach the network, whatever a cast lets through.
+  if (mode !== "replay" && mode !== "record") {
+    throw new Error(`cassette mode must be "replay" or "record", got ${JSON.stringify(mode)}`);
+  }
   const entries: CassetteEntry[] =
     mode === "replay" && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
   const used = new Set<number>();
@@ -60,7 +64,7 @@ export function cassetteFetch(
     const method = (init?.method ?? "GET").toUpperCase();
     const path = `${url.pathname}${url.search}`;
     const body = parseBody(init?.body);
-    if (mode === "replay") {
+    if (mode !== "record") {
       const key = canonical({ method, path, body });
       const index = entries.findIndex(
         (entry, i) => !used.has(i) && canonical(entry.request) === key,

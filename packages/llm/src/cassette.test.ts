@@ -2,7 +2,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CassetteMissError, cassetteFetch, cassetteMode, type FetchLike } from "./cassette.ts";
+import {
+  CassetteMissError,
+  type CassetteMode,
+  cassetteFetch,
+  cassetteMode,
+  type FetchLike,
+} from "./cassette.ts";
 
 const dirs: string[] = [];
 function tempCassette(): string {
@@ -86,6 +92,22 @@ describe("cassetteFetch", () => {
       /no unused recording for POST \/v1\/messages; re-record with pnpm cassettes:record/,
     );
   });
+});
+
+describe("cassetteFetch with a mode that is neither replay nor record", () => {
+  it.each(["bogus", "", "RECORD", undefined])(
+    "refuses %j and never calls upstream",
+    async (mode) => {
+      const api = upstream();
+      const file = tempCassette();
+      const use = async () => {
+        const fetchLike = cassetteFetch(file, mode as unknown as CassetteMode, api);
+        return fetchLike("https://a.test/v1/messages", post({ q: 1 }));
+      };
+      await expect(use()).rejects.toThrow(/cassette mode must be "replay" or "record"/);
+      expect(api.calls).toBe(0);
+    },
+  );
 });
 
 describe("cassetteMode", () => {
