@@ -1,0 +1,33 @@
+name: Feature
+description: A feature in the register (Fnn). Implementation happens in task sub-issues.
+title: "[Fnn] "
+labels: ["type:feature"]
+body:
+  - type: input
+    id: fid
+    attributes:
+      label: Feature ID
+      description: Next free F-number.
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Original point
+      description: The idea as first written down.
+    validations:
+      required: true
+  - type: textarea
+    id: interpretation
+    attributes:
+      label: Interpretation
+      description: What it concretely means for RepoWiki.
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Verdict
+      options: [v1, v2, v3, rejected]
+    validations:
+      required: true
