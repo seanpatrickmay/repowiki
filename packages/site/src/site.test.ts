@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport } from "./test-fixtures.ts";
 import { type BuiltSite, brokenLinks, buildFixtureSite, htmlFiles, runCli } from "./test-site.ts";
 
-let site: BuiltSite | undefined;
+let site: BuiltSite;
 beforeAll(() => {
   site = buildFixtureSite(["--repo-url", "https://github.com/acme/demo-repo"]);
 }, 120_000);
@@ -13,23 +13,23 @@ afterAll(() => site?.cleanup());
 
 describe("site build", () => {
   it("renders the Main Page and a Pagefind index", () => {
-    expect(site!.read("index.html")).toContain("Welcome to the demo-repo wiki");
-    expect(existsSync(join(site!.outDir, "pagefind", "pagefind.js"))).toBe(true);
-    expect(site!.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
+    expect(site.read("index.html")).toContain("Welcome to the demo-repo wiki");
+    expect(existsSync(join(site.outDir, "pagefind", "pagefind.js"))).toBe(true);
+    expect(site.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
   });
 
   it("has no same-site links to missing pages or anchors", () => {
-    expect(htmlFiles(site!.outDir).length).toBeGreaterThan(0);
+    expect(htmlFiles(site.outDir).length).toBeGreaterThan(0);
     // The fixture may have zero internal links; that's legitimate.
-    const result = brokenLinks(site!.outDir);
+    const result = brokenLinks(site.outDir);
     expect(result.broken).toEqual([]);
   });
 
   it("references no off-site scripts, styles or fonts", () => {
-    for (const page of htmlFiles(site!.outDir)) {
+    for (const page of htmlFiles(site.outDir)) {
       // Articles legitimately carry outbound <a href> links to the repo host and cited URLs.
       // The check is for resources the page loads, so anchors are excluded.
-      expect(site!.read(page)).not.toMatch(
+      expect(site.read(page)).not.toMatch(
         /<(?!a[\s>])[a-z][^>]*\s(?:src|href)="(?:https?:\/\/|\/\/)/,
       );
     }
@@ -247,17 +247,17 @@ describe(".astro dir confinement", () => {
 
 describe("page shell", () => {
   it("links one local stylesheet with dark-mode, phone-width, and overflow rules", () => {
-    const html = site!.read("index.html");
+    const html = site.read("index.html");
     const sheets = [...html.matchAll(/<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/g)];
     expect(sheets).toHaveLength(1);
-    const css = site!.read(sheets[0]?.[1] ?? "");
+    const css = site.read(sheets[0]?.[1] ?? "");
     expect(css).toContain("prefers-color-scheme:dark");
     expect(css).toMatch(/max-width:720px|width<=720px/);
     expect(css).toContain("overflow-wrap:anywhere");
   });
 
   it("has a skip link, a labelled site nav and a main landmark", () => {
-    const html = site!.read("index.html");
+    const html = site.read("index.html");
     expect(html).toContain('<a class="skip-link" href="#content">Jump to content</a>');
     expect(html).toContain('<nav class="site-nav" aria-label="Site">');
     expect(html).toContain('<main id="content" class="content">');
@@ -265,7 +265,7 @@ describe("page shell", () => {
   });
 
   it("uses data: favicon and has no off-site links", () => {
-    const html = site!.read("index.html");
+    const html = site.read("index.html");
     expect(html).toContain('<link rel="icon" href="data:,">');
     expect(html).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
   });
@@ -273,12 +273,12 @@ describe("page shell", () => {
 
 /** Hashed asset names change with any CSS or script edit; snapshots should not. */
 function normalized(path: string): string {
-  return site!.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
+  return site.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
 }
 
 describe("article page", () => {
   it("renders the lead, sections, references and infobox", () => {
-    const html = site!.read("wiki/signals/index.html");
+    const html = site.read("wiki/signals/index.html");
     expect(html).toContain('<h1 class="page-title">Signal ingestion</h1>');
     expect(html).toContain("<b>Signal ingestion</b> is the subsystem of demo-repo");
     expect(html).toContain(
@@ -294,7 +294,7 @@ describe("article page", () => {
   });
 
   it("escapes markup in claim text and leaves unknown links as plain text", () => {
-    const html = site!.read("wiki/signals/index.html");
+    const html = site.read("wiki/signals/index.html");
     expect(html).toContain(
       "<code>&lt;script&gt;</code> tags are stored escaped, and so is &lt;b&gt;this&lt;/b&gt;.",
     );
@@ -304,11 +304,11 @@ describe("article page", () => {
   });
 
   it("indexes current articles for search and marks retired ones", () => {
-    expect(site!.read("wiki/signals/index.html")).toContain(
+    expect(site.read("wiki/signals/index.html")).toContain(
       '<article class="article" data-pagefind-body>',
     );
-    expect(site!.read("wiki/exporter/index.html")).toContain("This feature was retired at commit");
-    expect(existsSync(join(site!.outDir, "wiki", "scheduler"))).toBe(false);
+    expect(site.read("wiki/exporter/index.html")).toContain("This feature was retired at commit");
+    expect(existsSync(join(site.outDir, "wiki", "scheduler"))).toBe(false);
   });
 
   it("matches the golden snapshot", async () => {
