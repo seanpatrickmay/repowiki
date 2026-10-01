@@ -41,3 +41,16 @@ export function bodyClaim(overrides: Partial<Claim> = {}): Claim {
     ...overrides,
   };
 }
+
+export function leadClaim(overrides: Partial<Claim> = {}): Claim {
+  return {
+    id: "lead-1",
+    text: "**Signal ingestion** is the subsystem that turns ingested chunks into signals.",
+    kind: "fact",
+    citations: [],
+    supports: ["c-1"],
+    staleSince: null,
+    hook: false,
+    ...overrides,
+  };
+}
