@@ -130,6 +130,18 @@ describe("es resolution", () => {
   });
 
   it.each([
+    ["a ?query suffix", "./data.json?raw", ["web/src/data.json"]],
+    ["a ?query suffix on an extensionless file", "./lib/util?worker", ["web/src/lib/util.ts"]],
+    ["a #hash suffix", "./lib/util#frag", ["web/src/lib/util.ts"]],
+    ["a ?query suffix on a workspace package", "@x/core?inline", ["packages/core/src/index.ts"]],
+  ])("strips %s before resolving", (_name, specifier, targets) => {
+    expect(resolver.resolve("web/src/main.tsx", es(specifier))).toEqual({
+      targets,
+      external: false,
+    });
+  });
+
+  it.each([
     ["trailing slash for current directory", "./", ["web/src/lib/index.ts"]],
     ["trailing slash for parent directory", "../", ["web/src/index.ts"]],
   ])("%s", (_name, specifier, targets) => {

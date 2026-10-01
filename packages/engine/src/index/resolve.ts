@@ -176,7 +176,9 @@ export function createResolver(
     return null;
   };
 
-  const resolveEs = (fromPath: string, specifier: string): ImportResolution => {
+  const resolveEs = (fromPath: string, rawSpecifier: string): ImportResolution => {
+    // Bundler suffixes ("./x.svg?react", "./x#frag") are not part of the file name; a leading "#" is not one.
+    const specifier = /^(.+?)[?#]/.exec(rawSpecifier)?.[1] ?? rawSpecifier;
     if (
       specifier === "." ||
       specifier === ".." ||
