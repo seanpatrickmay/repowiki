@@ -1,9 +1,13 @@
 import { z } from "zod";
 import { GitSha } from "./primitives.ts";
 
+/** Feature ids become URL path segments and file names in the reader site, so they are capped. */
+export const FEATURE_ID_MAX_LENGTH = 64;
+
 /** Permanent lowercase kebab-case slug. Never reused or renamed once assigned. */
 export const FeatureId = z
   .string()
+  .max(FEATURE_ID_MAX_LENGTH, `feature ids are at most ${FEATURE_ID_MAX_LENGTH} characters`)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "feature ids are lowercase kebab-case slugs");
 export type FeatureId = z.infer<typeof FeatureId>;
 
