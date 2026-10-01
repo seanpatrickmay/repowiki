@@ -2,3 +2,7 @@ packages:
   - "packages/*"
 onlyBuiltDependencies:
   - better-sqlite3
+ignoredBuiltDependencies:
+  - tree-sitter-javascript
+  - tree-sitter-python
+  - tree-sitter-typescript
