@@ -191,6 +191,14 @@ export function openStore(path: string): Store {
       ).map((row) => Revision.parse(JSON.parse(row.body))),
 
     findClaimsCitingRange(path, startLine, endLine) {
+      if (
+        !Number.isInteger(startLine) ||
+        !Number.isInteger(endLine) ||
+        startLine < 1 ||
+        endLine < 1
+      ) {
+        throw new RangeError(`line bounds must be integers >= 1, got ${startLine}-${endLine}`);
+      }
       if (startLine > endLine) throw new RangeError(`startLine ${startLine} > endLine ${endLine}`);
       return db
         .prepare(

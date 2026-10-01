@@ -88,4 +88,16 @@ describe("findClaimsCitingRange", () => {
   it("rejects an inverted range", () => {
     expect(() => store.findClaimsCitingRange(PATH, 30, 10)).toThrow(RangeError);
   });
+
+  it.each([
+    [Number.NaN, 10, "a NaN start"],
+    [1, Number.NaN, "a NaN end"],
+    [1.5, 10, "a fractional start"],
+    [1, 10.5, "a fractional end"],
+    [0, 10, "a start below line 1"],
+    [1, 0, "an end below line 1"],
+  ])("rejects non-line bounds %f-%f (%s)", (start, end) => {
+    expect(() => store.findClaimsCitingRange(PATH, start, end)).toThrow(RangeError);
+    expect(() => store.findClaimsCitingRange(PATH, start, end)).toThrow(/integer/);
+  });
 });
