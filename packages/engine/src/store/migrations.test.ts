@@ -467,10 +467,10 @@ describe("migration 2: two-way lineage and status", () => {
       ],
       membership: {},
     };
-    const unreparableBody = JSON.stringify(unrepairable);
+    const unrepairableBody = JSON.stringify(unrepairable);
     db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run(
       unrepairable.sha,
-      unreparableBody,
+      unrepairableBody,
     );
 
     // Read raw body before attempt
@@ -483,7 +483,7 @@ describe("migration 2: two-way lineage and status", () => {
     db.close();
 
     // Attempt to open the store should throw during migration 2
-    expect(() => openStore(path)).toThrow();
+    expect(() => openStore(path)).toThrow(/Migration 2: manifest .* failed to parse/);
 
     // Verify that user_version is still 1 (rollback happened)
     const db2 = new Database(path);

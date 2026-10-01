@@ -67,7 +67,8 @@ interface StoredManifest {
  * - Add rename's fromTitle to aliases if missing
  * - Remove all ending events (merge, split, retire)
  * - Re-add the ONE ending that matches the status, using existing sha where possible
- * Works on raw JSON so later schema changes cannot alter it.
+ * Works on raw JSON so later schema changes cannot alter it. At the end, validates all
+ * repaired bodies using the current core Manifest schema; if any fail, throws and rolls back.
  */
 function repairLineageStatus(db: Database.Database): void {
   const rows = db.prepare("SELECT sha, body FROM manifests").all() as {

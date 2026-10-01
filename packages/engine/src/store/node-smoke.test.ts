@@ -1,14 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("real-Node smoke test for openStore", () => {
   it("openStore works under real Node (not just vitest)", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "repowiki-node-smoke-"));
     const dbPath = join(tempDir, "test.db");
-    const storeIndexPath = new URL("./index.ts", import.meta.url).pathname;
+    const storeDir = dirname(fileURLToPath(import.meta.url));
+    const storeIndexPath = join(storeDir, "index.ts");
 
     try {
       const script = `
