@@ -68,6 +68,25 @@ function localMoving(level: Level, totalWeight: number, resolution: number): num
   });
 }
 
+/** Rejects input the algorithm would silently mis-handle: duplicate ids, unknown endpoints, bad weights. */
+function validate(nodes: readonly string[], edges: readonly WeightedEdge[]): void {
+  const known = new Set<string>();
+  for (const node of nodes) {
+    if (known.has(node)) throw new Error(`louvain: duplicate node id "${node}"`);
+    known.add(node);
+  }
+  for (const { a, b, weight } of edges) {
+    for (const end of [a, b]) {
+      if (!known.has(end)) {
+        throw new Error(`louvain: edge "${a}" - "${b}" names "${end}", which is not in nodes`);
+      }
+    }
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new Error(`louvain: edge "${a}" - "${b}" has invalid weight ${weight}`);
+    }
+  }
+}
+
 /**
  * Louvain community detection (Blondel et al. 2008) on an undirected weighted graph. Deterministic:
  * nodes are visited in the given order and no randomness is used. Returns each node's community,
@@ -78,6 +97,7 @@ export function louvain(
   edges: readonly WeightedEdge[],
   resolution = 1,
 ): Map<string, number> {
+  validate(nodes, edges);
   const indexOf = new Map(nodes.map((node, i) => [node, i]));
   let level = buildLevel(
     nodes.length,

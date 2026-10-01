@@ -50,4 +50,22 @@ describe("louvain", () => {
     });
     expect(Object.fromEntries(louvain(["x", "y"], []))).toEqual({ x: 0, y: 1 });
   });
+
+  it("rejects an edge endpoint that is not in nodes", () => {
+    expect(() => louvain(["x", "y"], [edge("x", "ghost")])).toThrow(/ghost/);
+    expect(() => louvain(["x", "y"], [edge("ghost", "y")])).toThrow(/ghost/);
+  });
+
+  it("rejects a duplicate node id", () => {
+    expect(() => louvain(["x", "y", "x"], [edge("x", "y")])).toThrow(/duplicate.*"x"/);
+  });
+
+  it("rejects negative and non-finite weights but allows zero", () => {
+    expect(() => louvain(["x", "y"], [edge("x", "y", -1)])).toThrow(/x.*y.*-1/);
+    expect(() => louvain(["x", "y"], [edge("x", "y", Number.NaN)])).toThrow(/x.*y.*NaN/);
+    expect(() => louvain(["x", "y"], [edge("x", "y", Number.POSITIVE_INFINITY)])).toThrow(
+      /x.*y.*Infinity/,
+    );
+    expect(Object.fromEntries(louvain(["x", "y"], [edge("x", "y", 0)]))).toEqual({ x: 0, y: 1 });
+  });
 });
