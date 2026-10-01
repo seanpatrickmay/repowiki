@@ -187,4 +187,14 @@ describe("Manifest", () => {
       expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(true);
     },
   );
+
+  it("accepts a member id whose path contains an encoded #", () => {
+    const membership = { "docs/C%23.md": { featureId: "signals", weight: 0.5 } };
+    expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(true);
+  });
+
+  it("rejects a member id with a malformed escape", () => {
+    const membership = { "docs/C%2.md": { featureId: "signals", weight: 0.5 } };
+    expect(Manifest.safeParse(makeManifest({ membership })).success).toBe(false);
+  });
 });
