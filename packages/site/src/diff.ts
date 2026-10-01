@@ -4,26 +4,29 @@ import { escapeHtml } from "./inline.ts";
 
 export type DiffOp<T> = { op: "equal" | "delete" | "insert"; value: T };
 
-/** Above this many cells the LCS table is skipped and the change shown as delete-all, insert-all. */
+/**
+ * Above this many cells (including the table's extra row and column) the LCS table is skipped and
+ * the change shown as delete-all, insert-all.
+ */
 export const MAX_DIFF_CELLS = 1_000_000;
 
 /** Longest-common-subsequence diff of two sequences, in order. */
 export function diffSequence<T>(a: readonly T[], b: readonly T[]): DiffOp<T>[] {
-  if (a.length * b.length > MAX_DIFF_CELLS) {
+  // An empty side needs no table, and the cell check must come before any table is allocated.
+  if (a.length === 0 || b.length === 0 || (a.length + 1) * (b.length + 1) > MAX_DIFF_CELLS) {
     return [
       ...a.map((value): DiffOp<T> => ({ op: "delete", value })),
       ...b.map((value): DiffOp<T> => ({ op: "insert", value })),
     ];
   }
-  // lcs[i][j] = length of the LCS of a[i..] and b[j..]
-  const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  // lcs[i * width + j] = length of the LCS of a[i..] and b[j..]
+  const width = b.length + 1;
+  const lcs = new Uint32Array((a.length + 1) * width);
+  const at = (i: number, j: number) => lcs[i * width + j] ?? 0;
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {
-      const row = lcs[i] as number[];
-      row[j] =
-        a[i] === b[j]
-          ? (lcs[i + 1]?.[j + 1] ?? 0) + 1
-          : Math.max(lcs[i + 1]?.[j] ?? 0, row[j + 1] ?? 0);
+      lcs[i * width + j] =
+        a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
     }
   }
   const ops: DiffOp<T>[] = [];
@@ -34,10 +37,7 @@ export function diffSequence<T>(a: readonly T[], b: readonly T[]): DiffOp<T>[] {
       ops.push({ op: "equal", value: a[i] as T });
       i++;
       j++;
-    } else if (
-      i < a.length &&
-      (j === b.length || (lcs[i + 1]?.[j] ?? 0) >= (lcs[i]?.[j + 1] ?? 0))
-    ) {
+    } else if (i < a.length && (j === b.length || at(i + 1, j) >= at(i, j + 1))) {
       ops.push({ op: "delete", value: a[i] as T });
       i++;
     } else {

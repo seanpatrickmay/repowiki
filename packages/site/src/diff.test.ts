@@ -1,5 +1,5 @@
 import { bodyClaim, makeRevision } from "@repowiki/core/test-fixtures";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { diffSequence, MAX_DIFF_CELLS, revisionDiff, wordDiffHtml } from "./diff.ts";
 import { fixtureExport } from "./test-fixtures.ts";
 
@@ -28,12 +28,12 @@ describe("diffSequence", () => {
   });
 
   it("checks the cell budget before allocating the table", () => {
-    // 100k x 100k would be 10^10 cells; building that table would exhaust memory.
-    const big = Array.from({ length: 100_000 }, (_, i) => String(i));
+    // 4000 x 4000 would be 16M cells; the check must return before anything that size exists.
+    const big = Array.from({ length: 4_000 }, (_, i) => String(i));
     const ops = diffSequence(big, big);
-    expect(ops).toHaveLength(200_000);
-    expect(ops.slice(0, 100_000).every((op) => op.op === "delete")).toBe(true);
-    expect(ops.slice(100_000).every((op) => op.op === "insert")).toBe(true);
+    expect(ops).toHaveLength(8_000);
+    expect(ops.slice(0, 4_000).every((op) => op.op === "delete")).toBe(true);
+    expect(ops.slice(4_000).every((op) => op.op === "insert")).toBe(true);
   });
 
   it("budgets the product of the lengths, not either length alone", () => {
@@ -43,16 +43,88 @@ describe("diffSequence", () => {
     expect(ops).toHaveLength(6_000);
   });
 
-  it("still diffs a table of exactly MAX_DIFF_CELLS cells", () => {
-    const side = Math.sqrt(MAX_DIFF_CELLS);
-    const same = Array.from({ length: side }, (_, i) => String(i));
+  it("tables (n + 1) x (m + 1) cells: 999 x 999 is exactly MAX_DIFF_CELLS and is still diffed", () => {
+    const same = Array.from({ length: 999 }, (_, i) => String(i));
+    expect((same.length + 1) * (same.length + 1)).toBe(MAX_DIFF_CELLS);
     expect(diffSequence(same, same).every((op) => op.op === "equal")).toBe(true);
   });
 
-  it("diffs a long side against an empty one", () => {
-    const long = Array.from({ length: MAX_DIFF_CELLS + 5 }, (_, i) => String(i));
-    expect(diffSequence(long, [])).toHaveLength(long.length);
-    expect(diffSequence([], long).every((op) => op.op === "insert")).toBe(true);
+  it("falls back as soon as the table would pass MAX_DIFF_CELLS: 1000 x 1000 is 1,002,001 cells", () => {
+    const same = Array.from({ length: 1000 }, (_, i) => String(i));
+    const ops = diffSequence(same, same);
+    expect(ops.filter((op) => op.op === "equal")).toEqual([]);
+    expect(ops).toHaveLength(2000);
+  });
+
+  it("counts the extra row and column on each side: 2 x 500,001 cells is the last that is diffed", () => {
+    const hasEqual = (ops: { op: string }[]) => ops.some((op) => op.op === "equal");
+    const side = (length: number) => Array.from({ length }, (_, i) => String(i));
+    // (1 + 1) * (499_999 + 1) = 1_000_000: diffed. (1 + 1) * (500_000 + 1) = 1_000_002: falls back.
+    expect(hasEqual(diffSequence(["0"], side(499_999)))).toBe(true);
+    expect(hasEqual(diffSequence(side(499_999), ["0"]))).toBe(true);
+    expect(hasEqual(diffSequence(["0"], side(500_000)))).toBe(false);
+    expect(hasEqual(diffSequence(side(500_000), ["0"]))).toBe(false);
+    expect(diffSequence(["0"], side(500_000))).toHaveLength(500_001);
+  });
+
+  describe("allocation", () => {
+    // Records every typed-array and Array.from allocation made while fn runs.
+    const allocations = (fn: () => void): number[] => {
+      const sizes: number[] = [];
+      const RealUint32Array = Uint32Array;
+      vi.stubGlobal(
+        "Uint32Array",
+        class extends RealUint32Array {
+          constructor(length: number) {
+            super(length);
+            sizes.push(length);
+          }
+        },
+      );
+      const from = vi.spyOn(Array, "from");
+      try {
+        fn();
+        sizes.push(...from.mock.calls.map(() => -1));
+      } finally {
+        from.mockRestore();
+        vi.unstubAllGlobals();
+      }
+      return sizes;
+    };
+
+    it("builds no table when one side is empty, even one a table could hold", () => {
+      // (500_000 + 1) * (0 + 1) is under MAX_DIFF_CELLS, so only the empty-side check avoids a table.
+      const long = Array.from({ length: 500_000 }, (_, i) => String(i));
+      let del: ReturnType<typeof diffSequence<string>> = [];
+      let ins: ReturnType<typeof diffSequence<string>> = [];
+      expect(
+        allocations(() => {
+          del = diffSequence(long, []);
+          ins = diffSequence([], long);
+        }),
+      ).toEqual([]);
+      expect(del).toHaveLength(long.length);
+      expect(del.every((op, i) => op.op === "delete" && op.value === long[i])).toBe(true);
+      expect(ins).toHaveLength(long.length);
+      expect(ins.every((op, i) => op.op === "insert" && op.value === long[i])).toBe(true);
+    });
+
+    it("builds no table for a huge empty-sided input either", () => {
+      const huge = Array.from({ length: MAX_DIFF_CELLS + 5 }, (_, i) => String(i));
+      const results: ReturnType<typeof diffSequence<string>>[] = [];
+      expect(allocations(() => results.push(diffSequence(huge, [])))).toEqual([]);
+      expect(results[0]).toHaveLength(huge.length);
+      expect(results[0]?.every((op) => op.op === "delete")).toBe(true);
+    });
+
+    it("builds no table for an oversized input", () => {
+      const big = Array.from({ length: 5_000 }, (_, i) => String(i));
+      expect(allocations(() => diffSequence(big, big))).toEqual([]);
+    });
+
+    it("builds one flat table of (n + 1) x (m + 1) cells", () => {
+      expect(allocations(() => diffSequence(["a", "b"], ["a", "c", "d"]))).toEqual([12]);
+    });
   });
 
   it("lists every deletion of a replaced run before its insertions", () => {
