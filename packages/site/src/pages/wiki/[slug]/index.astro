@@ -2,18 +2,20 @@
 import { articleView } from "../../../article.ts";
 import Article from "../../../components/Article.astro";
 import Layout from "../../../layouts/Layout.astro";
-import { type WikiRoute, wikiRoutes } from "../../../routes.ts";
+import { articleFor, type WikiRoute, wikiRoutes } from "../../../routes.ts";
 import { getSite } from "../../../site.ts";
 
 export function getStaticPaths() {
   return wikiRoutes(getSite()).map((route) => ({ params: { slug: route.slug }, props: { route } }));
 }
 
-const { route } = Astro.props as { route: WikiRoute };
+interface Props {
+  route: WikiRoute;
+}
+
+const { route } = Astro.props;
 const site = getSite();
-const page = site.pages.get(route.featureId);
-if (page === undefined) throw new Error(`no page for ${route.featureId}`);
-const view = articleView(site, page);
+const view = articleView(site, articleFor(site, route));
 ---
 <Layout title={view.title}>
   <Article view={view} indexed={true} />

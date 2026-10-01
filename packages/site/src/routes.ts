@@ -1,3 +1,4 @@
+import type { Revision } from "@repowiki/core";
 import type { SiteModel } from "./model.ts";
 
 /** One page under /wiki/<slug>/. */
@@ -13,4 +14,11 @@ export function wikiRoutes(site: SiteModel): WikiRoute[] {
     }
   }
   return routes;
+}
+
+/** The current revision an article route renders. A route without a page is a build bug. */
+export function articleFor(site: SiteModel, route: WikiRoute): Revision {
+  const page = site.pages.get(route.featureId);
+  if (page === undefined) throw new Error(`no page for ${route.featureId}`);
+  return page;
 }
