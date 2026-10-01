@@ -1,42 +1,45 @@
 import { lstatSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export function isInsideRepo(repo: string, out: string): boolean {
+export function resolveOutPath(repo: string, out: string): string | null {
   try {
     // Get absolute path of out
     const abs = resolve(out);
 
-    // If out is a symlink, treat as unsafe and refuse (return true - fail closed)
+    // If out is a symlink, return null (refuse)
     try {
       const stat = lstatSync(abs);
       if (stat.isSymbolicLink()) {
-        return true;
+        return null;
       }
     } catch (err) {
       // If lstat throws ENOENT on abs itself, that's fine, continue
-      // Any other error is treated as fail-closed
+      // Any other error is treated as fail-closed (refuse)
       const error = err as NodeJS.ErrnoException;
       if (error.code !== "ENOENT") {
-        return true;
+        return null;
       }
     }
 
-    // Get the real path of the parent directory (must exist)
+    // Get the real path of the parent directory
     const parentDir = dirname(abs);
     const parentReal = realpathSync.native(parentDir);
 
-    // Get the real path of the repo (will throw if it doesn't exist - fail closed)
+    // Get the real path of the repo
     const repoReal = realpathSync.native(repo);
 
-    // Construct the real out path by joining the real parent with the basename
+    // Construct the target path: canonical parent + basename
     const outName = basename(abs);
-    const outReal = join(parentReal, outName);
+    const target = join(parentReal, outName);
 
-    // Check if out is inside repo
-    const rel = relative(repoReal, outReal);
-    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+    // Check if target is outside repo
+    const rel = relative(repoReal, target);
+    const isOutside = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+
+    // Return target if outside, null if inside (to refuse writing)
+    return isOutside ? target : null;
   } catch {
     // Any unexpected error - fail closed, refuse the write
-    return true;
+    return null;
   }
 }
