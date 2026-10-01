@@ -627,9 +627,14 @@ describe("hover previews", () => {
     expect(existsSync(join(site.outDir, "api", "preview", "scheduler.json"))).toBe(false);
   });
 
-  it("loads the preview script on every page", () => {
-    for (const page of ["index.html", "wiki/signals/index.html", "wiki/reports/index.html"]) {
-      expect(site.read(page)).toMatch(/<script type="module" src="\/_astro\/[^"]+\.js"><\/script>/);
+  it("loads the preview script exactly once on every page", () => {
+    // The Main page has no component scripts, so its one module script is Layout's.
+    const scripts = [...site.read("index.html").matchAll(/<script type="module" src="([^"]+)">/g)];
+    expect(scripts).toHaveLength(1);
+    const layoutScript = `<script type="module" src="${scripts[0]?.[1]}"></script>`;
+    expect(layoutScript).toMatch(/src="\/_astro\/[^"]+\.js"/);
+    for (const page of htmlFiles(site.outDir)) {
+      expect(site.read(page).split(layoutScript).length - 1, page).toBe(1);
     }
   });
 });

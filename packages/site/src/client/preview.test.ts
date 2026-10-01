@@ -52,7 +52,7 @@ function fakeElement(tag: string, allowInnerHtml = false) {
 type Handler = (event: { target: unknown; key?: string }) => void;
 type FakeElement = ReturnType<typeof fakeElement>;
 
-function setup(options: { hover?: boolean; response?: () => Promise<unknown> } = {}) {
+function setup(options: { hover?: boolean; response?: (url: string) => Promise<unknown> } = {}) {
   const handlers = new Map<string, Handler>();
   const created: FakeElement[] = [];
   const body = fakeElement("body");
@@ -78,7 +78,7 @@ function setup(options: { hover?: boolean; response?: () => Promise<unknown> } =
   const fetchFake = vi.fn(async (url: string) => {
     fetched.push(url);
     return (
-      (await options.response?.()) ?? {
+      (await options.response?.(url)) ?? {
         ok: true,
         json: async () => ({
           title: "<img src=x onerror=alert(1)> Title",
@@ -184,6 +184,48 @@ describe("installPreviews", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(card.hidden).toBe(true);
     expect(card.children).toEqual([]);
+  });
+
+  it("hides shortly after keyboard focus leaves the link", async () => {
+    const { card, fire } = setup({ hover: false });
+    const link = fakeLink("signals");
+    fire("focusin", link);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(card.hidden).toBe(false);
+    fire("focusout", link);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(card.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(card.hidden).toBe(true);
+    expect(link.attributes.has("aria-describedby")).toBe(false);
+  });
+
+  it("shows only the link the reader is on when an earlier fetch resolves late", async () => {
+    let finishA: (value: unknown) => void = () => {};
+    const slowA = new Promise((resolve) => {
+      finishA = resolve;
+    });
+    const reply = (title: string) => ({
+      ok: true,
+      json: async () => ({ title, url: `/wiki/${title}/`, html: `<p>${title}</p>` }),
+    });
+    const { card, fire } = setup({
+      response: (url) => (url.includes("/a.json") ? slowA : Promise.resolve(reply("b"))),
+    });
+    const linkA = fakeLink("a");
+    const linkB = fakeLink("b");
+    fire("mouseover", linkA);
+    await vi.advanceTimersByTimeAsync(300);
+    fire("mouseover", linkB);
+    await vi.advanceTimersByTimeAsync(300);
+    expect((card.children as FakeElement[])[0]?.textContent).toBe("b");
+    finishA(reply("a"));
+    await vi.advanceTimersByTimeAsync(0);
+    const [title, text] = card.children as FakeElement[];
+    expect(title?.textContent).toBe("b");
+    expect(text?.innerHtml).toBe("<p>b</p>");
+    expect(linkA.attributes.has("aria-describedby")).toBe(false);
+    expect(linkB.attributes.get("aria-describedby")).toBe("preview-card");
   });
 
   it("fetches each id once", async () => {

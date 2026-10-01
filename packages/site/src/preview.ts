@@ -1,6 +1,6 @@
 import { formatDate, formatNumber } from "./format.ts";
 import { escapeHtml } from "./inline.ts";
-import { finalTarget, hasArticleRoute, type SiteModel } from "./model.ts";
+import { featureLink, finalTarget, hasArticleRoute, type SiteModel } from "./model.ts";
 import { leadSummary } from "./summary.ts";
 import { articleUrl } from "./urls.ts";
 
@@ -39,4 +39,13 @@ export function previewData(site: SiteModel, id: string): Preview | null {
   ];
   const html = `<p>${lead}</p><p class="preview-facts">${facts.join(" &middot; ")}</p>`;
   return { title: feature.title, url, html };
+}
+
+/** Link target for a [[id]] token in an article; it asks for a hover preview only if one is served. */
+export function articleLink(
+  site: SiteModel,
+  id: string,
+): { href: string; title: string; preview: boolean } | null {
+  const link = featureLink(site, id);
+  return link === null ? null : { ...link, preview: previewData(site, id) !== null };
 }

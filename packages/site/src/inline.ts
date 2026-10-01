@@ -1,8 +1,11 @@
 import { wikipediaUrl } from "./urls.ts";
 
 export interface InlineOptions {
-  /** Resolves a [[featureId]] token; null renders the label as plain text. */
-  link(id: string): { href: string; title: string } | null;
+  /**
+   * Resolves a [[featureId]] token; null renders the label as plain text. `preview: false` leaves
+   * out the data-preview attribute, for a target that has no preview file.
+   */
+  link(id: string): { href: string; title: string; preview?: boolean } | null;
   /** False renders every link token as its plain label (hover previews). Default true. */
   links?: boolean;
 }
@@ -68,5 +71,6 @@ function renderLink(
   const text = escapeHtml(label || cleanTitle || target);
   if (!links || resolved === null) return text;
   // data-preview is read by the hover-preview script.
-  return `<a class="wikilink" href="${escapeHtml(resolved.href)}" title="${escapeHtml(cleanTitle ?? resolved.title)}" data-preview="${escapeHtml(target)}">${text}</a>`;
+  const preview = resolved.preview === false ? "" : ` data-preview="${escapeHtml(target)}"`;
+  return `<a class="wikilink" href="${escapeHtml(resolved.href)}" title="${escapeHtml(cleanTitle ?? resolved.title)}"${preview}>${text}</a>`;
 }
