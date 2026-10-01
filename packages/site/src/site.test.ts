@@ -335,3 +335,35 @@ describe("article page", () => {
     );
   });
 });
+
+describe("hostile fixture content", () => {
+  // The fixture feature's title is `<img src=x onerror=alert(1)> "q" & 'p'` plus two private-use
+  // characters; its alias is `<i>x</i>`. Titles and labels are plain text, so every page that
+  // prints them must escape them. The TOC lists the fixed section titles plus "See also" and
+  // "References", never a feature title, so the title reaches the page through the h1, the
+  // caption, the browser-tab title and other pages' See also lists.
+  const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
+
+  it("escapes the title, alias and claim text on the article page", () => {
+    const html = site.read("wiki/hostile-title/index.html");
+    expect(html).toContain(`<h1 class="page-title">${title}</h1>`);
+    expect(html).toContain(`<caption>${title}</caption>`);
+    expect(html).toContain(`<title>${title} - demo-repo wiki</title>`);
+    expect(html).toContain("<td>&lt;i&gt;x&lt;/i&gt;</td>");
+    expect(html).toContain("She said &quot;hi&quot; and it&#39;s fine");
+    expect(html).toContain('<li><a href="#see-also">See also</a></li>');
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<i>x</i>");
+  });
+
+  it("escapes the title in another article's See also list", () => {
+    const html = site.read("wiki/deliverables/index.html");
+    expect(html).toContain(`<li><a class="wikilink" href="/wiki/hostile-title/">${title}</a></li>`);
+  });
+
+  it("emits the hostile markup on no page", () => {
+    for (const page of htmlFiles(site.outDir)) {
+      expect(site.read(page), page).not.toContain("<img src=x");
+    }
+  });
+});

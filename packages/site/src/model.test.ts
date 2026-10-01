@@ -20,7 +20,7 @@ describe("aliasSlug", () => {
 describe("buildSiteModel", () => {
   it("routes active and retired features that have a page", () => {
     const routed = [...site.features.keys()].filter((id) => hasArticleRoute(site, id));
-    expect(routed.sort()).toEqual(["deliverables", "exporter", "signals"]);
+    expect(routed.sort()).toEqual(["deliverables", "exporter", "hostile-title", "signals"]);
     expect(hasArticleRoute(site, "scheduler")).toBe(false);
     expect(hasArticleRoute(site, "ghost")).toBe(false);
   });
@@ -40,6 +40,7 @@ describe("buildSiteModel", () => {
     expect(site.aliases).toEqual([
       { slug: "api-signals", alias: "/api/signals", targets: ["signals"] },
       { slug: "deliverable-records", alias: "deliverable records", targets: ["deliverables"] },
+      { slug: "i-x-i", alias: "<i>x</i>", targets: ["hostile-title"] },
       { slug: "signal-pipeline", alias: "signal pipeline", targets: ["signals", "deliverables"] },
       { slug: "signals-table", alias: "SIGNALS_TABLE", targets: ["signals"] },
     ]);
