@@ -107,4 +107,17 @@ describe("commitFiles", () => {
       ["a.py", "b.py"],
     ]);
   });
+
+  it("lists files per non-merge commit with awkward names", () => {
+    repo.write("with space.py", "a = 1\n");
+    repo.write("ünï.py", "b = 2\n");
+    repo.write("C#.md", "# C#\n");
+    repo.write("100%.md", "done\n");
+    repo.write("\nlead.py", "c = 3\n");
+    repo.write("a\x1eb.py", "d = 4\n");
+    const sha = repo.commit("add files");
+    expect(commitFiles(repo.dir, sha)).toEqual([
+      ["\nlead.py", "100%.md", "C#.md", "a\x1eb.py", "with space.py", "ünï.py"],
+    ]);
+  });
 });

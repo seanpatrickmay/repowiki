@@ -87,18 +87,50 @@ export function commitFiles(repo: string, sha: string): string[][] {
     "--no-renames",
     "-z",
     "--name-only",
-    "--format=%x1e%H",
+    "--format=%x00%H",
     sha,
   ]);
-  return out
-    .toString("utf8")
-    .split("\x1e")
-    .filter((record) => record !== "")
-    .map((record) =>
-      record
-        .split("\0")
-        .slice(1)
-        .map((path) => path.replace(/^\n/, ""))
-        .filter((path) => path !== ""),
-    );
+  const tokens = out.toString("utf8").split("\0");
+  const commits: string[][] = [];
+  let i = 0;
+
+  while (i < tokens.length) {
+    const token = tokens[i];
+    // Commit marker: empty token followed by 40-char hex SHA
+    if (token === "" && i + 1 < tokens.length) {
+      const nextToken = tokens[i + 1];
+      if (nextToken && /^[0-9a-f]{40}$/.test(nextToken)) {
+        i += 2; // Skip empty token and SHA
+        const paths: string[] = [];
+        let isFirstPath = true;
+
+        // Collect paths until next empty token
+        while (i < tokens.length) {
+          const path = tokens[i];
+          if (!path || path === "") break;
+
+          let finalPath = path;
+          // Strip leading \n (format terminator) from first path only
+          if (isFirstPath && path.startsWith("\n")) {
+            finalPath = path.slice(1);
+          }
+          isFirstPath = false;
+
+          // Only add non-empty paths
+          if (finalPath !== "") {
+            paths.push(finalPath);
+          }
+          i++;
+        }
+
+        commits.push(paths);
+      } else {
+        i++;
+      }
+    } else {
+      i++;
+    }
+  }
+
+  return commits;
 }
