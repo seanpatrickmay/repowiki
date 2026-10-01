@@ -4,12 +4,15 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { cassetteFetch, cassetteMode } from "./cassette.ts";
 import { createClaudeProvider } from "./claude.ts";
-import { createLedger } from "./ledger.ts";
+import { createLedger, totalsOf } from "./ledger.ts";
+import { callCostUsd } from "./pricing.ts";
 import { DEFAULT_MODELS } from "./provider.ts";
 
 const mode = cassetteMode();
 /** A live batch can take over an hour (two recordings took about 70 minutes); a replay is instant. */
 const BATCH_TIMEOUT_MS = mode === "record" ? 14_400_000 : 5_000;
+/** Two live calls and a cache write; replays use the default timeout. */
+const CACHE_TIMEOUT_MS = mode === "record" ? 60_000 : undefined;
 const cassette = (name: string) =>
   fileURLToPath(new URL(`./__cassettes__/${name}.json`, import.meta.url));
 
@@ -52,24 +55,32 @@ describe("createClaudeProvider against recorded Claude API exchanges", () => {
     expect(ledger.entries()[0]?.tokens.in).toBeGreaterThan(0);
   });
 
-  it("caches a long prefix: the second call reads what the first wrote", async () => {
-    const { ledger, provider } = setup("prompt-cache");
-    const ask = (n: number) =>
-      provider.generate({
-        purpose: "write",
-        system: `Use this glossary to answer.\n\n${GLOSSARY}`,
-        messages: [{ role: "user", content: `Which component does term ${n} describe?` }],
-        schema: z.object({ component: z.number() }),
-        maxTokens: 100,
-        cacheKey: "glossary",
-      });
-    expect((await ask(10)).output.component).toBe(70);
-    expect((await ask(20)).output.component).toBe(140);
-    const [first, second] = ledger.entries().map((e) => e.tokens);
-    // A re-recording within five minutes of the last one reads instead of writing.
-    expect((first?.cacheWrite ?? 0) + (first?.cacheRead ?? 0)).toBeGreaterThan(4096);
-    expect(second?.cacheRead).toBeGreaterThan(4096);
-  });
+  it(
+    "caches a long prefix: the second call reads what the first wrote",
+    async () => {
+      const { ledger, provider } = setup("prompt-cache");
+      const ask = (n: number) =>
+        provider.generate({
+          purpose: "write",
+          system: `Use this glossary to answer.\n\n${GLOSSARY}`,
+          messages: [{ role: "user", content: `Which component does term ${n} describe?` }],
+          schema: z.object({ component: z.number() }),
+          maxTokens: 100,
+          cacheKey: "glossary",
+        });
+      expect((await ask(10)).output.component).toBe(70);
+      expect((await ask(20)).output.component).toBe(140);
+      const [first, second] = ledger.entries().map((e) => e.tokens);
+      if (first === undefined || second === undefined)
+        throw new Error("expected two ledger entries");
+      // A re-recording within five minutes of the last one reads instead of writing.
+      const prefixTokens = first.cacheWrite + first.cacheRead;
+      expect(prefixTokens).toBeGreaterThan(4096);
+      expect(second.cacheRead).toBe(prefixTokens);
+      expect(second.cacheWrite).toBe(0);
+    },
+    CACHE_TIMEOUT_MS,
+  );
 
   it(
     "sends calls made in the same tick as one Message Batch",
@@ -92,6 +103,14 @@ describe("createClaudeProvider against recorded Claude API exchanges", () => {
         [true, "capitals"],
         [true, "capitals"],
       ]);
+      // Batch calls bill at half the unbatched price for the same tokens.
+      const entries = ledger.entries();
+      const unbatched = entries.reduce(
+        (sum, e) => sum + (callCostUsd(e.model, e.tokens, false) ?? Number.NaN),
+        0,
+      );
+      expect(unbatched).toBeGreaterThan(0);
+      expect(totalsOf(entries).usd).toBeCloseTo(unbatched * 0.5, 10);
     },
     BATCH_TIMEOUT_MS,
   );
