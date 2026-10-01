@@ -247,3 +247,72 @@ describe("proposalToManifest: the weight floor", () => {
     );
   });
 });
+
+describe("proposalToManifest fix round 1: nothing is silently left out", () => {
+  it("throws when a cluster is never assigned, naming the files left without a feature", () => {
+    const partial = proposal({ clusters: proposal().clusters.slice(0, 2) });
+    expect(() => proposalToManifest(partial, index, graph, clusters)).toThrow(/web\/src\/api\.ts/);
+  });
+
+  it("throws when the clusters do not cover an index file", () => {
+    const short = clusters.map((c) => ({ ...c, files: c.files.filter((f) => f !== "docs/C#.md") }));
+    expect(() => proposalToManifest(proposal(), index, graph, short)).toThrow(/docs\/C#\.md/);
+  });
+
+  it("throws when the proposal names a cluster that does not exist, naming it", () => {
+    const unknown = proposal({
+      clusters: [...proposal().clusters, { cluster: "c99", feature: "http-api", role: "core" }],
+    });
+    expect(() => proposalToManifest(unknown, index, graph, clusters)).toThrow(/c99/);
+  });
+
+  it("lists at most five missing paths and counts the rest", () => {
+    const none = proposal({ clusters: [] });
+    expect(() => proposalToManifest(none, index, graph, clusters)).toThrow(
+      /docs\/C#\.md, src\/api\/app\.py, src\/api\/routes\.py, tests\/test_routes\.py, web\/src\/api\.ts and 1 more/,
+    );
+  });
+
+  it("names every missing path, with no count, when there are five or fewer", () => {
+    const two = proposal({ clusters: proposal().clusters.slice(1, 3) });
+    expect(() => proposalToManifest(two, index, graph, clusters)).toThrow(
+      /^2 indexed files belong to no assigned cluster: docs\/C#\.md, src\/api\/app\.py$/,
+    );
+  });
+
+  it("still makes skipped and parse-error files members", () => {
+    const flagged = {
+      ...index,
+      files: index.files.map((f) =>
+        f.path === "docs/C#.md"
+          ? { ...f, skipped: "binary" as const }
+          : f.path === "web/src/main.tsx"
+            ? { ...f, parseError: true, symbols: [] }
+            : f,
+      ),
+    };
+    const result = proposalToManifest(proposal(), flagged, graph, clusters);
+    expect(result.membership["docs/C%23.md"]?.featureId).toBe("http-api");
+    expect(result.membership["web/src/main.tsx"]?.featureId).toBe("web-frontend");
+  });
+
+  it("drops an alias equal to its own id when another kept feature is titled that", () => {
+    const result = proposalToManifest(
+      proposal({
+        features: [
+          { id: "a", title: "Gamma", aliases: ["alpha", "beta"] },
+          { id: "gamma", title: "Delta", aliases: ["gamma", "epsilon"] },
+        ],
+        clusters: [
+          { cluster: "c01", feature: "a", role: "core" },
+          { cluster: "c02", feature: "gamma", role: "core" },
+          { cluster: "c03", feature: "gamma", role: "core" },
+        ],
+      }),
+      index,
+      graph,
+      clusters,
+    );
+    expect(result.features.map((f) => f.aliases)).toEqual([["alpha", "beta"], ["epsilon"]]);
+  });
+});
