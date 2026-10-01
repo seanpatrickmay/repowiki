@@ -72,7 +72,11 @@ export function backlinksHtml(note: RefNote): string {
 }
 
 const short = (sha: string): string => sha.slice(0, 7);
-const encodePath = (path: string): string => path.split("/").map(encodeURIComponent).join("/");
+const encodePath = (path: string): string =>
+  path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment.toWellFormed()))
+    .join("/");
 
 /** GitHub-style permalink to the cited lines at the cited sha. */
 export function codeUrl(repoUrl: string, c: CodeCitation): string {

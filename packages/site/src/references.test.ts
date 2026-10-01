@@ -48,6 +48,32 @@ describe("collectReferences", () => {
     });
     expect(collectReferences(revision).notes.map((note) => note.n)).toEqual([1, 2]);
   });
+
+  it("treats citations differing only in path as different sources", () => {
+    const claim = bodyClaim({
+      citations: [codeCitation(), codeCitation({ path: "src/other.py" })],
+    });
+    const revision = makeRevision({
+      sections: [
+        { key: "lead", claims: [leadClaim()] },
+        { key: "overview", claims: [claim] },
+      ],
+    });
+    expect(collectReferences(revision).notes.map((note) => note.n)).toEqual([1, 2]);
+  });
+
+  it("treats citations differing only in endLine as different sources", () => {
+    const claim = bodyClaim({
+      citations: [codeCitation(), codeCitation({ endLine: 30 })],
+    });
+    const revision = makeRevision({
+      sections: [
+        { key: "lead", claims: [leadClaim()] },
+        { key: "overview", claims: [claim] },
+      ],
+    });
+    expect(collectReferences(revision).notes.map((note) => note.n)).toEqual([1, 2]);
+  });
 });
 
 describe("markersHtml and backlinksHtml", () => {
@@ -80,6 +106,33 @@ describe("citationHtml", () => {
     const odd = codeCitation({ path: "src/a b/c#1%.py", startLine: 7, endLine: 7, symbol: null });
     expect(codeUrl(REPO, odd)).toBe(`${REPO}/blob/${SHA_A}/src/a%20b/c%231%25.py#L7`);
     expect(citationHtml(odd, null)).toBe("<code>src/a b/c#1%.py:L7@aaaaaaa</code>");
+  });
+
+  it("handles lone surrogate in path without throwing and replaces it with replacement character", () => {
+    const surrogatePath = "src/\ud800.py";
+    const citation = codeCitation({ path: surrogatePath });
+    expect(() => codeUrl(REPO, citation)).not.toThrow();
+    const url = codeUrl(REPO, citation);
+    expect(url).toContain("%EF%BF%BD");
+  });
+
+  it("escapes special characters in path and symbol in output", () => {
+    const dangerous = codeCitation({
+      path: "src/<script>.py",
+      symbol: 'foo"bar<baz>',
+    });
+    const html = citationHtml(dangerous, REPO);
+    expect(html).not.toMatch(/<script>/);
+    expect(html).not.toMatch(/foo"bar<baz>/);
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("foo&quot;bar&lt;baz&gt;");
+  });
+
+  it("escapes ampersand in repo URL inside href", () => {
+    const repoWithAmp = "https://github.com/acme/demo?foo=1&bar=2";
+    const html = citationHtml(codeCitation(), repoWithAmp);
+    expect(html).toContain("href=");
+    expect(html).toContain("&amp;");
   });
 
   it("renders a commit citation with its subject and PR", () => {
