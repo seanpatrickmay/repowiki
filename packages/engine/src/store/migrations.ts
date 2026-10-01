@@ -1,11 +1,14 @@
 import type Database from "better-sqlite3";
 import { UnsupportedSchemaError } from "./errors.ts";
 
+/** SQL to exec, or a function for changes SQL cannot express, such as rewriting JSON bodies. */
+export type Migration = string | ((db: Database.Database) => void);
+
 /**
  * Ordered schema migrations. Entry i upgrades a database from user_version i to i + 1.
  * Never edit a shipped entry; append a new one.
  */
-export const MIGRATIONS: readonly string[] = [
+export const MIGRATIONS: readonly Migration[] = [
   `
   CREATE TABLE meta (
     key TEXT PRIMARY KEY,
@@ -39,12 +42,18 @@ export const MIGRATIONS: readonly string[] = [
 ];
 
 export function migrate(db: Database.Database): void {
+  runMigrations(db, MIGRATIONS);
+}
+
+/** Applies the migrations a database has not seen, all in one transaction. */
+export function runMigrations(db: Database.Database, migrations: readonly Migration[]): void {
   const current = db.pragma("user_version", { simple: true }) as number;
-  if (current > MIGRATIONS.length) throw new UnsupportedSchemaError(current, MIGRATIONS.length);
+  if (current > migrations.length) throw new UnsupportedSchemaError(current, migrations.length);
   db.transaction(() => {
-    for (const [index, sql] of MIGRATIONS.entries()) {
+    for (const [index, migration] of migrations.entries()) {
       if (index < current) continue;
-      db.exec(sql);
+      if (typeof migration === "string") db.exec(migration);
+      else migration(db);
       db.pragma(`user_version = ${index + 1}`);
     }
   })();

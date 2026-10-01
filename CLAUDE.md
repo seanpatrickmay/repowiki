@@ -31,3 +31,4 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - Tests are co-located `*.test.ts` files. Tests never call the network or an LLM; LLM calls go through record/replay cassettes.
 - RepoWiki never writes inside a repo it documents. Wiki data lives in `~/.repowiki/<repo>/` or the `--out` directory.
 - Dependency versions are pinned exactly. Review each new dependency (maintenance, downloads, license) before adding it.
+- Any change to a @repowiki/core schema that rejects previously stored bodies must ship with a store migration (packages/engine/src/store/migrations.ts) that rewrites them. Never edit a shipped migration; append one.
