@@ -22,7 +22,7 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 3. TDD: failing test → minimal code → green → commit. Commit at every green step.
 4. Commits follow Conventional Commits with a scope, e.g. `feat(core): add Citation schema`. Every commit passes `pnpm check`. No `Co-Authored-By` or AI attribution. Never `--no-verify`.
 5. One PR closes exactly one ticket (`Closes #n`) and stays under ~300 changed lines, not counting lockfiles, fixtures, and cassettes.
-6. Merge with a merge commit (`gh pr merge --merge --delete-branch`) once CI is green. Never squash or rebase-merge (ADR-0002).
+6. Merge with a merge commit (`gh pr merge --merge --delete-branch --author-email sean.may101@gmail.com`) once CI is green. Merge commits are what replay reads, so they must carry the project email. Never squash or rebase-merge (ADR-0002).
 7. Reshaping, deferring, or rejecting a feature requires an ADR in `docs/decisions/`.
 
 ## Code rules
