@@ -1,6 +1,7 @@
 ---
 import { type ArticleView, STALE_NOTICE } from "../article.ts";
 import { getSite } from "../site.ts";
+import Diagram from "./Diagram.astro";
 import PageTabs from "./PageTabs.astro";
 
 interface Props {
@@ -33,6 +34,9 @@ const { wiki } = getSite();
   </table>
   {view.leadStale && <div class="ambox ambox-stale" role="note">{STALE_NOTICE}</div>}
   <p class="lead" set:html={view.leadHtml} />
+  {view.diagram !== null && !view.sections.some((s) => s.anchor === "data-flow") && (
+    <Diagram source={view.diagram} caption={`Data flow of ${view.title}`} />
+  )}
   {view.toc.length > 0 && (
     <nav class="toc" aria-labelledby="toc-heading">
       <h2 id="toc-heading">Contents</h2>
@@ -47,6 +51,9 @@ const { wiki } = getSite();
     <section aria-labelledby={section.anchor}>
       <h2 id={section.anchor}>{section.title}</h2>
       {section.stale && <div class="ambox ambox-stale" role="note">{STALE_NOTICE}</div>}
+      {section.anchor === "data-flow" && view.diagram !== null && (
+        <Diagram source={view.diagram} caption={`Data flow of ${view.title}`} />
+      )}
       <p set:html={section.html} />
     </section>
   ))}

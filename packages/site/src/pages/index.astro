@@ -1,10 +1,13 @@
 ---
+import Diagram from "../components/Diagram.astro";
+import { featureMapSource } from "../feature-map.ts";
 import Layout from "../layouts/Layout.astro";
 import { articleCountText, mainPageView } from "../main-page.ts";
 import { getSite } from "../site.ts";
 
 const site = getSite();
 const view = mainPageView(site);
+const map = featureMapSource(site);
 ---
 <Layout title="Main page">
   <div class="mp-welcome">
@@ -45,4 +48,14 @@ const view = mainPageView(site);
       </ul>
     </section>
   </div>
+  {map !== null && (
+    <section class="mp-box mp-map" aria-labelledby="mp-map">
+      <h2 id="mp-map">Feature map</h2>
+      <Diagram
+        source={map}
+        caption="Each box is an article; a line joins two articles when one lists the other under See also."
+      />
+      <p><a href="/special/all-pages/">All articles</a> lists every article as text.</p>
+    </section>
+  )}
 </Layout>

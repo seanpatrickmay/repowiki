@@ -87,6 +87,12 @@ describe("articleView", () => {
     ]);
   });
 
+  it("passes the revision's Mermaid source through untouched, or null", () => {
+    expect(articleView(site, page("signals")).diagram).toBe(page("signals").diagram);
+    expect(articleView(site, page("signals")).diagram).toContain("flowchart LR");
+    expect(articleView(site, page("deliverables")).diagram).toBeNull();
+  });
+
   it("dates the page by its commit, not its generation time", () => {
     expect(view.lastEdited).toMatch(/^This page was last edited on 10 March 2026, at commit /);
   });

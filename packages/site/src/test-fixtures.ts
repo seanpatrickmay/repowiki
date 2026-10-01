@@ -247,6 +247,7 @@ const hostile = makeRevision({
   id: "hostile-1",
   featureId: "hostile-title",
   commitDate: "2026-02-25T09:00:00-05:00",
+  diagram: 'flowchart LR\n  a["<img src=x onerror=alert(1)>"] --> b',
   seeAlso: ["deliverables"],
   sections: [
     {

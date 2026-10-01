@@ -64,6 +64,7 @@
   </table>
   
   <p class="lead"><b>Signal ingestion</b> is the subsystem of demo-repo that turns ingested chunks into <a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">deliverable records</a>. It retries failed fetches with <a class="external" href="https://en.wikipedia.org/wiki/Exponential_backoff" title="Wikipedia: Exponential backoff">Exponential backoff</a>.</p>
+  
   <nav class="toc" aria-labelledby="toc-heading">
       <h2 id="toc-heading">Contents</h2>
       <ol>
@@ -73,21 +74,31 @@
   <section aria-labelledby="overview">
       <h2 id="overview">Overview</h2>
       
+      
       <p>Signals are created from ingested chunks by <code>ingest_chunk</code>.<sup class="reference" id="cite-ref-1-0"><a href="#cite-note-1">[1]</a></sup> Each signal stores its source chunk and a <i>confidence</i> score.<sup class="reference" id="cite-ref-1-1"><a href="#cite-note-1">[1]</a></sup><sup class="reference" id="cite-ref-2-0"><a href="#cite-note-2">[2]</a></sup></p>
     </section><section aria-labelledby="how-it-works">
       <h2 id="how-it-works">How it works</h2>
       <div class="ambox ambox-stale" role="note">This section may be out of date.</div>
+      
       <p>The scheduler triggers ingestion every five minutes.<sup class="reference" id="cite-ref-3-0"><a href="#cite-note-3">[3]</a></sup> Failed fetches are retried up to three times; ghost described the old approach. Payloads containing <code>&lt;script&gt;</code> tags are stored escaped, and so is &lt;b&gt;this&lt;/b&gt;.<sup class="reference" id="cite-ref-2-1"><a href="#cite-note-2">[2]</a></sup></p>
     </section><section aria-labelledby="data-flow">
       <h2 id="data-flow">Data flow</h2>
       
+      <figure class="diagram">
+  <pre class="mermaid">flowchart LR
+  fetch[Fetcher] --&gt; ingest[ingest_chunk]
+  ingest --&gt; store[(signals table)]</pre>
+  <figcaption>Data flow of Signal ingestion</figcaption>
+</figure>
       <p>Chunks pass through <a class="wikilink" href="/wiki/legacy-signals/" title="Legacy signals" data-preview="legacy-signals">Legacy signals</a> storage before promotion.<sup class="reference" id="cite-ref-1-2"><a href="#cite-note-1">[1]</a></sup></p>
     </section><section aria-labelledby="history">
       <h2 id="history">History</h2>
       
+      
       <p>Signal ingestion was introduced in PR #45.<sup class="reference" id="cite-ref-4-0"><a href="#cite-note-4">[4]</a></sup></p>
     </section><section aria-labelledby="known-limitations">
       <h2 id="known-limitations">Known limitations</h2>
+      
       
       <p>Deduplication is not implemented (a <code>TODO</code> in the ingest module).<sup class="reference" id="cite-ref-5-0"><a href="#cite-note-5">[5]</a></sup></p>
     </section>

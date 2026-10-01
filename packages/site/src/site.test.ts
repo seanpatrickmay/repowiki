@@ -712,3 +712,121 @@ describe("Main Page, Random article and All articles", () => {
     await expect(normalized("index.html")).toMatchFileSnapshot("__snapshots__/index.html");
   });
 });
+
+describe("diagrams", () => {
+  it("draws the page's diagram at the top of its Data flow section", () => {
+    const html = site.read("wiki/signals/index.html");
+    const section = html.slice(
+      html.indexOf('<h2 id="data-flow">'),
+      html.indexOf('<h2 id="history">'),
+    );
+    expect(section).toContain(
+      '<pre class="mermaid">flowchart LR\n  fetch[Fetcher] --&gt; ingest[ingest_chunk]',
+    );
+    expect(section).toContain("<figcaption>Data flow of Signal ingestion</figcaption>");
+    expect(html.split('<pre class="mermaid">').length - 1).toBe(1);
+  });
+
+  it("draws the diagram after the lead when the article has no Data flow section", () => {
+    const html = site.read("wiki/hostile-title/index.html");
+    expect(html).not.toContain('id="data-flow"');
+    expect(html.split('<pre class="mermaid">').length - 1).toBe(1);
+    expect(html.indexOf('<p class="lead"')).toBeLessThan(html.indexOf('<pre class="mermaid">'));
+    expect(html.indexOf('<pre class="mermaid">')).toBeLessThan(html.indexOf('<nav class="toc"'));
+  });
+
+  it("escapes diagram source as text, never as markup", () => {
+    const html = site.read("wiki/hostile-title/index.html");
+    expect(html).toContain(
+      '<pre class="mermaid">flowchart LR\n  a[&quot;&lt;img src=x onerror=alert(1)&gt;&quot;] --&gt; b</pre>',
+    );
+    expect(html).not.toContain("<img src=x");
+  });
+
+  it("has no diagram on an article without one", () => {
+    expect(site.read("wiki/deliverables/index.html")).not.toContain("mermaid");
+  });
+
+  it("draws the feature map on the Main Page", () => {
+    expect(site.read("index.html")).toContain("  click n2 &quot;/wiki/signals/&quot;</pre>");
+    expect(site.read("index.html")).toContain('<h2 id="mp-map">Feature map</h2>');
+  });
+
+  it("keeps the hostile title inside its label in the Main Page's feature map", () => {
+    const html = site.read("index.html");
+    const block = html.match(/<pre class="mermaid">([\s\S]*?)<\/pre>/)?.[1] ?? "";
+    expect(block).toContain(
+      "  n1[&quot;#lt;img src#61;x onerror#61;alert#40;1#41;#gt; #quot;q#quot; #amp; #39;p#39;&quot;]",
+    );
+    expect(block).not.toMatch(/[<>']|&lt;|&#39;|[\uE000-\uF8FF]/);
+    expect(html).not.toContain("<img src=x");
+  });
+
+  /** The Layout's module script, the only one on the Main Page, as a path inside the build. */
+  function layoutScriptPath(): string {
+    const entry = site.read("index.html").match(/<script type="module" src="\/(_astro\/[^"]+)"/);
+    return entry?.[1] ?? "";
+  }
+
+  it("bundles Mermaid locally and loads it only on demand", () => {
+    const astro = readdirSync(join(site.outDir, "_astro"));
+    expect(astro.some((file) => /^mermaid\.core\..+\.js$/.test(file))).toBe(true);
+    const layoutScript = site.read(layoutScriptPath());
+    expect(layoutScript).toMatch(/import\(`\.\/mermaid\.core\.[^`]+\.js`\)/);
+    // The loader looks for diagrams first, so a page without one never downloads Mermaid.
+    expect(layoutScript.indexOf("pre.mermaid")).toBeLessThan(
+      layoutScript.indexOf("import(`./mermaid"),
+    );
+  });
+
+  it("puts the Mermaid loader in the Layout's script once, in strict mode, and nowhere else", () => {
+    const layoutPath = layoutScriptPath();
+    const layoutScript = site.read(layoutPath);
+    const count = (text: string, part: string) => text.split(part).length - 1;
+    expect(count(layoutScript, "pre.mermaid")).toBe(1);
+    expect(count(layoutScript, "securityLevel:`strict`")).toBe(1);
+    expect(layoutScript).not.toMatch(/securityLevel:`(?:loose|antiscript|sandbox)`/);
+    // The hover-preview module is in the same script, so Layout's one script tag carries both.
+    expect(count(layoutScript, "/api/preview/")).toBe(1);
+    const layoutTag = `<script type="module" src="/${layoutPath}"></script>`;
+    for (const page of htmlFiles(site.outDir)) {
+      const html = site.read(page);
+      expect(count(html, layoutTag), page).toBe(1);
+      for (const [, src = ""] of html.matchAll(/<script type="module" src="\/([^"]+)"/g)) {
+        if (src === layoutPath) continue;
+        const other = site.read(src);
+        expect(other, `${page} ${src}`).not.toContain("pre.mermaid");
+        expect(other, `${page} ${src}`).not.toContain("/api/preview/");
+      }
+    }
+  });
+
+  it("makes no off-site request from the built scripts", () => {
+    const scripts = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".js"));
+    expect(scripts.length).toBeGreaterThan(1);
+    // Mermaid's bundle names other hosts only as XML namespace identifiers (w3.org, eclipse.org)
+    // and in documentation links inside error messages (chevrotain.io, github.com, ...). None is
+    // fetched; any other host appearing in a script fails here, so an upgrade has to be reviewed.
+    // Strings with no host after the scheme ("http://" + a link text in the Markdown parser, an
+    // Ecore namespace "http:///org/eclipse/...") are inert too.
+    const inert =
+      /^(?:www\.w3\.org|www\.eclipse\.org|chevrotain\.io|github\.com|en\.wikipedia\.org|langium\.org|rolldown\.rs)$/;
+    // Networking APIs and font loading: Mermaid's bundle uses none of them, and neither do we.
+    const networking =
+      /\b(?:XMLHttpRequest|WebSocket|EventSource|FontFace|importScripts|sendBeacon)\b|@font-face/;
+    for (const file of scripts) {
+      const text = site.read(`_astro/${file}`);
+      const hosts = [...text.matchAll(/https?:\/\/([^/\s`"'<>)]*)/g)]
+        .map((m) => m[1] ?? "")
+        .filter(Boolean);
+      expect({ file, hosts: hosts.filter((host) => !inert.test(host)) }).toEqual({
+        file,
+        hosts: [],
+      });
+      expect({ file, networking: text.match(networking)?.[0] ?? null }).toEqual({
+        file,
+        networking: null,
+      });
+    }
+  });
+});

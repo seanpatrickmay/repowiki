@@ -38,6 +38,12 @@ export interface ArticleView {
   /** Trusted HTML. */
   leadHtml: string;
   leadStale: boolean;
+  /**
+   * Mermaid source, drawn at the top of Data flow, or after the lead when there is no such
+   * section. Model text: pass it to `<Diagram>`, which prints it as escaped text inside
+   * `<pre class="mermaid">`. Never `set:html`, and never given to Mermaid's `click` or links.
+   */
+  diagram: string | null;
   /** Plain text titles. */
   toc: { anchor: string; title: string }[];
   sections: SectionView[];
@@ -112,6 +118,7 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
     leadStale: lead.some(
       (claim) => stale.has(claim.id) || claim.supports.some((id) => stale.has(id)),
     ),
+    diagram: revision.diagram,
     toc,
     sections,
     seeAlso,

@@ -497,3 +497,28 @@ ins {
 .all-pages-other {
   font-style: italic;
 }
+
+/* Diagrams */
+.diagram {
+  margin: 1rem 0;
+  padding: 0.5rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  overflow-x: auto;
+}
+
+.diagram pre.mermaid {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: none;
+}
+
+.diagram figcaption {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.mp-map {
+  margin-top: 1rem;
+}
