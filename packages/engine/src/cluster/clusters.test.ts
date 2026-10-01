@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clusterFiles } from "./clusters.ts";
-import { buildFileGraph } from "./graph.ts";
+import { buildFileGraph, type FileGraph } from "./graph.ts";
 import { makeIndex } from "./test-index.ts";
 
 /** Two tightly importing groups of four files plus whatever `extra` adds. */
@@ -14,6 +14,26 @@ function twoGroups(extra: string[] = [], imports: [string, string][] = []) {
       imports: [...clique(api), ...clique(web), ...imports],
     }),
   );
+}
+
+const clique = (files: string[]): [string, string][] =>
+  files.flatMap((x, i) => files.slice(i + 1).map((y): [string, string] => [x, y]));
+
+/** Index-built graph over `paths`, with a clique of imports inside each group and `imports` between. */
+function grouped(groups: string[][], paths: string[], imports: [string, string][] = []) {
+  return buildFileGraph(
+    makeIndex([...groups.flat(), ...paths], { imports: [...groups.flatMap(clique), ...imports] }),
+  );
+}
+
+/** A graph with exactly the given weighted edges (a < b is applied here), no directory edges. */
+function weighted(edges: [string, string, number][]): FileGraph {
+  return {
+    nodes: [...new Set(edges.flatMap(([a, b]) => [a, b]))].sort(),
+    edges: edges
+      .map(([x, y, weight]) => ({ a: x < y ? x : y, b: x < y ? y : x, weight }))
+      .sort((l, r) => (l.a < r.a ? -1 : l.a > r.a ? 1 : l.b < r.b ? -1 : l.b > r.b ? 1 : 0)),
+  };
 }
 
 describe("clusterFiles", () => {
@@ -76,5 +96,92 @@ describe("clusterFiles", () => {
     expect(clusterFiles(buildFileGraph(reversed), options)).toEqual(
       clusterFiles(buildFileGraph(index), options),
     );
+  });
+
+  describe("absorption rules", () => {
+    const options = (minClusterSize: number) => ({ resolution: 1, minClusterSize });
+    const filesOf = (clusters: { files: string[] }[]) => clusters.map((c) => c.files);
+
+    it("prefers shared edge weight over directory depth, size and community id", () => {
+      // The big a/ cluster has the lower id, is larger, and shares the directory with a/sub/,
+      // but a/sub/ only has an edge to z/.
+      const big = ["a/1.py", "a/2.py", "a/3.py", "a/4.py", "a/5.py"];
+      const linked = ["z/1.py", "z/2.py", "z/3.py", "z/4.py"];
+      const sub = ["a/sub/s1.py", "a/sub/s2.py"];
+      const graph = grouped([big, linked], sub, [
+        ["a/sub/s1.py", "a/sub/s2.py"],
+        ["a/sub/s2.py", "a/sub/s1.py"],
+        ["a/sub/s1.py", "z/1.py"],
+      ]);
+      expect(filesOf(clusterFiles(graph, options(1)))).toEqual([big, linked, sub]);
+      expect(filesOf(clusterFiles(graph, options(3)))).toEqual([[...sub, ...linked], big]);
+    });
+
+    it("with no edges, scores a cluster by its best-matching file's directory depth", () => {
+      // x/n* shares only "x" with x/y/z/s.py; the z/ cluster holds x/y/z/w/near.py, which shares
+      // three levels. N has the lower id and equal size, so only the deepest member can win.
+      const near = ["x/n1.py", "x/n2.py", "x/n3.py", "x/n4.py"];
+      const deep = ["z/1.py", "z/2.py", "z/3.py", "x/y/z/w/near.py"];
+      const graph = grouped([near, deep], ["x/y/z/s.py"]);
+      expect(filesOf(clusterFiles(graph, options(1)))).toEqual([
+        near,
+        ["x/y/z/w/near.py", "z/1.py", "z/2.py", "z/3.py"],
+        ["x/y/z/s.py"],
+      ]);
+      expect(clusterFiles(graph, options(2))[0]?.files).toEqual(["x/y/z/s.py", ...deep].sort());
+    });
+
+    it("with equal depth, joins the larger cluster even when it has the higher id", () => {
+      const four = ["a/1.py", "a/2.py", "a/3.py", "a/4.py"];
+      const six = ["b/1.py", "b/2.py", "b/3.py", "b/4.py", "b/5.py", "b/6.py"];
+      const clusters = clusterFiles(grouped([four, six], ["s.py"]), options(2));
+      expect(filesOf(clusters)).toEqual([[...six, "s.py"], four]);
+    });
+
+    it("with equal depth and size, joins the lower community id", () => {
+      const a = ["a/1.py", "a/2.py", "a/3.py", "a/4.py"];
+      const b = ["b/1.py", "b/2.py", "b/3.py", "b/4.py"];
+      const clusters = clusterFiles(grouped([a, b], ["s.py"]), options(2));
+      expect(filesOf(clusters)).toEqual([[...a, "s.py"], b]);
+    });
+
+    it("absorbs the smallest cluster first, so a larger small cluster can stay whole", () => {
+      // pair (2 files) is below 4 and links only to trio (3 files); trio links to big more
+      // strongly than to pair. Smallest first: pair joins trio and the result is big enough to
+      // stand. Largest first: trio would join big, and pair would follow it.
+      const big = ["b/1.py", "b/2.py", "b/3.py", "b/4.py", "b/5.py"];
+      const trio = ["c/1.py", "c/2.py", "c/3.py"];
+      const pair = ["d/1.py", "d/2.py"];
+      const graph = weighted([
+        ...clique(big).map(([a, b]): [string, string, number] => [a, b, 10]),
+        ...clique(trio).map(([a, b]): [string, string, number] => [a, b, 10]),
+        ["d/1.py", "d/2.py", 10],
+        ["d/1.py", "c/1.py", 1],
+        ["c/1.py", "b/1.py", 2],
+      ]);
+      expect(filesOf(clusterFiles(graph, options(1)))).toEqual([big, trio, pair]);
+      expect(filesOf(clusterFiles(graph, options(4)))).toEqual([big, [...trio, ...pair]]);
+    });
+
+    it("breaks ties between equally small clusters by lower community id", () => {
+      // p and q are both pairs. p links to big (2) and to q (1); q links only to p. Taking p
+      // first sends p to big and then q follows into big. Taking q first would pair q with p.
+      const big = ["b/1.py", "b/2.py", "b/3.py", "b/4.py", "b/5.py"];
+      const graph = weighted([
+        ...clique(big).map(([a, b]): [string, string, number] => [a, b, 10]),
+        ["p/1.py", "p/2.py", 10],
+        ["q/1.py", "q/2.py", 10],
+        ["p/1.py", "b/1.py", 2],
+        ["p/2.py", "q/1.py", 1],
+      ]);
+      expect(filesOf(clusterFiles(graph, options(1)))).toEqual([
+        big,
+        ["p/1.py", "p/2.py"],
+        ["q/1.py", "q/2.py"],
+      ]);
+      expect(filesOf(clusterFiles(graph, options(3)))).toEqual([
+        [...big, "p/1.py", "p/2.py", "q/1.py", "q/2.py"],
+      ]);
+    });
   });
 });
