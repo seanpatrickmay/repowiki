@@ -31,6 +31,7 @@ const summary = {
     binary: count((f) => f.skipped === "binary"),
     tooLarge: count((f) => f.skipped === "too-large"),
   },
+  invalidPaths: index.invalidPaths.length,
   parseErrors: count((f) => f.parseError),
   symbols: index.files.reduce((total, f) => total + f.symbols.length, 0),
   importEdges: index.imports.length,

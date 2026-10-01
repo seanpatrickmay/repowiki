@@ -1,4 +1,4 @@
-import { memberId } from "@repowiki/core";
+import { memberId, RepoPath } from "@repowiki/core";
 import { type CoChange, computeCoChange, DEFAULT_MAX_FILES_PER_COMMIT } from "./cochange.ts";
 import {
   commitFiles,
@@ -51,6 +51,8 @@ export interface RepoIndex {
   sha: string;
   files: IndexedFile[];
   imports: ImportEdge[];
+  /** Tracked paths excluded because they are not valid RepoPaths (e.g. contain a backslash), sorted. */
+  invalidPaths: string[];
   unresolved: UnresolvedImport[];
   coChange: CoChange;
 }
@@ -81,7 +83,13 @@ export async function indexRepo(
 ): Promise<RepoIndex> {
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const sha = resolveCommit(repo, rev);
-  const blobs = listBlobs(repo, sha);
+  const listed = listBlobs(repo, sha);
+  const isValid = (blob: TreeBlob) => RepoPath.safeParse(blob.path).success;
+  const blobs = listed.filter(isValid);
+  const invalidPaths = listed
+    .filter((blob) => !isValid(blob))
+    .map((blob) => blob.path)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const contents = readBlobs(
     repo,
     blobs.map((blob) => blob.oid),
@@ -156,6 +164,7 @@ export async function indexRepo(
   return {
     sha,
     files,
+    invalidPaths,
     imports: [...edges.values()].sort(
       (a, b) => byPath(a, b) || (a.to < b.to ? -1 : a.to > b.to ? 1 : 0),
     ),
