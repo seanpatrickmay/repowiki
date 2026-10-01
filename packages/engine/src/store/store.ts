@@ -1,4 +1,4 @@
-import { GitSha, Manifest, Revision } from "@repowiki/core";
+import { GitSha, LedgerEntry, Manifest, Revision } from "@repowiki/core";
 import Database from "better-sqlite3";
 import {
   DroppedFeatureError,
@@ -28,6 +28,10 @@ export interface Store {
   putManifest(manifest: Manifest): void;
   getManifest(sha: string): Manifest | null;
   getLatestManifest(): Manifest | null;
+  /** Appends one LLM call to the token ledger. */
+  appendLedger(entry: LedgerEntry): void;
+  /** Ledger entries in the order they were appended, optionally only those of one run. */
+  listLedger(runId?: string): LedgerEntry[];
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
@@ -103,6 +107,23 @@ export function openStore(path: string): Store {
         ).run(parsed.sha, JSON.stringify(parsed));
       })();
     },
+
+    appendLedger(entry) {
+      const parsed = LedgerEntry.parse(entry);
+      db.prepare("INSERT INTO ledger (run_id, body) VALUES (?, ?)").run(
+        parsed.runId,
+        JSON.stringify(parsed),
+      );
+    },
+
+    listLedger: (runId) =>
+      (
+        (runId === undefined
+          ? db.prepare("SELECT body FROM ledger ORDER BY seq").all()
+          : db
+              .prepare("SELECT body FROM ledger WHERE run_id = ? ORDER BY seq")
+              .all(runId)) as BodyRow[]
+      ).map((row) => LedgerEntry.parse(JSON.parse(row.body))),
 
     getManifest: (sha) =>
       readManifest(
