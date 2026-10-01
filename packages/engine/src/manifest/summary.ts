@@ -4,12 +4,24 @@ import type { LedgerTotals } from "@repowiki/llm";
 const TOP_FILES = 5;
 const count = (n: number): string => n.toLocaleString("en-US");
 
+/** Line breaks would start a new Markdown block, so every model- or repo-supplied value loses them. */
+const oneLine = (text: string): string => text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, " ");
+
+/** For titles and aliases, which the model supplies: also escape what breaks a table cell. */
+const inline = (text: string): string => oneLine(text).replace(/[\\|]/g, "\\$&");
+
 /**
- * Titles and aliases come from the model. Collapse line breaks and escape backslashes and pipes so
- * a value cannot break a table row or start a new Markdown block.
+ * A code span that survives any content (CommonMark): the fence is one backtick longer than the
+ * longest run inside, and content that starts or ends with a backtick (or with spaces on both
+ * sides, which a parser would trim) is padded with one space.
  */
-const inline = (text: string): string =>
-  text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, " ").replace(/[\\|]/g, "\\$&");
+function codeSpan(text: string): string {
+  const flat = oneLine(text);
+  const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longest + 1);
+  const pad = /^`|`$/.test(flat) || /^ .* $/.test(flat) ? " " : "";
+  return `${fence}${pad}${flat}${pad}${fence}`;
+}
 
 /** The manifest as Markdown for the owner's review, with the LLM cost of producing it. */
 export function renderManifestSummary(
@@ -30,7 +42,7 @@ export function renderManifestSummary(
   const symbolTotal = [...symbols.values()].reduce((n, k) => n + k, 0);
 
   const lines = [
-    `# Manifest: ${repoName} at ${manifest.sha.slice(0, 7)}`,
+    `# Manifest: ${oneLine(repoName)} at ${manifest.sha.slice(0, 7)}`,
     "",
     `${manifest.features.length} features, ${count(fileTotal)} files, ${count(symbolTotal)} symbols.`,
     "",
@@ -51,7 +63,7 @@ export function renderManifestSummary(
       "",
       `Aliases: ${feature.aliases.map(inline).join(", ")}`,
       "",
-      ...top.map((f) => `- \`${f.path}\` (${f.weight})`),
+      ...top.map((f) => `- ${codeSpan(f.path)} (${f.weight})`),
     );
   }
   if (totals !== null) {

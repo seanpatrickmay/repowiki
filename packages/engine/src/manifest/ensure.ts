@@ -1,6 +1,6 @@
 import type { Manifest } from "@repowiki/core";
 import type { RepoIndex } from "../index/index.ts";
-import type { Store } from "../store/index.ts";
+import { DuplicateManifestError, type Store } from "../store/index.ts";
 import {
   buildManifest,
   type ManifestBuild,
@@ -12,6 +12,10 @@ import {
  * Returns the manifest for index.sha, building and storing it (as the drift baseline) when the
  * store has none. A store that already holds a manifest for another sha needs an update, which
  * revises the prior manifest instead of rebuilding it (spec §4, §6.1), so this refuses.
+ *
+ * Concurrent calls on an empty store may each pay for a build: nothing locks across the LLM call.
+ * The first to finish stores its manifest; the others return that stored manifest with
+ * `build: null` and discard their own.
  */
 export async function ensureManifest(
   store: Store,
@@ -27,6 +31,12 @@ export async function ensureManifest(
     );
   }
   const build = await buildManifest(index, options);
-  store.putManifest(build.manifest, { llmRevised: true });
+  try {
+    store.putManifest(build.manifest, { llmRevised: true });
+  } catch (error) {
+    const winner = error instanceof DuplicateManifestError ? store.getManifest(index.sha) : null;
+    if (winner === null) throw error;
+    return { manifest: winner, build: null };
+  }
   return { manifest: build.manifest, build };
 }

@@ -2,6 +2,7 @@ import { makeManifest } from "@repowiki/core/test-fixtures";
 import type { Provider } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openStore, type Store } from "../store/index.ts";
+import { ManifestBuildError } from "./build.ts";
 import { ensureManifest } from "./ensure.ts";
 import { sampleIndex } from "./test-index.ts";
 import { SAMPLE_CLUSTER_OPTIONS, SAMPLE_PROPOSAL, scriptedProvider } from "./test-provider.ts";
@@ -39,9 +40,32 @@ describe("ensureManifest", () => {
   it("refuses to rebuild over a manifest for another sha", async () => {
     store.putManifest(makeManifest());
     const { provider, requests } = scriptedProvider(SAMPLE_PROPOSAL);
-    await expect(ensureManifest(store, sampleIndex(), options(provider))).rejects.toThrow(
-      /is an update, not a build/,
-    );
+    const attempt = ensureManifest(store, sampleIndex(), options(provider));
+    await expect(attempt).rejects.toBeInstanceOf(ManifestBuildError);
+    await expect(attempt).rejects.toThrow(/is an update, not a build/);
     expect(requests).toHaveLength(0);
+  });
+
+  it("returns the stored manifest for an older sha even when a newer one is stored", async () => {
+    const older = makeManifest({ sha: "c".repeat(40) });
+    store.putManifest(older);
+    store.putManifest(makeManifest({ sha: "d".repeat(40) }));
+    const { provider, requests } = scriptedProvider(SAMPLE_PROPOSAL);
+    const again = await ensureManifest(store, sampleIndex(), options(provider));
+    expect(again.build).toBeNull();
+    expect(again.manifest).toEqual(older);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("returns the manifest another caller stored first when two calls race on an empty store", async () => {
+    const first = scriptedProvider(SAMPLE_PROPOSAL);
+    const second = scriptedProvider(SAMPLE_PROPOSAL);
+    const [a, b] = await Promise.all([
+      ensureManifest(store, sampleIndex(), options(first.provider)),
+      ensureManifest(store, sampleIndex(), options(second.provider)),
+    ]);
+    expect(a.manifest).toEqual(b.manifest);
+    expect(store.getLatestManifest()).toEqual(a.manifest);
+    expect([a.build, b.build].filter((build) => build === null)).toHaveLength(1);
   });
 });

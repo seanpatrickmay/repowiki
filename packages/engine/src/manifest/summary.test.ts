@@ -1,3 +1,4 @@
+import { memberId } from "@repowiki/core";
 import { makeFeature, makeManifest } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { renderManifestSummary } from "./summary.ts";
@@ -65,5 +66,72 @@ describe("renderManifestSummary with model-supplied text", () => {
   it("never lets a title or alias start a new Markdown line", () => {
     expect(text).not.toMatch(/^# injected/m);
     expect(text).toContain("Aliases: a\\|b, line break");
+  });
+});
+
+describe("renderManifestSummary file paths and repo name", () => {
+  const render = (
+    membership: Record<string, { featureId: string; weight: number }>,
+    name = "demo",
+  ) => renderManifestSummary(name, makeManifest({ features: [makeFeature()], membership }), null);
+
+  it("renders a path containing backticks as a valid code span", () => {
+    const text = render({
+      "a`b.py": { featureId: "signals", weight: 0.9 },
+      "``lead.py": { featureId: "signals", weight: 0.8 },
+      "trail``": { featureId: "signals", weight: 0.7 },
+    });
+    expect(text).toContain("- ``a`b.py`` (0.9)");
+    expect(text).toContain("- ``` ``lead.py ``` (0.8)");
+    expect(text).toContain("- ``` trail`` ``` (0.7)");
+  });
+
+  it("does not let a path with line breaks start a new Markdown line", () => {
+    const text = render({
+      [memberId("x\n# injected\ny.py")]: { featureId: "signals", weight: 0.9 },
+    });
+    expect(text).not.toMatch(/^# injected/m);
+    expect(text).toContain("- `x # injected y.py` (0.9)");
+  });
+
+  it("does not let a repo name with a line break start a new heading", () => {
+    const text = render({ "a.py": { featureId: "signals", weight: 0.9 } }, "my\n# repo");
+    expect(text).not.toMatch(/^# repo/m);
+    expect(text).toContain("# Manifest: my # repo at aaaaaaa");
+  });
+
+  it("lists exactly the five heaviest files of a feature, ties broken by path", () => {
+    const membership: Record<string, { featureId: string; weight: number }> = {};
+    for (const [path, weight] of [
+      ["f.py", 0.1],
+      ["e.py", 0.5],
+      ["d.py", 0.5],
+      ["c.py", 0.9],
+      ["b.py", 0.5],
+      ["a.py", 0.7],
+      ["g.py", 0.05],
+    ] as const)
+      membership[path] = { featureId: "signals", weight };
+    const lines = render(membership)
+      .split("\n")
+      .filter((l) => l.startsWith("- `"));
+    expect(lines).toEqual([
+      "- `c.py` (0.9)",
+      "- `a.py` (0.7)",
+      "- `b.py` (0.5)",
+      "- `d.py` (0.5)",
+      "- `e.py` (0.5)",
+    ]);
+  });
+
+  it("mentions calls to unpriced models in the cost line", () => {
+    const text = renderManifestSummary("demo", makeManifest(), {
+      calls: 3,
+      batchCalls: 0,
+      tokens: { in: 10, out: 20, cacheRead: 0, cacheWrite: 0 },
+      usd: 0.5,
+      unpricedCalls: 2,
+    });
+    expect(text).toContain("Cost: $0.5000 (plus 2 calls to unpriced models).");
   });
 });
