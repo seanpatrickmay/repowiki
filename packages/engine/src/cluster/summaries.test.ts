@@ -1,7 +1,7 @@
 import { memberId } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
 import type { SymbolDef } from "../index/index.ts";
-import { buildFileGraph } from "./graph.ts";
+import { buildFileGraph, type FileGraph } from "./graph.ts";
 import { summarizeClusters } from "./summaries.ts";
 import { makeIndex } from "./test-index.ts";
 
@@ -84,6 +84,110 @@ describe("summarizeClusters", () => {
       symbols: ["api/app.py#App"],
       externalImports: ["fastapi"],
       neighbours: [],
+    });
+  });
+});
+
+describe("summarizeClusters ranking rules", () => {
+  const paths = ["p/a.ts", "p/d.ts", "q/x.ts", "r/b.ts", "s/c.ts", "top.ts", "z/y.py"];
+  const ranking = makeIndex(paths);
+  const symbolsByPath: Record<string, [string, SymbolDef["kind"]][]> = {
+    "p/a.ts": [
+      ["va", "variable"],
+      ["fa", "function"],
+    ],
+    "p/d.ts": [["ED", "enum"]],
+    "r/b.ts": [["IB", "interface"]],
+    "s/c.ts": [["TC", "type"]],
+  };
+  for (const file of ranking.files) {
+    file.symbols = (symbolsByPath[file.path] ?? []).map(([name, kind]) =>
+      symbol(file.path, name, kind),
+    );
+  }
+  const miss = (from: string, specifier: string, external = true) => ({
+    from,
+    specifier,
+    line: 1,
+    external,
+  });
+  ranking.unresolved = [
+    miss("p/a.ts", "zod"),
+    miss("p/a.ts", "@scope/pkg/x"),
+    miss("p/d.ts", "zod/v4"),
+    miss("p/d.ts", "chart.js/auto"),
+    miss("r/b.ts", "react-dom/client"),
+    miss("s/c.ts", "zod"),
+    miss("s/c.ts", "react-dom"),
+    miss("s/c.ts", "./gone", false),
+    miss("z/y.py", "os.path"),
+    miss("z/y.py", "os"),
+    miss("z/y.py", "numpy.linalg"),
+    miss("z/y.py", ".sibling", false),
+  ];
+  // Inner weights: r/b 7, s/c 7, p/a 5, p/d 5. Node order in the file never matches that rank,
+  // and a file sits on the low side of one edge and the high side of another.
+  const edge = (x: string, y: string, weight: number) =>
+    x < y ? { a: x, b: y, weight } : { a: y, b: x, weight };
+  const graph: FileGraph = {
+    nodes: paths,
+    edges: [
+      edge("p/a.ts", "p/d.ts", 5),
+      edge("r/b.ts", "s/c.ts", 7),
+      edge("s/c.ts", "q/x.ts", 9),
+      edge("p/a.ts", "z/y.py", 0.12345),
+    ],
+  };
+  const ranked = [
+    { id: "c01", files: ["s/c.ts", "r/b.ts", "p/d.ts", "p/a.ts"] },
+    { id: "c02", files: ["q/x.ts"] },
+    { id: "c03", files: ["z/y.py", "top.ts"] },
+  ];
+  const [main, , root] = summarizeClusters(ranking, graph, ranked);
+
+  it("ranks files by the edge weight they keep inside the cluster, not across it", () => {
+    expect(main?.files).toEqual(["r/b.ts", "s/c.ts", "p/a.ts", "p/d.ts"]);
+  });
+
+  it("orders symbols types, then functions, then variables, central files first within a kind", () => {
+    expect(main?.symbols).toEqual([
+      "r/b.ts#IB",
+      "s/c.ts#TC",
+      "p/d.ts#ED",
+      "p/a.ts#fa",
+      "p/a.ts#va",
+    ]);
+  });
+
+  it("reduces specifiers to package roots, ranked by use then name", () => {
+    // zod 3 (including "zod/v4"), react-dom 2, then the single uses in alphabetical order.
+    expect(main?.externalImports).toEqual(["zod", "react-dom", "@scope/pkg", "chart.js"]);
+    expect(root?.externalImports).toEqual(["os", "numpy"]);
+  });
+
+  it("rounds shared weight to two decimals and labels the repo root", () => {
+    expect(main?.neighbours).toEqual([
+      { id: "c02", weight: 9 },
+      { id: "c03", weight: 0.12 },
+    ]);
+    expect(root?.directories).toEqual([
+      { dir: "(root)", files: 1 },
+      { dir: "z", files: 1 },
+    ]);
+  });
+
+  it("breaks count ties alphabetically and applies each limit to its own listing", () => {
+    const limits = { files: 3, symbols: 2, directories: 2, externalImports: 1, neighbours: 1 };
+    const [small] = summarizeClusters(ranking, graph, ranked, limits);
+    expect(small).toMatchObject({
+      files: ["r/b.ts", "s/c.ts", "p/a.ts"],
+      symbols: ["r/b.ts#IB", "s/c.ts#TC"],
+      directories: [
+        { dir: "p", files: 2 },
+        { dir: "r", files: 1 },
+      ],
+      externalImports: ["zod"],
+      neighbours: [{ id: "c02", weight: 9 }],
     });
   });
 });
