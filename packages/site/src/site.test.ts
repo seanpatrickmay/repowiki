@@ -240,3 +240,26 @@ describe(".astro dir confinement", () => {
     }
   }, 120_000);
 });
+
+describe("page shell", () => {
+  it("links one local stylesheet with dark-mode and phone-width rules", () => {
+    const sheets = [
+      ...(site!
+        .read("index.html")
+        .matchAll(/<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/g) ?? []),
+    ];
+    expect(sheets).toHaveLength(1);
+    const css = site!.read(sheets[0]?.[1] ?? "");
+    expect(css).toContain("prefers-color-scheme:dark");
+    expect(css).toMatch(/max-width:720px|width<=720px/);
+  });
+
+  it("has a skip link, a labelled site nav and a main landmark", () => {
+    expect(site!.read("index.html")).toContain(
+      '<a class="skip-link" href="#content">Jump to content</a>',
+    );
+    expect(site!.read("index.html")).toContain('<nav class="site-nav" aria-label="Site">');
+    expect(site!.read("index.html")).toContain('<main id="content" class="content">');
+    expect(site!.read("index.html")).toContain("<title>Main page - demo-repo wiki</title>");
+  });
+});
