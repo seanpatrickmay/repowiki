@@ -1,4 +1,21 @@
 export {
+  type CoChange,
+  type CoChangePair,
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_MAX_FILES_PER_COMMIT,
+  GitError,
+  type ImportEdge,
+  type IndexedFile,
+  type IndexedSymbol,
+  type IndexOptions,
+  indexRepo,
+  type RepoIndex,
+  type SourceLanguage,
+  type SymbolDef,
+  type SymbolKind,
+  type UnresolvedImport,
+} from "./index/index.ts";
+export {
   buildExport,
   type CitingClaim,
   DroppedFeatureError,
