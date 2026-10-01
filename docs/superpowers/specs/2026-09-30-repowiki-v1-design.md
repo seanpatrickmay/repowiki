@@ -99,7 +99,7 @@ packages/
     verify/     resolves every citation at its sha; enforces citation rules
     link/       aliases, link resolution, See also, Wikipedia URL checks
     freshness/  diff(shaA, shaB) -> stale claims + coverage gaps -> RegenerationPlan
-    store/      SQLite (better-sqlite3): revisions, claims, indexed citation ranges
+    store/      SQLite (better-sqlite3): manifests, revisions, indexed citation ranges, head sha
   site/       Astro reader; reads the JSON export only
   cli/        repowiki build | update | replay | export | serve
   eval/       Q&A harness
@@ -132,14 +132,16 @@ Manifest  { sha, features: Feature[], membership: Record<SymbolOrFileId, { featu
 Revision  { id, featureId, sha, commitDate, generatedAt, parentId: string | null,
             reason: "build" | "update" | "manifest-change", pr: number | null,
             model, tokens: { in, out, cacheRead, cacheWrite },
-            infobox: Infobox, sections: Section[] }
+            infobox: Infobox, diagram: string | null /* Mermaid */,
+            seeAlso: FeatureId[], sections: Section[] }
 
 Infobox   { files: number, loc: number, languages: string[], entryPoints: string[],
             firstCommitDate, lastCommitDate }
 
 Section   { key: "lead" | "overview" | "how-it-works" | "data-flow" | "history"
-               | "known-limitations" | "see-also" | "references",
+               | "known-limitations",
             claims: Claim[] }
+            // "See also" renders from Revision.seeAlso; "References" renders from claim citations.
 
 Claim     { id, text /* markdown with link tokens */, kind: "fact" | "limitation" | "history",
             citations: Citation[], supports: ClaimId[], staleSince: string | null,
