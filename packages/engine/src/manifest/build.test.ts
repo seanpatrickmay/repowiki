@@ -1,6 +1,6 @@
 import { LlmError, LlmOutputError, type Provider } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
-import { buildManifest, ManifestBuildError } from "./build.ts";
+import { buildManifest, ManifestBuildError, manifestCacheKey } from "./build.ts";
 import type { ManifestProposal } from "./proposal.ts";
 import { sampleIndex } from "./test-index.ts";
 import { SAMPLE_CLUSTER_OPTIONS, SAMPLE_PROPOSAL, scriptedProvider } from "./test-provider.ts";
@@ -24,7 +24,7 @@ describe("buildManifest", () => {
     expect(requests[0]).toMatchObject({
       purpose: "manifest",
       batch: true,
-      cacheKey: `manifest-${"c".repeat(40)}`,
+      cacheKey: manifestCacheKey("c".repeat(40), requests[0]?.system ?? ""),
       messages: [{ role: "user", content: "Group these clusters into the wiki's feature pages." }],
     });
     expect(requests[0]?.system).toContain(`# Repository sample at ${"c".repeat(40)}: 3 clusters`);
@@ -32,6 +32,22 @@ describe("buildManifest", () => {
     expect(requests[0]?.system).toContain(
       "symbols: web/src/api.ts#fetchJson, web/src/main.tsx#Main",
     );
+  });
+
+  it("keys the cache by the sha and a hash of the prompt", async () => {
+    const sha = "c".repeat(40);
+    expect(manifestCacheKey(sha)).toBe(`manifest-${sha}`);
+    expect(manifestCacheKey(sha, "prompt")).toMatch(new RegExp(`^manifest-${sha}-[0-9a-f]{12}$`));
+    expect(manifestCacheKey(sha, "prompt")).toBe(manifestCacheKey(sha, "prompt"));
+    expect(manifestCacheKey(sha, "other")).not.toBe(manifestCacheKey(sha, "prompt"));
+  });
+
+  it("uses a different cacheKey when other options change the prompt for the same sha", async () => {
+    const { provider, requests } = scriptedProvider(GOOD, GOOD);
+    await buildManifest(sampleIndex(), { ...options(provider), batch: false });
+    await buildManifest(sampleIndex(), { ...options(provider), batch: false, repoName: "fork" });
+    expect(requests[1]?.system).not.toBe(requests[0]?.system);
+    expect(requests[1]?.cacheKey).not.toBe(requests[0]?.cacheKey);
   });
 
   it("can make the call without the Batches API", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Manifest } from "@repowiki/core";
 import { type LlmMessage, LlmOutputError, type Provider } from "@repowiki/llm";
 import {
@@ -50,6 +51,16 @@ export const DEFAULT_MAX_PROMPT_TOKENS = 150_000;
 const MAX_ATTEMPTS = 2;
 const MAX_OUTPUT_TOKENS = 16_000;
 
+/**
+ * The manifest call's cacheKey: the sha plus a hash of the prompt, so builds of one sha with
+ * different options (weights, clustering, budget) never share a key. Without `system`, the
+ * prefix that every key for this sha starts with, for matching ledger rows.
+ */
+export function manifestCacheKey(sha: string, system?: string): string {
+  if (system === undefined) return `manifest-${sha}`;
+  return `manifest-${sha}-${createHash("sha256").update(system).digest("hex").slice(0, 12)}`;
+}
+
 /** index → clusters → one LLM call (plus at most one retry) → a validated new manifest. */
 export async function buildManifest(
   index: RepoIndex,
@@ -95,7 +106,7 @@ export async function buildManifest(
         messages,
         schema: ManifestProposal,
         maxTokens: MAX_OUTPUT_TOKENS,
-        cacheKey: `manifest-${index.sha}`,
+        cacheKey: manifestCacheKey(index.sha, system),
         batch: options.batch ?? true,
       });
       problems = proposalProblems(output, clusters);
