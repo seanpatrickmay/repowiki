@@ -43,6 +43,30 @@ describe("extractImports (python)", () => {
     expect(importsOf("python", source).map((i) => i.line)).toEqual([2, 4]);
   });
 
+  describe("syntax errors", () => {
+    it("does not report an import node that tree-sitter guessed across a broken line", () => {
+      const found = importsOf("python", "from a import (b,\nimport os\n");
+      expect(found).not.toContainEqual(expect.objectContaining({ module: "a", names: ["os"] }));
+      expect(found.some((i) => i.kind === "python" && i.module === "a")).toBe(false);
+    });
+
+    it("keeps the clean `import x` inside a broken `from import x`", () => {
+      expect(importsOf("python", "from import x\n")).toEqual([
+        { kind: "python", module: "x", level: 0, names: [], line: 1 },
+      ]);
+    });
+
+    it("keeps a clean import whose ancestor is an ERROR node", () => {
+      expect(importsOf("python", "def f(:\n    pass\nimport os\n")).toContainEqual({
+        kind: "python",
+        module: "os",
+        level: 0,
+        names: [],
+        line: 3,
+      });
+    });
+  });
+
   it("ignores __future__ imports", () => {
     expect(importsOf("python", "from __future__ import annotations\n")).toEqual([]);
   });
@@ -68,5 +92,14 @@ describe("extractImports (typescript)", () => {
       { kind: "es", specifier: "@scope/pkg/sub", line: 5 },
       { kind: "es", specifier: "./Page", line: 6 },
     ]);
+  });
+
+  it("never throws on a syntax error and still reads clean imports", () => {
+    const source = 'import { a } from "./a";\nimport { b from "./b";\nexport const x = ;\n';
+    let found: ReturnType<typeof importsOf> = [];
+    expect(() => {
+      found = importsOf("typescript", source);
+    }).not.toThrow();
+    expect(found).toContainEqual({ kind: "es", specifier: "./a", line: 1 });
   });
 });
