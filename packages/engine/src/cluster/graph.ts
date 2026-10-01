@@ -72,9 +72,12 @@ export function buildFileGraph(
   const byDir = new Map<string, string[]>();
   for (const path of nodes) {
     const dir = posix.dirname(path);
-    byDir.set(dir, [...(byDir.get(dir) ?? []), path]);
+    const siblings = byDir.get(dir);
+    if (siblings) siblings.push(path);
+    else byDir.set(dir, [path]);
   }
   for (const siblings of byDir.values()) {
+    if (siblings.length < 2) continue;
     const share = weights.directory / (siblings.length - 1);
     for (let i = 0; i < siblings.length; i++) {
       for (let j = i + 1; j < siblings.length; j++)
