@@ -1,9 +1,25 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport } from "./test-fixtures.ts";
-import { type BuiltSite, brokenLinks, buildFixtureSite, htmlFiles, runCli } from "./test-site.ts";
+import {
+  type BuiltSite,
+  brokenLinks,
+  buildFixtureSite,
+  htmlFiles,
+  offsiteCssUrls,
+  offsiteResources,
+  runCli,
+} from "./test-site.ts";
 
 let site: BuiltSite;
 beforeAll(() => {
@@ -26,12 +42,14 @@ describe("site build", () => {
   });
 
   it("references no off-site scripts, styles or fonts", () => {
+    // Outbound <a> links are navigation and exempt; every other loadable URL must be same-site.
     for (const page of htmlFiles(site.outDir)) {
-      // Articles legitimately carry outbound <a href> links to the repo host and cited URLs.
-      // The check is for resources the page loads, so anchors are excluded.
-      expect(site.read(page)).not.toMatch(
-        /<(?!a[\s>])[a-z][^>]*\s(?:src|href)="(?:https?:\/\/|\/\/)/,
-      );
+      expect({ page, offsite: offsiteResources(site.read(page)) }).toEqual({ page, offsite: [] });
+    }
+    const stylesheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
+    expect(stylesheets.length).toBeGreaterThan(0);
+    for (const sheet of stylesheets) {
+      expect(offsiteCssUrls(site.read(`_astro/${sheet}`))).toEqual([]);
     }
   });
 });
@@ -267,7 +285,7 @@ describe("page shell", () => {
   it("uses data: favicon and has no off-site links", () => {
     const html = site.read("index.html");
     expect(html).toContain('<link rel="icon" href="data:,">');
-    expect(html).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
+    expect(offsiteResources(html)).toEqual([]);
   });
 });
 
