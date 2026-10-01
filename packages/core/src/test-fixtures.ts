@@ -3,6 +3,7 @@ import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
 import type { Feature } from "./feature.ts";
 import type { Manifest } from "./manifest.ts";
+import type { Revision } from "./revision.ts";
 
 export const SHA_A = "a".repeat(40);
 export const SHA_B = "b".repeat(40);
@@ -79,6 +80,36 @@ export function makeManifest(overrides: Partial<Manifest> = {}): Manifest {
       "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 },
       "src/deliverables/crud.py": { featureId: "deliverables", weight: 0.7 },
     },
+    ...overrides,
+  };
+}
+
+export function makeRevision(overrides: Partial<Revision> = {}): Revision {
+  return {
+    id: "rev-1",
+    featureId: "signals",
+    sha: SHA_A,
+    commitDate: "2026-02-03T10:00:00-05:00",
+    generatedAt: "2026-09-30T20:00:00Z",
+    parentId: null,
+    reason: "build",
+    pr: null,
+    model: "claude-haiku-4-5",
+    tokens: { in: 1200, out: 300, cacheRead: 0, cacheWrite: 0 },
+    infobox: {
+      files: 3,
+      loc: 240,
+      languages: ["Python"],
+      entryPoints: ["src/signals/ingest.py"],
+      firstCommitDate: "2026-01-26T09:00:00-05:00",
+      lastCommitDate: "2026-02-03T10:00:00-05:00",
+    },
+    diagram: null,
+    seeAlso: ["deliverables"],
+    sections: [
+      { key: "lead", claims: [leadClaim()] },
+      { key: "overview", claims: [bodyClaim()] },
+    ],
     ...overrides,
   };
 }
