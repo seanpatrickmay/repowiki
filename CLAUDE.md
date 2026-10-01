@@ -8,6 +8,7 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm install` — install dependencies (Node 24, pnpm 10)
 - `pnpm check` — typecheck + lint + test; must pass before every commit
 - `pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format`
+- `pnpm manifest:build <repo> [rev] [--out dir]` — index, cluster, and build the manifest live (Haiku 4.5 via the Batches API); writes only under `~/.repowiki/<repo>/` or `--out`
 - `pnpm cassettes:record <test files>` — re-record LLM cassettes live (needs `ANTHROPIC_API_KEY` in `.env`; costs money; review the diff)
 
 ## Layout
