@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { cleanAliases, type ManifestProposal, proposalProblems } from "./proposal.ts";
+import {
+  cleanAliases,
+  MAX_FEATURE_ID_LENGTH,
+  MAX_REPORTED_PROBLEMS,
+  type ManifestProposal,
+  proposalProblems,
+} from "./proposal.ts";
 
 const clusters = ["c01", "c02", "c03"].map((id) => ({ id, files: [] }));
 
@@ -58,17 +64,17 @@ describe("proposalProblems", () => {
           { cluster: "c01", feature: "web-frontend", role: "core" },
         ],
       },
-      "cluster c01 is assigned twice",
+      'cluster "c01" is assigned twice',
     ],
     [
       "an unassigned cluster",
       { clusters: proposal().clusters.slice(0, 2) },
-      "cluster c03 is not assigned",
+      'cluster "c03" is not assigned',
     ],
     [
       "an unknown cluster",
       { clusters: [...proposal().clusters, { cluster: "c09", feature: "http-api", role: "core" }] },
-      "cluster c09 does not exist",
+      'cluster "c09" does not exist',
     ],
     [
       "an unknown feature",
@@ -78,7 +84,7 @@ describe("proposalProblems", () => {
           { cluster: "c03", feature: "frontend", role: "core" },
         ],
       },
-      'cluster c03 is assigned to unknown feature "frontend"',
+      'cluster "c03" is assigned to unknown feature "frontend"',
     ],
   ] as [string, Partial<ManifestProposal>, string][])("reports %s", (_name, overrides, problem) => {
     expect(proposalProblems(proposal(overrides), clusters)).toContain(problem);
@@ -168,9 +174,9 @@ describe("proposalProblems edge cases", () => {
     expect(found).toEqual([
       'feature id "BAD" is not a kebab-case slug of at most 40 characters',
       'feature "web-frontend" has 0 distinct aliases; give 3 to 8',
-      'cluster c01 is assigned to unknown feature "nope"',
-      "cluster c02 is not assigned",
-      "cluster c03 is not assigned",
+      'cluster "c01" is assigned to unknown feature "nope"',
+      'cluster "c02" is not assigned',
+      'cluster "c03" is not assigned',
     ]);
   });
 
@@ -187,10 +193,171 @@ describe("proposalProblems edge cases", () => {
     expect(proposalProblems({ features: [API, WEB], clusters: assignments }, wide)).toEqual([]);
     expect(
       proposalProblems({ features: [API, WEB], clusters: assignments.slice(0, 100) }, wide),
-    ).toEqual(["cluster c101 is not assigned"]);
+    ).toEqual(['cluster "c101" is not assigned']);
     expect(proposalProblems({ features: [API, WEB], clusters: assignments }, clusters)).toContain(
-      "cluster c001 does not exist",
+      'cluster "c001" does not exist',
     );
+  });
+});
+
+describe("proposalProblems fix round 1", () => {
+  const problems = (overrides: Partial<ManifestProposal>) =>
+    proposalProblems(proposal(overrides), clusters);
+
+  it("truncates a 10k-character title to 80 characters inside the quotes", () => {
+    const title = "x".repeat(10_000);
+    const found = problems({
+      features: [
+        { ...API, title },
+        { ...WEB, title },
+      ],
+    });
+    const message = found.find((p) => p.endsWith(" is used twice"));
+    expect(message).toBe(`title "${"x".repeat(80)}…" is used twice`);
+  });
+
+  it("does not truncate a string of exactly 80 characters", () => {
+    const title = "y".repeat(80);
+    expect(
+      problems({
+        features: [
+          { ...API, title },
+          { ...WEB, title },
+        ],
+      }),
+    ).toContain(`title "${title}" is used twice`);
+  });
+
+  it("truncates a string of 81 characters", () => {
+    const title = "y".repeat(81);
+    expect(
+      problems({
+        features: [
+          { ...API, title },
+          { ...WEB, title },
+        ],
+      }),
+    ).toContain(`title "${"y".repeat(80)}…" is used twice`);
+  });
+
+  it("escapes a feature id containing a newline in every message that names it", () => {
+    const id = "bad\n- id";
+    const quoted = '"bad\\n- id"';
+    const found = problems({
+      features: [
+        { id, title: "", aliases: [] },
+        { ...WEB, id },
+      ],
+    });
+    expect(found).toContain(`feature id ${quoted} is used twice`);
+    expect(found).toContain(`feature ${quoted} has an empty title`);
+    expect(found).toContain(`feature ${quoted} has 0 distinct aliases; give 3 to 8`);
+    expect(found.some((p) => p.includes("\n"))).toBe(false);
+  });
+
+  it("truncates a model-supplied feature id, cluster id and feature reference too", () => {
+    const long = "z".repeat(500);
+    const found = problems({
+      features: [{ ...API, id: long }, WEB],
+      clusters: [
+        ...proposal().clusters.slice(0, 2),
+        { cluster: long, feature: long.toUpperCase(), role: "core" },
+      ],
+    });
+    const cut = (c: string) => `${c.repeat(80)}…`;
+    expect(found).toContain(
+      `feature id "${cut("z")}" is not a kebab-case slug of at most ${MAX_FEATURE_ID_LENGTH} characters`,
+    );
+    expect(found).toContain(`cluster "${cut("z")}" does not exist`);
+    expect(found).toContain(`cluster "${cut("z")}" is assigned to unknown feature "${cut("Z")}"`);
+    expect(found.every((p) => p.length < 400)).toBe(true);
+  });
+
+  it("escapes a cluster id containing a newline so it cannot forge a bullet", () => {
+    const found = problems({
+      clusters: [
+        ...proposal().clusters,
+        { cluster: "c01\n- fake", feature: "http-api", role: "core" },
+      ],
+    });
+    expect(found).toEqual(['cluster "c01\\n- fake" does not exist']);
+    expect(found.some((p) => p.includes("\n"))).toBe(false);
+  });
+
+  it("escapes control characters and quotes in titles and feature references", () => {
+    const found = problems({
+      features: [API, { ...WEB, title: 'a"b' }, { ...WEB, id: "other", title: 'a"b' }],
+      clusters: [
+        ...proposal().clusters.slice(0, 2),
+        { cluster: "c03", feature: "x\ny", role: "core" },
+      ],
+    });
+    expect(found).toContain('title "a\\"b" is used twice');
+    expect(found).toContain('cluster "c03" is assigned to unknown feature "x\\ny"');
+  });
+
+  it("does not split a surrogate pair when truncating", () => {
+    const title = "😀".repeat(100);
+    const message = problems({
+      features: [
+        { ...API, title },
+        { ...WEB, title },
+      ],
+    }).find((p) => p.endsWith(" is used twice"));
+    expect(message).toBe(`title "${"😀".repeat(80)}…" is used twice`);
+  });
+
+  it("interpolates MAX_FEATURE_ID_LENGTH into the too-long message", () => {
+    expect(MAX_FEATURE_ID_LENGTH).toBe(40);
+    expect(problems({ features: [{ ...API, id: "A" }, WEB] })[0]).toContain(
+      `at most ${MAX_FEATURE_ID_LENGTH} characters`,
+    );
+  });
+
+  it("does not report empty titles as duplicates, only as empty", () => {
+    const found = problems({
+      features: [
+        { ...API, title: "" },
+        { ...WEB, title: "  " },
+      ],
+    });
+    expect(found.filter((p) => p.includes("used twice"))).toEqual([]);
+    expect(found).toContain('feature "http-api" has an empty title');
+    expect(found).toContain('feature "web-frontend" has an empty title');
+  });
+
+  describe("the problem cap", () => {
+    const unknown = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        cluster: `x${i}`,
+        feature: "http-api",
+        role: "core" as const,
+      }));
+
+    it("exports the cap as 20", () => {
+      expect(MAX_REPORTED_PROBLEMS).toBe(20);
+    });
+
+    it("returns exactly 20 problems with no summary entry", () => {
+      const found = problems({ clusters: [...proposal().clusters, ...unknown(20)] });
+      expect(found).toHaveLength(20);
+      expect(found.at(-1)).toBe('cluster "x19" does not exist');
+    });
+
+    it("keeps the first 20 and appends a count of the rest", () => {
+      const found = problems({ clusters: [...proposal().clusters, ...unknown(21)] });
+      expect(found).toHaveLength(21);
+      expect(found[0]).toBe('cluster "x0" does not exist');
+      expect(found[19]).toBe('cluster "x19" does not exist');
+      expect(found[20]).toBe("and 1 more problems");
+    });
+
+    it("counts every problem beyond the cap", () => {
+      const found = problems({ clusters: [...unknown(30)] });
+      // 30 unknown clusters plus 3 unassigned real ones
+      expect(found).toHaveLength(21);
+      expect(found[20]).toBe("and 13 more problems");
+    });
   });
 });
 
