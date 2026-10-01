@@ -87,11 +87,14 @@ export function pageFor(site: SiteModel, route: WikiRoute): PageView {
         refresh: link === null ? null : `0; url=${link.href}?redirectedfrom=${from}`,
       };
     }
-    case "disambiguation":
+    case "disambiguation": {
+      // A merged-away target shows its final article, not its own stale lead; two targets that
+      // merge into one article list it once.
+      const ids = [...new Set(route.targets.map((id) => finalTarget(site, id)))];
       return {
         kind: "disambiguation",
         title: route.title,
-        entries: route.targets.map((id) => {
+        entries: ids.map((id) => {
           const summary = leadSummary(site, id);
           return {
             title: titleOf(id),
@@ -100,5 +103,6 @@ export function pageFor(site: SiteModel, route: WikiRoute): PageView {
           };
         }),
       };
+    }
   }
 }

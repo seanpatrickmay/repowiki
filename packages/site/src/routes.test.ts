@@ -1,8 +1,9 @@
+import { makeFeature, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { buildSiteModel } from "./model.ts";
 import { articleFor, pageFor, type WikiRoute, wikiRoutes } from "./routes.ts";
 import { leadSummary } from "./summary.ts";
-import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
+import { fixtureExport, fixtureExportWith, HOSTILE_TITLE } from "./test-fixtures.ts";
 
 const site = buildSiteModel(fixtureExport(), null);
 
@@ -145,6 +146,102 @@ describe("pageFor", () => {
     ).toEqual({
       kind: "disambiguation",
       title: "Z",
+      entries: [{ title: "Scheduler", href: null, summaryHtml: null }],
+    });
+  });
+});
+
+const redirectTo = (id: string, to: string, aliases: string[] = []) =>
+  makeFeature({
+    id,
+    title: id,
+    aliases,
+    status: { kind: "redirect", to },
+    lineage: [
+      { kind: "create", sha: SHA_A },
+      { kind: "merge", sha: SHA_B, into: to },
+    ],
+  });
+
+describe("redirect chains", () => {
+  // old-legacy -> legacy-signals -> signals
+  const chained = buildSiteModel(
+    fixtureExportWith([redirectTo("old-legacy", "legacy-signals", ["Ancient"])]),
+    null,
+  );
+
+  it("points a chained redirect straight at the final target", () => {
+    const route = wikiRoutes(chained).find((candidate) => candidate.slug === "old-legacy");
+    expect(route).toEqual({
+      slug: "old-legacy",
+      kind: "redirect",
+      title: "old-legacy",
+      target: "signals",
+    });
+    expect(route && pageFor(chained, route)).toEqual({
+      kind: "redirect",
+      title: "old-legacy",
+      target: { title: "Signal ingestion", href: "/wiki/signals/" },
+      refresh: "0; url=/wiki/signals/?redirectedfrom=old-legacy",
+    });
+  });
+
+  it("points an alias of a chained redirect at the final target too", () => {
+    const route = wikiRoutes(chained).find((candidate) => candidate.slug === "ancient");
+    expect(route).toEqual({
+      slug: "ancient",
+      kind: "redirect",
+      title: "Ancient",
+      target: "signals",
+    });
+  });
+});
+
+describe("disambiguation targets", () => {
+  const dab = (targets: string[]): WikiRoute => ({
+    slug: "d",
+    kind: "disambiguation",
+    title: "D",
+    targets,
+  });
+  const merged = buildSiteModel(fixtureExportWith([redirectTo("dead-end", "scheduler")]), null);
+
+  it("links a merged-away target to its final article and shows that article's lead", () => {
+    // legacy-signals is a redirect that still has a (stale) revision of its own.
+    expect(site.pages.has("legacy-signals")).toBe(true);
+    const page = pageFor(site, dab(["legacy-signals", "deliverables"]));
+    expect(page).toEqual({
+      kind: "disambiguation",
+      title: "D",
+      entries: [
+        {
+          title: "Signal ingestion",
+          href: "/wiki/signals/",
+          summaryHtml: expect.stringMatching(/^: <b>Signal ingestion<\/b> is the subsystem/),
+        },
+        {
+          title: "Deliverables",
+          href: "/wiki/deliverables/",
+          summaryHtml: ": <b>Deliverables</b> are the records that Signal ingestion feed.",
+        },
+      ],
+    });
+    expect(JSON.stringify(page)).not.toContain("Legacy signals");
+  });
+
+  it("lists one entry when two targets resolve to the same article", () => {
+    const page = pageFor(site, dab(["legacy-signals", "signals", "deliverables"]));
+    expect(page.kind === "disambiguation" && page.entries.map((entry) => entry.href)).toEqual([
+      "/wiki/signals/",
+      "/wiki/deliverables/",
+    ]);
+  });
+
+  it("renders a target that resolves to a feature without a page as plain text", () => {
+    const page = pageFor(merged, dab(["dead-end"]));
+    expect(page).toEqual({
+      kind: "disambiguation",
+      title: "D",
       entries: [{ title: "Scheduler", href: null, summaryHtml: null }],
     });
   });

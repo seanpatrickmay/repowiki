@@ -424,6 +424,14 @@ describe("redirect and disambiguation pages", () => {
     expect(html).not.toContain("<img src=x");
   });
 
+  it("emits no stray text outside <html> on any page", () => {
+    for (const page of htmlFiles(site.outDir)) {
+      const html = site.read(page);
+      expect(html, page).toMatch(/^<!DOCTYPE html>\n<html /i);
+      expect(html.endsWith("</html>"), page).toBe(true);
+    }
+  });
+
   it("matches the golden snapshots", async () => {
     await expect(normalized("wiki/legacy-signals/index.html")).toMatchFileSnapshot(
       "__snapshots__/wiki-legacy-signals.html",

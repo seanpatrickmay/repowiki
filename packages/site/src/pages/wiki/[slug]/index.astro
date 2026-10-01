@@ -15,12 +15,11 @@ interface Props {
 const { route } = Astro.props;
 const page = pageFor(getSite(), route);
 ---
-{page.kind === "article" && (
+{page.kind === "article" ? (
   <Layout title={page.view.title}>
     <Article view={page.view} indexed={true} />
   </Layout>
-)}
-{page.kind === "redirect" && (
+) : page.kind === "redirect" ? (
   <Layout title={page.title}>
     <Fragment slot="head">
       {page.refresh !== null && <meta http-equiv="refresh" content={page.refresh} />}
@@ -37,8 +36,7 @@ const page = pageFor(getSite(), route);
       )}
     </p>
   </Layout>
-)}
-{page.kind === "disambiguation" && (
+) : (
   <Layout title={page.title}>
     <h1 class="page-title">{page.title}</h1>
     <p><b>{page.title}</b> may refer to:</p>
