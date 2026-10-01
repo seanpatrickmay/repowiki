@@ -1,23 +1,16 @@
 import { z } from "zod";
 import { Feature, FeatureId } from "./feature.ts";
+import { parseMemberId } from "./member-id.ts";
 import { GitSha, RepoPath } from "./primitives.ts";
 
-/** "path" for file-level members, "path#symbol" for symbol-level members. */
+/** A memberId(): an encoded repo path, optionally "#" and a non-empty symbol. */
 export const MemberId = z
   .string()
   .min(1)
-  .refine((memberId) => {
-    const hashIndex = memberId.indexOf("#");
-    const path = hashIndex === -1 ? memberId : memberId.substring(0, hashIndex);
-    const symbol = hashIndex === -1 ? undefined : memberId.substring(hashIndex + 1);
-
-    if (!path) return false; // empty path part
-    // Validate path part with RepoPath
-    if (!RepoPath.safeParse(path).success) return false;
-    // If symbol part exists (hashIndex !== -1), it must be non-empty
-    if (hashIndex !== -1 && symbol === "") return false;
-    return true;
-  }, "member id must be 'path' or 'path#symbol' where path is a valid repo path and symbol is non-empty");
+  .refine((id) => {
+    const parsed = parseMemberId(id);
+    return parsed !== null && RepoPath.safeParse(parsed.path).success;
+  }, "member id must be memberId(path) or memberId(path, symbol) for a valid repo path");
 
 export const Membership = z.object({ featureId: FeatureId, weight: z.number().gt(0).lte(1) });
 export type Membership = z.infer<typeof Membership>;

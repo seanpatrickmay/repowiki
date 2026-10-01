@@ -4,6 +4,7 @@ export { contentHash } from "./content-hash.ts";
 export { HistoryEntry, WikiExport } from "./export.ts";
 export { Feature, FeatureId, FeatureStatus, LineageEvent } from "./feature.ts";
 export { Manifest, MemberId, Membership } from "./manifest.ts";
+export { memberId, parseMemberId } from "./member-id.ts";
 export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";
 export { Infobox, Revision, RevisionReason, TokenUsage } from "./revision.ts";
 export { claimRuleViolations, Section, SectionKey } from "./section.ts";
