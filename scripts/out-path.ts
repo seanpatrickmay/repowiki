@@ -1,45 +1,26 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+/** Canonical path to write `out` to, or null to refuse (inside repo, symlink, directory, error). */
 export function resolveOutPath(repo: string, out: string): string | null {
   try {
-    // Get absolute path of out
     const abs = resolve(out);
 
-    // If out is a symlink, return null (refuse)
     try {
       const stat = lstatSync(abs);
-      if (stat.isSymbolicLink()) {
-        return null;
-      }
+      if (stat.isSymbolicLink() || stat.isDirectory()) return null;
     } catch (err) {
-      // If lstat throws ENOENT on abs itself, that's fine, continue
-      // Any other error is treated as fail-closed (refuse)
-      const error = err as NodeJS.ErrnoException;
-      if (error.code !== "ENOENT") {
-        return null;
-      }
+      // ENOENT is fine: the file does not exist yet.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") return null;
     }
 
-    // Get the real path of the parent directory
-    const parentDir = dirname(abs);
-    const parentReal = realpathSync.native(parentDir);
+    // Canonical parent plus the typed basename: the final segment is never followed or normalized.
+    const target = join(realpathSync.native(dirname(abs)), basename(abs));
 
-    // Get the real path of the repo
-    const repoReal = realpathSync.native(repo);
-
-    // Construct the target path: canonical parent + basename
-    const outName = basename(abs);
-    const target = join(parentReal, outName);
-
-    // Check if target is outside repo
-    const rel = relative(repoReal, target);
+    const rel = relative(realpathSync.native(repo), target);
     const isOutside = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
-
-    // Return target if outside, null if inside (to refuse writing)
     return isOutside ? target : null;
   } catch {
-    // Any unexpected error - fail closed, refuse the write
     return null;
   }
 }
