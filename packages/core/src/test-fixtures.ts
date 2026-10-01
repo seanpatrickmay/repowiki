@@ -1,6 +1,8 @@
 import type { CodeCitation, CommitCitation } from "./citation.ts";
 import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
+import type { Feature } from "./feature.ts";
+import type { Manifest } from "./manifest.ts";
 
 export const SHA_A = "a".repeat(40);
 export const SHA_B = "b".repeat(40);
@@ -51,6 +53,32 @@ export function leadClaim(overrides: Partial<Claim> = {}): Claim {
     supports: ["c-1"],
     staleSince: null,
     hook: false,
+    ...overrides,
+  };
+}
+
+export function makeFeature(overrides: Partial<Feature> = {}): Feature {
+  return {
+    id: "signals",
+    title: "Signal ingestion",
+    aliases: ["signal pipeline"],
+    status: { kind: "active" },
+    lineage: [{ kind: "create", sha: SHA_A }],
+    ...overrides,
+  };
+}
+
+export function makeManifest(overrides: Partial<Manifest> = {}): Manifest {
+  return {
+    sha: SHA_A,
+    features: [
+      makeFeature(),
+      makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
+    ],
+    membership: {
+      "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 },
+      "src/deliverables/crud.py": { featureId: "deliverables", weight: 0.7 },
+    },
     ...overrides,
   };
 }
