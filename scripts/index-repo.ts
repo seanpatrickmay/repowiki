@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
 import { type IndexedFile, indexRepo } from "@repowiki/engine";
+import { isInsideRepo } from "./out-path.ts";
 
 const [repo, rev = "HEAD", ...rest] = process.argv.slice(2);
 if (repo === undefined) {
@@ -9,7 +9,7 @@ if (repo === undefined) {
 }
 const outFlag = rest.indexOf("--out");
 const out = outFlag === -1 ? null : (rest[outFlag + 1] ?? null);
-if (out !== null && resolve(out).startsWith(resolve(repo) + sep)) {
+if (out !== null && isInsideRepo(repo, out)) {
   console.error("refusing to write inside the indexed repository; choose an --out path elsewhere");
   process.exit(2);
 }
