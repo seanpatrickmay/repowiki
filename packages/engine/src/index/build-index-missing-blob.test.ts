@@ -3,7 +3,7 @@ import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
 const dropBlobs = vi.hoisted(() => ({ on: false }));
 vi.mock("./git.ts", async (importOriginal) => {
-  const real = await importOriginal<typeof import("./git.ts")>();
+  const real: typeof import("./git.ts") = await importOriginal();
   return {
     ...real,
     readBlobs: (repo: string, oids: readonly string[]) =>

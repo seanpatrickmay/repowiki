@@ -2,10 +2,10 @@ import type { SpawnSyncReturns } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const spawn = vi.hoisted(() => vi.fn());
-vi.mock("node:child_process", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: spawn,
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const real: typeof import("node:child_process") = await importOriginal();
+  return { ...real, spawnSync: spawn };
+});
 
 const { GitError, listBlobs, resolveCommit } = await import("./git.ts");
 
