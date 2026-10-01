@@ -220,6 +220,20 @@ describe("resolveOutPath", () => {
       expect(resolveOutPath(join(repo, ".git"), join(elsewhere, "ok.json"))).toBeNull();
     });
 
+    it("ignores an inherited GIT_DIR when finding the work tree", () => {
+      const saved = process.env.GIT_DIR;
+      try {
+        process.env.GIT_DIR = join(elsewhere, "bogus.git");
+        expect(resolveOutPath(repo, join(repo, "x.json"))).toBeNull();
+        expect(resolveOutPath(repo, join(elsewhere, "ok.json"))).toBe(
+          join(realpathSync.native(elsewhere), "ok.json"),
+        );
+      } finally {
+        if (saved === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = saved;
+      }
+    });
+
     it("a bare repository returns null", () => {
       const bare = join(tmpDir, "bare.git");
       execFileSync("git", ["init", "-q", "--bare", bare]);

@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { scrubbedGitEnv } from "@repowiki/engine";
 
 /** Canonical top level of the work tree enclosing `repo`, the tree `git -C repo` indexes. */
 function repoTopLevel(repo: string): string {
   const top = execFileSync("git", ["-C", repo, "rev-parse", "--show-toplevel"], {
     encoding: "utf8",
+    env: scrubbedGitEnv(),
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
   return realpathSync.native(top);

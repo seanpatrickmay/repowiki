@@ -7,9 +7,30 @@ export class GitError extends Error {
   }
 }
 
+/** Variables that redirect git to a different repository, index or object store. */
+const REDIRECTING_GIT_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR",
+] as const;
+
+/** The process environment (plus `extra`) without anything that would redirect `git -C <repo>`. */
+export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  for (const name of REDIRECTING_GIT_ENV) delete env[name];
+  return env;
+}
+
 /** Runs a read-only git command against `repo`; never touches its working tree or index. */
 function git(repo: string, args: readonly string[], input?: string): Buffer {
-  const result = spawnSync("git", ["-C", repo, ...args], { input, maxBuffer: 1 << 30 });
+  const result = spawnSync("git", ["-C", repo, ...args], {
+    input,
+    maxBuffer: 1 << 30,
+    env: scrubbedGitEnv(),
+  });
   if (result.error) throw new GitError(`could not run git: ${result.error.message}`);
   if (result.status !== 0) {
     throw new GitError(
@@ -21,15 +42,11 @@ function git(repo: string, args: readonly string[], input?: string): Buffer {
 
 /** Full 40-character sha of the commit `rev` names. */
 export function resolveCommit(repo: string, rev: string): string {
-  const out = spawnSync("git", [
-    "-C",
-    repo,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "--end-of-options",
-    `${rev}^{commit}`,
-  ]);
+  const out = spawnSync(
+    "git",
+    ["-C", repo, "rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
+    { env: scrubbedGitEnv() },
+  );
   const sha = out.stdout?.toString("utf8").trim() ?? "";
   if (out.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) {
     throw new GitError(`${repo}: "${rev}" does not name a commit`);
