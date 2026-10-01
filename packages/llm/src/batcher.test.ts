@@ -216,7 +216,7 @@ describe("createBatcher", () => {
         });
       }
 
-      if (method === "GET" && path.endsWith("msgbatch_canned") && !path.endsWith("/results")) {
+      if (method === "GET" && path.endsWith("msgbatch_canned")) {
         getCount += 1;
         if (getCount <= 2) {
           return new Response("error", { status: 500 });
@@ -243,6 +243,7 @@ describe("createBatcher", () => {
     });
     const result = await batcher(params("test"));
     expect(result.content).toEqual([{ type: "text", text: "a" }]);
+    expect(getCount).toBeGreaterThanOrEqual(3);
   });
 
   it("resets failure counter on successful retrieve", async () => {
@@ -253,18 +254,18 @@ describe("createBatcher", () => {
       const path = new URL(urlStr).pathname;
       const method = (init as Record<string, unknown>)?.method ?? "GET";
 
-      // Pattern: fail, fail, success (status ends), then results()
-      if (
-        method === "GET" &&
-        path.includes("/batches/msgbatch_canned") &&
-        !path.includes("/results")
-      ) {
+      // Pattern: fail, fail, success(in_progress), fail, fail, fail, success(ended), then results GET
+      if (method === "GET" && path.endsWith("msgbatch_canned")) {
         getCount += 1;
-        if (getCount < 3) {
+        // Sequence: [F, F, S, F, F, F, S, S]
+        // (7th is success with ended, 8th is the SDK's extra GET before results)
+        const shouldFail = [true, true, false, true, true, true, false, false][getCount - 1];
+
+        if (shouldFail) {
           return new Response("error", { status: 500 });
         }
-        // getCount >= 3: success with ended status
-        return new Response(JSON.stringify(batchResponse("ended")), {
+        const status = getCount >= 7 ? "ended" : "in_progress";
+        return new Response(JSON.stringify(batchResponse(status)), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -279,6 +280,7 @@ describe("createBatcher", () => {
     });
     const result = await batcher(params("test"));
     expect(result.content).toEqual([{ type: "text", text: "a" }]);
+    expect(getCount).toBeGreaterThanOrEqual(7);
   });
 
   it("rejects all items after 4 consecutive retrieve failures with batch id in error", async () => {
@@ -294,7 +296,7 @@ describe("createBatcher", () => {
         });
       }
 
-      if (method === "GET" && path.endsWith("msgbatch_canned") && !path.endsWith("/results")) {
+      if (method === "GET" && path.endsWith("msgbatch_canned")) {
         return new Response("server error", { status: 500 });
       }
 
@@ -328,7 +330,7 @@ describe("createBatcher", () => {
         });
       }
 
-      if (method === "GET" && path.endsWith("msgbatch_canned") && !path.endsWith("/results")) {
+      if (method === "GET" && path.endsWith("msgbatch_canned")) {
         return new Response(JSON.stringify(batchResponse("ended")), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -339,7 +341,7 @@ describe("createBatcher", () => {
         return new Response("server error", { status: 500 });
       }
 
-      return new Response("error", { status: 500 });
+      throw new Error(`Unexpected fetch: ${path}`);
     };
 
     const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
@@ -347,12 +349,16 @@ describe("createBatcher", () => {
       sleep: async () => {},
     });
     const settled = await Promise.allSettled([batcher(params("a")), batcher(params("b"))]);
-    expect(settled.map((s) => s.status)).toEqual(["rejected", "rejected"]);
-    expect(settled[0].status === "rejected" && settled[0].reason.toString()).toContain(
-      "msgbatch_canned",
-    );
-    expect(settled[0].status === "rejected" && settled[0].reason.toString()).toContain(
-      "failed to retrieve results",
-    );
+    expect(settled).toHaveLength(2);
+    expect(settled[0].status).toEqual("rejected");
+    expect(settled[1].status).toEqual("rejected");
+    const reason0 = settled[0].status === "rejected" ? settled[0].reason : null;
+    const reason1 = settled[1].status === "rejected" ? settled[1].reason : null;
+    expect(reason0).toBeInstanceOf(Error);
+    expect(reason1).toBeInstanceOf(Error);
+    expect(reason0?.toString()).toContain("msgbatch_canned");
+    expect(reason0?.toString()).toContain("failed to retrieve results");
+    expect(reason1?.toString()).toContain("msgbatch_canned");
+    expect(reason1?.toString()).toContain("failed to retrieve results");
   });
 });
