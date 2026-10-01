@@ -16,23 +16,37 @@ export const STALE_NOTICE = "This section may be out of date.";
 
 export interface SectionView {
   anchor: string;
+  /** Plain text: emit with `{}` in Astro. */
   title: string;
+  /** Trusted HTML built by the site's renderers: emit with `set:html`. */
   html: string;
   stale: boolean;
 }
 
+/**
+ * Everything the article template prints. Each text field is either plain text (emit it with
+ * `{}`, so Astro escapes it) or trusted HTML built here from escaped parts (emit it with
+ * `set:html`). Never swap the two.
+ */
 export interface ArticleView {
   featureId: string;
+  /** Plain text. */
   title: string;
-  /** Banner HTML above the article (retired feature, old revision), or null. */
+  /** Trusted HTML. Banner above the article (retired feature), or null. */
   notice: string | null;
+  /** Trusted HTML. */
   leadHtml: string;
   leadStale: boolean;
+  /** Plain text titles. */
   toc: { anchor: string; title: string }[];
   sections: SectionView[];
+  /** Plain text titles. */
   seeAlso: { href: string; title: string }[];
+  /** Trusted HTML in both `html` and `backlinks`. */
   references: { n: number; html: string; backlinks: string }[];
+  /** `label` is plain text; `html` is trusted HTML. */
   infobox: { label: string; html: string }[];
+  /** Trusted HTML: "This page was last edited on <date>, at commit <sha link>." */
   lastEdited: string;
 }
 

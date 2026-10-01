@@ -1,3 +1,4 @@
+import { bodyClaim, codeCitation, commitCitation, leadClaim } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { articleView } from "./article.ts";
 import { formatDate, formatNumber } from "./format.ts";
@@ -86,5 +87,101 @@ describe("articleView", () => {
       "This feature was retired at commit <code>ccccccc</code>. The article describes it as of its last revision.",
     );
     expect(view.notice).toBeNull();
+  });
+
+  it("marks the lead stale when one of its own claims is stale", () => {
+    const revision = page("signals");
+    const [lead, ...rest] = revision.sections;
+    if (lead === undefined) throw new Error("no lead");
+    const leadClaims = lead.claims.map((claim) => ({
+      ...claim,
+      supports: [],
+      staleSince: "b".repeat(40),
+    }));
+    const stale = articleView(site, {
+      ...revision,
+      sections: [{ ...lead, claims: leadClaims }, ...rest],
+    });
+    expect(stale.leadStale).toBe(true);
+  });
+
+  it.each([[[]], [["ghost"]]])("has no See also entry for %j", (seeAlso) => {
+    const bare = articleView(site, { ...page("signals"), seeAlso });
+    expect(bare.seeAlso).toEqual([]);
+    expect(bare.toc.map((entry) => entry.title)).not.toContain("See also");
+    expect(bare.toc.map((entry) => entry.title)).toContain("References");
+  });
+
+  it("renders claim text with its reference markers, and lists the references", () => {
+    const overview = view.sections.find((s) => s.anchor === "overview");
+    expect(overview?.html).toContain(
+      'Each signal stores its source chunk and a <i>confidence</i> score.<sup class="reference" id="cite-ref-1-1"><a href="#cite-note-1">[1]</a></sup><sup class="reference" id="cite-ref-2-0"><a href="#cite-note-2">[2]</a></sup>',
+    );
+    expect(view.references.length).toBeGreaterThan(0);
+    expect(view.references[0]).toEqual({
+      n: 1,
+      html: `<a class="external" href="${REPO}/blob/${"a".repeat(40)}/src/signals/ingest.py#L10-L24"><code>src/signals/ingest.py:L10-24@aaaaaaa</code></a> (<code>ingest_chunk</code>)`,
+      // Three claims cite this source (the fixture's default citation), hence the lettered back-links.
+      backlinks:
+        '^ <a class="ref-back" href="#cite-ref-1-0" aria-label="Back to citing claim 1">a</a> <a class="ref-back" href="#cite-ref-1-1" aria-label="Back to citing claim 2">b</a> <a class="ref-back" href="#cite-ref-1-2" aria-label="Back to citing claim 3">c</a>',
+    });
+  });
+});
+
+describe("articleView with hostile text", () => {
+  const HOSTILE = `<img src=x onerror=1>"&'`;
+  const ESCAPED = "&lt;img src=x onerror=1&gt;&quot;&amp;&#39;";
+  const revision = page("signals");
+  const signals = site.features.get("signals");
+  if (signals === undefined) throw new Error("no feature signals");
+  const hostileSite = {
+    ...site,
+    features: new Map(site.features).set("signals", {
+      ...signals,
+      aliases: [HOSTILE],
+    }),
+  };
+  const hostile = articleView(hostileSite, {
+    ...revision,
+    infobox: { ...revision.infobox, languages: [HOSTILE], entryPoints: [HOSTILE] },
+    sections: [
+      {
+        key: "lead",
+        claims: [leadClaim({ id: "h-lead", text: HOSTILE, supports: [] })],
+      },
+      {
+        key: "overview",
+        claims: [
+          bodyClaim({
+            id: "h-o1",
+            text: HOSTILE,
+            citations: [
+              codeCitation({ path: `src/${HOSTILE}.py`, symbol: HOSTILE }),
+              commitCitation({ subject: HOSTILE }),
+            ],
+          }),
+        ],
+      },
+    ],
+  });
+
+  it("escapes claim text, citations and infobox values", () => {
+    const rendered = [
+      hostile.leadHtml,
+      ...hostile.sections.map((s) => s.html),
+      ...hostile.infobox.map((row) => row.html),
+      ...hostile.references.map((ref) => ref.html),
+    ];
+    for (const html of rendered) expect(html).not.toContain("<img");
+    expect(hostile.leadHtml).toContain(ESCAPED);
+    expect(hostile.sections[0]?.html).toContain(ESCAPED);
+    const row = (label: string) => hostile.infobox.find((r) => r.label === label)?.html;
+    expect(row("Also known as")).toBe(ESCAPED);
+    expect(row("Languages")).toBe(ESCAPED);
+    expect(row("Entry points")).toBe(`<code>${ESCAPED}</code>`);
+    expect(hostile.references).toHaveLength(2);
+    expect(hostile.references[0]?.html).toContain("src/&lt;img");
+    expect(hostile.references[0]?.html).toContain(`(<code>${ESCAPED}</code>)`);
+    expect(hostile.references[1]?.html).toContain(`&quot;${ESCAPED}&quot;`);
   });
 });
