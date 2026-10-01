@@ -48,4 +48,11 @@ describe("WikiExport", () => {
   it("requires each page to be the last entry of its history", () => {
     expect(WikiExport.safeParse(makeExport({ history: { signals: [] } })).success).toBe(false);
   });
+
+  it("rejects two pages for the same feature", () => {
+    const page = makeRevision();
+    const result = WikiExport.safeParse(makeExport({ pages: [page, page] }));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual(["two pages for signals"]);
+  });
 });
