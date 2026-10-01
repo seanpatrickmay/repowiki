@@ -57,7 +57,7 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
       return;
     }
 
-    let currentPollIntervalMs = pollIntervalMs;
+    let currentPollIntervalMs = Math.min(pollIntervalMs, maxPollIntervalMs);
     let consecutiveRetrieveFailures = 0;
 
     while (batch.processing_status !== "ended") {

@@ -11,13 +11,34 @@ const params = (content: string): MessageCreateParamsNonStreaming => ({
   messages: [{ role: "user", content }],
 });
 
-function setup(results: unknown[], pollIntervalMs = 0, recordedSleep?: (ms: number) => void) {
+const batchResponse = (status: "in_progress" | "ended") => ({
+  id: "msgbatch_canned",
+  type: "message_batch" as const,
+  processing_status: status,
+  request_counts: {
+    processing: status === "ended" ? 0 : 1,
+    succeeded: 0,
+    errored: 0,
+    canceled: 0,
+    expired: 0,
+  },
+  results_url:
+    status === "ended"
+      ? "https://api.anthropic.com/v1/messages/batches/msgbatch_canned/results"
+      : null,
+  created_at: "2026-10-01T12:00:00Z",
+  ended_at: null,
+  expires_at: "2026-10-02T12:00:00Z",
+  archived_at: null,
+  cancel_initiated_at: null,
+});
+
+function setup(results: unknown[], pollIntervalMs = 0) {
   const api = cannedBatchApi(results);
   const progress: BatchProgress[] = [];
   const recordedSleeps: number[] = [];
   const sleep = (ms: number) => {
     recordedSleeps.push(ms);
-    recordedSleep?.(ms);
     return Promise.resolve();
   };
   const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
@@ -103,58 +124,20 @@ describe("createBatcher", () => {
       const urlStr = input instanceof Request ? input.url : (input as string);
       const path = new URL(urlStr).pathname;
 
-      if (path.endsWith("/create") || (init as Record<string, unknown>)?.method === "POST") {
-        return new Response(
-          JSON.stringify({
-            id: "msgbatch_canned",
-            type: "message_batch",
-            processing_status: "in_progress",
-            request_counts: { processing: 1, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
-            results_url: null,
-            created_at: "2026-10-01T12:00:00Z",
-            ended_at: null,
-            expires_at: "2026-10-02T12:00:00Z",
-            archived_at: null,
-            cancel_initiated_at: null,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+      if ((init as Record<string, unknown>)?.method === "POST") {
+        return new Response(JSON.stringify(batchResponse("in_progress")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
 
       if (!path.endsWith("/results")) {
         retrieveCount += 1;
-        if (retrieveCount < 3) {
-          return new Response(
-            JSON.stringify({
-              id: "msgbatch_canned",
-              type: "message_batch",
-              processing_status: "in_progress",
-              request_counts: { processing: 1, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
-              results_url: null,
-              created_at: "2026-10-01T12:00:00Z",
-              ended_at: null,
-              expires_at: "2026-10-02T12:00:00Z",
-              archived_at: null,
-              cancel_initiated_at: null,
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
-        }
-        return new Response(
-          JSON.stringify({
-            id: "msgbatch_canned",
-            type: "message_batch",
-            processing_status: "ended",
-            request_counts: { processing: 0, succeeded: 1, errored: 0, canceled: 0, expired: 0 },
-            results_url: "https://api.anthropic.com/v1/messages/batches/msgbatch_canned/results",
-            created_at: "2026-10-01T12:00:00Z",
-            ended_at: "2026-10-01T12:01:00Z",
-            expires_at: "2026-10-02T12:00:00Z",
-            archived_at: null,
-            cancel_initiated_at: null,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+        const status = retrieveCount < 3 ? "in_progress" : "ended";
+        return new Response(JSON.stringify(batchResponse(status)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
 
       return new Response(`${JSON.stringify(succeededLine("req-0", "a"))}\n`, {
@@ -177,20 +160,119 @@ describe("createBatcher", () => {
     expect(recordedSleeps).toEqual([100, 150, 225]);
   });
 
-  it("survives transient retrieve failures and resolves normally", async () => {
-    const api = cannedBatchApi([succeededLine("req-0", "a")]);
+  it("clamps backoff to max poll interval", async () => {
     let retrieveCount = 0;
-    const originalFetch = api.fetch;
     const fetch: FetchLike = async (input, init) => {
-      const path = new URL(input instanceof Request ? input.url : (input as string)).pathname;
-      if (path.includes("/retrieve")) {
+      const urlStr = input instanceof Request ? input.url : (input as string);
+      const path = new URL(urlStr).pathname;
+
+      if ((init as Record<string, unknown>)?.method === "POST") {
+        return new Response(JSON.stringify(batchResponse("in_progress")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (!path.endsWith("/results")) {
         retrieveCount += 1;
-        if (retrieveCount <= 2) {
+        const status = retrieveCount < 4 ? "in_progress" : "ended";
+        return new Response(JSON.stringify(batchResponse(status)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      return new Response(`${JSON.stringify(succeededLine("req-0", "a"))}\n`, {
+        status: 200,
+        headers: { "content-type": "application/x-jsonl" },
+      });
+    };
+
+    const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
+    const recordedSleeps: number[] = [];
+    const batcher = createBatcher(client, {
+      pollIntervalMs: 100,
+      maxPollIntervalMs: 200,
+      sleep: (ms) => {
+        recordedSleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    await batcher(params("test"));
+    expect(recordedSleeps).toEqual([100, 150, 200, 200]);
+  });
+
+  it("survives transient retrieve failures and resolves normally", async () => {
+    let getCount = 0;
+    const fetch: FetchLike = async (input, init) => {
+      const urlStr = input instanceof Request ? input.url : (input as string);
+      const path = new URL(urlStr).pathname;
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
+
+      if (method === "POST") {
+        return new Response(JSON.stringify(batchResponse("in_progress")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (method === "GET" && path.endsWith("msgbatch_canned") && !path.endsWith("/results")) {
+        getCount += 1;
+        if (getCount <= 2) {
           return new Response("error", { status: 500 });
         }
+        return new Response(JSON.stringify(batchResponse("ended")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
-      return originalFetch(input, init);
+
+      if (path.endsWith("/results")) {
+        return new Response(`${JSON.stringify(succeededLine("req-0", "a"))}\n`, {
+          status: 200,
+          headers: { "content-type": "application/x-jsonl" },
+        });
+      }
+
+      return new Response("error", { status: 500 });
     };
+
+    const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      sleep: async () => {},
+    });
+    const result = await batcher(params("test"));
+    expect(result.content).toEqual([{ type: "text", text: "a" }]);
+  });
+
+  it("resets failure counter on successful retrieve", async () => {
+    let getCount = 0;
+    const api = cannedBatchApi([succeededLine("req-0", "a")]);
+    const fetch: FetchLike = async (input, init) => {
+      const urlStr = input instanceof Request ? input.url : (input as string);
+      const path = new URL(urlStr).pathname;
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
+
+      // Pattern: fail, fail, success (status ends), then results()
+      if (
+        method === "GET" &&
+        path.includes("/batches/msgbatch_canned") &&
+        !path.includes("/results")
+      ) {
+        getCount += 1;
+        if (getCount < 3) {
+          return new Response("error", { status: 500 });
+        }
+        // getCount >= 3: success with ended status
+        return new Response(JSON.stringify(batchResponse("ended")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      return api.fetch(input, init);
+    };
+
     const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
     const batcher = createBatcher(client, {
       sleep: async () => {},
@@ -203,30 +285,20 @@ describe("createBatcher", () => {
     const fetch: FetchLike = async (input, init) => {
       const urlStr = input instanceof Request ? input.url : (input as string);
       const path = new URL(urlStr).pathname;
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
 
-      if (path.endsWith("/create") || (init as Record<string, unknown>)?.method === "POST") {
-        return new Response(
-          JSON.stringify({
-            id: "msgbatch_canned",
-            type: "message_batch",
-            processing_status: "in_progress",
-            request_counts: { processing: 2, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
-            results_url: null,
-            created_at: "2026-10-01T12:00:00Z",
-            ended_at: null,
-            expires_at: "2026-10-02T12:00:00Z",
-            archived_at: null,
-            cancel_initiated_at: null,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+      if (method === "POST") {
+        return new Response(JSON.stringify(batchResponse("in_progress")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
 
-      if (!path.endsWith("/results")) {
+      if (method === "GET" && path.endsWith("msgbatch_canned") && !path.endsWith("/results")) {
         return new Response("server error", { status: 500 });
       }
 
-      return new Response("", { status: 200, headers: { "content-type": "application/x-jsonl" } });
+      return new Response("error", { status: 500 });
     };
 
     const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
@@ -240,6 +312,47 @@ describe("createBatcher", () => {
     );
     expect(settled[0].status === "rejected" && settled[0].reason.toString()).toContain(
       "4 consecutive poll failures",
+    );
+  });
+
+  it("rejects all items when results request fails", async () => {
+    const fetch: FetchLike = async (input, init) => {
+      const urlStr = input instanceof Request ? input.url : (input as string);
+      const path = new URL(urlStr).pathname;
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
+
+      if (method === "POST") {
+        return new Response(JSON.stringify(batchResponse("in_progress")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (method === "GET" && path.endsWith("msgbatch_canned") && !path.endsWith("/results")) {
+        return new Response(JSON.stringify(batchResponse("ended")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (path.endsWith("/results")) {
+        return new Response("server error", { status: 500 });
+      }
+
+      return new Response("error", { status: 500 });
+    };
+
+    const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      sleep: async () => {},
+    });
+    const settled = await Promise.allSettled([batcher(params("a")), batcher(params("b"))]);
+    expect(settled.map((s) => s.status)).toEqual(["rejected", "rejected"]);
+    expect(settled[0].status === "rejected" && settled[0].reason.toString()).toContain(
+      "msgbatch_canned",
+    );
+    expect(settled[0].status === "rejected" && settled[0].reason.toString()).toContain(
+      "failed to retrieve results",
     );
   });
 });
