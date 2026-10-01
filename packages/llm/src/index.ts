@@ -1,3 +1,11 @@
+export {
+  type CassetteEntry,
+  CassetteMissError,
+  type CassetteMode,
+  cassetteFetch,
+  cassetteMode,
+  type FetchLike,
+} from "./cassette.ts";
 export { createLedger, type LedgerTotals, type TokenLedger, totalsOf } from "./ledger.ts";
 export {
   BATCH_PRICE_FACTOR,
