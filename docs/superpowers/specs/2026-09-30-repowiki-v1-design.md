@@ -20,7 +20,7 @@ understanding of a repo so they don't have to re-read the raw code every time.
 | First target repo | `next-chief-of-staff` (≈40k LOC, 600 commits, 160 merge commits; Python / TSX / Terraform). |
 | v1 scope | Core engine + minimal reader + freshness (sub-projects #1, #3, #2). |
 | Pipeline approach | **A — analysis first, LLM on top** (§4). |
-| LLM runtime | Pluggable provider interface; Claude API implementation first. |
+| LLM runtime | Pluggable provider interface; Claude API implementation first. Cheapest model (`claude-haiku-4-5`) for every role in v1. |
 | Stack | TypeScript end to end; Astro for the reader. |
 | Exit criteria | Q&A eval, author accuracy review, rabbit-hole test (§9). |
 | Tracking | GitHub Issues + GitHub Project board; ADRs in `docs/decisions/` (§10). |
@@ -106,7 +106,7 @@ packages/
 ```
 
 - **Data location:** outside the target repo. The default is `~/.repowiki/<repo-name>/`, overridable with `--out`. RepoWiki never writes to the repo it documents.
-- **Provider interface:** `generate({ system, messages, schema, cacheKey?, batch? }) -> { output, usage }`. Every call is recorded in the `TokenLedger` (input, output, cache-read, and cache-write tokens, model, purpose, featureId). Model IDs come from config. Defaults: `claude-sonnet-5-5` for manifest and write calls, `claude-haiku-4-5-20251001` for membership tie-breaks.
+- **Provider interface:** `generate({ system, messages, schema, cacheKey?, batch? }) -> { output, usage }`. Every call is recorded in the `TokenLedger` (input, output, cache-read, and cache-write tokens, model, purpose, featureId). Model IDs come from config, set per role (`manifest`, `write`, `tieBreak`, `evalAgent`, `evalJudge`). Every role defaults to the cheapest current model, `claude-haiku-4-5` ($1 / $5 per MTok, 200K context). Upgrading a role is a config change, not a code change. Because Haiku 4.5 has a 200K context window, every prompt (including the manifest call) must fit under 200K tokens; the manifest call receives cluster summaries, not source code.
 - **Languages in v1:** symbol-level indexing for Python, TypeScript, and TSX. Every other tracked file (including Terraform) is indexed at file level and joins features through co-change only.
 
 ### Data flow
