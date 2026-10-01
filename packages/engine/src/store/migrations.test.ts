@@ -5,7 +5,7 @@ import { makeManifest } from "@repowiki/core/test-fixtures";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { UnsupportedSchemaError } from "./errors.ts";
-import { MIGRATIONS } from "./migrations.ts";
+import { MIGRATIONS, type Migration, runMigrations } from "./migrations.ts";
 import { openStore } from "./store.ts";
 
 const dirs: string[] = [];
@@ -50,5 +50,57 @@ describe("migrations", () => {
     const after = new Database(path);
     expect(after.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length + 1);
     after.close();
+  });
+
+  describe("runMigrations", () => {
+    const tableExists = (db: Database.Database, name: string): boolean =>
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !==
+      undefined;
+
+    it("runs SQL and function migrations in order and records the version", () => {
+      const db = new Database(":memory:");
+      const migrations: Migration[] = [
+        "CREATE TABLE notes (body TEXT NOT NULL)",
+        (handle) => {
+          handle.prepare("INSERT INTO notes (body) VALUES (?)").run("rewritten");
+        },
+      ];
+      runMigrations(db, migrations);
+      expect(db.prepare("SELECT body FROM notes").all()).toEqual([{ body: "rewritten" }]);
+      expect(db.pragma("user_version", { simple: true })).toBe(2);
+      db.close();
+    });
+
+    it("only runs the migrations a database has not seen", () => {
+      const db = new Database(":memory:");
+      const calls: number[] = [];
+      const migrations: Migration[] = [
+        () => {
+          calls.push(1);
+        },
+        () => {
+          calls.push(2);
+        },
+      ];
+      runMigrations(db, migrations.slice(0, 1));
+      runMigrations(db, migrations);
+      expect(calls).toEqual([1, 2]);
+      expect(db.pragma("user_version", { simple: true })).toBe(2);
+      db.close();
+    });
+
+    it("rolls back the schema change and the version when a function migration throws", () => {
+      const db = new Database(":memory:");
+      const migrations: Migration[] = [
+        "CREATE TABLE notes (body TEXT NOT NULL)",
+        () => {
+          throw new Error("rewrite failed");
+        },
+      ];
+      expect(() => runMigrations(db, migrations)).toThrow("rewrite failed");
+      expect(tableExists(db, "notes")).toBe(false);
+      expect(db.pragma("user_version", { simple: true })).toBe(0);
+      db.close();
+    });
   });
 });

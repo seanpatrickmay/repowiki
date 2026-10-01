@@ -64,10 +64,37 @@ describe("Revision", () => {
     ).toBe(false);
   });
 
-  it("ties parentId to the reason", () => {
-    expect(ok({ reason: "build", parentId: "rev-0" })).toBe(false);
-    expect(ok({ reason: "update", parentId: null })).toBe(false);
-    expect(ok({ reason: "update", parentId: "rev-0" })).toBe(true);
+  describe("parentId and reason", () => {
+    const parentIssues = (overrides: Parameters<typeof makeRevision>[0]) => {
+      const result = Revision.safeParse(makeRevision(overrides));
+      return result.success
+        ? []
+        : result.error.issues.filter((i) => i.path.join(".") === "parentId").map((i) => i.message);
+    };
+
+    it("accepts a manifest-change revision with no parent (a newly created or split feature)", () => {
+      expect(ok({ reason: "manifest-change", parentId: null })).toBe(true);
+    });
+
+    it("accepts a manifest-change revision with a parent", () => {
+      expect(ok({ reason: "manifest-change", parentId: "rev-0" })).toBe(true);
+    });
+
+    it("accepts an update revision with a parent", () => {
+      expect(ok({ reason: "update", parentId: "rev-0" })).toBe(true);
+    });
+
+    it("rejects a build revision with a parent", () => {
+      expect(parentIssues({ reason: "build", parentId: "rev-0" })).toEqual([
+        "build revisions have no parent",
+      ]);
+    });
+
+    it("rejects an update revision without a parent", () => {
+      expect(parentIssues({ reason: "update", parentId: null })).toEqual([
+        "update revisions must have a parent",
+      ]);
+    });
   });
 
   it("rejects seeAlso pointing at the page itself", () => {

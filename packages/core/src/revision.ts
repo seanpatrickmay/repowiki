@@ -89,11 +89,18 @@ export const Revision = z
       });
     });
 
-    if ((revision.reason === "build") !== (revision.parentId === null)) {
+    // manifest-change may be a feature's first page (create/split) or a later one, so either is valid.
+    if (revision.reason === "build" && revision.parentId !== null) {
       ctx.addIssue({
         code: "custom",
-        message:
-          "build revisions have no parent; update and manifest-change revisions must have one",
+        message: "build revisions have no parent",
+        path: ["parentId"],
+      });
+    }
+    if (revision.reason === "update" && revision.parentId === null) {
+      ctx.addIssue({
+        code: "custom",
+        message: "update revisions must have a parent",
         path: ["parentId"],
       });
     }
