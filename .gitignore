@@ -9,3 +9,6 @@ dist/
 .DS_Store
 .claude/settings.local.json
 .claude/.cc-writes/
+.env
+.env.*
+!.env.example
