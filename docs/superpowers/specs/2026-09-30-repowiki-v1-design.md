@@ -108,6 +108,10 @@ packages/
 - **Data location:** outside the target repo. The default is `~/.repowiki/<repo-name>/`, overridable with `--out`. RepoWiki never writes to the repo it documents.
 - **Provider interface:** `generate({ system, messages, schema, cacheKey?, batch? }) -> { output, usage }`. Every call is recorded in the `TokenLedger` (input, output, cache-read, and cache-write tokens, model, purpose, featureId). Model IDs come from config, set per role (`manifest`, `write`, `tieBreak`, `evalAgent`, `evalJudge`). Every role defaults to the cheapest current model, `claude-haiku-4-5` ($1 / $5 per MTok, 200K context). Upgrading a role is a config change, not a code change. Because Haiku 4.5 has a 200K context window, every prompt (including the manifest call) must fit under 200K tokens; the manifest call receives cluster summaries, not source code.
 - **Languages in v1:** symbol-level indexing for Python, TypeScript, and TSX. Every other tracked file (including Terraform) is indexed at file level and joins features through co-change only.
+- **What the index reads:** git objects at the requested sha only (`ls-tree`, `cat-file`, `log`), never the working tree, so uncommitted changes in the target repo have no effect on the index.
+- **Symbols:** functions, classes, qualified methods, interfaces, type aliases, enums, and public module-level bindings (exported TS `const`s; Python top-level assignments to non-underscore names). Function bodies are not descended into. Repeated definitions of one name in a file (such as a property getter and setter) merge into one span. `.js`/`.jsx` files are indexed at file level.
+- **Edges:** M2 extracts import edges only. Call edges (used by diagrams, §7.3) are added by the M4 plan, since M4 is their first consumer.
+- **Co-change:** counted over non-merge commits. A rename counts as a delete plus an add. Commits touching more than 50 files (configurable) are skipped as sweeps and counted.
 
 ### Data flow
 
@@ -159,6 +163,7 @@ Citation  = { kind: "code", path, startLine, endLine, sha, symbol: string | null
 4. **`history` claims** must cite at least one `commit` citation. The History section is append-only.
 5. **`commitDate` is the date shown to readers.** `generatedAt` and `tokens` are kept as cost evidence (F25).
 6. **`contentHash`** is the SHA-256 of the cited lines with line endings normalized. It is the only test of whether cited code changed.
+7. **Member ids** (`SymbolOrFileId`) are `path` or `path#symbol`, produced only by `memberId()` in `@repowiki/core`. The path part percent-encodes `%` as `%25` and `#` as `%23`, so the first `#` always separates the path from the symbol, while the symbol itself may contain `#` (for TS private members).
 
 ## 6. Freshness
 
