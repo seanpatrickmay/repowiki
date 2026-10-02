@@ -76,7 +76,7 @@ export {
   UnsupportedSchemaError,
   writeExport,
 } from "./store/index.ts";
-export { diagramProblems, revisionProblems } from "./verify/index.ts";
+export { commitCitationProblems, diagramProblems, revisionProblems } from "./verify/index.ts";
 export {
   type BuildJournal,
   buildJournal,

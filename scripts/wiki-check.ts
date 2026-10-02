@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
+  commitCitationProblems,
   DEFAULT_MAX_FILE_BYTES,
   GitError,
   linkViolations,
@@ -13,9 +14,11 @@ import {
 
 /**
  * pnpm wiki:check <repo> [--out dir]: spec §8's first two invariants on the stored wiki. Every
- * code citation of every current page resolves at its sha with a matching hash, every diagram is
- * safe, and no link names an id without a page. Read-only; exits 1 on any problem, and 2 for a
- * usage error: bad arguments, or a repository that is missing or does not hold the wiki's sha.
+ * code citation of every current page resolves at its sha with a matching hash, every commit
+ * citation names a commit in the history of the wiki's sha (read-only git), every diagram is
+ * safe, and every link and See also entry names an active feature (a link may name a
+ * disambiguation page). Read-only; exits 1 on any problem, and 2 for a usage error: bad
+ * arguments, or a repository that is missing or does not hold the wiki's sha.
  *
  * openStore migrates and switches the file to WAL, so the check opens a throwaway copy of the
  * store (with its write-ahead log) and the wiki's own files are never opened for writing.
@@ -90,17 +93,16 @@ try {
       };
       const problems = pages.flatMap((page) => [
         ...revisionProblems(page, sourcesAt),
+        ...commitCitationProblems(page, history),
         ...linkViolations(page, manifest),
       ]);
-      const citations = pages.reduce(
-        (n, p) =>
-          n +
-          p.sections.reduce((m, s) => m + s.claims.reduce((k, c) => k + c.citations.length, 0), 0),
-        0,
+      const citations = pages.flatMap((p) =>
+        p.sections.flatMap((s) => s.claims.flatMap((c) => c.citations)),
       );
+      const code = citations.filter((c) => c.kind === "code").length;
       for (const problem of problems) console.error(printable(problem));
       console.log(
-        `${pages.length} pages, ${citations} citations: ${problems.length === 0 ? "every citation resolves with a matching hash and every link has a page" : `${problems.length} problems`}`,
+        `${pages.length} pages: ${code} code citations re-hashed and ${citations.length - code} commit citations resolved; ${problems.length === 0 ? "no problems" : `${problems.length} problems`}`,
       );
       if (problems.length > 0) process.exitCode = 1;
     }

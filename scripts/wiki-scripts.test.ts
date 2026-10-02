@@ -2,7 +2,17 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeManifest, makeRevision, SHA_A } from "@repowiki/core/test-fixtures";
+import { contentHash } from "@repowiki/core";
+import {
+  bodyClaim,
+  codeCitation,
+  commitCitation,
+  leadClaim,
+  makeManifest,
+  makeRevision,
+  SHA_A,
+  SHA_B,
+} from "@repowiki/core/test-fixtures";
 import { openStore } from "@repowiki/engine";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILD_LOCK } from "./wiki-cli.ts";
@@ -113,5 +123,63 @@ describe("wiki-check.ts as a process (no network)", () => {
     expect(result.stderr).toMatch(
       new RegExp(`^${repo} does not hold ${SHA_A}, the sha the wiki was built at`),
     );
+  });
+
+  /** A store whose one page, at the repo's sha, cites a line of it and its commit `cited`. */
+  function pageOf(repo: string, sha: string, cited: string): string {
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest({ sha }), { llmRevised: true });
+    const code = codeCitation({
+      path: "src/app.ts",
+      startLine: 1,
+      endLine: 1,
+      sha,
+      symbol: null,
+      contentHash: contentHash("export const app = 1;\n"),
+    });
+    store.putRevision(
+      makeRevision({
+        sha,
+        sections: [
+          { key: "lead", claims: [leadClaim({ supports: ["c-1", "h-1"] })] },
+          { key: "overview", claims: [bodyClaim({ citations: [code] })] },
+          {
+            key: "history",
+            claims: [
+              bodyClaim({
+                id: "h-1",
+                kind: "history",
+                citations: [commitCitation({ sha: cited, subject: "init", pr: null })],
+              }),
+            ],
+          },
+        ],
+      }),
+    );
+    store.setHead(sha);
+    store.close();
+    return out;
+  }
+
+  it("counts the code citations it re-hashed and the commit citations it resolved", () => {
+    const { repo, sha } = gitRepo();
+    const result = run("scripts/wiki-check.ts", repo, "--out", pageOf(repo, sha, sha));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(
+      "1 pages: 1 code citations re-hashed and 1 commit citations resolved; no problems\n",
+    );
+  });
+
+  it("reports a commit citation the repository's history does not hold", () => {
+    const { repo, sha } = gitRepo();
+    const result = run("scripts/wiki-check.ts", repo, "--out", pageOf(repo, sha, SHA_B));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "signals h-1 commit:bbbbbbb: no such commit in the history of the wiki's sha\n",
+    );
+    expect(result.stdout).toContain("1 problems");
   });
 });
