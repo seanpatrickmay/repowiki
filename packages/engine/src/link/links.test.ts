@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   createPageLinker,
   createTargetResolver,
+  linkTokensIn,
   normalizeWikipediaTitle,
+  unlinkText,
   wikipediaTitlesIn,
 } from "./links.ts";
 import { linkManifest } from "./test-manifest.ts";
@@ -269,5 +271,29 @@ describe("fix round 1", () => {
       }),
     );
     expect(createPageLinker(manifest, "signals", NO_WP)("[[old]]")).toBe("[[billing]]");
+  });
+});
+
+describe("unlinkText", () => {
+  const titles = new Map([["deliverables", "Deliverables"]]);
+
+  it("turns every link token into its plain words and keeps code spans", () => {
+    expect(
+      unlinkText(
+        "See [[deliverables]], [[deliverables|the records]] and [[wp:Message queue]]; `[[x]]` stays.",
+        titles,
+      ),
+    ).toBe("See Deliverables, the records and Message queue; `[[x]]` stays.");
+  });
+
+  it("strips brackets and backticks from the words, and the site's placeholder characters", () => {
+    expect(unlinkText("[[wp:Evil|a `b` [c]]", titles)).toBe("a b c");
+    expect(unlinkText("[\ue000[wp:Evil]]", titles)).toBe("Evil");
+  });
+
+  it("leaves no token behind for odd runs of brackets", () => {
+    const out = unlinkText("[[[ ]][x]]", titles);
+    expect(linkTokensIn(out)).toEqual([]);
+    expect(out).not.toContain("[[");
   });
 });

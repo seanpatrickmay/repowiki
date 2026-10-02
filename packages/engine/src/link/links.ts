@@ -95,6 +95,29 @@ export function createTargetResolver(manifest: Manifest): (target: string) => Fe
 const plainWords = (words: string): string => words.replace(/[[\]`]/g, "");
 
 /**
+ * A text with every link token replaced by its plain words, the way the linker writes a link it
+ * drops: the label, else the title of the feature the target names (from `titles`, by id), else
+ * the target itself. For a claim the linker made too long to store. Brackets, backticks and the
+ * site's placeholder characters are removed, and the pass repeats until no token is left, since
+ * dropping an empty one can join the text around it into a new one.
+ */
+export function unlinkText(text: string, titles: ReadonlyMap<string, string> = new Map()): string {
+  const plain = (match: string, target: string | undefined, label?: string): string => {
+    if (target === undefined) return match;
+    const name = target.trim();
+    const words =
+      label?.trim() || (name.startsWith("wp:") ? name.slice(3).trim() : (titles.get(name) ?? name));
+    return plainWords(words);
+  };
+  let current = text.replace(PLACEHOLDER_CHARS, "");
+  for (let next = current.replace(INLINE_TOKEN, plain); next !== current; ) {
+    current = next;
+    next = current.replace(INLINE_TOKEN, plain);
+  }
+  return current;
+}
+
+/**
  * Rewrites the link tokens of one page's claims, in page order (spec §7.3). A token for a known
  * feature becomes [[id]] or [[id|words]]; a page links each concept on its first mention only;
  * a link to the page itself, to an unknown target, or to a Wikipedia title that did not check

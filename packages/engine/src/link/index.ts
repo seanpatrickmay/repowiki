@@ -4,6 +4,7 @@ export {
   createTargetResolver,
   LINK_TOKEN,
   normalizeWikipediaTitle,
+  unlinkText,
   wikipediaTitlesIn,
 } from "./links.ts";
 export { featureNeighbours, SEE_ALSO_LIMIT, seeAlsoFor } from "./see-also.ts";

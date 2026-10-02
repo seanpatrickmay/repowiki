@@ -1,12 +1,19 @@
 import {
+  CLAIM_TEXT_MAX_LENGTH,
   type Claim,
   type Infobox,
   IsoDateTime,
   type Manifest,
+  type Revision,
   type Section,
   type SectionKey,
+  type TokenUsage,
 } from "@repowiki/core";
 import type { CommitInfo, RepoIndex, SourceLanguage } from "../index/index.ts";
+import { createPageLinker, linkViolations, seeAlsoFor, unlinkText } from "../link/index.ts";
+import { type DraftDiagram, diagramProblems } from "../verify/index.ts";
+import { renderDiagram } from "./diagram.ts";
+import type { ContextPack } from "./pack.ts";
 import { featureFiles } from "./prompt.ts";
 
 /** Section order on a page (spec §5). */
@@ -143,4 +150,87 @@ export function computeInfobox(
     firstCommitDate: dates[0] ?? commitDate,
     lastCommitDate: dates.at(-1) ?? commitDate,
   };
+}
+
+/** Everything a page's revision is made from once its claims are verified. */
+export interface RevisionParts {
+  featureId: string;
+  index: RepoIndex;
+  manifest: Manifest;
+  commitDate: string;
+  generatedAt: string;
+  model: string;
+  tokens: TokenUsage;
+  /** Verified claims with unique draft ids, in any order. */
+  claims: readonly { key: SectionKey; claim: Claim }[];
+  diagram: DraftDiagram;
+  pack: ContextPack;
+  neighbours: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  /** Normalized Wikipedia title → canonical title, or null for plain text. */
+  wikipedia: ReadonlyMap<string, string | null>;
+}
+
+export type Assembled =
+  | { revision: Revision; failure: null; diagramProblems: string[] }
+  | { revision: null; failure: string };
+
+/**
+ * A build revision for one page: claims linked in page order (spec §7.3), sections ordered and
+ * renumbered, the infobox, See also, and the diagram, which is dropped (and its problems
+ * returned) if the verifier refuses it. Throws if a link still points nowhere: the linker never
+ * writes one, so that is a bug, not a page to skip.
+ *
+ * Linking can lengthen a claim past `CLAIM_TEXT_MAX_LENGTH` (a link writes the id and the words).
+ * Such a claim keeps no link: its links become their plain words, first from the linker's output,
+ * then, if the feature titles made even that too long, from the claim as verified, which fit. The
+ * claim as written is never stored, because it may hold link tokens the linker neutralised.
+ */
+export function assembleRevision(parts: RevisionParts): Assembled {
+  const { featureId, index, manifest } = parts;
+  const link = createPageLinker(manifest, featureId, parts.wikipedia);
+  const titles = new Map(manifest.features.map((f) => [f.id, f.title]));
+  const linkClaim = (claim: Claim): Claim => {
+    const linked = link(claim.text);
+    if (linked.length <= CLAIM_TEXT_MAX_LENGTH) return { ...claim, text: linked };
+    const plain = unlinkText(linked, titles);
+    return {
+      ...claim,
+      text: plain.length <= CLAIM_TEXT_MAX_LENGTH ? plain : unlinkText(claim.text),
+    };
+  };
+  const bySection = new Map<SectionKey, Claim[]>();
+  for (const key of SECTION_ORDER) {
+    bySection.set(
+      key,
+      parts.claims.filter((v) => v.key === key).map((v) => linkClaim(v.claim)),
+    );
+  }
+  const sections = pageSections(bySection);
+  if (sections === null) {
+    return { revision: null, failure: "no lead or no body claim survived verification" };
+  }
+  let diagram = renderDiagram(parts.diagram, parts.pack.candidates);
+  const refused = diagram === null ? [] : diagramProblems(diagram);
+  if (refused.length > 0) diagram = null;
+  const revision: Revision = {
+    id: `${featureId}-${index.sha.slice(0, 12)}`,
+    featureId,
+    sha: index.sha,
+    commitDate: parts.commitDate,
+    generatedAt: parts.generatedAt,
+    parentId: null,
+    reason: "build",
+    pr: null,
+    model: parts.model,
+    tokens: parts.tokens,
+    infobox: computeInfobox(featureId, manifest, index, parts.pack.commits, parts.commitDate),
+    diagram,
+    seeAlso: seeAlsoFor(featureId, parts.neighbours, manifest),
+    sections,
+  };
+  const violations = linkViolations(revision, manifest);
+  if (violations.length > 0) {
+    throw new Error(`the linker wrote links to nowhere: ${violations.join("; ")}`);
+  }
+  return { revision, failure: null, diagramProblems: refused };
 }
