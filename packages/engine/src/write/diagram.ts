@@ -27,7 +27,7 @@ export const MAX_DIAGRAM_NODES = 12;
 const MAX_CANDIDATE_FILES = 16;
 const MAX_CANDIDATE_FEATURES = 6;
 const MAX_CANDIDATE_EDGES = 60;
-const MAX_LABEL = 40;
+const MAX_EDGE_LABEL = 40;
 
 /**
  * The nodes and edges a page's diagram is drawn from: the feature's best-connected member files,
@@ -71,20 +71,25 @@ export function diagramCandidates(
   const features = byWeight(foreign, MAX_CANDIDATE_FEATURES);
 
   const nodes: DiagramNode[] = [];
-  const nodeOf = new Map<string, string>();
+  const fileNode = new Map<string, string>();
+  const featureNode = new Map<string, string>();
   for (const path of [...files].sort()) {
     const id = `n${nodes.length + 1}`;
     nodes.push({ id, kind: "file", ref: path, label: path });
-    nodeOf.set(path, id);
+    fileNode.set(path, id);
   }
   const titles = new Map(manifest.features.map((f) => [f.id, f.title]));
   for (const feature of [...features].sort()) {
     const id = `n${nodes.length + 1}`;
     nodes.push({ id, kind: "feature", ref: feature, label: titles.get(feature) ?? feature });
-    nodeOf.set(`feature:${feature}`, id);
+    featureNode.set(feature, id);
   }
-  const node = (path: string) =>
-    nodeOf.get(path) ?? (mine.has(path) ? undefined : nodeOf.get(`feature:${featureOf(path)}`));
+  const node = (path: string) => {
+    const file = fileNode.get(path);
+    if (file !== undefined || mine.has(path)) return file;
+    const owner = featureOf(path);
+    return owner === undefined ? undefined : featureNode.get(owner);
+  };
 
   const edges = new Map<string, DiagramEdge>();
   for (const { from, to, kind } of pairs) {
@@ -120,20 +125,18 @@ export function renderCandidates(
   ].join("\n");
 }
 
-export { mermaidLabel };
-
-/** Cuts to `MAX_LABEL` code points, then escapes: cutting escaped text could split an entity. */
-function escaped(text: string): string {
-  return mermaidLabel(Array.from(text.trim()).slice(0, MAX_LABEL).join(""));
-}
-
+/**
+ * An edge label is the model's text: cut to `MAX_EDGE_LABEL` code points, then escaped (cutting
+ * escaped text could split an entity), or the edge's kind when nothing is left.
+ */
 function edgeLabel(text: string, fallback: string): string {
-  return escaped(text) || fallback;
+  return mermaidLabel(Array.from(text.trim()).slice(0, MAX_EDGE_LABEL).join("")) || fallback;
 }
 
+/** A node's label is engine data (a path or a feature title), escaped but not cut. */
 function nodeLabel(node: DiagramNode): string {
   const basename = node.ref.slice(node.ref.lastIndexOf("/") + 1);
-  return escaped(node.label) || escaped(basename) || "node";
+  return mermaidLabel(node.label) || mermaidLabel(basename) || "node";
 }
 
 /**
