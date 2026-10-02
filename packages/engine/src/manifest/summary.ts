@@ -5,7 +5,7 @@ const TOP_FILES = 5;
 const count = (n: number): string => n.toLocaleString("en-US");
 
 /** Line breaks would start a new Markdown block, so every model- or repo-supplied value loses them. */
-const oneLine = (text: string): string => text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, " ");
+export const oneLine = (text: string): string => text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, " ");
 
 /** For titles and aliases, which the model supplies: also escape what breaks a table cell. */
 const inline = (text: string): string => oneLine(text).replace(/[\\|]/g, "\\$&");
@@ -15,7 +15,7 @@ const inline = (text: string): string => oneLine(text).replace(/[\\|]/g, "\\$&")
  * longest run inside, and content that starts or ends with a backtick (or with spaces on both
  * sides, which a parser would trim) is padded with one space.
  */
-function codeSpan(text: string): string {
+export function codeSpan(text: string): string {
   const flat = oneLine(text);
   const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length));
   const fence = "`".repeat(longest + 1);
