@@ -14,8 +14,13 @@ export interface ImportBinding {
 }
 
 /**
- * A call (or `new`, or a JSX element) as written: `name(...)`, `receiver.name(...)`, or
- * `self.name(...)` / `this.name(...)`, which have the receiver "self".
+ * A call (or `new`, or a JSX element) as written: `name(...)`, `receiver.name(...)`, or a call on
+ * the instance, which has the receiver "self": `self.`/`cls.` in Python, `this.` in TS and TSX
+ * (a TS variable named `self` or `cls` keeps its own name).
+ *
+ * Only a plain-identifier receiver is recorded. A call on anything else (a chain `a.b().c()`,
+ * `this.a.b()`, `a!.b()`, `super.m()`, `a.b.c()`) records only what it records today: the
+ * inner call of a chain, and nothing for the outer call.
  */
 export interface CallSite {
   name: string;
@@ -97,7 +102,7 @@ function esBindings(root: Node): ImportBinding[] {
 export function extractCalls(language: SourceLanguage, root: Node): CallSite[] {
   const found = new Map<string, CallSite>();
   const add = (callee: Node | null, line: number): void => {
-    const site = callee === null ? null : calleeOf(callee);
+    const site = callee === null ? null : calleeOf(language, callee);
     if (site === null) return;
     found.set(`${site.receiver ?? ""}\0${site.name}\0${line}`, { ...site, line });
   };
@@ -126,17 +131,20 @@ export function extractCalls(language: SourceLanguage, root: Node): CallSite[] {
   return [...found.values()].sort((a, b) => a.line - b.line);
 }
 
-function calleeOf(node: Node): { name: string; receiver: string | null } | null {
+function calleeOf(
+  language: SourceLanguage,
+  node: Node,
+): { name: string; receiver: string | null } | null {
   if (node.type === "identifier") return { name: node.text, receiver: null };
   if (node.type !== "attribute" && node.type !== "member_expression") return null;
   const object = node.childForFieldName("object");
   const name = node.childForFieldName(node.type === "attribute" ? "attribute" : "property");
   if (object === null || name === null) return null;
-  if (
-    object.type === "this" ||
-    (object.type === "identifier" && /^(self|cls)$/.test(object.text))
-  ) {
-    return { name: name.text, receiver: "self" };
-  }
+  // In a TSX member tag (`<this.X />`) the grammar gives `this` as an identifier.
+  const isSelf =
+    language === "python"
+      ? object.type === "identifier" && /^(self|cls)$/.test(object.text)
+      : object.type === "this" || (object.type === "identifier" && object.text === "this");
+  if (isSelf) return { name: name.text, receiver: "self" };
   return object.type === "identifier" ? { name: name.text, receiver: object.text } : null;
 }

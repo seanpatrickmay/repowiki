@@ -48,6 +48,13 @@ describe("extractBindings", () => {
     ]);
     expect(found[3]?.raw).toEqual({ kind: "es", specifier: "./n", line: 2 });
   });
+
+  it("binds a bare relative from-import, and binds nothing for a re-export", () => {
+    const found = bindings("python", "from . import x\n");
+    expect(found.map(({ local, imported }) => [local, imported])).toEqual([["x", "x"]]);
+    expect(found[0]?.raw).toEqual({ kind: "python", module: "", level: 1, names: ["x"], line: 1 });
+    expect(bindings("typescript", 'export { x } from "./y";\n')).toEqual([]);
+  });
 });
 
 describe("extractCalls", () => {
@@ -76,6 +83,27 @@ describe("extractCalls", () => {
     expect(calls("tsx", source)).toEqual([
       { name: "Comp", receiver: null, line: 1 },
       { name: "Item", receiver: "Box", line: 2 },
+    ]);
+  });
+
+  it("maps cls to self in Python only, and self or cls stay receivers in TS", () => {
+    expect(calls("python", "cls.m()\n")).toEqual([{ name: "m", receiver: "self", line: 1 }]);
+    expect(calls("typescript", "self.k();\ncls.m();\n")).toEqual([
+      { name: "k", receiver: "self", line: 1 },
+      { name: "m", receiver: "cls", line: 2 },
+    ]);
+  });
+
+  it("records optional calls, and a JSX element once despite its closing tag", () => {
+    expect(calls("typescript", "a?.b();\n")).toEqual([{ name: "b", receiver: "a", line: 1 }]);
+    expect(calls("tsx", "const x = <Foo>hi</Foo>;\n")).toEqual([
+      { name: "Foo", receiver: null, line: 1 },
+    ]);
+  });
+
+  it("gives a this member tag in TSX the receiver self", () => {
+    expect(calls("tsx", "const x = <this.X />;\n")).toEqual([
+      { name: "X", receiver: "self", line: 1 },
     ]);
   });
 });
