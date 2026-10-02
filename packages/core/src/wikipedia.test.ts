@@ -11,13 +11,12 @@ const accepts = (overrides: Partial<WikipediaSummary>): boolean =>
   WikipediaSummary.safeParse({ ...good, ...overrides }).success;
 
 describe("WikipediaSummary url", () => {
-  it.each([
-    "https://en.wikipedia.org/wiki/Message_queue",
-    "https://en.wikipedia.org/wiki/C%2B%2B",
-    "https://en.wikipedia.org/wiki/Cron#History",
-  ])("accepts %s", (url) => {
-    expect(accepts({ url })).toBe(true);
-  });
+  it.each(["https://en.wikipedia.org/wiki/Message_queue", "https://en.wikipedia.org/wiki/C%2B%2B"])(
+    "accepts %s",
+    (url) => {
+      expect(accepts({ url })).toBe(true);
+    },
+  );
 
   it.each([
     "https://en.wikipedia.org.evil.com/wiki/X",
@@ -32,6 +31,10 @@ describe("WikipediaSummary url", () => {
     "https://fr.wikipedia.org/wiki/X",
     "https://EN.wikipedia.org/wiki/X",
     "https://en.wikipedia.org/w/index.php?title=X",
+    "https://en.wikipedia.org/wiki/Cron#History",
+    "https://en.wikipedia.org/wiki/Cron#",
+    "https://en.wikipedia.org/wiki/Cron?action=raw",
+    "https://en.wikipedia.org/wiki/Cron?",
     "https://en.wikipedia.org/wiki/",
     "https://en.wikipedia.org/wiki",
     "https://en.wikipedia.org\\wiki\\X",
@@ -76,8 +79,22 @@ describe("WikipediaSummary extract", () => {
     ["a left-to-right mark", "a\u200eb"],
     ["a right-to-left mark", "a\u200fb"],
     ["an Arabic letter mark", "a\u061cb"],
+    ["a tag character", "a" + String.fromCodePoint(0xe0041) + "b"],
+    ["a word joiner", "a\u2060b"],
+    ["an invisible operator", "a\u2062b"],
+    ["a deprecated format character", "a\u206ab"],
+    ["a byte order mark", "a\ufeffb"],
+    ["a zero-width space", "a\u200bb"],
+    ["a soft hyphen", "a\u00adb"],
   ])("refuses %s", (_name, extract) => {
     expect(accepts({ extract })).toBe(false);
+  });
+
+  it("keeps the zero-width joiner and non-joiner that spell real scripts", () => {
+    expect(accepts({ extract: "\u0915\u094d" + "\u200d" + "\u0937" })).toBe(true);
+    expect(accepts({ extract: "\u0645\u06cc" + "\u200c" + "\u062e\u0648\u0627\u0647\u0645" })).toBe(
+      true,
+    );
   });
 
   it("keeps ordinary non-ASCII text", () => {
@@ -89,6 +106,9 @@ describe("WikipediaSummary title", () => {
   it("is non-empty and free of control and bidi characters", () => {
     expect(accepts({ title: "" })).toBe(false);
     expect(accepts({ title: "A\u202eB" })).toBe(false);
+    expect(accepts({ title: "A" + String.fromCodePoint(0xe0041) + "B" })).toBe(false);
+    expect(accepts({ title: "A\u2060B" })).toBe(false);
+    expect(accepts({ title: "A\u200dB" })).toBe(true);
     expect(accepts({ title: "A\nB" })).toBe(false);
   });
 });

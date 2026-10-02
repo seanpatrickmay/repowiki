@@ -52,6 +52,16 @@ describe("loadExport", () => {
     );
   });
 
+  it("rejects an export from the previous schema version, which had no Wikipedia summaries", () => {
+    const { wikipedia: _omitted, ...v2 } = fixtureExport();
+    const file = write("v2.json", JSON.stringify({ ...v2, schemaVersion: 2 }));
+    expect(() => loadExport(file)).toThrow(
+      new ExportError(
+        `export schema 2 in ${file} is older than this reader (3); re-run the export`,
+      ),
+    );
+  });
+
   it("rejects an export from a newer schema version the same way", () => {
     const file = write("v4.json", JSON.stringify({ ...fixtureExport(), schemaVersion: 4 }));
     expect(() => loadExport(file)).toThrow(

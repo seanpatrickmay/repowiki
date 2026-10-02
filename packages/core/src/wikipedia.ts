@@ -6,17 +6,19 @@ export const WIKIPEDIA_EXTRACT_MAX_LENGTH = 1200;
 
 /**
  * Characters the reader must never be handed inside a preview: C0/C1 controls (including
- * newlines and tabs), the Unicode line and paragraph separators, and every bidirectional
- * formatting character (marks, embeddings, overrides, isolates), which can reorder the text
- * around them.
+ * newlines and tabs), the Unicode line and paragraph separators, and every invisible format
+ * character (\p{Cf}): the bidirectional marks, embeddings, overrides and isolates that reorder
+ * the text around them, plus tag characters, word joiners, invisible operators, byte order marks,
+ * zero-width spaces and soft hyphens, which hide text. The zero-width joiner and non-joiner are
+ * kept: Indic and Persian scripts need them to spell words.
  */
-const CONTROL_OR_BIDI = /[\p{Cc}\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+const CONTROL_OR_INVISIBLE = /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
-const plainText = (text: string): boolean => !CONTROL_OR_BIDI.test(text);
+const plainText = (text: string): boolean => !CONTROL_OR_INVISIBLE.test(text);
 
 /**
  * True for an English Wikipedia article URL in the one form the URL parser writes: https, host
- * exactly en.wikipedia.org, no credentials and no port, a path under /wiki/. Comparing with the
+ * exactly en.wikipedia.org, no credentials and no port, a path under /wiki/, no query and no fragment. Comparing with the
  * parsed href refuses anything the parser would rewrite (spaces, quotes, backslashes, an explicit
  * default port, an upper-case host), so the stored string is the string a browser follows.
  */
@@ -31,7 +33,11 @@ function isWikipediaArticleUrl(value: string): boolean {
     url.password === "" &&
     url.port === "" &&
     url.pathname.startsWith("/wiki/") &&
-    url.pathname.length > "/wiki/".length
+    url.pathname.length > "/wiki/".length &&
+    url.search === "" &&
+    url.hash === "" &&
+    !value.includes("?") &&
+    !value.includes("#")
   );
 }
 
@@ -45,14 +51,14 @@ export const WikipediaSummary = z.object({
   title: z
     .string()
     .min(1)
-    .refine(plainText, "must not contain control or bidirectional characters"),
+    .refine(plainText, "must not contain control or invisible format characters"),
   extract: z
     .string()
     .refine(
       (text) => [...text].length <= WIKIPEDIA_EXTRACT_MAX_LENGTH,
       `must be at most ${WIKIPEDIA_EXTRACT_MAX_LENGTH} characters`,
     )
-    .refine(plainText, "must not contain control or bidirectional characters"),
+    .refine(plainText, "must not contain control or invisible format characters"),
   url: z.string().refine(isWikipediaArticleUrl, "expected an en.wikipedia.org article URL"),
 });
 export type WikipediaSummary = z.infer<typeof WikipediaSummary>;

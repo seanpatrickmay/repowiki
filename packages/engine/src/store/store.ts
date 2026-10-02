@@ -64,9 +64,12 @@ export interface Store {
    * replaced is kept.
    */
   forgetBatchRequests(batchId: string, requestKeys: readonly string[]): void;
-  /** A cached Wikipedia lookup by title (requested or canonical), or null if never looked up. */
+  /**
+   * A cached Wikipedia lookup, or null if never looked up. Lookups are keyed by
+   * normalizeWikipediaTitle(requested title), the form buildExport reads link tokens in.
+   */
   getWikipediaSummary(title: string): WikipediaCacheEntry | null;
-  /** Caches a lookup: the summary, or null for a title with no article to link. */
+  /** Caches a lookup under normalizeWikipediaTitle(requested title): the summary, or null for none. */
   putWikipediaSummary(title: string, summary: WikipediaSummary | null, fetchedAt: string): void;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
