@@ -43,14 +43,70 @@ describe("parseWikiArgs", () => {
   it("takes a deadline of a positive number of minutes up to 24 hours", () => {
     expect(parseWikiArgs(["a", "--deadline", "1440"]).deadlineMinutes).toBe(1440);
     expect(parseWikiArgs(["a", "--deadline", "0.5"]).deadlineMinutes).toBe(0.5);
-    for (const bad of ["0", "-5", "1441", "Infinity", "NaN", "", "1e9"])
+    for (const bad of [
+      "0",
+      "-5",
+      "1441",
+      "Infinity",
+      "NaN",
+      "",
+      "1e9",
+      "1e2",
+      "0x10",
+      " 5 ",
+      "5.",
+      ".5",
+    ])
       expect(() => parseWikiArgs(["a", "--deadline", bad])).toThrow(CliError);
   });
 
   it("takes a budget of a positive integer only", () => {
     expect(parseWikiArgs(["a"]).budgetTokens).toBe(30_000);
-    for (const bad of ["1.5", "-1", "NaN", "", "9".repeat(20)])
+    for (const bad of [
+      "1.5",
+      "-1",
+      "NaN",
+      "",
+      "0",
+      "00",
+      "9".repeat(20),
+      "0x10",
+      "1e2",
+      " 5 ",
+      "+5",
+    ])
       expect(() => parseWikiArgs(["a", "--budget", bad])).toThrow(CliError);
+  });
+
+  it("refuses an empty repo, --out or --config", () => {
+    for (const argv of [[""], ["a", "--out", ""], ["a", "--config", ""]])
+      expect(() => parseWikiArgs(argv)).toThrow(CliError);
+  });
+
+  it("refuses a repeated flag", () => {
+    for (const argv of [
+      ["a", "--budget", "5", "--budget", "6"],
+      ["a", "--out", "x", "--out", "y"],
+      ["a", "--config", "x", "--config", "y"],
+      ["a", "--deadline", "5", "--deadline", "6"],
+      ["a", "--no-batch", "--no-batch"],
+      ["a", "--dry-run", "--dry-run"],
+    ])
+      expect(() => parseWikiArgs(argv)).toThrow(CliError);
+  });
+
+  it("echoes an unknown flag cut to 40 characters and never past an equals sign", () => {
+    const long = `--${"k".repeat(60)}`;
+    let message = "";
+    try {
+      parseWikiArgs(["a", `${long}=hunter2`]);
+    } catch (err) {
+      message = (err as CliError).message;
+    }
+    expect(message).toContain(long.slice(0, 40));
+    expect(message).not.toContain(long.slice(0, 41));
+    expect(message).not.toContain("hunter2");
+    expect(message).not.toMatch(/[\r\n]/);
   });
 
   it.each([
@@ -59,6 +115,7 @@ describe("parseWikiArgs", () => {
     [["a", "--unknown=hunter2"], "--unknown"],
     [["a", "--out"], "--out"],
     [["a", "--no-batch=hunter2"], "--no-batch"],
+    [["a", "--ANTHROPIC_API_KEY=hunter2"], "--ANTHROPIC_API_KEY"],
   ])("answers %j with one line that names only the flag", (argv, flag) => {
     let message = "";
     try {
@@ -108,6 +165,24 @@ const failed = (featureId: string, failure: string) => ({
   tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
 });
 
+describe("estimateBuild with an unpriced model", () => {
+  it("is a CliError naming the model cut to 80 characters, before any call", () => {
+    const id = `gpt-${"9".repeat(100)}\nsecond line`;
+    let message = "";
+    try {
+      estimateBuild([pack(1)], "x", id, true);
+    } catch (err) {
+      expect(err).toBeInstanceOf(CliError);
+      message = (err as CliError).message;
+    }
+    expect(message).toMatch(
+      /^no price for model gpt-9+; add it to packages\/llm\/src\/pricing\.ts$/,
+    );
+    expect(message.length).toBeLessThan(150);
+    expect(message).not.toMatch(/[\r\n]/);
+  });
+});
+
 describe("renderBuildSummary", () => {
   it("lists every page with its claims, drops and calls, and the cost against the estimate", () => {
     const summary = renderBuildSummary(
@@ -118,37 +193,78 @@ describe("renderBuildSummary", () => {
       totals,
     );
     expect(summary).toContain("0 of 1 pages written, 0 claims dropped.");
-    expect(summary).toContain("| `a` | 0 | 0 | 2 | the write call failed: x y |");
+    expect(summary).toContain("| `a` | 0 | 0 | 2 | `the write call failed: x\\|y` |");
     expect(summary).toContain(
       "3 calls (3 batched): 1,000 input, 200 output, 4,000 cache-read, 0 cache-write tokens.",
     );
     expect(summary).toContain("Cost: $0.0123 (estimated up front: $0.0200 for the first round).");
   });
 
-  it("says the estimate runs high because it assumes no cache hits", () => {
+  it("says on its own line that the estimate runs high, and ends on the Cost line", () => {
     const summary = renderBuildSummary("repo", "a".repeat(40), [], estimate, totals);
-    expect(summary).toMatch(/upper-side estimate.*no cache hits/);
-    expect(renderBuildSummary("repo", "a".repeat(40), [], null, totals)).not.toContain("estimate");
+    expect(summary.split("\n")).toContain(
+      "The estimate is an upper-side estimate with no cache hits.",
+    );
+    expect(summary.trimEnd().split("\n").at(-1)).toBe(
+      "Cost: $0.0123 (estimated up front: $0.0200 for the first round).",
+    );
+    const bare = renderBuildSummary("repo", "a".repeat(40), [], null, totals);
+    expect(bare).not.toContain("estimate");
+    expect(bare.trimEnd().split("\n").at(-1)).toBe("Cost: $0.0123.");
   });
 
-  it("keeps a repo name, feature id and failure from injecting Markdown", () => {
-    const hostile = "t\n# Injected `x` | [x](javascript:alert(1))";
+  it("says when no LLM call was made, and counts unpriced calls", () => {
+    const none = { ...totals, calls: 0, batchCalls: 0, usd: 0 };
+    expect(renderBuildSummary("repo", "a".repeat(40), [], estimate, none)).toContain(
+      "no LLM call made",
+    );
+    expect(renderBuildSummary("repo", "a".repeat(40), [], estimate, totals)).not.toContain(
+      "no LLM call made",
+    );
+    expect(renderBuildSummary("repo", "a".repeat(40), [], null, totals)).not.toContain("no price");
+    const unpriced = renderBuildSummary("repo", "a".repeat(40), [], null, {
+      ...totals,
+      unpricedCalls: 2,
+    });
+    expect(unpriced).toContain("2 calls have no known price");
+  });
+
+  it("renders the repo name and failure as code spans that no Markdown can leave", () => {
+    const hostile =
+      "x\n# Injected <script>alert(1)</script> [x](javascript:alert(1)) ![i](http://x) <http://x> https://evil.example a@b.co |";
     const summary = renderBuildSummary(
-      `repo\n# Injected ${hostile}`,
+      hostile,
       "a".repeat(40),
-      [failed(hostile, `boom\r\n# Injected\u2028## Again ${hostile}`)],
+      [failed("a", hostile)],
       estimate,
       totals,
     );
     expect(summary.split("\n").filter((l) => l.startsWith("#"))).toEqual([
-      expect.stringMatching(/^# Build: repo # Injected /),
+      expect.stringMatching(/^# Build: `x # Injected /),
       "## LLM cost",
     ]);
-    const row = summary.split("\n").find((l) => l.startsWith("| ``"));
-    const cells = (row ?? "").slice(1, -1).split(/(?<!\\)\|/);
-    // the feature id's pipe is escaped inside its span, and the failure's cannot split a cell
+    const h1 = summary.split("\n")[0] ?? "";
+    expect(h1).toMatch(/^# Build: `[^`]*` at aaaaaaa$/);
+    const row = summary.split("\n").find((l) => l.startsWith("| `")) ?? "";
+    expect(row.split(/(?<!\\)\|/)).toHaveLength(7);
+    for (const line of [h1, row]) {
+      const outside = line.replace(/(`+).*?\1/g, "");
+      for (const live of ["](", "<script", "![", "<http", "https://", "@"])
+        expect(outside).not.toContain(live);
+    }
+  });
+
+  it("keeps a feature id's pipe from splitting its row", () => {
+    const summary = renderBuildSummary(
+      "repo",
+      "a".repeat(40),
+      [failed("t `x` | [x](y)", "boom")],
+      estimate,
+      totals,
+    );
+    const row = summary.split("\n").find((l) => l.startsWith("| ``")) ?? "";
+    const cells = row.slice(1, -1).split(/(?<!\\)\|/);
     expect(cells).toHaveLength(5);
-    expect(cells[0]).toBe(" ``t # Injected `x` \\| [x](javascript:alert(1))`` ");
-    for (const unsafe of ["](", "`", "<", "\u2028"]) expect(cells[4]).not.toContain(unsafe);
+    expect(cells[0]).toBe(" ``t `x` \\| [x](y)`` ");
   });
 });
