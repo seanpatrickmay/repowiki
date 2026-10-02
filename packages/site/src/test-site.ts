@@ -34,6 +34,7 @@ export interface BuiltSite {
   dir: string;
   outDir: string;
   stdout: string;
+  stderr: string;
   /** Contents of a built file, by its path relative to the output directory. */
   read(path: string): string;
   cleanup(): void;
@@ -53,6 +54,7 @@ export function buildFixtureSite(extraArgs: readonly string[] = []): BuiltSite {
       dir,
       outDir,
       stdout: result.stdout,
+      stderr: result.stderr,
       read: (path) => readFileSync(join(outDir, path), "utf8"),
       cleanup: () => rmSync(dir, { recursive: true, force: true }),
     };

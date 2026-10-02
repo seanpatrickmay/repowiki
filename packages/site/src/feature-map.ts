@@ -1,4 +1,4 @@
-import type { SiteModel } from "./model.ts";
+import { finalTarget, type SiteModel } from "./model.ts";
 import { articleUrl } from "./urls.ts";
 
 /** Characters that stay as they are inside a quoted Mermaid label. */
@@ -53,7 +53,9 @@ export function featureMapSource(site: SiteModel): string | null {
   }
   const edges = new Set<string>();
   for (const id of ids) {
-    for (const other of site.pages.get(id)?.seeAlso ?? []) {
+    for (const listed of site.pages.get(id)?.seeAlso ?? []) {
+      // A link to a merged feature leads to the article it was merged into.
+      const other = finalTarget(site, listed);
       if (!node.has(other) || other === id) continue;
       const [a, b] = [id, other].sort();
       edges.add(`  ${node.get(a as string)} --- ${node.get(b as string)}`);

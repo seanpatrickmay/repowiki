@@ -54,6 +54,27 @@ describe("site build", () => {
   });
 });
 
+describe("content security policy", () => {
+  const CSP =
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+
+  it("puts the same policy right after the charset on every page, once", () => {
+    const tag = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
+    const pages = htmlFiles(site.outDir);
+    expect(pages.length).toBeGreaterThan(0);
+    for (const page of pages) {
+      const html = site.read(page);
+      expect(html.split("Content-Security-Policy").length - 1, page).toBe(1);
+      const afterCharset = html.slice(html.indexOf('<meta charset="utf-8">') + 22);
+      expect(afterCharset.trimStart().startsWith(tag), page).toBe(true);
+    }
+  });
+
+  it("builds without a bundle-size warning", () => {
+    expect(site.stderr + site.stdout).not.toMatch(/larger than|chunkSizeWarningLimit/);
+  });
+});
+
 describe("site build input validation", () => {
   let dir: string;
   beforeAll(() => {
@@ -801,28 +822,47 @@ describe("diagrams", () => {
     }
   });
 
-  it("makes no off-site request from the built scripts", () => {
+  it("lists no unexpected off-site URL in the built scripts", () => {
+    // A heuristic, not the guard: a script can build a URL at run time. The Content-Security-Policy
+    // on every page is what actually stops off-site requests; this only makes a Mermaid upgrade
+    // that adds a new host or a networking API show up in review.
     const scripts = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".js"));
     expect(scripts.length).toBeGreaterThan(1);
-    // Mermaid's bundle names other hosts only as XML namespace identifiers (w3.org, eclipse.org)
-    // and in documentation links inside error messages (chevrotain.io, github.com, ...). None is
-    // fetched; any other host appearing in a script fails here, so an upgrade has to be reviewed.
-    // Strings with no host after the scheme ("http://" + a link text in the Markdown parser, an
-    // Ecore namespace "http:///org/eclipse/...") are inert too.
-    const inert =
-      /^(?:www\.w3\.org|www\.eclipse\.org|chevrotain\.io|github\.com|en\.wikipedia\.org|langium\.org|rolldown\.rs)$/;
+    // Mermaid 12.0.0's bundle holds other hosts only as inert strings: XML, SVG and Ecore namespace
+    // identifiers, and documentation links in error messages. None is fetched. A bare "http://" is
+    // a prefix the Markdown parser puts on link text; "http:///org/eclipse/emf/" is an Ecore name.
+    const inert = [
+      "http://www.w3.org/1998/Math/MathML",
+      "http://www.w3.org/1999/xhtml",
+      "http://www.w3.org/1999/xlink",
+      "http://www.w3.org/2000/svg",
+      "http://www.w3.org/2000/xmlns/",
+      "http://www.w3.org/2001/XMLSchema#",
+      "http://www.w3.org/XML/1998/namespace",
+      "http://www.eclipse.org/elk/ElkGraph",
+      "http://www.eclipse.org/emf/2002/Ecore",
+      "http://www.eclipse.org/emf/2003/XMLType",
+      "http:///org/eclipse/emf/",
+      "https://chevrotain.io/docs/",
+      "https://en.wikipedia.org/wiki/LL_parser#",
+      "https://github.com/chevrotain/chevrotain/issues",
+      "https://github.com/markedjs/marked.",
+      "https://github.com/mermaid-js/mermaid/issues",
+      "https://github.com/mermaid-js/mermaid/releases/tag/v11.0.0",
+      "https://langium.org/docs/reference/configuration-services/",
+      "https://rolldown.rs/in-depth/bundling-cjs",
+    ];
+    // Absolute http, https, ws and wss URLs, and protocol-relative ones at the start of a string.
+    const urls = /(?:https?|wss?):\/\/[^\s`"'<>)\\]*|(?<=[`"'])\/\/[\w.-]+[^\s`"'<>)\\]*/g;
     // Networking APIs and font loading: Mermaid's bundle uses none of them, and neither do we.
     const networking =
       /\b(?:XMLHttpRequest|WebSocket|EventSource|FontFace|importScripts|sendBeacon)\b|@font-face/;
     for (const file of scripts) {
       const text = site.read(`_astro/${file}`);
-      const hosts = [...text.matchAll(/https?:\/\/([^/\s`"'<>)]*)/g)]
-        .map((m) => m[1] ?? "")
-        .filter(Boolean);
-      expect({ file, hosts: hosts.filter((host) => !inert.test(host)) }).toEqual({
-        file,
-        hosts: [],
-      });
+      const unexpected = (text.match(urls) ?? []).filter(
+        (url) => url !== "http://" && url !== "https://" && !inert.some((p) => url.startsWith(p)),
+      );
+      expect({ file, unexpected }).toEqual({ file, unexpected: [] });
       expect({ file, networking: text.match(networking)?.[0] ?? null }).toEqual({
         file,
         networking: null,

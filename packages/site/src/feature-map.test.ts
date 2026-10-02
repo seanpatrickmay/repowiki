@@ -29,6 +29,21 @@ describe("featureMapSource", () => {
     );
   });
 
+  it("draws an edge to the final article when See also names a merged feature", () => {
+    // legacy-signals is a redirect to signals, so a link to it joins the hostile article to signals.
+    const wiki = fixtureExport();
+    const pages = wiki.pages.map((p) =>
+      p.featureId === "hostile-title" ? { ...p, seeAlso: ["legacy-signals"] } : p,
+    );
+    const source = featureMapSource(buildSiteModel({ ...wiki, pages }, null)) ?? "";
+    expect(source.split("\n").filter((l) => l.includes(" --- "))).toEqual([
+      "  n0 --- n1",
+      "  n0 --- n2",
+      "  n1 --- n2",
+    ]);
+    expect(source).not.toContain("legacy");
+  });
+
   it("escapes quotes in titles and is null without articles", () => {
     const site = buildSiteModel(withTitle("signals", 'The "signals"'), null);
     expect(featureMapSource(site)).toContain('n2["The #quot;signals#quot;"]');
