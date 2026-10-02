@@ -42,10 +42,22 @@ describe("WikiExport", () => {
 
   it("chains the Architecture revisions by parent", () => {
     const first = makeArchitecture({ edges: [] });
-    const next = makeArchitecture({ id: "architecture-2", parentId: "architecture-1", edges: [] });
+    const next = makeArchitecture({
+      id: "architecture-aaaaaaaaaaaa-2",
+      parentId: "architecture-aaaaaaaaaaaa-1",
+      edges: [],
+    });
     expect(messages(makeExport({ architecture: [first, next] }))).toEqual([]);
     expect(messages(makeExport({ architecture: [first, { ...next, parentId: null }] }))).toEqual([
-      "architecture revision architecture-2 must have parent architecture-1",
+      "architecture revision architecture-aaaaaaaaaaaa-2 must have parent architecture-aaaaaaaaaaaa-1",
+    ]);
+  });
+
+  it("refuses two Architecture revisions with one id", () => {
+    const first = makeArchitecture({ edges: [] });
+    const again = { ...first, parentId: first.id };
+    expect(messages(makeExport({ architecture: [first, again] }))).toEqual([
+      "duplicate architecture revision id architecture-aaaaaaaaaaaa-1",
     ]);
   });
 

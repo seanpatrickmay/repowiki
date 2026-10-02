@@ -3,6 +3,7 @@ import { Claim } from "./claim.ts";
 import { FeatureId } from "./feature.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 import { RevisionReason, TokenUsage } from "./revision.ts";
+import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rules.ts";
 
 /** Sections of the Architecture article (F27), in page order. */
 export const ArchitectureSectionKey = z.enum([
@@ -17,6 +18,8 @@ export type ArchitectureSectionKey = z.infer<typeof ArchitectureSectionKey>;
 /** The most feature pages one claim may name as its support. */
 export const MAX_CLAIM_PAGES = 3;
 
+const DUPLICATE_PAGE = "a claim names the same page twice";
+
 /**
  * A claim of the Architecture article. Besides citations, a body claim may name the feature
  * pages that back it: their leads are what the claim summarizes, and those leads rest on cited
@@ -25,7 +28,7 @@ export const MAX_CLAIM_PAGES = 3;
 export const ArchitectureClaim = Claim.extend({
   /** Body claims only: ids of features whose pages back the claim. */
   pages: z.array(FeatureId).max(MAX_CLAIM_PAGES),
-});
+}).refine((claim) => new Set(claim.pages).size === claim.pages.length, DUPLICATE_PAGE);
 export type ArchitectureClaim = z.infer<typeof ArchitectureClaim>;
 
 /** Every rule an Architecture claim breaks in a section (spec §7.4). */
@@ -35,9 +38,7 @@ export function architectureClaimViolations(
 ): string[] {
   const violations: string[] = [];
   if (claim.kind !== "fact") violations.push("architecture claims must be fact claims");
-  if (new Set(claim.pages).size !== claim.pages.length) {
-    violations.push("a claim names the same page twice");
-  }
+  if (new Set(claim.pages).size !== claim.pages.length) violations.push(DUPLICATE_PAGE);
   if (key === "lead") {
     if (claim.citations.length > 0 || claim.pages.length > 0) {
       violations.push("lead claims carry no citations or pages; list the body claims they support");
@@ -77,13 +78,16 @@ export const FeatureEdge = z
   .refine((edge) => edge.imports + edge.calls > 0, "an edge needs an import or a call");
 export type FeatureEdge = z.infer<typeof FeatureEdge>;
 
+const ARTICLE_ID = /^architecture-[0-9a-f]{12}-[1-9][0-9]*$/;
+
 /**
  * One revision of the Architecture article (F27): how the features fit together. It is not a
  * feature page, so it has no feature id, infobox or See also; it lives at /special/architecture/.
  */
 export const Architecture = z
   .object({
-    id: z.string().min(1),
+    /** `architecture-<sha12>-<n>`: the first 12 characters of `sha`, then the 1-based position. */
+    id: z.string().regex(ARTICLE_ID, "expected an id like architecture-<sha12>-<n>"),
     sha: GitSha,
     commitDate: IsoDateTime,
     generatedAt: IsoDateTime,
@@ -101,51 +105,29 @@ export const Architecture = z
     sections: z.array(ArchitectureSection).min(1),
   })
   .superRefine((article, ctx) => {
-    if (article.sections[0]?.key !== "lead") {
+    if (!article.id.startsWith(`architecture-${article.sha.slice(0, 12)}-`)) {
       ctx.addIssue({
         code: "custom",
-        message: "the first section must be the lead",
-        path: ["sections", 0],
+        message: "the id must carry the first 12 characters of the sha",
+        path: ["id"],
       });
     }
-    const keys = new Set<string>();
-    const ids = new Set<string>();
-    const bodyIds = new Set<string>();
-    article.sections.forEach((section, s) => {
-      if (keys.has(section.key)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `duplicate section ${section.key}`,
-          path: ["sections", s],
-        });
-      }
-      keys.add(section.key);
-      section.claims.forEach((claim, c) => {
-        if (ids.has(claim.id)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `duplicate claim id ${claim.id}`,
-            path: ["sections", s, "claims", c],
-          });
-        }
-        ids.add(claim.id);
-        if (section.key !== "lead") bodyIds.add(claim.id);
+    addSectionStructureIssues(article.sections, ctx);
+    if (article.basis.some((id, i) => i > 0 && id <= (article.basis[i - 1] ?? ""))) {
+      ctx.addIssue({
+        code: "custom",
+        message: "basis must be sorted without repeats",
+        path: ["basis"],
       });
-    });
-    article.sections.forEach((section, s) => {
-      if (section.key !== "lead") return;
-      section.claims.forEach((claim, c) => {
-        for (const supported of claim.supports) {
-          if (!bodyIds.has(supported)) {
-            ctx.addIssue({
-              code: "custom",
-              message: `lead claim ${claim.id} supports unknown body claim ${supported}`,
-              path: ["sections", s, "claims", c, "supports"],
-            });
-          }
-        }
+    }
+    const weights = article.edges.map((edge) => edge.imports + edge.calls);
+    if (weights.some((weight, i) => i > 0 && weight > (weights[i - 1] ?? 0))) {
+      ctx.addIssue({
+        code: "custom",
+        message: "edges must be heaviest first",
+        path: ["edges"],
       });
-    });
+    }
     const pairs = new Set<string>();
     article.edges.forEach((edge, e) => {
       const pair = `${edge.from}>${edge.to}`;
@@ -158,12 +140,6 @@ export const Architecture = z
       }
       pairs.add(pair);
     });
-    if (article.reason === "update" && article.parentId === null) {
-      ctx.addIssue({
-        code: "custom",
-        message: "update revisions must have a parent",
-        path: ["parentId"],
-      });
-    }
+    addUpdateParentIssue(article, ctx);
   });
 export type Architecture = z.infer<typeof Architecture>;

@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   Architecture,
-  type ArchitectureClaim,
+  ArchitectureClaim,
+  ArchitectureSection,
   type ArchitectureSectionKey,
   architectureClaimViolations,
   FeatureEdge,
 } from "./architecture.ts";
-import { architectureClaim, codeCitation, leadClaim, makeArchitecture } from "./test-fixtures.ts";
+import {
+  architectureClaim,
+  codeCitation,
+  leadClaim,
+  makeArchitecture,
+  SHA_B,
+} from "./test-fixtures.ts";
 
 const lead = (overrides: Partial<ArchitectureClaim> = {}): ArchitectureClaim => ({
   ...leadClaim({ supports: ["a-1"] }),
@@ -63,10 +70,39 @@ describe("architectureClaimViolations", () => {
   it.each(invalid)("refuses %s", (_name, key, claim, message) => {
     expect(architectureClaimViolations(key, claim).join("; ")).toContain(message);
   });
+
+  it.each(invalid)("refuses %s when the section is parsed", (_name, key, claim, message) => {
+    const result = ArchitectureSection.safeParse({ key, claims: [claim] });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.message).join("; ")).toContain(message);
+  });
+
+  it.each(valid)("accepts %s when the section is parsed", (_name, key, claim) => {
+    expect(ArchitectureSection.safeParse({ key, claims: [claim] }).success).toBe(true);
+  });
+
+  it("refuses rule-breaking claims inside a whole article", () => {
+    const [first] = makeArchitecture().sections;
+    const sections = [first, { key: "layers", claims: [architectureClaim({ citations: [] })] }];
+    const result = Architecture.safeParse(makeArchitecture({ sections: sections as never }));
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual([
+      "body claims need a citation or a feature page",
+    ]);
+  });
+});
+
+describe("ArchitectureClaim", () => {
+  it("refuses a page named twice on its own", () => {
+    const parse = (pages: string[]) => ArchitectureClaim.safeParse(architectureClaim({ pages }));
+    expect(parse(["signals", "deliverables"]).success).toBe(true);
+    expect(parse(["signals", "signals"]).success).toBe(false);
+  });
 });
 
 const ok = (overrides: Partial<Architecture>) =>
   Architecture.safeParse(makeArchitecture(overrides)).success;
+const messagesOf = (overrides: Partial<Architecture>): string[] =>
+  Architecture.safeParse(makeArchitecture(overrides)).error?.issues.map((i) => i.message) ?? [];
 
 describe("Architecture", () => {
   it("accepts the fixture article", () => {
@@ -79,11 +115,44 @@ describe("Architecture", () => {
       Architecture["sections"][number],
       Architecture["sections"][number],
     ];
-    expect(ok({ sections: [layers, first] })).toBe(false);
-    expect(ok({ sections: [first, layers, layers] })).toBe(false);
+    expect(messagesOf({ sections: [layers, first] })).toEqual([
+      "the first section must be the lead",
+    ]);
+    const twice = { ...layers, claims: [architectureClaim({ id: "a-3" })] };
+    expect(messagesOf({ sections: [first, layers, twice] })).toEqual(["duplicate section layers"]);
     const again = { ...dependencies, claims: [architectureClaim()] };
-    expect(ok({ sections: [first, layers, again] })).toBe(false);
-    expect(ok({ sections: [first, dependencies] })).toBe(false);
+    expect(messagesOf({ sections: [first, layers, again] })).toEqual(["duplicate claim id a-1"]);
+    expect(messagesOf({ sections: [first, dependencies] })).toEqual([
+      "lead claim lead-1 supports unknown body claim a-1",
+    ]);
+  });
+
+  it("names its id architecture-<sha12>-<n>, with the sha12 of its own sha", () => {
+    expect(ok({ id: "architecture-aaaaaaaaaaaa-12" })).toBe(true);
+    expect(ok({ id: "architecture-1" })).toBe(false);
+    expect(ok({ id: "architecture-aaaaaaaaaaaa-0" })).toBe(false);
+    expect(ok({ id: "architecture-aaaaaaaaaaaa-01" })).toBe(false);
+    expect(ok({ id: "signals-aaaaaaaaaaaa-1" })).toBe(false);
+    expect(messagesOf({ id: "architecture-bbbbbbbbbbbb-1" })).toEqual([
+      "the id must carry the first 12 characters of the sha",
+    ]);
+    expect(ok({ id: "architecture-bbbbbbbbbbbb-1", sha: SHA_B })).toBe(true);
+  });
+
+  it("lists its basis sorted, without repeats", () => {
+    expect(ok({ basis: ["a-1", "b-1"] })).toBe(true);
+    expect(ok({ basis: ["b-1", "a-1"] })).toBe(false);
+    expect(ok({ basis: ["a-1", "a-1"] })).toBe(false);
+    expect(messagesOf({ basis: ["b-1", "a-1"] })).toEqual(["basis must be sorted without repeats"]);
+  });
+
+  it("lists its edges heaviest first", () => {
+    const heavy = { from: "deliverables", to: "signals", imports: 1, calls: 2 };
+    const light = { from: "signals", to: "deliverables", imports: 1, calls: 0 };
+    const equal = { from: "signals", to: "billing", imports: 0, calls: 3 };
+    expect(ok({ edges: [heavy, light] })).toBe(true);
+    expect(ok({ edges: [heavy, equal] })).toBe(true);
+    expect(messagesOf({ edges: [light, heavy] })).toEqual(["edges must be heaviest first"]);
   });
 
   it("refuses more than three pages on a claim and a page id that is not a feature id", () => {

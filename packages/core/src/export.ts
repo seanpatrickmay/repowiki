@@ -85,7 +85,16 @@ export const WikiExport = z
       });
     }
 
+    const articleIds = new Set<string>();
     wiki.architecture.forEach((article, index) => {
+      if (articleIds.has(article.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate architecture revision id ${article.id}`,
+          path: ["architecture", index, "id"],
+        });
+      }
+      articleIds.add(article.id);
       const parent = index === 0 ? null : (wiki.architecture[index - 1]?.id ?? null);
       if (article.parentId !== parent) {
         ctx.addIssue({

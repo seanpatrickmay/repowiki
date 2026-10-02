@@ -185,7 +185,7 @@ export function architectureClaim(overrides: Partial<ArchitectureClaim> = {}): A
 /** An Architecture article over makeManifest()'s two features, written at SHA_A. */
 export function makeArchitecture(overrides: Partial<Architecture> = {}): Architecture {
   return {
-    id: "architecture-1",
+    id: "architecture-aaaaaaaaaaaa-1",
     sha: SHA_A,
     commitDate: "2026-02-03T10:00:00-05:00",
     generatedAt: "2026-09-30T20:00:00Z",

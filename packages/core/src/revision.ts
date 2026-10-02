@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { FeatureId } from "./feature.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
+import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rules.ts";
 import { Section } from "./section.ts";
 
 export const RevisionReason = z.enum(["build", "update", "manifest-change"]);
@@ -41,53 +42,7 @@ export const Revision = z
     sections: z.array(Section).min(1),
   })
   .superRefine((revision, ctx) => {
-    if (revision.sections[0]?.key !== "lead") {
-      ctx.addIssue({
-        code: "custom",
-        message: "the first section must be the lead",
-        path: ["sections", 0],
-      });
-    }
-
-    const keys = new Set<string>();
-    const bodyClaimIds = new Set<string>();
-    const allClaimIds = new Set<string>();
-    revision.sections.forEach((section, s) => {
-      if (keys.has(section.key)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `duplicate section ${section.key}`,
-          path: ["sections", s],
-        });
-      }
-      keys.add(section.key);
-      section.claims.forEach((claim, c) => {
-        if (allClaimIds.has(claim.id)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `duplicate claim id ${claim.id}`,
-            path: ["sections", s, "claims", c],
-          });
-        }
-        allClaimIds.add(claim.id);
-        if (section.key !== "lead") bodyClaimIds.add(claim.id);
-      });
-    });
-
-    revision.sections.forEach((section, s) => {
-      if (section.key !== "lead") return;
-      section.claims.forEach((claim, c) => {
-        for (const supported of claim.supports) {
-          if (!bodyClaimIds.has(supported)) {
-            ctx.addIssue({
-              code: "custom",
-              message: `lead claim ${claim.id} supports unknown body claim ${supported}`,
-              path: ["sections", s, "claims", c, "supports"],
-            });
-          }
-        }
-      });
-    });
+    addSectionStructureIssues(revision.sections, ctx);
 
     // manifest-change may be a feature's first page (create/split) or a later one, so either is valid.
     if (revision.reason === "build" && revision.parentId !== null) {
@@ -97,13 +52,7 @@ export const Revision = z
         path: ["parentId"],
       });
     }
-    if (revision.reason === "update" && revision.parentId === null) {
-      ctx.addIssue({
-        code: "custom",
-        message: "update revisions must have a parent",
-        path: ["parentId"],
-      });
-    }
+    addUpdateParentIssue(revision, ctx);
     if (revision.seeAlso.includes(revision.featureId)) {
       ctx.addIssue({
         code: "custom",
