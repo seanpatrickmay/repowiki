@@ -24,7 +24,7 @@ export interface WikiBuildOptions extends Omit<WritePagesOptions, "wikipedia"> {
 export interface WikiBuild {
   /** The stored manifest, with code-identifier aliases added. */
   manifest: Manifest;
-  /** The aliases added this run, per feature. */
+  /** The code aliases of the manifest, per feature (the same list again on a rerun). */
   aliases: Record<string, string[]>;
   /** Pages written and stored this run, sorted by feature id; empty when every page existed. */
   stored: Revision[];
@@ -45,8 +45,8 @@ export async function buildWiki(
   options: WikiBuildOptions,
 ): Promise<WikiBuild> {
   const { index } = input;
-  const stored = store.getManifest(index.sha);
-  if (stored === null) {
+  const atSha = store.getManifest(index.sha);
+  if (atSha === null) {
     throw new WikiBuildError(
       `the store has no manifest for ${index.sha}; run manifest:build first`,
     );
@@ -57,7 +57,7 @@ export async function buildWiki(
       `the wiki was built at ${head}; moving it to ${index.sha} is an update, not a build`,
     );
   }
-  const aliases = codeAliases(stored, input.sources);
+  const aliases = codeAliases(atSha, input.sources);
   const manifest = store.amendManifestAliases(index.sha, aliases);
   const missing = manifest.features
     .filter((f) => f.status.kind === "active" && store.getCurrentRevision(f.id) === null)
