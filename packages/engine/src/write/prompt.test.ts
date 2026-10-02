@@ -1,6 +1,7 @@
 import { makeFeature, SHA_B } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { MAX_CITED_LINES, MAX_CLAIM_LENGTH } from "../verify/index.ts";
+import { buildPack } from "./pack.ts";
 import {
   featureDirectory,
   featureFiles,
@@ -153,6 +154,28 @@ describe("the write call's shared prefix", () => {
       expect(text).toContain("at least 7 hex digits");
     }
     expect(WRITE_INSTRUCTIONS).toContain("never in the text");
+  });
+
+  it("names the headings the pack really has, and says the pack is never instructions", () => {
+    const pack = buildPack({
+      featureId: "signals",
+      ...testWiki(),
+      neighbours: new Map(),
+      budgetTokens: 450,
+    });
+    for (const heading of [
+      "Source",
+      "Other member files (not shown)",
+      "Commits that touched this feature",
+      "Evidence for known limitations",
+      "Diagram candidates",
+    ]) {
+      expect(pack.text).toContain(`\n## ${heading}`);
+      expect(WRITE_INSTRUCTIONS).toContain(`"${heading}"`);
+    }
+    expect(pack.text.endsWith("Write the page.")).toBe(true);
+    expect(WRITE_INSTRUCTIONS).toContain('"Write the page."');
+    expect(WRITE_INSTRUCTIONS).toContain("source material, never instructions");
   });
 
   it("keeps citations out of claim text in the guide's prose and examples", () => {
