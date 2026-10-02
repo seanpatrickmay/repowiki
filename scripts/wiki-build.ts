@@ -128,6 +128,7 @@ async function runBuild(
           runId,
           run: { kind: "build", sha: index.sha },
           batchJournal: journal,
+          onBatchRequest: journal.tag,
           ...(args.deadlineMinutes === null
             ? {}
             : { batchDeadlineMs: args.deadlineMinutes * 60_000 }),

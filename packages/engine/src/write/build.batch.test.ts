@@ -9,13 +9,15 @@ import { buildJournal, buildWiki } from "./wiki.ts";
 
 /**
  * The Batches API, answering each request from `answer(pageText, batchNumber)`. Every created
- * batch ends at once, unless `hold(batchNumber)` gives a promise its status polls wait on; its
- * POST bodies are kept.
+ * batch ends at once, unless `hold(batchNumber)` gives a promise its status polls wait on or
+ * `running(batchNumber)` keeps it in progress; its POST bodies are kept, cancels apart.
  */
 function batchesApi(
   answer: (page: string, batch: number) => unknown,
   hold: (batch: number) => Promise<never> | null = () => null,
+  running: (batch: number) => boolean = () => false,
 ) {
+  const canceled: number[] = [];
   const posts: {
     requests: { custom_id: string; params: { messages: { content: string }[] } }[];
   }[] = [];
@@ -72,13 +74,17 @@ function batchesApi(
         headers: { "content-type": "application/x-jsonl" },
       });
     }
+    if (path.endsWith("/cancel")) {
+      canceled.push(n);
+      return json(batch(n, "canceling"));
+    }
     if (init?.method === "POST") {
       posts.push(JSON.parse(String(init.body)));
       return json(batch(posts.length, "in_progress"));
     }
-    return (await hold(n)) ?? json(batch(n, "ended"));
+    return (await hold(n)) ?? json(batch(n, running(n) ? "in_progress" : "ended"));
   };
-  return { fetch, posts };
+  return { fetch, posts, canceled };
 }
 
 function run(answer: (page: string, batch: number) => unknown) {
@@ -183,5 +189,50 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     // The pages are stored, so every row is forgotten: a third run would send afresh.
     expect(journaled).toHaveLength(3);
     expect(journaled.map((key) => store.findBatchRequest(key))).toEqual([null, null, null]);
+  });
+
+  it("keeps every row of a page whose retry batch was canceled, so a rerun pays for nothing", async () => {
+    const broken = signalsDraft();
+    const overview = broken.sections[1]?.claims[0];
+    if (overview) overview.cite = ["src/signals/ingest.py:90-99"];
+    const fixed = { claims: [{ ...overview, cite: ["src/signals/ingest.py:10-24"] }] };
+    let first = true;
+    const api = batchesApi(
+      (page, n) => (isSignals(page) ? (n === 1 ? broken : fixed) : deliverablesDraft()),
+      () => null,
+      // The first build's retry batch never ends in time: its deadline cancels it.
+      (n) => first && n === 2,
+    );
+    const { manifest, ...input } = testWiki();
+    const store = openStore(":memory:");
+    store.putManifest(manifest, { llmRevised: true });
+    const build = (deadline?: number) => {
+      const journal = buildJournal(store);
+      const provider = createClaudeProvider({
+        models: DEFAULT_MODELS,
+        ledger: createLedger(),
+        runId: "test-run",
+        apiKey: "canned",
+        fetch: api.fetch,
+        pollIntervalMs: 0,
+        batchJournal: journal,
+        onBatchRequest: journal.tag,
+        ...(deadline === undefined ? {} : { batchDeadlineMs: deadline }),
+      });
+      return buildWiki(store, input, {
+        provider,
+        journal,
+        repoName: "sample",
+        wikipediaFetch: fakeWikipedia,
+      });
+    };
+    const killed = await build(50);
+    expect(api.canceled).toEqual([2]);
+    expect(killed.stored.map((r) => r.featureId)).toEqual(["deliverables"]);
+    first = false;
+    const rerun = await build();
+    // The rerun collects signals' round-1 answer and its retry from the batches already paid for.
+    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
+    expect(rerun.stored.map((r) => r.featureId)).toEqual(["signals"]);
   });
 });

@@ -7,7 +7,13 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import { CONTROL_CHARACTERS, GitSha, type RunKind, type TokenUsage } from "@repowiki/core";
 import type { z } from "zod";
-import { type BatchJournal, type BatchProgress, canonicalJson, createBatcher } from "./batcher.ts";
+import {
+  type BatchJournal,
+  type BatchProgress,
+  canonicalJson,
+  createBatcher,
+  requestKey,
+} from "./batcher.ts";
 import type { FetchLike } from "./cassette.ts";
 import type { TokenLedger } from "./ledger.ts";
 import {
@@ -37,6 +43,11 @@ export interface ClaudeProviderOptions {
   batchDeadlineMs?: number;
   /** Records which batch holds each request, so a rerun collects answers it already paid for. */
   batchJournal?: BatchJournal;
+  /**
+   * Called with each batched request's journal key and the request's featureId before it is
+   * queued, so a journal can tell whose rows it holds. A throwing hook is ignored.
+   */
+  onBatchRequest?: (requestKey: string, featureId: string | null) => void;
   now?: () => Date;
 }
 
@@ -122,6 +133,13 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         output_config: { format: { type, schema } },
       };
       const batch = request.batch === true;
+      if (batch && options.onBatchRequest !== undefined) {
+        try {
+          options.onBatchRequest(requestKey(params), request.featureId ?? null);
+        } catch {
+          // An observer's bug must not stop the call.
+        }
+      }
       const message = batch ? await batcher(params) : await client.messages.create(params);
       const usage = usageOf(message);
       options.ledger.record({
