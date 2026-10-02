@@ -50,8 +50,8 @@ Never reuse their names, numbers or citations.
 - How it works: the mechanism, step by step, naming the functions, classes and files.
 - Data flow: inputs, transformations, storage and outputs, in the order data moves.
 - History: when and how the feature changed, from commit subjects, oldest first.
-- Known limitations: only what a TODO or FIXME comment, a skipped test or a reverting commit
-  shows.
+- Known limitations: only what a TODO, FIXME, XXX or HACK comment, a skipped test or a reverting
+  commit shows.
 - Sections are left out rather than padded. A short, accurate page beats a long one.
 
 ## Naming code

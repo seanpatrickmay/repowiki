@@ -331,7 +331,7 @@ export function buildPack(input: PackInput): ContextPack {
           : `- ${omittedEvidence} evidence items not listed`;
     return [
       `## Commits that touched this feature (newest first)\n${commitLines.slice(0, nc).join("\n") || (commits.length === 0 ? "(none)" : "")}${commitNote}`,
-      `## Evidence for known limitations\n${evidence.slice(0, ne).join("\n") || (evidence.length === 0 ? "(none)" : "")}${evidenceNote}`,
+      `## Evidence for known limitations\n${evidence.slice(0, ne).join("\n") || (evidence.length === 0 ? "(none: write no known-limitations claims)" : "")}${evidenceNote}`,
       diagrams,
       "Write the page.",
     ].join("\n\n");

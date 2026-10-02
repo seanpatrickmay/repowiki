@@ -16,7 +16,7 @@ sections: the page's sections in this order, each with its claims:
 - "how-it-works": how the code does it, naming the functions, classes and files involved.
 - "data-flow": where data comes from, how it moves and where it ends up. Leave the section out when the feature moves no data.
 - "history": how the feature came to be, from its commits. Every history claim cites at least one commit.
-- "known-limitations": only problems the evidence list proves: a TODO or FIXME comment, a skipped test, or a reverting commit. Every limitation claim cites that evidence. Leave the section out when there is none.
+- "known-limitations": only problems the evidence list proves: a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit. Every limitation claim cites that evidence. Leave the section out when there is none.
 
 A claim is one or two sentences that state one thing. The text of a claim is one paragraph with no line breaks, at most 1,000 characters. Each claim has:
 - id: a short id, unique on the page, such as "o1" or "h3".
