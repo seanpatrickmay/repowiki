@@ -886,21 +886,22 @@ describe("search", () => {
     expect(html).toContain('<script src="/pagefind/pagefind-ui.js"></script>');
   });
 
-  it("indexes exactly the article pages, with their aliases", () => {
-    // Only a current article carries data-pagefind-body: not history, diff, redirect,
-    // disambiguation, the Main Page or /search/ itself. Retired articles stay readable, so they
-    // are indexed too: signals, deliverables, hostile-title and the retired exporter.
+  it("indexes exactly the current articles of active features, with their aliases", () => {
+    // Only an active feature's current article carries data-pagefind-body: not history, diff,
+    // redirect, disambiguation, the Main Page, /search/ itself or a retired article. The retired
+    // exporter page still renders with its banner and stays in All articles.
     const indexed = htmlFiles(site.outDir).filter((page) =>
       site.read(page).includes("data-pagefind-body"),
     );
     expect(indexed).toEqual([
       "wiki/deliverables/index.html",
-      "wiki/exporter/index.html",
       "wiki/hostile-title/index.html",
       "wiki/signals/index.html",
     ]);
+    expect(site.read("wiki/exporter/index.html")).toContain("This feature was retired at commit");
+    expect(site.read("special/all-pages/index.html")).toContain('href="/wiki/exporter/"');
     const entry = JSON.parse(site.read("pagefind/pagefind-entry.json"));
-    expect(entry.languages.en.page_count).toBe(indexed.length);
+    expect(entry.languages.en.page_count).toBe(3);
     const body = site.read("wiki/signals/index.html").split("data-pagefind-body")[1] ?? "";
     expect(body).toContain("signal pipeline, SIGNALS_TABLE, /api/signals");
   });
@@ -918,6 +919,9 @@ describe("search", () => {
   });
 
   it("hands the q parameter only to the Pagefind UI, never to markup or a URL", () => {
+    // A tripwire, not a proof: it only catches someone adding an obvious sink to search.ts. The
+    // guarantee is Pagefind UI itself, which renders result titles as text nodes and escapes
+    // excerpts (checked in a browser with a hostile title and a hostile q).
     const source = readFileSync(new URL("./client/search.ts", import.meta.url), "utf8");
     expect(source).toContain("ui.triggerSearch(query)");
     expect(source).not.toMatch(

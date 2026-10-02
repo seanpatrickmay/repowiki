@@ -20,7 +20,7 @@ const history = historyHref(site, route.slug);
 ---
 {page.kind === "article" ? (
   <Layout title={page.view.title}>
-    <Article view={page.view} indexed={true} />
+    <Article view={page.view} indexed={page.indexed} />
   </Layout>
 ) : page.kind === "redirect" ? (
   <Layout title={page.title}>
