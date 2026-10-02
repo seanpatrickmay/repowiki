@@ -14,10 +14,16 @@ export const LINK_TOKEN = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
  */
 const INLINE_TOKEN = new RegExp(`\`[^\`]+\`|${LINK_TOKEN.source}`, "g");
 
+/**
+ * The site deletes these two private-use characters from claim text before it reads any token
+ * (packages/site/src/inline.ts), so `[<U+E000>[wp:X]]` is a link there. Read text the same way.
+ */
+const PLACEHOLDER_CHARS = /[\ue000\ue001]/g;
+
 /** Every link token in a text that the reader renders as a link (none inside code spans). */
 export function linkTokensIn(text: string): { target: string; label: string | undefined }[] {
   const tokens: { target: string; label: string | undefined }[] = [];
-  for (const [, target, label] of text.matchAll(INLINE_TOKEN)) {
+  for (const [, target, label] of text.replace(PLACEHOLDER_CHARS, "").matchAll(INLINE_TOKEN)) {
     if (target !== undefined) tokens.push({ target: target.trim(), label: label?.trim() });
   }
   return tokens;
@@ -51,17 +57,25 @@ export function wikipediaTitlesIn(text: string): string[] {
  */
 export function createTargetResolver(manifest: Manifest): (target: string) => Feature | null {
   const byId = new Map(manifest.features.map((f) => [f.id, f]));
+  // A name goes to an active feature before any other, a retired one last; ties go to the
+  // smallest id, so manifest order never decides a link.
+  const rank = (f: Feature): number =>
+    f.status.kind === "retired" ? 2 : f.status.kind === "active" ? 0 : 1;
+  const better = (f: Feature, than: Feature): boolean =>
+    rank(f) - rank(than) < 0 || (rank(f) === rank(than) && f.id < than.id);
   const byName = new Map<string, Feature>();
   for (const feature of manifest.features) {
     for (const name of [feature.title, ...feature.aliases]) {
       const key = name.trim().toLowerCase();
-      if (!byName.has(key)) byName.set(key, feature);
+      const held = byName.get(key);
+      if (held === undefined || better(feature, held)) byName.set(key, feature);
     }
   }
   const final = (feature: Feature): Feature | null => {
     const seen = new Set<string>();
     let current: Feature | undefined = feature;
-    while (current?.status.kind === "redirect" && !seen.has(current.id)) {
+    while (current?.status.kind === "redirect") {
+      if (seen.has(current.id)) return null;
       seen.add(current.id);
       current = byId.get(current.status.to);
     }
@@ -95,7 +109,7 @@ export function createPageLinker(
   const resolve = createTargetResolver(manifest);
   const titles = new Map(manifest.features.map((f) => [f.id, f.title]));
   const linked = new Set<string>();
-  const rewrite = (token: string, rawTarget: string, rawLabel: string | undefined): string => {
+  const rewrite = (rawTarget: string, rawLabel: string | undefined): string => {
     const target = rawTarget.trim();
     // Like the site, an empty label is no label.
     const label = rawLabel?.trim() || undefined;
@@ -115,10 +129,12 @@ export function createPageLinker(
     }
     linked.add(feature.id);
     if (label === undefined && target === feature.id) return `[[${feature.id}]]`;
-    return words === "" ? token : `[[${feature.id}|${words}]]`;
+    return words === "" ? `[[${feature.id}]]` : `[[${feature.id}|${words}]]`;
   };
   return (text) =>
-    text.replace(INLINE_TOKEN, (match, target: string | undefined, label?: string) =>
-      target === undefined ? match : rewrite(match, target, label),
-    );
+    text
+      .replace(PLACEHOLDER_CHARS, "")
+      .replace(INLINE_TOKEN, (match, target: string | undefined, label?: string) =>
+        target === undefined ? match : rewrite(target, label),
+      );
 }

@@ -1,3 +1,4 @@
+import { makeFeature, makeRevision } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   createPageLinker,
@@ -6,6 +7,7 @@ import {
   wikipediaTitlesIn,
 } from "./links.ts";
 import { linkManifest } from "./test-manifest.ts";
+import { linkViolations } from "./violations.ts";
 
 const NO_WP = new Map<string, string | null>();
 
@@ -137,6 +139,8 @@ describe("crafted claim text (the site's parser is the contract)", () => {
       "]",
       "|",
       "`",
+      "\ue000",
+      "\ue001",
       " ",
       "x",
       "billing",
@@ -161,7 +165,9 @@ describe("crafted claim text (the site's parser is the contract)", () => {
       const text = Array.from({ length: 4 + next(12) }, () => pieces[next(pieces.length)]).join("");
       const out = linker(WP)(text);
       const seen = new Set<string>();
-      for (const [, code, target = "", label] of out.matchAll(SITE_TOKEN)) {
+      for (const [, code, target = "", label] of out
+        .replace(/[\ue000\ue001]/g, "")
+        .matchAll(SITE_TOKEN)) {
         if (code !== undefined) continue;
         const key = target.trim();
         const ok = key.startsWith("wp:") ? key === "wp:Cron" : resolve(key)?.id === key;
@@ -173,5 +179,95 @@ describe("crafted claim text (the site's parser is the contract)", () => {
       }
       expect({ text, out: linker(WP)(out) }).toEqual({ text, out });
     }
+  });
+});
+
+describe("fix round 1", () => {
+  const WP = new Map<string, string | null>([["Cron", "Cron"]]);
+  // The site deletes U+E000 and U+E001 from claim text before it reads any token.
+  const OPEN = String.fromCharCode(0xe000);
+  const CLOSE = String.fromCharCode(0xe001);
+  const split = (token: string) => `[${OPEN}[${token}]${CLOSE}]`;
+
+  it("reads tokens the way the site does after it deletes its placeholder characters", () => {
+    const link = createPageLinker(linkManifest(), "signals", WP);
+    expect(link(split("wp:Evil"))).toBe("Evil");
+    expect(link(split("signals"))).toBe("Signal ingestion");
+    expect(link(`[[billing]] ${split("billing")} ${split("wp:Cron")} ${split("wp:Cron")}`)).toBe(
+      "[[billing]] Billing [[wp:Cron]] Cron",
+    );
+    expect(wikipediaTitlesIn(split("wp:Evil"))).toEqual(["Evil"]);
+  });
+
+  it("flags a token that only exists once the placeholder characters are deleted", () => {
+    const revision = makeRevision();
+    const lead = revision.sections[0];
+    if (lead?.claims[0] === undefined) throw new Error("fixture has a lead");
+    lead.claims[0].text = split("nowhere");
+    expect(linkViolations(revision, linkManifest())).toEqual([
+      "signals lead-1: [[nowhere]] is not a feature id",
+    ]);
+  });
+
+  it("resolves a name to an active feature over a retired one that shares it", () => {
+    const retired = makeFeature({
+      id: "a-old-billing",
+      title: "Billing",
+      aliases: ["invoices"],
+      status: { kind: "retired" },
+    });
+    const manifest = linkManifest();
+    manifest.features.unshift(retired);
+    const resolve = createTargetResolver(manifest);
+    expect(resolve("Billing")?.id).toBe("billing");
+    expect(resolve("invoices")?.id).toBe("billing");
+  });
+
+  it("resolves a name two active features share to the smaller id", () => {
+    const manifest = linkManifest();
+    manifest.features.unshift(
+      makeFeature({ id: "ledger", title: "Ledger", aliases: ["billing"] }),
+      makeFeature({ id: "accounts", title: "Accounts", aliases: ["BILLING"] }),
+    );
+    const resolve = createTargetResolver(manifest);
+    expect(resolve("Billing")?.id).toBe("accounts");
+    expect(resolve("billing")?.id).toBe("billing");
+  });
+
+  it("resolves a redirect cycle to no page", () => {
+    const manifest = linkManifest();
+    manifest.features.push(
+      makeFeature({
+        id: "loop-a",
+        title: "Loop A",
+        aliases: [],
+        status: { kind: "redirect", to: "loop-b" },
+      }),
+      makeFeature({
+        id: "loop-b",
+        title: "Loop B",
+        aliases: [],
+        status: { kind: "redirect", to: "loop-a" },
+      }),
+    );
+    const resolve = createTargetResolver(manifest);
+    expect(resolve("loop-a")).toBeNull();
+    expect(resolve("Loop B")).toBeNull();
+    expect(createPageLinker(manifest, "signals", NO_WP)("[[loop-a]]")).toBe("Loop A");
+  });
+
+  it("emits nothing for a dropped link whose words are all stripped, and never the raw token", () => {
+    const link = createPageLinker(linkManifest(), "signals", NO_WP);
+    expect(link("a[[ghost|`]]b [[ghost|[]]c")).toBe("ab c");
+    const manifest = linkManifest();
+    manifest.features.push(
+      makeFeature({
+        id: "old",
+        title: "]",
+        aliases: [],
+        status: { kind: "redirect", to: "billing" },
+      }),
+    );
+    expect(createPageLinker(manifest, "signals", NO_WP)("[[old]]")).toBe("[[billing]]");
   });
 });
