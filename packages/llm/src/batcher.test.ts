@@ -1,7 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk/resources/messages/messages";
 import { describe, expect, it } from "vitest";
-import { type BatchProgress, createBatcher, RESULTS_ATTEMPTS } from "./batcher.ts";
+import {
+  type BatcherOptions,
+  type BatchProgress,
+  createBatcher,
+  ITEM_ATTEMPTS,
+  RESULTS_ATTEMPTS,
+} from "./batcher.ts";
 import { cannedBatchApi, succeededLine } from "./canned.ts";
 import type { FetchLike } from "./cassette.ts";
 import { LlmError } from "./provider.ts";
@@ -80,27 +86,6 @@ describe("createBatcher", () => {
     await batcher(params("first"));
     await batcher(params("second"));
     expect(posts).toHaveLength(2);
-  });
-
-  it("rejects only the items that errored, expired, or have no result", async () => {
-    const { batcher } = setup([
-      succeededLine("req-0", "a"),
-      {
-        custom_id: "req-1",
-        result: {
-          type: "errored",
-          error: { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
-        },
-      },
-      { custom_id: "req-2", result: { type: "expired" } },
-    ]);
-    const settled = await Promise.allSettled(["a", "b", "c", "d"].map((q) => batcher(params(q))));
-    expect(settled.map((s) => (s.status === "fulfilled" ? "ok" : String(s.reason)))).toEqual([
-      "ok",
-      "LlmError: batch msgbatch_canned request req-1 did not succeed: overloaded_error: Overloaded",
-      "LlmError: batch msgbatch_canned request req-2 did not succeed: expired",
-      "LlmError: batch msgbatch_canned request req-3 did not succeed: missing",
-    ]);
   });
 
   it("rejects every item when the batch itself cannot be created", async () => {
@@ -628,5 +613,128 @@ describe("createBatcher deadline, cancel and downloads (issue #113)", () => {
     });
     expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "a" }]);
     expect(api.calls.some((c) => c.endsWith("/cancel"))).toBe(false);
+  });
+});
+
+const errored = (customId: string, type: string) => ({
+  custom_id: customId,
+  result: { type: "errored", error: { type: "error", error: { type, message: type } } },
+});
+
+/** Each created batch answers with the next entry of `rounds`; the bodies are kept. */
+function roundsApi(rounds: unknown[][], options: BatcherOptions = {}) {
+  const posts: { requests: { custom_id: string; params: { messages: unknown[] } }[] }[] = [];
+  const fetch: FetchLike = async (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : input).pathname;
+    if (path.endsWith("/results")) {
+      const lines = rounds[posts.length - 1] ?? [];
+      return new Response(lines.map((l) => JSON.stringify(l)).join("\n"), {
+        status: 200,
+        headers: { "content-type": "application/x-jsonl" },
+      });
+    }
+    if (init?.method === "POST") posts.push(JSON.parse(String(init.body)));
+    return new Response(JSON.stringify(batchResponse("ended")), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const client = new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 });
+  return { batcher: createBatcher(client, { sleep: async () => {}, ...options }), posts };
+}
+
+describe("createBatcher per-item retries", () => {
+  it("rejects only the items that still errored, expired, or had no result on the last attempt", async () => {
+    const stillFailing = [
+      errored("req-0", "overloaded_error"),
+      { custom_id: "req-1", result: { type: "expired" } },
+    ];
+    const { batcher, posts } = roundsApi([
+      [
+        succeededLine("req-0", "a"),
+        errored("req-1", "overloaded_error"),
+        { custom_id: "req-2", result: { type: "expired" } },
+      ],
+      stillFailing,
+      stillFailing,
+    ]);
+    const settled = await Promise.allSettled(["a", "b", "c", "d"].map((q) => batcher(params(q))));
+    expect(settled.map((s) => (s.status === "fulfilled" ? "ok" : String(s.reason)))).toEqual([
+      "ok",
+      "LlmError: batch msgbatch_canned request req-0 did not succeed (attempt 3 of 3): overloaded_error: overloaded_error",
+      "LlmError: batch msgbatch_canned request req-1 did not succeed (attempt 3 of 3): expired",
+      "LlmError: batch msgbatch_canned request req-2 did not succeed (attempt 3 of 3): missing",
+    ]);
+    expect(posts.map((p) => p.requests.length)).toEqual([4, 3, 3]);
+  });
+
+  it("sends an overloaded or expired item again in the next batch and resolves it", async () => {
+    const { batcher, posts } = roundsApi([
+      [
+        succeededLine("req-0", "a"),
+        errored("req-1", "overloaded_error"),
+        { custom_id: "req-2", result: { type: "expired" } },
+      ],
+      [succeededLine("req-0", "b"), succeededLine("req-1", "c")],
+    ]);
+    const answers = await Promise.all(["a", "b", "c"].map((q) => batcher(params(q))));
+    expect(answers.map((m) => m.content)).toEqual([
+      [{ type: "text", text: "a" }],
+      [{ type: "text", text: "b" }],
+      [{ type: "text", text: "c" }],
+    ]);
+    expect(posts.map((p) => p.requests.map((r) => r.params.messages))).toEqual([
+      [params("a").messages, params("b").messages, params("c").messages],
+      [params("b").messages, params("c").messages],
+    ]);
+  });
+
+  it.each([
+    ["an invalid request", errored("req-0", "invalid_request_error"), /invalid_request_error/],
+    ["a canceled item", { custom_id: "req-0", result: { type: "canceled" } }, /canceled/],
+  ])("never sends %s again", async (_name, line, why) => {
+    const { batcher, posts } = roundsApi([[line]]);
+    await expect(batcher(params("a"))).rejects.toThrow(why);
+    expect(posts).toHaveLength(1);
+  });
+
+  it(`gives up after ${ITEM_ATTEMPTS} batches`, async () => {
+    const failing = [errored("req-0", "api_error")];
+    const { batcher, posts } = roundsApi([
+      failing,
+      failing,
+      failing,
+      [succeededLine("req-0", "x")],
+    ]);
+    await expect(batcher(params("a"))).rejects.toThrow(
+      `did not succeed (attempt ${ITEM_ATTEMPTS} of ${ITEM_ATTEMPTS}): api_error`,
+    );
+    expect(posts).toHaveLength(ITEM_ATTEMPTS);
+  });
+
+  it("reports each retry batch to onBatchCreated", async () => {
+    const seen: string[] = [];
+    const { batcher } = roundsApi(
+      [[succeededLine("req-0", "a"), errored("req-1", "api_error")], [succeededLine("req-0", "b")]],
+      { onBatchCreated: (batch) => seen.push(`${batch.id} ${batch.requests}`) },
+    );
+    await Promise.all([batcher(params("a")), batcher(params("b"))]);
+    expect(seen).toEqual(["msgbatch_canned 2", "msgbatch_canned 1"]);
+  });
+
+  it("does not send a request again when its batch is canceled at the deadline", async () => {
+    const api = scriptedApi({ statuses: ["in_progress", "in_progress"] });
+    let clock = 0;
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      pollIntervalMs: 1000,
+      deadlineMs: 1000,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+    await expect(batcher(params("a"))).rejects.toThrow("passed its 1 s deadline and was canceled");
+    expect(api.calls.filter((c) => c === "POST /v1/messages/batches")).toHaveLength(1);
   });
 });
