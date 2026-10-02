@@ -112,7 +112,8 @@ packages/
   - **`batch: true`.** Requests made in the same tick go out together as one Message Batch (50% off, stacking with caching). Each caller's promise settles with its own item, and an errored, expired or missing item rejects only that caller.
   - **Output.** Output is structured JSON through `output_config.format`, generated from the request's zod schema, and is validated again on receipt. No `thinking` parameter is sent.
   - **Retries.** The SDK retries failed requests itself (`maxRetries: 2`, so 3 attempts in all, per §6.3).
-  - **Ledger.** Each ledger entry records `runId`, `at`, `purpose`, `model`, `featureId`, `batch`, `cacheKey` and the four token counts, and is persisted in the store's `ledger` table. Cost is computed from the entries, never stored: each token count times the model's price for that class, halved for batch entries. For Haiku 4.5 the prices per MTok are $1 input, $5 output, $1.25 cache write (5-minute TTL) and $0.10 cache read.
+  - **Batch robustness (M4).** A batch item that errored (other than a permanent error such as an invalid request), expired or went missing is sent again in the next batch, up to three batches in all. A batch can have a deadline, past which it is canceled, and result downloads are retried. A journal in the store (migration 5) maps each request's key to its batch, so a rerun collects a batch it already submitted instead of paying for it again.
+  - **Ledger.** Each ledger entry records `runId`, `at`, `purpose`, `model`, `featureId`, `batch`, `cacheKey` and the four token counts, and is persisted in the store's `ledger` table. From M4, rows also carry `runKind` (`build` | `update`) and the run's `sha` (§6.4). Cost is computed from the entries, never stored: each token count times the model's price for that class, halved for batch entries. For Haiku 4.5 the prices per MTok are $1 input, $5 output, $1.25 cache write (5-minute TTL) and $0.10 cache read.
 - **Clustering (M3).** The file graph has these edges:
   - import edges of weight 1, scaled by `min(1, 4 / in-degree)` so barrels and shared fixtures don't glue the repo together;
   - co-change edges of weight 2 × Jaccard, for pairs that changed together at least twice;
@@ -126,12 +127,12 @@ packages/
 - **Languages in v1:** symbol-level indexing for Python, TypeScript, and TSX. Every other tracked file (including Terraform) is indexed at file level and joins features through co-change only.
 - **What the index reads:** git objects at the requested sha only (`ls-tree`, `cat-file`, `log`), never the working tree, so uncommitted changes in the target repo have no effect on the index.
 - **Symbols:** functions, classes, qualified methods, interfaces, type aliases, enums, and public module-level bindings (exported TS `const`s; Python top-level assignments to non-underscore names). Function bodies are not descended into. Repeated definitions of one name in a file (such as a property getter and setter) merge into one span. `.js`/`.jsx` files are indexed at file level.
-- **Edges:** M2 extracts import edges only. Call edges (used by diagrams, §7.3) are added by the M4 plan, since M4 is their first consumer.
+- **Edges:** M2 extracts import edges. M4 adds `RepoIndex.calls`, call edges between indexed symbols, used by diagrams (§7.3). They are resolved by name only: an imported name, an attribute of an imported module binding, the file's own top-level symbol, `self.m()` inside its class, and capitalized JSX elements in TSX. Calls on any other object are not resolved.
 - **Co-change:** counted over non-merge commits. A rename counts as a delete plus an add. Commits touching more than 50 files (configurable) are skipped as sweeps and counted.
 
 ### Data flow
 
-- `build <sha>`: index → cluster → manifest → write → verify → link → store revision → export.
+- `build <sha>`: index → cluster → manifest → write → verify → link → store revision → export. A store already built at another sha is refused (that is an `update`); one built at the same sha is resumed, writing only the pages it lacks (M4).
 - `update <shaB>`: runs the freshness algorithm (§6) from the last processed sha to `shaB`.
 - `replay <fromSha> <toSha>`: runs `update` once for each merge commit along `main`'s first-parent history.
 - `export`: writes the JSON for the current revisions plus `llms.txt`.
@@ -195,6 +196,7 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
    - **Migration.** Store migration 2 repairs bodies stored under the older one-way rule.
 2. **Every non-lead claim needs at least one citation.** Lead claims have no citations of their own; they list the body claims they summarize in `supports`, and they go stale when any supported claim goes stale.
 3. **`limitation` claims** must cite evidence: a `TODO`/`FIXME` comment, a skipped test, or a reverting commit.
+   - **Evidence, precisely (M4).** A cited code range containing a `TODO` or `FIXME` line, or a skipped, xfail or to-do test; or a commit citation whose subject starts with "revert". A code citation spans at most 120 lines.
 4. **`history` claims** must cite at least one `commit` citation. The History section is append-only.
 5. **`commitDate` is the date shown to readers.** `generatedAt` and `tokens` are kept as cost evidence (F25).
 6. **`contentHash`** is the SHA-256 of the cited lines with line endings normalized. It is the only test of whether cited code changed.
@@ -203,6 +205,7 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
 9. **Feature ids are URL path segments.** They are lowercase kebab-case slugs of at most 64 characters (`FEATURE_ID_MAX_LENGTH`). M3's manifest step caps ids at 40 characters (`proposal.ts`), so no stored body exceeds the 64-character schema cap and no migration is needed.
 10. **The export carries full history.** `history[id]` holds every stored revision body, oldest first. Its last entry is the page, and each entry's `parentId` is the previous entry's id. The reader computes diffs from these bodies.
 11. **Claim text** is a small markdown subset: `**bold**`, `*italic*`, `` `code` `` and the link tokens `[[id]]`, `[[id|label]]`, `[[wp:Title]]` and `[[wp:Title|label]]`. Anything else is shown literally, HTML-escaped.
+   - **Claim text (M4).** A claim's text is one paragraph of the reader's markdown subset (emphasis, inline code, `[[target]]` and `[[wp:Title]]` tokens), at most 1,000 characters as the write step produces it. Core caps stored claim text at `CLAIM_TEXT_MAX_LENGTH = 2000`; no migration is needed, since no claim was stored before M4.
 
 ## 6. Freshness
 
@@ -226,12 +229,15 @@ Building at an old commit and replaying forward produces the full dated history 
 - If a rewritten claim fails verification, retry once with the verifier's error included in the prompt.
 - If the second attempt also fails, keep the previous claim, set `staleSince: shaB`, and have the reader show the banner *"This section may be out of date."* Claims are never dropped silently during an update.
 - During the initial `build`, a claim that fails verification twice is dropped, and the drop is logged.
+  - **Build rounds (M4).** The first round is one batch and the retry round another. A page whose first answer is unusable (not JSON, wrong shape, no lead or no body) is asked for again whole; claims that failed verification go back once with their problems. A page left without a lead or a body claim is not stored, the build reports it, and a rerun at the same sha writes it again.
 - If a provider call fails (network, rate limit), retry with exponential backoff, at most 3 attempts. After that, the update aborts without writing a partial revision. Updates are transactional per run.
 
 ### 6.4 Cost accounting
 
 Every `update` records its total tokens alongside the token cost of the most
 recent full `build` of the same repo. Both figures appear in the export.
+From M4, ledger rows carry `runKind` and `sha`, so both totals are sums over
+`(runKind, sha)`; `manifest:build` rows count toward the full build.
 
 ## 7. Generation quality
 
@@ -251,14 +257,19 @@ prompt-cached prefix for every write call.
 - Members are sorted by membership weight. Full source is included for members until 70% of the budget is used. The rest get signatures and docstrings only.
 - The pack also includes the manifest's titles and aliases (the set of valid link targets) and the subjects of the feature's commits.
 - The style guide plus the manifest form the cached prefix for every page in a run. The initial `build` goes through the Batch API.
+- **Prompt layout (M4).** The shared, cached system prefix is the write instructions, the style guide and a feature directory (each active feature's id, title, aliases and top files, plus redirects). The pack goes in the user turn. The model answers sections of claims whose citations are `path:start-end` or `commit:<sha prefix>` references; the engine resolves them to `Citation`s and hashes the cited lines.
 
 ### 7.3 Computed rather than generated
 
 - **Infobox:** computed from the index and git.
 - **Aliases (F01):** LLM synonyms plus code identifiers (HTTP routes, table names, env vars, CLI commands) belonging to the feature's members. Each alias slug (ASCII kebab-case, at most 64 chars) gets a page that redirects to its feature, or a disambiguation page when two features share it. A feature id always wins over an alias slug. Aliases appear in the infobox, which is how search finds them.
+  - **M4.** An identifier found in exactly one feature's files is appended to that feature's aliases in the stored manifest at the build's sha, at most 10 per feature, never colliding with another feature's id, title or alias. Ids, membership and the drift baseline are untouched.
 - **Links (F02):** the LLM may emit `[[featureId]]` or `[[featureId|label]]` only for manifest IDs and aliases. Unknown targets become plain text. Each concept is linked on first mention only. "See also" lists the top 5 graph neighbours by combined edge weight.
+  - **M4.** Every stored `[[target]]` is a feature id: aliases and titles are canonicalized to the id and redirects are followed. Retired, unknown and self targets become plain text, and no link or See also entry may name an id without a page.
 - **Wikipedia links (F13):** `[[wp:Title]]`, checked with `GET https://en.wikipedia.org/api/rest_v1/page/summary/{title}`. A 404 makes the link plain text. Summaries are cached in the store and used as hover previews. The reader shows those previews once M4 adds the summary cache to the export; until then `[[wp:Title]]` renders as an outbound link.
+  - **M4.** The cache is store migration 6 and records misses too. A disambiguation page also makes plain text, and so does an unreachable API (uncached, so the next build checks again). `WikiExport.wikipedia` carries the summaries of linked articles keyed by canonical title, and `SCHEMA_VERSION` becomes 3.
 - **Diagrams (F10):** a Mermaid flowchart per page, built from import and call edges among members and to neighbouring features. The LLM chooses at most 12 nodes and labels the edges. Every node must exist in the index, and every node links to its page or its source. The reader draws diagrams in the browser with the bundled Mermaid (`securityLevel: "strict"`), redrawing them when the color scheme changes. A diagram sits at the top of Data flow, or after the lead when the page has no Data flow section.
+  - **M4.** The engine draws the diagram from candidates the index proves (member files, and the neighbouring features they import from or call into); the model only picks up to 12 nodes and labels candidate edges. Labels are escaped as the site's `mermaidLabel()` escapes them. Nodes are not clickable: the engine writes no click line. Verify accepts only the four line shapes the engine writes (`flowchart LR`, a box node, a subroutine node, a labelled arrow between declared nodes) with labels in `mermaidLabel()`'s entity-encoded alphabet, so `click`, `href`, `call`, `%%{` directives, `@{` shapes, `<`, `img:` and any URL scheme are refused. This replaces "every node links to its page or its source".
 - **Main Page (F12):** the feature map, a featured article (rotated per export), "Did you know…" (claims with `hook: true`), recently updated pages, and Random article. The rotation is seeded by the head sha, so one export always renders the same page. Did you know… shows up to 5 hooks from active articles as "... that <claim>?". Recently updated lists 5 pages by commit date. The feature map draws one node per active article and one edge per See also pair. Random article picks in the browser.
 
 ## 8. Testing
