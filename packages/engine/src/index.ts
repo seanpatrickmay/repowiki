@@ -37,6 +37,12 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  codeAliases,
+  featureNeighbours,
+  linkViolations,
+  WIKIPEDIA_USER_AGENT,
+} from "./link/index.ts";
+export {
   buildManifest,
   DEFAULT_MAX_PROMPT_TOKENS,
   ensureManifest,
@@ -67,3 +73,18 @@ export {
   writeExport,
 } from "./store/index.ts";
 export { diagramProblems, revisionProblems } from "./verify/index.ts";
+export {
+  buildPack,
+  buildWiki,
+  type ContextPack,
+  DEFAULT_CONTEXT_BUDGET_TOKENS,
+  MAX_PAGE_OUTPUT_TOKENS,
+  type PageOutcome,
+  type WikiBuild,
+  WikiBuildError,
+  type WikiBuildOptions,
+  type WrittenPages,
+  writeCacheKey,
+  writePages,
+  writeSystemPrompt,
+} from "./write/index.ts";
