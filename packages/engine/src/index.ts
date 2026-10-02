@@ -57,6 +57,7 @@ export {
   renderManifestSummary,
 } from "./manifest/index.ts";
 export {
+  addAliases,
   type BatchRequestRow,
   buildExport,
   type CitingClaim,

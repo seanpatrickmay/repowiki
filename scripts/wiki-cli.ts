@@ -1,9 +1,12 @@
+import { closeSync, openSync, rmSync, statSync, writeSync } from "node:fs";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
   type ContextPack,
   estimateTokens,
   markdownCodeSpan,
   type PageOutcome,
+  WikiBuildError,
 } from "@repowiki/engine";
 import { callCostUsd, type LedgerTotals } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
@@ -102,6 +105,45 @@ function parse(argv: readonly string[]) {
       deadline: { type: "string", multiple: true },
     },
   });
+}
+
+/** Why a build that needs a call cannot make one; `pnpm wiki:build` loads .env only if present. */
+export const KEYLESS_MESSAGE =
+  "ANTHROPIC_API_KEY is not set: pnpm wiki:build reads it from a .env file in the directory it runs in, if there is one (node --env-file-if-exists=.env); add it there, or run node --env-file=<path to .env> scripts/wiki-build.ts";
+
+/** The advisory lock file a running wiki:build holds in its out dir. */
+export const BUILD_LOCK = "wiki-build.lock";
+/** A lock older than this is left over from a killed build, never a running one (a batch ends in 24 h). */
+const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Takes the out dir's build lock, so two builds never send the same batches twice, and returns
+ * the function that frees it. A lock another build holds is a WikiBuildError; one older than 24
+ * hours is taken over, with a line to `log`. Advisory: it guards wiki:build against itself only.
+ */
+export function acquireBuildLock(out: string, log: (line: string) => void): () => void {
+  const path = join(out, BUILD_LOCK);
+  let fd: number;
+  try {
+    fd = openSync(path, "wx");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    const age = Date.now() - statSync(path).mtimeMs;
+    if (age < STALE_LOCK_MS) {
+      throw new WikiBuildError(
+        `another wiki:build is running on ${out} (${path}); if none is, delete the lock file`,
+      );
+    }
+    log(`ignoring a stale lock older than 24 hours: ${path}`);
+    rmSync(path, { force: true });
+    fd = openSync(path, "wx");
+  }
+  try {
+    writeSync(fd, `pid ${process.pid} since ${new Date().toISOString()}\n`);
+  } finally {
+    closeSync(fd);
+  }
+  return () => rmSync(path, { force: true });
 }
 
 /** The longest model id a usage error echoes. */

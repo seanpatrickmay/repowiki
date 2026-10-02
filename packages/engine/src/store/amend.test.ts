@@ -1,7 +1,7 @@
 import { makeFeature, makeManifest, SHA_B } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { StoreError, UnknownManifestError } from "./errors.ts";
-import { openStore } from "./store.ts";
+import { addAliases, openStore } from "./store.ts";
 
 describe("amendManifestAliases", () => {
   it("adds new aliases only, keeps everything else, and stores the result", () => {
@@ -18,6 +18,17 @@ describe("amendManifestAliases", () => {
     expect(store.getManifest(makeManifest().sha)).toEqual(amended);
     expect(store.getDriftBaseline()).toEqual(amended);
     expect(amended.membership).toEqual(makeManifest().membership);
+    store.close();
+  });
+
+  it("is addAliases, which computes the same manifest in memory and stores nothing", () => {
+    const additions = { signals: ["/api/signals", "SIGNAL PIPELINE", " "], deliverables: ["x_y"] };
+    const preview = addAliases(makeManifest(), additions);
+    const store = openStore(":memory:");
+    store.putManifest(makeManifest(), { llmRevised: true });
+    expect(store.getManifest(makeManifest().sha)).toEqual(makeManifest());
+    expect(store.amendManifestAliases(makeManifest().sha, additions)).toEqual(preview);
+    expect(() => addAliases(makeManifest(), { signals: ["a\u202Eb"] })).toThrow(StoreError);
     store.close();
   });
 

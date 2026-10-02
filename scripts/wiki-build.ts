@@ -2,10 +2,12 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
+  addAliases,
   buildFileGraph,
   buildJournal,
   buildPack,
   buildWiki,
+  codeAliases,
   DEFAULT_MAX_FILE_BYTES,
   featureNeighbours,
   indexRepo,
@@ -17,10 +19,24 @@ import {
   writeExport,
   writeSystemPrompt,
 } from "@repowiki/engine";
-import { createClaudeProvider, createLedger, type Provider, totalsOf } from "@repowiki/llm";
+import {
+  createClaudeProvider,
+  createLedger,
+  LlmError,
+  type ModelConfig,
+  type Provider,
+  totalsOf,
+} from "@repowiki/llm";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { estimateBuild, parseWikiArgs, renderBuildSummary } from "./wiki-cli.ts";
+import {
+  acquireBuildLock,
+  estimateBuild,
+  KEYLESS_MESSAGE,
+  parseWikiArgs,
+  renderBuildSummary,
+  type WikiArgs,
+} from "./wiki-cli.ts";
 
 async function main(): Promise<void> {
   const args = parseWikiArgs(process.argv.slice(2));
@@ -36,20 +52,39 @@ async function main(): Promise<void> {
     );
   }
   const models = loadModels(args.config);
+  mkdirSync(out, { recursive: true });
+  // A dry run sends nothing, so only a real build needs the out dir to itself.
+  const release = args.dryRun ? () => {} : acquireBuildLock(out, (line) => console.error(line));
+  try {
+    await runBuild(args, repo, out, models);
+  } finally {
+    release();
+  }
+}
+
+/** The build itself, run while this process holds the out dir's lock. */
+async function runBuild(
+  args: WikiArgs,
+  repo: string,
+  out: string,
+  models: ModelConfig,
+): Promise<void> {
+  const repoName = basename(repo);
   const index = await indexRepo(repo, args.rev);
   const history = readHistory(repo, index.sha);
   const sources = readSources(repo, index.sha, DEFAULT_MAX_FILE_BYTES);
   const graph = buildFileGraph(index);
-  mkdirSync(out, { recursive: true });
   const store = openStore(join(out, "wiki.db"));
   try {
-    const manifest = store.getManifest(index.sha);
-    if (manifest === null) {
+    const stored = store.getManifest(index.sha);
+    if (stored === null) {
       throw new WikiBuildError(
         `no manifest for ${index.sha} in ${join(out, "wiki.db")}; run pnpm manifest:build first`,
       );
     }
-    // The estimate is stated before any call (owner directive), from the packs the build sends.
+    // The estimate is stated before any call (owner directive), from the packs the build sends:
+    // those of the manifest with its code aliases, computed here in memory as buildWiki stores it.
+    const manifest = addAliases(stored, codeAliases(stored, sources));
     const neighbours = featureNeighbours(graph, manifest);
     const todo = manifest.features.filter(
       (f) => f.status.kind === "active" && store.getCurrentRevision(f.id) === null,
@@ -84,6 +119,9 @@ async function main(): Promise<void> {
     let claude: Provider | undefined;
     const provider: Provider = {
       generate: (request) => {
+        if (claude === undefined && !process.env.ANTHROPIC_API_KEY) {
+          throw new LlmError(KEYLESS_MESSAGE);
+        }
         claude ??= createClaudeProvider({
           models,
           ledger,
