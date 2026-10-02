@@ -5,6 +5,7 @@ export {
   quote,
   type Resolved,
   resolveReference,
+  sourceLines,
   type Verified,
   type VerifyContext,
   verifyClaim,

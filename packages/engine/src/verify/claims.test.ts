@@ -1,6 +1,13 @@
 import { codeCitation } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { MAX_CITED_LINES, quote, resolveReference, verifyClaim } from "./claims.ts";
+import {
+  citedLines,
+  MAX_CITED_LINES,
+  quote,
+  resolveReference,
+  sourceLines,
+  verifyClaim,
+} from "./claims.ts";
 import type { DraftClaim } from "./draft.ts";
 import { COMMITS, testContext } from "./test-context.ts";
 
@@ -15,6 +22,21 @@ const draft = (overrides: Partial<DraftClaim> = {}): DraftClaim => ({
 
 /** A problem message must not carry a newline or NUL: it goes into a retry prompt as one bullet. */
 const inOneLine = (problem: string): boolean => !problem.includes("\n") && !problem.includes("\0");
+
+describe("sourceLines", () => {
+  it("counts lines the way a citation does", () => {
+    expect(sourceLines("")).toEqual([]);
+    expect(sourceLines("a\nb")).toEqual(["a", "b"]);
+    expect(sourceLines("a\nb\n")).toEqual(["a", "b"]);
+    expect(sourceLines("a\r\nb\r\n")).toEqual(["a\r", "b\r"]);
+    expect(sourceLines("\n")).toEqual([""]);
+    for (const text of ["a\nb", "a\nb\n", "a\r\nb\r\n", "\n\nx"]) {
+      for (const [i, line] of sourceLines(text).entries()) {
+        expect(line).toBe(citedLines(text, i + 1, i + 1));
+      }
+    }
+  });
+});
 
 describe("resolveReference", () => {
   it("resolves lines of a file to a code citation with their hash and symbol", () => {

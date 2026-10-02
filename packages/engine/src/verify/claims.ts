@@ -51,9 +51,16 @@ export function quote(text: string): string {
   return json.replace(UNSAFE_TEXT_EACH, (char) => `\\u${hex4(char)}`);
 }
 
-/** An empty file has no lines; otherwise a final newline ends a line rather than starting one. */
-const lineCount = (text: string): number =>
-  text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
+/**
+ * A file's lines as citations count them: split on "\n" only (a CRLF line keeps its "\r"), an
+ * empty file has none, and a final newline ends a line rather than starting one. Line N of this
+ * list is exactly `citedLines(text, N, N)`.
+ */
+export function sourceLines(text: string): string[] {
+  return text === "" ? [] : text.replace(/\n$/, "").split("\n");
+}
+
+const lineCount = (text: string): number => sourceLines(text).length;
 
 /** Lines start..end (1-based, inclusive) of a file's text. */
 export function citedLines(text: string, start: number, end: number): string {
