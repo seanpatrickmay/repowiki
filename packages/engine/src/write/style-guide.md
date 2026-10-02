@@ -3,6 +3,9 @@
 RepoWiki pages read like Wikipedia articles about a codebase. This guide distills the parts of
 Wikipedia's Manual of Style that apply to them. It is part of every page's prompt.
 
+The examples below are illustrative: they are never claims about the repository being documented.
+Never reuse their names, numbers or citations.
+
 ## Neutral point of view
 
 - Describe what the code does and how it is built. Never judge it: no praise, no criticism, no
@@ -17,15 +20,16 @@ Wikipedia's Manual of Style that apply to them. It is part of every page's promp
 
 - Every sentence of the body states something the cited lines or commits show. If the context
   pack does not show it, do not write it.
-- Intent ("why") is stated only when a commit subject says so, and that commit is cited:
-  "The retry was added to survive rate limits (commit:abc1234)". Never guess at motives.
+- Intent ("why") is stated only in the History section, only when a commit subject says so, and
+  that commit is cited in the claim's cite array: "The retry was added to survive rate limits."
+  Never guess at motives.
 - Do not describe code that is not in the context pack, even if its name suggests what it does.
 - Prefer one precise claim over two vague ones.
 
 ## Tense and mood
 
 - Present tense for what the code does: "The scheduler runs every five minutes."
-- Past tense only in the History section: "Signal scoring was added in March 2026."
+- Past tense only in the History section: "Signal scoring was added on 3 March 2026."
 - Plain declarative sentences. No questions, no exclamations, no rhetorical flourishes.
 
 ## The lead
@@ -36,8 +40,8 @@ Wikipedia's Manual of Style that apply to them. It is part of every page's promp
   into scored signals."
 - The lead is 2 to 4 sentences. It stands on its own: a reader who reads only the lead (it is
   also the hover preview) learns what the feature is, what it does and what it connects to.
-- The lead summarizes the body; it adds nothing the body does not say. Each lead sentence lists
-  the body claims it summarizes.
+- The lead summarizes the body; it adds nothing the body does not say. Each lead claim lists,
+  in its supports field, the ids of the body claims it summarizes.
 - Do not start the lead with "This page", "This feature" or "This section".
 
 ## Sections
@@ -78,8 +82,12 @@ Wikipedia's Manual of Style that apply to them. It is part of every page's promp
 ## Claims
 
 - A claim is one or two sentences that state one checkable thing.
+- The text of a claim is one paragraph with no line breaks, at most 1,000 characters.
+- Citations go only in the claim's cite array, never in its text: no parenthesised commit
+  references, no "cite:" and no file and line references written into the sentences.
+- A commit reference is "commit:" and at least 7 hex digits.
 - Keep claims independent: a reader should be able to verify each one from its citations alone.
-- Cite the narrowest lines that show the claim. A function's signature and the lines that do
+- Cite the narrowest lines that show the claim, at most 120 lines. A function's signature and the lines that do
   the work are better than the whole file.
 - Hooks ("Did you know…") are surprising, self-contained facts, such as an unusual limit or a
   notable design choice the code makes. At most two per page.
@@ -96,10 +104,12 @@ Bad lead (judges the code, addresses the reader, says nothing checkable):
 
 > This robust feature lets you easily manage deliverables in a seamless way.
 
-Good body claim, with its citation:
+Good body claim:
 
 > `ingest_chunk()` creates one signal per non-empty sentence and stops after `MAX_SIGNALS`
-> (50) signals. cite: src/signals/ingest.py:10-24
+> (50) signals.
+
+with the cite array `["src/signals/ingest.py:10-24"]`.
 
 Bad body claim (guesses at intent, cites nothing):
 
@@ -107,9 +117,13 @@ Bad body claim (guesses at intent, cites nothing):
 
 Good history claim:
 
-> Scoring moved from a nightly job to ingestion time in March 2026. cite: commit:abc1234
+> Scoring moved from a nightly job to ingestion time on 12 March 2026.
+
+with the cite array `["commit:abc1234"]`.
 
 Good known limitation:
 
 > A TODO comment notes that chunks longer than `MAX_SIGNALS` sentences are truncated rather
-> than paged. cite: src/signals/ingest.py:18-21
+> than paged.
+
+with the cite array `["src/signals/ingest.py:18-21"]`.

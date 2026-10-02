@@ -18,11 +18,11 @@ sections: the page's sections in this order, each with its claims:
 - "history": how the feature came to be, from its commits. Every history claim cites at least one commit.
 - "known-limitations": only problems the evidence list proves: a TODO or FIXME comment, a skipped test, or a reverting commit. Every limitation claim cites that evidence. Leave the section out when there is none.
 
-A claim is one or two sentences that state one thing. Each claim has:
+A claim is one or two sentences that state one thing. The text of a claim is one paragraph with no line breaks, at most 1,000 characters. Each claim has:
 - id: a short id, unique on the page, such as "o1" or "h3".
-- text: the sentences, in the style guide's voice. Markdown is limited to **bold**, *italic*, \`code\` and links.
-- cite: references taken from the context pack: "path:start-end" for lines of a file as the pack numbers them (for example "src/signals/ingest.py:10-24"), or "commit:abc1234" for a commit. Cite the narrowest lines that show the claim, at most 120 lines. Every body claim cites at least one reference. Never cite lines the pack does not show.
-- supports: for lead claims, the ids of the body claims the sentence summarizes; empty for body claims.
+- text: the sentences, in the style guide's voice. Markdown is limited to **bold**, *italic*, \`code\` and links. Citations go only in the cite array, never in the text.
+- cite: references taken from the context pack: "path:start-end" for lines of a file as the pack numbers them (for example "src/signals/ingest.py:10-24"), or "commit:abc1234" for a commit (a commit reference needs at least 7 hex digits). Cite the narrowest lines that show the claim, at most 120 lines. Every body claim cites at least one reference. Never cite lines the pack does not show.
+- supports: for lead claims, the ids of the body claims the claim summarizes; empty for body claims.
 - hook: true for at most two surprising, self-contained facts a reader would enjoy on the Main Page ("Did you know..."); otherwise false.
 
 Links: link another feature on its first mention with [[feature-id]] or [[feature-id|words]], using only ids from the feature directory. Link a general technical concept that has a Wikipedia article on its first mention with [[wp:Article title]] or [[wp:Article title|words]]. Never link the page's own feature.
@@ -55,7 +55,9 @@ const TOP_FILES = 5;
  */
 export function featureDirectory(manifest: Manifest): string {
   const lines: string[] = [];
-  for (const feature of manifest.features) {
+  // By id, so the prefix does not change if a later reconciliation only reorders features.
+  const features = [...manifest.features].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const feature of features) {
     if (feature.status.kind === "redirect") {
       lines.push(`- ${feature.id}: redirects to ${feature.status.to}`);
       continue;
@@ -64,8 +66,9 @@ export function featureDirectory(manifest: Manifest): string {
     // Sorted, so the cached prefix does not depend on the order aliases are stored in.
     const aliasList = feature.aliases.map(plain).sort();
     const aliases = aliasList.length > 0 ? `; also ${aliasList.join(", ")}` : "";
-    const files = featureFiles(manifest, feature.id).slice(0, TOP_FILES).map(plain).join(", ");
-    lines.push(`- ${feature.id}: ${plain(feature.title)}${aliases}; files ${files}`);
+    const files = featureFiles(manifest, feature.id).slice(0, TOP_FILES).map(plain);
+    const filesPart = files.length > 0 ? `; files ${files.join(", ")}` : "";
+    lines.push(`- ${feature.id}: ${plain(feature.title)}${aliases}${filesPart}`);
   }
   return lines.join("\n");
 }
