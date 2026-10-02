@@ -3,7 +3,7 @@ import {
   type WikipediaCacheEntry,
   WikipediaSummary,
 } from "@repowiki/core";
-import type { FetchLike } from "@repowiki/llm";
+import { CassetteMissError, type FetchLike } from "@repowiki/llm";
 import { normalizeWikipediaTitle } from "./links.ts";
 
 /** Wikimedia asks every API client to identify itself; requests without a User-Agent fail. */
@@ -11,6 +11,8 @@ export const WIKIPEDIA_USER_AGENT = "RepoWiki/0.1 (https://github.com/seanpatric
 const SUMMARY_ORIGIN = "https://en.wikipedia.org";
 const SUMMARY_PATH = "/api/rest_v1/page/summary/";
 const CONCURRENCY = 4;
+/** How long one lookup may take, headers and body together, before it counts as unreachable. */
+export const WIKIPEDIA_TIMEOUT_MS = 10_000;
 
 /** What core's WikipediaSummary refuses in text: controls, line separators, invisible format marks (ZWJ and ZWNJ are fine). */
 const REFUSED = /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
@@ -80,8 +82,11 @@ async function fetchSummary(
   try {
     response = await fetch(url, {
       headers: { "User-Agent": WIKIPEDIA_USER_AGENT, Accept: "application/json" },
+      signal: AbortSignal.timeout(WIKIPEDIA_TIMEOUT_MS),
     });
-  } catch {
+  } catch (error) {
+    // A cassette that lacks this request is a broken test, not an unreachable Wikipedia.
+    if (error instanceof CassetteMissError) throw error;
     return undefined;
   }
   if (response.status === 404) return null;
@@ -130,10 +135,17 @@ export async function checkWikipediaTitles(
     if (cached === null) missing.push(title);
     else check.links.set(title, cached.summary?.title ?? null);
   }
+  // Redirect targets: canonical title → the summary a redirecting lookup brought back for it.
+  const redirected = new Map<string, WikipediaSummary>();
   const lookUp = async (title: string): Promise<void> => {
     const url = summaryUrl(title);
-    const summary = url === null ? undefined : await fetchSummary(url, fetch);
-    if (url !== null) check.fetched += 1;
+    if (url === null) {
+      // Cannot be an article and cannot be put in a path: plain, with nothing to retry or cache.
+      check.links.set(title, null);
+      return;
+    }
+    const summary = await fetchSummary(url, fetch);
+    check.fetched += 1;
     if (summary === undefined) {
       check.failed.push(title);
       check.links.set(title, null);
@@ -141,11 +153,24 @@ export async function checkWikipediaTitles(
     }
     const at = now().toISOString();
     options.cache.put(title, summary, at);
-    if (summary !== null && summary.title !== title) options.cache.put(summary.title, summary, at);
+    if (summary !== null && summary.title !== title) {
+      redirected.set(summary.title, summary);
+      // Never overwrite what is already known about the canonical title.
+      if (options.cache.get(summary.title) === null) {
+        options.cache.put(summary.title, summary, at);
+      }
+    }
     check.links.set(title, summary?.title ?? null);
   };
   for (let i = 0; i < missing.length; i += CONCURRENCY) {
     await Promise.all(missing.slice(i, i + CONCURRENCY).map(lookUp));
+  }
+  // A title another lookup redirected to links to itself, whatever its own lookup found.
+  for (const title of redirected.keys()) {
+    if (wanted.includes(title)) {
+      check.links.set(title, title);
+      check.failed = check.failed.filter((failed) => failed !== title);
+    }
   }
   check.failed.sort();
   // Lookups finish in any order; the result lists titles sorted, like `wanted`.

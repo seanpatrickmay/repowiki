@@ -1,8 +1,8 @@
 import type { WikipediaSummary } from "@repowiki/core";
-import type { FetchLike } from "@repowiki/llm";
-import { describe, expect, it } from "vitest";
+import { CassetteMissError, type FetchLike } from "@repowiki/llm";
+import { describe, expect, it, vi } from "vitest";
 import { memoryCache } from "./test-wikipedia.ts";
-import { checkWikipediaTitles, WIKIPEDIA_USER_AGENT } from "./wikipedia.ts";
+import { checkWikipediaTitles, WIKIPEDIA_TIMEOUT_MS, WIKIPEDIA_USER_AGENT } from "./wikipedia.ts";
 
 const page = (title: string, extra: Record<string, unknown> = {}) => ({
   type: "standard",
@@ -14,7 +14,9 @@ const page = (title: string, extra: Record<string, unknown> = {}) => ({
 });
 
 /** Answers by path; records each request's url, path and headers. */
-function fakeWikipedia(answers: Record<string, { status: number; body?: unknown } | "throw">) {
+function fakeWikipedia(
+  answers: Record<string, { status: number; body?: unknown; raw?: string } | "throw">,
+) {
   const requests: { url: string; path: string; userAgent: string | null }[] = [];
   const fetch: FetchLike = async (input, init) => {
     const url = String(input);
@@ -23,7 +25,7 @@ function fakeWikipedia(answers: Record<string, { status: number; body?: unknown 
     const answer = answers[path];
     if (answer === "throw") throw new TypeError("fetch failed");
     if (answer === undefined) return new Response("{}", { status: 404 });
-    return new Response(JSON.stringify(answer.body ?? {}), { status: answer.status });
+    return new Response(answer.raw ?? JSON.stringify(answer.body ?? {}), { status: answer.status });
   };
   return { fetch, requests };
 }
@@ -161,6 +163,7 @@ describe("checkWikipediaTitles", () => {
       { cache: memoryCache().cache, fetch: api.fetch },
     );
     expect(api.requests.length).toBeGreaterThan(0);
+    expect(check.failed).toEqual([]);
     for (const { url } of api.requests) {
       const parsed = new URL(url);
       expect(parsed.origin).toBe("https://en.wikipedia.org");
@@ -172,6 +175,109 @@ describe("checkWikipediaTitles", () => {
     expect(api.requests.map((r) => r.path)).toContain("../../w/api.php?x");
     // Titles that cannot be put in a path safely are never requested; they are plain this run.
     expect(api.requests.map((r) => r.path)).not.toContain("..");
-    expect(check.failed).toEqual(expect.arrayContaining(["..", "."]));
+    expect(api.requests.map((r) => r.path)).not.toContain(".");
+  });
+
+  it("makes a title that can never be a path plain, without a request, a failure or a cache entry", async () => {
+    const lone = `bad${String.fromCharCode(0xd800)}name`;
+    const api = fakeWikipedia({});
+    const { cache, entries } = memoryCache();
+    const check = await checkWikipediaTitles(["..", ".", lone], { cache, fetch: api.fetch });
+    expect([...check.links]).toEqual([
+      [".", null],
+      ["..", null],
+      [`Bad${String.fromCharCode(0xd800)}name`, null],
+    ]);
+    expect(check).toMatchObject({ fetched: 0, failed: [] });
+    expect(api.requests).toEqual([]);
+    expect(entries.size).toBe(0);
+  });
+
+  it("keeps what is known about a redirect target instead of overwriting it", async () => {
+    const api = fakeWikipedia({ Cron_job: { status: 200, body: page("Cron") } });
+    const known = { summary: summary("Cron"), fetchedAt: "2026-09-01T00:00:00Z" };
+    const { cache, entries } = memoryCache({ Cron: known });
+    const check = await checkWikipediaTitles(["Cron job"], { cache, fetch: api.fetch, now: NOW });
+    expect(check.links.get("Cron job")).toBe("Cron");
+    expect(entries.get("Cron")).toBe(known);
+  });
+
+  it("links a redirect target requested in the same call the way its redirect does", async () => {
+    const api = fakeWikipedia({
+      Cron_job: { status: 200, body: page("Cron") },
+      Cron: { status: 503 },
+    });
+    const { cache, entries } = memoryCache();
+    const check = await checkWikipediaTitles(["Cron", "Cron job"], {
+      cache,
+      fetch: api.fetch,
+      now: NOW,
+    });
+    expect([...check.links]).toEqual([
+      ["Cron", "Cron"],
+      ["Cron job", "Cron"],
+    ]);
+    expect(check.failed).toEqual([]);
+    expect(entries.get("Cron")?.summary?.title).toBe("Cron");
+  });
+
+  it("asks for at most four titles at a time", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const fetch: FetchLike = async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return new Response("{}", { status: 404 });
+    };
+    const titles = Array.from({ length: 10 }, (_, i) => `Title ${i}`);
+    const check = await checkWikipediaTitles(titles, { cache: memoryCache().cache, fetch });
+    expect(check.fetched).toBe(10);
+    expect(most).toBe(4);
+  });
+
+  it("gives each request a timeout, and a timed-out title is failed and uncached", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const stop = new AbortController();
+    timeout.mockReturnValue(stop.signal);
+    const fetch: FetchLike = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        stop.abort(new DOMException("The operation timed out.", "TimeoutError"));
+      });
+    const { cache, entries } = memoryCache();
+    try {
+      const check = await checkWikipediaTitles(["Slow"], { cache, fetch });
+      expect(check.failed).toEqual(["Slow"]);
+      expect(entries.size).toBe(0);
+      expect(timeout).toHaveBeenCalledWith(WIKIPEDIA_TIMEOUT_MS);
+      expect(WIKIPEDIA_TIMEOUT_MS).toBe(10_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("lets a missing cassette recording through instead of calling the title unreachable", async () => {
+    const fetch: FetchLike = async () => {
+      throw new CassetteMissError("wikipedia.json", "GET", "/api/rest_v1/page/summary/Lost");
+    };
+    await expect(
+      checkWikipediaTitles(["Lost"], { cache: memoryCache().cache, fetch }),
+    ).rejects.toBeInstanceOf(CassetteMissError);
+  });
+
+  it.each([
+    ["invalid JSON", "{not json"],
+    ["null", "null"],
+    ["a string", '"article"'],
+    ["a number", "42"],
+  ])("makes a 200 whose body is %s plain for this run, uncached", async (_name, raw) => {
+    const api = fakeWikipedia({ Odd: { status: 200, raw } });
+    const { cache, entries } = memoryCache();
+    const check = await checkWikipediaTitles(["Odd"], { cache, fetch: api.fetch });
+    expect(check.failed).toEqual(["Odd"]);
+    expect(check.links.get("Odd")).toBeNull();
+    expect(entries.size).toBe(0);
   });
 });
