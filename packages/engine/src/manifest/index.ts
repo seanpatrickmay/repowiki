@@ -7,5 +7,6 @@ export {
   manifestCacheKey,
 } from "./build.ts";
 export { ensureManifest } from "./ensure.ts";
+export { estimateTokens, plain } from "./prompt.ts";
 export { ManifestProposal } from "./proposal.ts";
 export { renderManifestSummary } from "./summary.ts";

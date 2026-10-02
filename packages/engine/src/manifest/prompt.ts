@@ -43,7 +43,7 @@ const MAX_NAME_LENGTH = 200;
  * start a forged line or heading. Control characters become U+FFFD, one for one, and anything
  * past 200 code points is cut and marked with "…". Pure, so the prompt stays byte-identical.
  */
-function plain(text: string): string {
+export function plain(text: string): string {
   const chars = [...text.replace(CONTROL_CHARACTERS, "\uFFFD")];
   if (chars.length <= MAX_NAME_LENGTH) return chars.join("");
   return `${chars.slice(0, MAX_NAME_LENGTH).join("")}…`;
