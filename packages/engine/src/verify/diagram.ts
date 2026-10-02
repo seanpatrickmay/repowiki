@@ -1,10 +1,9 @@
-/**
- * A label as mermaidLabel() writes it: no quote, bracket, brace, pipe, colon, percent, angle
- * bracket, backtick or backslash, and `#` / `;` only inside an entity such as `#58;` or `#quot;`.
- * So a label can hold no URL scheme (`javascript:`, `img:`), no `@{` shape data, no `%%` comment
- * or `%%{init}` directive, and no markup.
- */
-const LABEL = /^(?:[^"#;<>{}[\]|:%`\\\n\r]|#(?:\d+|quot|amp|lt|gt);)*$/;
+import { decodeMermaidEntities, mermaidLabel } from "./mermaid-label.ts";
+
+/** Mermaid's defaults (maxTextSize, maxEdges): past either it renders an error, not the diagram. */
+export const MAX_DIAGRAM_CHARS = 50_000;
+export const MAX_DIAGRAM_EDGES = 500;
+
 const NODE = /^ {2}(n\d+)(\["|\[\[")(.*?)("\]|"\]\])$/;
 const EDGE = /^ {2}(n\d+) -->\|"(.*)"\| (n\d+)$/;
 
@@ -17,22 +16,41 @@ const EDGE = /^ {2}(n\d+) -->\|"(.*)"\| (n\d+)$/;
 const UNSAFE_CHARACTER = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 
 /**
+ * A label is safe only if it is non-empty and is exactly what mermaidLabel() writes for the text
+ * its entities decode to. That is an allowlist: letters, marks, numbers, single spaces and
+ * `.,-_/+!?@*` as they are, everything else (quotes, brackets, `$` for KaTeX, `ﬂ°¶ß`, which
+ * Mermaid turns back into entities, `;`, `#`, `%`, `:`) as an entity. An entity for a control or
+ * bidirectional character, or for a character that is not written as an entity, is not what
+ * mermaidLabel writes, so it is refused too.
+ */
+function isMermaidLabel(label: string): boolean {
+  if (label === "") return false;
+  const decoded = decodeMermaidEntities(label);
+  return decoded !== null && mermaidLabel(decoded) === label;
+}
+
+/**
  * Everything wrong with a diagram's Mermaid source, empty when it is safe to store. Mermaid's
  * "strict" security level still loads images from labels and `img:` shapes (M5 Task 17 review),
  * so this is the control: only the four line shapes the diagram builder writes are accepted
  * (`flowchart LR`, a box node, a subroutine node, a labelled arrow), each matched as a WHOLE line
- * by an anchored pattern, with labels in the entity-encoded alphabet above. Any other line
+ * by an anchored pattern, with labels in the alphabet mermaidLabel writes. Any other line
  * (`click`, `call`, `href`, `style`, `classDef`, `%%{init}`, `n1@{ img: … }`, raw `<img>`, two
  * statements on one line) is rejected, so is any line holding a control or bidirectional
- * character, and every arrow must join nodes declared above it.
+ * character, and every arrow must join nodes declared above it. A source over Mermaid's size
+ * limits is rejected too, so a stored diagram always renders.
  * Words such as "click" or "calls" inside a quoted label are only text: a label cannot contain
  * a quote, so it cannot end early and start a directive.
  */
 export function diagramProblems(source: string): string[] {
+  if (source.length > MAX_DIAGRAM_CHARS) {
+    return [`the diagram is longer than ${MAX_DIAGRAM_CHARS} characters`];
+  }
   const problems: string[] = [];
   const lines = source.split("\n");
   if (lines[0] !== "flowchart LR") problems.push('the diagram must start with "flowchart LR"');
   const declared = new Set<string>();
+  let edges = 0;
   lines.slice(1).forEach((line, i) => {
     const where = `diagram line ${i + 2}`;
     if (UNSAFE_CHARACTER.test(line)) {
@@ -43,7 +61,7 @@ export function diagramProblems(source: string): string[] {
     if (node !== null) {
       const [, id = "", open = "", label = "", close = ""] = node;
       if ((open === '[["') !== (close === '"]]')) problems.push(`${where}: mismatched brackets`);
-      if (!LABEL.test(label)) problems.push(`${where}: the label holds characters it may not`);
+      if (!isMermaidLabel(label)) problems.push(`${where}: the label holds characters it may not`);
       if (declared.has(id)) problems.push(`${where}: node ${id} is declared twice`);
       declared.add(id);
       return;
@@ -51,7 +69,8 @@ export function diagramProblems(source: string): string[] {
     const edge = EDGE.exec(line);
     if (edge !== null) {
       const [, from = "", label = "", to = ""] = edge;
-      if (!LABEL.test(label)) problems.push(`${where}: the label holds characters it may not`);
+      edges += 1;
+      if (!isMermaidLabel(label)) problems.push(`${where}: the label holds characters it may not`);
       if (!declared.has(from) || !declared.has(to)) {
         problems.push(`${where}: an arrow must join two nodes declared above it`);
       }
@@ -59,5 +78,8 @@ export function diagramProblems(source: string): string[] {
     }
     problems.push(`${where} is not a node or a labelled arrow`);
   });
+  if (edges > MAX_DIAGRAM_EDGES) {
+    problems.push(`the diagram has more than ${MAX_DIAGRAM_EDGES} arrows`);
+  }
   return problems;
 }

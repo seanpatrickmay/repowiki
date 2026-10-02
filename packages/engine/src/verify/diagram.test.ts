@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { diagramProblems } from "./diagram.ts";
+import { diagramProblems, MAX_DIAGRAM_CHARS, MAX_DIAGRAM_EDGES } from "./diagram.ts";
+import { mermaidLabel } from "./mermaid-label.ts";
 
 const SAFE = [
   "flowchart LR",
@@ -51,6 +52,26 @@ describe("diagramProblems (the Mermaid safety control)", () => {
     ["two nodes on one line", '  n3["a"]  n4["b"]'],
     ["a bare hash", '  n3["issue #12"]'],
     ["an unknown entity", '  n3["a #nbsp; b"]'],
+    ["KaTeX math", '  n3["$$x^2$$"]'],
+    ["malformed KaTeX math", '  n3["$$x^$$"]'],
+    ["a raw dollar", '  n3["costs $5"]'],
+    ["raw entity placeholder characters", '  n3["ﬂ°°x3C¶ßimg src=xﬂ°°x3E¶ß"]'],
+    ["a raw degree sign", '  n3["ﬂ°quot¶ß"]'],
+    ["a raw pilcrow and sharp s", '  n3["a¶ßb"]'],
+    ["an entity for a right-to-left override", '  n3["a#8238;b"]'],
+    ["an entity for NUL", '  n3["a#0;b"]'],
+    ["an entity beyond Unicode", '  n3["a#1114112;b"]'],
+    ["a hex entity", '  n3["a#x3C;b"]'],
+    ["a padded numeric entity", '  n3["#065;"]'],
+    ["a numeric entity for a quote", '  n3["a#34;b"]'],
+    ["an empty label", '  n3[""]'],
+    ["an all-space label", '  n3["   "]'],
+    ["a double space", '  n3["a  b"]'],
+    ["a leading space", '  n3[" a"]'],
+    ["a trailing space", '  n3["a "]'],
+    ["a raw ampersand", '  n3["a & b"]'],
+    ["a raw apostrophe", `  n3["it's"]`],
+    ["a raw parenthesis", '  n3["f(x)"]'],
   ])("rejects a node label holding %s", (_name, line) => {
     expect(diagramProblems(`${SAFE}\n${line}`)).toEqual([
       "diagram line 5: the label holds characters it may not",
@@ -97,6 +118,68 @@ describe("diagramProblems (the Mermaid safety control)", () => {
     expect(diagramProblems(`${SAFE}\n  n9 -->|"x"| n8`)).toEqual([
       "diagram line 5: an arrow must join two nodes declared above it",
     ]);
+  });
+
+  it.each([
+    ["KaTeX math", "$$y$$"],
+    ["malformed KaTeX math", "$$y^$$"],
+    ["raw entity placeholder characters", "ﬂ°°x3C¶ßb"],
+    ["an entity for a right-to-left override", "a#8238;b"],
+    ["an entity for NUL", "a#0;b"],
+    ["an empty label", ""],
+    ["an all-space label", "  "],
+  ])("rejects an arrow label holding %s", (_name, label) => {
+    expect(diagramProblems(`${SAFE}\n  n1 -->|"${label}"| n2`)).toEqual([
+      "diagram line 5: the label holds characters it may not",
+    ]);
+  });
+
+  it("accepts every label the site's mermaidLabel writes, and nothing it would write differently", () => {
+    for (const text of [
+      "Signal ingestion",
+      '"quoted" & <tagged>',
+      "$$x^2$$",
+      "ﬂ°°x3C¶ßimg",
+      "a; b # c",
+      "emoji 🙂 日本語 naïve",
+      "back`tick \\ [x] {y} | z",
+    ]) {
+      const label = mermaidLabel(text);
+      expect(diagramProblems(`${SAFE}\n  n3["${label}"]\n  n1 -->|"${label}"| n3`), text).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("rejects a node line whose brackets do not match", () => {
+    expect(diagramProblems(`${SAFE}\n  n3[["a"]`)).toEqual(["diagram line 5: mismatched brackets"]);
+    expect(diagramProblems(`${SAFE}\n  n3["a"]]`)).toEqual(["diagram line 5: mismatched brackets"]);
+  });
+
+  describe("size caps (Mermaid refuses a bigger diagram)", () => {
+    it("allows exactly the limits", () => {
+      const nodes = ['  n1["a"]', '  n2["b"]'];
+      const edges = Array.from({ length: MAX_DIAGRAM_EDGES }, () => '  n1 -->|"x"| n2');
+      expect(diagramProblems(["flowchart LR", ...nodes, ...edges].join("\n"))).toEqual([]);
+    });
+
+    it("rejects more than 500 arrows with one problem", () => {
+      const nodes = ['  n1["a"]', '  n2["b"]'];
+      const edges = Array.from({ length: MAX_DIAGRAM_EDGES + 1 }, () => '  n1 -->|"x"| n2');
+      expect(diagramProblems(["flowchart LR", ...nodes, ...edges].join("\n"))).toEqual([
+        `the diagram has more than ${MAX_DIAGRAM_EDGES} arrows`,
+      ]);
+    });
+
+    it("rejects more than 50,000 characters with one problem, without parsing it", () => {
+      const source = `${SAFE}\n  n3["${"a".repeat(MAX_DIAGRAM_CHARS)}"]`;
+      expect(diagramProblems(source)).toEqual([
+        `the diagram is longer than ${MAX_DIAGRAM_CHARS} characters`,
+      ]);
+      const atLimit = `${SAFE}\n  n3["${"a".repeat(MAX_DIAGRAM_CHARS - SAFE.length - 9)}"]`;
+      expect(atLimit.length).toBe(MAX_DIAGRAM_CHARS);
+      expect(diagramProblems(atLimit)).toEqual([]);
+    });
   });
 
   describe("control and bidirectional characters", () => {
