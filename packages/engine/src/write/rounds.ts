@@ -29,13 +29,18 @@ function cut(id: string, max: number): string {
   return [...id.slice(0, 2 * max)].slice(0, max).join("");
 }
 
+/** Any draft of sections of claims with ids: a feature page's or the Architecture article's. */
+export interface DraftWithIds {
+  sections: readonly { claims: readonly { id: string }[] }[];
+}
+
 /**
  * The draft with its claim ids made unique on the page ("o1", then "o1-2"), sections and claims
  * in their original order (repeated and empty sections kept). The ids are the model's own
  * strings, so they are trimmed (a blank one becomes "claim") and cut to 80 characters before they
  * are made unique, and the work is linear in the number of claims. The draft is not changed.
  */
-export function uniqueDraft(draft: PageDraft): PageDraft {
+export function uniqueDraft<D extends DraftWithIds>(draft: D): D {
   const seen = new Set<string>();
   /** The next suffix to try for each base id, so a run of one id costs one step per claim. */
   const next = new Map<string, number>();
@@ -56,7 +61,7 @@ export function uniqueDraft(draft: PageDraft): PageDraft {
       ...section,
       claims: section.claims.map((claim) => ({ ...claim, id: uniqueId(claim.id) })),
     })),
-  };
+  } as D;
 }
 
 /** A draft's claims with ids made unique on the page (see uniqueDraft), in section order. */
@@ -159,8 +164,23 @@ export function setAsideUnfixable(state: PageState): void {
   }
 }
 
-/** The retry turn for a page with failing claims: the pack, the draft, and the first problems. */
-export function fixRequest(state: PageState): LlmMessage[] {
+/** What a retry turn is made from: a PageState, or the Architecture article's own state. */
+export interface RetryState {
+  pack: { text: string };
+  draft: DraftWithIds | null;
+  rejected: { text: string; reason: string } | null;
+  failing: ReadonlyMap<string, { claim: { id: string }; problems: string[] }>;
+}
+
+/** How a feature page's retry turn says to give a claim up. */
+export const PAGE_GIVE_UP =
+  "You may give up any claim you cannot support from the pack: return a body claim with an empty cite list, or a lead claim with an empty supports list.";
+
+/**
+ * The retry turn for a draft with failing claims: the pack, the draft, and the first problems,
+ * ending with how to give a claim up (`giveUp`, a feature page's by default).
+ */
+export function fixRequest(state: RetryState, giveUp: string = PAGE_GIVE_UP): LlmMessage[] {
   if (state.draft === null) throw new Error("fixRequest needs the page's draft");
   if (state.failing.size === 0) throw new Error("fixRequest needs a failing claim");
   const failing = [...state.failing.values()];
@@ -179,7 +199,7 @@ export function fixRequest(state: PageState): LlmMessage[] {
     { role: "assistant", content: JSON.stringify(uniqueDraft(state.draft)) },
     {
       role: "user",
-      content: `These claims failed verification:\n${listed.join("\n")}\nReturn corrected versions of only these claims, under the same ids, citing only lines and commits the pack shows. You may give up any claim you cannot support from the pack: return a body claim with an empty cite list, or a lead claim with an empty supports list.`,
+      content: `These claims failed verification:\n${listed.join("\n")}\nReturn corrected versions of only these claims, under the same ids, citing only lines and commits the pack shows. ${giveUp}`,
     },
   ];
 }
@@ -194,7 +214,7 @@ function oneLine(reason: string): string {
 }
 
 /** The retry turn for a page whose first answer was unusable (spec §6.3: retry once). */
-export function retryRequest(state: PageState): LlmMessage[] {
+export function retryRequest(state: RetryState): LlmMessage[] {
   const { rejected } = state;
   if (rejected === null) throw new Error("retryRequest needs the rejected answer");
   return [

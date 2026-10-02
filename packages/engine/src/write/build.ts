@@ -98,34 +98,64 @@ export function writeCacheKey(sha: string, system: string): string {
   return `write-${sha}-${createHash("sha256").update(system).digest("hex").slice(0, 12)}`;
 }
 
-const addTokens = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
+export const addTokens = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
   in: a.in + b.in,
   out: a.out + b.out,
   cacheRead: a.cacheRead + b.cacheRead,
   cacheWrite: a.cacheWrite + b.cacheWrite,
 });
 
-type Settled<T> = { result: GenerateResult<T> } | { error: unknown };
+export type Settled<T> = { result: GenerateResult<T> } | { error: unknown };
 /** A round-2 answer: a whole page again, or fixes for the failing claims. */
 type RetryAnswer =
   | { kind: "page"; outcome: Settled<PageDraft> }
   | { kind: "fixes"; outcome: Settled<ClaimFixes> };
-const settle = <T>(promise: Promise<GenerateResult<T>>): Promise<Settled<T>> =>
+export const settle = <T>(promise: Promise<GenerateResult<T>>): Promise<Settled<T>> =>
   promise.then(
     (result) => ({ result }),
     (error: unknown) => ({ error }),
   );
 
 /** The name of whatever was thrown: never its message, which may hold model text. */
-const errorClass = (error: unknown): string =>
+export const errorClass = (error: unknown): string =>
   error instanceof Error ? error.constructor.name : typeof error;
 
 /**
  * A failed call as one line: the error class, and the message only of an LlmError, whose messages
  * RepoWiki writes itself. Any other error may carry a provider's response body.
  */
-const callFailure = (error: unknown): string =>
+export const callFailure = (error: unknown): string =>
   error instanceof LlmError ? `${errorClass(error)}: ${error.message}` : errorClass(error);
+
+/**
+ * Checks Wikipedia titles once for a round of claims. A check that throws leaves every title as
+ * plain text for this run (no link without a check) and loses no answer; a missing cassette is a
+ * test setup error and is thrown. Each unreachable title is logged.
+ */
+export async function checkTitles(
+  titles: readonly string[],
+  options: WikipediaOptions,
+  log: (line: string) => void,
+): Promise<WikipediaCheck> {
+  let wikipedia: WikipediaCheck;
+  try {
+    wikipedia = await checkWikipediaTitles(titles, options);
+  } catch (error) {
+    // A missing cassette is a test setup error: replay must fail loudly, never fall back.
+    if (error instanceof CassetteMissError) throw error;
+    // No link without a check: every title stays plain text this run, and no answer is lost.
+    log(`Wikipedia could not be checked (${errorClass(error)}); left as plain text`);
+    const wanted = new Set(titles.map(normalizeWikipediaTitle).filter((t) => t !== ""));
+    wikipedia = {
+      links: new Map([...wanted].sort().map((t) => [t, null])),
+      fetched: 0,
+      failed: [],
+    };
+  }
+  for (const title of wikipedia.failed)
+    log(`Wikipedia could not be reached for ${quote(title)}; left as plain text`);
+  return wikipedia;
+}
 
 /**
  * Writes every active feature's page (spec §7): one write call per page, all issued in the same
@@ -316,23 +346,7 @@ export async function writePages(
       ? []
       : [...s.verified.values()].flatMap(({ claim }) => wikipediaTitlesIn(claim.text)),
   );
-  let wikipedia: WikipediaCheck;
-  try {
-    wikipedia = await checkWikipediaTitles(titles, options.wikipedia);
-  } catch (error) {
-    // A missing cassette is a test setup error: replay must fail loudly, never fall back.
-    if (error instanceof CassetteMissError) throw error;
-    // No link without a check: every title stays plain text this run, and no answer is lost.
-    log(`Wikipedia could not be checked (${errorClass(error)}); left as plain text`);
-    const wanted = new Set(titles.map(normalizeWikipediaTitle).filter((t) => t !== ""));
-    wikipedia = {
-      links: new Map([...wanted].sort().map((t) => [t, null])),
-      fetched: 0,
-      failed: [],
-    };
-  }
-  for (const title of wikipedia.failed)
-    log(`Wikipedia could not be reached for ${quote(title)}; left as plain text`);
+  const wikipedia = await checkTitles(titles, options.wikipedia, log);
 
   // The build commit's own date, unless git gave one the infobox cannot store.
   const buildDate = history.find((c) => c.sha === index.sha)?.date;
