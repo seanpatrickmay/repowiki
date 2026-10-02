@@ -77,6 +77,8 @@ export {
 } from "./store/index.ts";
 export { diagramProblems, revisionProblems } from "./verify/index.ts";
 export {
+  type BuildJournal,
+  buildJournal,
   buildPack,
   buildWiki,
   type ContextPack,

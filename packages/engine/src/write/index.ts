@@ -9,4 +9,11 @@ export {
 } from "./build.ts";
 export { buildPack, type ContextPack, DEFAULT_CONTEXT_BUDGET_TOKENS } from "./pack.ts";
 export { STYLE_GUIDE, writeSystemPrompt } from "./prompt.ts";
-export { buildWiki, type WikiBuild, WikiBuildError, type WikiBuildOptions } from "./wiki.ts";
+export {
+  type BuildJournal,
+  buildJournal,
+  buildWiki,
+  type WikiBuild,
+  WikiBuildError,
+  type WikiBuildOptions,
+} from "./wiki.ts";

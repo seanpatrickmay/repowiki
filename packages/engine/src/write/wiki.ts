@@ -1,5 +1,5 @@
 import type { Manifest, Revision } from "@repowiki/core";
-import type { FetchLike } from "@repowiki/llm";
+import type { BatchJournal, FetchLike } from "@repowiki/llm";
 import { codeAliases } from "../link/index.ts";
 import type { Store } from "../store/index.ts";
 import {
@@ -19,6 +19,39 @@ export class WikiBuildError extends Error {
 export interface WikiBuildOptions extends Omit<WritePagesOptions, "wikipedia"> {
   /** Replaces global fetch for Wikipedia lookups, e.g. with a cassette in tests. */
   wikipediaFetch?: FetchLike;
+  /** The provider's batch journal, flushed in the transaction that stores the pages. */
+  journal?: BuildJournal;
+}
+
+/** A batch journal whose forgets wait for flush(). */
+export interface BuildJournal extends BatchJournal {
+  /** Forgets every request whose answer was collected so far. */
+  flush(): void;
+}
+
+/**
+ * The store's batch journal for a build. The batcher forgets a request once its answer is read,
+ * but the answer is only safe once its page is stored: until then a killed build must leave the
+ * row, so a rerun collects the batch instead of paying for it again. So forgets are held in
+ * memory until buildWiki flushes them in the transaction that settles the pages, written or not
+ * (a failed page's rows are forgotten too, or a rerun would replay the same failing answer).
+ */
+export function buildJournal(store: Store): BuildJournal {
+  const pending: { batchId: string; keys: readonly string[] }[] = [];
+  return {
+    lookup: (key) => store.findBatchRequest(key),
+    record: (batchId, createdAt, items) => store.recordBatchRequests(batchId, createdAt, items),
+    forget: (batchId, keys) => {
+      pending.push({ batchId, keys });
+    },
+    flush: () => {
+      try {
+        for (const { batchId, keys } of pending.splice(0)) store.forgetBatchRequests(batchId, keys);
+      } catch {
+        // A row left behind only costs a replay; it must never roll back the pages it answers.
+      }
+    },
+  };
 }
 
 export interface WikiBuild {
@@ -64,7 +97,7 @@ export async function buildWiki(
     .map((f) => f.id);
   if (missing.length === 0) return { manifest, aliases, stored: [], written: null };
 
-  const { wikipediaFetch, ...rest } = options;
+  const { wikipediaFetch, journal, ...rest } = options;
   const written = await writePages(
     { ...input, manifest, only: missing },
     {
@@ -83,6 +116,8 @@ export async function buildWiki(
     page.revision === null ? [] : [page.revision],
   );
   if (revisions.length === 0) {
+    // Every page failed; its answers are settled all the same.
+    store.transaction(() => journal?.flush());
     throw new WikiBuildError(
       `no page could be written: ${written.pages.map((p) => `${p.featureId}: ${p.failure}`).join("; ")}`,
     );
@@ -90,6 +125,7 @@ export async function buildWiki(
   store.transaction(() => {
     for (const revision of revisions) store.putRevision(revision);
     store.setHead(index.sha);
+    journal?.flush();
   });
   return { manifest, aliases, stored: revisions, written };
 }

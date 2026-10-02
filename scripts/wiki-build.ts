@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
   buildFileGraph,
+  buildJournal,
   buildPack,
   buildWiki,
   DEFAULT_MAX_FILE_BYTES,
@@ -77,6 +78,8 @@ async function main(): Promise<void> {
 
     const runId = `wiki-build-${index.sha}-${new Date().toISOString()}`;
     const ledger = createLedger((entry) => store.appendLedger(entry));
+    // Forgets a collected request only once buildWiki stores its page, so a kill never re-pays.
+    const journal = buildJournal(store);
     // Built on the first call, so a run with nothing left to write needs no API key.
     let claude: Provider | undefined;
     const provider: Provider = {
@@ -86,12 +89,7 @@ async function main(): Promise<void> {
           ledger,
           runId,
           run: { kind: "build", sha: index.sha },
-          batchJournal: {
-            lookup: (key) => store.findBatchRequest(key),
-            record: (batchId, createdAt, items) =>
-              store.recordBatchRequests(batchId, createdAt, items),
-            forget: (batchId, keys) => store.forgetBatchRequests(batchId, keys),
-          },
+          batchJournal: journal,
           ...(args.deadlineMinutes === null
             ? {}
             : { batchDeadlineMs: args.deadlineMinutes * 60_000 }),
@@ -109,6 +107,7 @@ async function main(): Promise<void> {
       { index, sources, history, graph },
       {
         provider,
+        journal,
         repoName,
         batch: args.batch,
         budgetTokens: args.budgetTokens,
