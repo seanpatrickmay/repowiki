@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { WikiExport } from "@repowiki/core";
+import { SCHEMA_VERSION, WikiExport } from "@repowiki/core";
 import { z } from "zod";
 
 /** The export could not be read or failed schema validation. The message is reader-facing. */
@@ -25,6 +25,16 @@ export function loadExport(path: string): WikiExport {
     raw = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
     throw new ExportError(`cannot read export ${file}: ${(error as Error).message}`);
+  }
+  const version =
+    typeof raw === "object" && raw !== null ? Reflect.get(raw, "schemaVersion") : null;
+  if (typeof version === "number" && version !== SCHEMA_VERSION) {
+    // Checked first: a different version fails on many fields, which would bury the real cause.
+    const [age, action] =
+      version < SCHEMA_VERSION ? ["older", "re-run the export"] : ["newer", "upgrade RepoWiki"];
+    throw new ExportError(
+      `export schema ${version} in ${file} is ${age} than this reader (${SCHEMA_VERSION}); ${action}`,
+    );
   }
   const result = WikiExport.safeParse(raw);
   if (!result.success) {
