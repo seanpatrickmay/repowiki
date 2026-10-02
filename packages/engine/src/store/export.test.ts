@@ -2,7 +2,14 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WikiExport } from "@repowiki/core";
-import { makeManifest, makeRevision, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
+import {
+  bodyClaim,
+  leadClaim,
+  makeManifest,
+  makeRevision,
+  SHA_A,
+  SHA_B,
+} from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EmptyStoreError } from "./errors.ts";
 import { buildExport, writeExport } from "./export.ts";
@@ -42,7 +49,7 @@ describe("buildExport", () => {
   it("exports current pages with oldest-first history", () => {
     seed();
     const wiki = buildExport(store, options);
-    expect(wiki.schemaVersion).toBe(2);
+    expect(wiki.schemaVersion).toBe(3);
     expect(wiki.head).toBe(SHA_B);
     expect(wiki.manifest.sha).toBe(SHA_A);
     expect(wiki.pages.map((p) => p.id)).toEqual(["rev-2"]);
@@ -68,5 +75,91 @@ describe("writeExport", () => {
     const text = readFileSync(out, "utf8");
     expect(text.endsWith("\n")).toBe(true);
     expect(WikiExport.parse(JSON.parse(text))).toEqual(buildExport(store, options));
+  });
+});
+
+describe("buildExport Wikipedia summaries (F13)", () => {
+  const queue = {
+    title: "Message queue",
+    extract: "A message queue is a form of asynchronous communication.",
+    url: "https://en.wikipedia.org/wiki/Message_queue",
+  };
+
+  it("exports the cached summary of every Wikipedia article a current page links", () => {
+    store.putManifest(makeManifest());
+    store.putRevision(
+      makeRevision({
+        sections: [
+          { key: "lead", claims: [leadClaim({ text: "Uses a [[wp:Message queue|queue]]." })] },
+          {
+            key: "overview",
+            claims: [bodyClaim({ text: "Runs on [[wp:Cron]] and [[wp:Gone]]." })],
+          },
+        ],
+      }),
+    );
+    store.setHead(SHA_A);
+    store.putWikipediaSummary("Message queue", queue, "2026-10-01T12:00:00Z");
+    store.putWikipediaSummary("Gone", null, "2026-10-01T12:00:00Z");
+    store.putWikipediaSummary("Unlinked", { ...queue, title: "Unlinked" }, "2026-10-01T12:00:00Z");
+    expect(buildExport(store, options).wikipedia).toEqual({ "Message queue": queue });
+  });
+});
+
+describe("buildExport Wikipedia titles are read as the site reads link tokens", () => {
+  const entry = (title: string) => ({
+    title,
+    extract: `${title} is a thing.`,
+    url: `https://en.wikipedia.org/wiki/${title.replaceAll(" ", "_")}`,
+  });
+  const fetchedAt = "2026-10-01T12:00:00Z";
+
+  function seedPages(leadText: string, bodyText: string): void {
+    store.putManifest(makeManifest());
+    store.putRevision(
+      makeRevision({
+        sections: [
+          { key: "lead", claims: [leadClaim({ text: leadText })] },
+          { key: "overview", claims: [bodyClaim({ text: bodyText })] },
+        ],
+      }),
+    );
+    store.setHead(SHA_A);
+  }
+
+  it("keys a summary by the normalized title, ignores code spans, and reads through placeholders", () => {
+    seedPages(
+      "Uses [[wp:message_queue|a queue]] and `[[wp:Hidden]]`.",
+      "Also [[wp:Dead letter queue]], [[wp:Cron]] and [\ue000[wp:Event loop]].",
+    );
+    for (const title of ["Message queue", "Hidden", "Dead letter queue", "Event loop"]) {
+      store.putWikipediaSummary(title, entry(title), fetchedAt);
+    }
+    expect(Object.keys(buildExport(store, options).wikipedia)).toEqual([
+      "Dead letter queue",
+      "Event loop",
+      "Message queue",
+    ]);
+  });
+
+  it("leaves out an article only an older revision linked", () => {
+    store.putManifest(makeManifest());
+    store.putRevision(
+      makeRevision({
+        sections: [
+          { key: "lead", claims: [leadClaim({ text: "Old [[wp:Cron]]." })] },
+          { key: "overview", claims: [bodyClaim()] },
+        ],
+      }),
+    );
+    store.putRevision(makeRevision({ id: "rev-2", parentId: "rev-1", reason: "update" }));
+    store.setHead(SHA_A);
+    store.putWikipediaSummary("Cron", entry("Cron"), fetchedAt);
+    expect(buildExport(store, options).wikipedia).toEqual({});
+  });
+
+  it("exports no summaries when nothing was cached", () => {
+    seedPages("Uses [[wp:Cron]].", "Plain.");
+    expect(buildExport(store, options).wikipedia).toEqual({});
   });
 });

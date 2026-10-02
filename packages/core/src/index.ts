@@ -16,3 +16,8 @@ export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";
 export { Infobox, Revision, RevisionReason, TokenUsage } from "./revision.ts";
 export { claimRuleViolations, Section, SectionKey } from "./section.ts";
 export { SCHEMA_VERSION } from "./version.ts";
+export {
+  WIKIPEDIA_EXTRACT_MAX_LENGTH,
+  WikipediaCacheEntry,
+  WikipediaSummary,
+} from "./wikipedia.ts";

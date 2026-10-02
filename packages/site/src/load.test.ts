@@ -47,15 +47,15 @@ describe("loadExport", () => {
     expect(() => loadExport(file)).toThrow(ExportError);
     expect(() => loadExport(file)).toThrow(
       new ExportError(
-        `export schema 1 in ${file} is older than this reader (2); re-run the export`,
+        `export schema 1 in ${file} is older than this reader (3); re-run the export`,
       ),
     );
   });
 
   it("rejects an export from a newer schema version the same way", () => {
-    const file = write("v3.json", JSON.stringify({ ...fixtureExport(), schemaVersion: 3 }));
+    const file = write("v4.json", JSON.stringify({ ...fixtureExport(), schemaVersion: 4 }));
     expect(() => loadExport(file)).toThrow(
-      new ExportError(`export schema 3 in ${file} is newer than this reader (2); upgrade RepoWiki`),
+      new ExportError(`export schema 4 in ${file} is newer than this reader (3); upgrade RepoWiki`),
     );
   });
 
