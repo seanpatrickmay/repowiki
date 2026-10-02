@@ -1,6 +1,6 @@
 import { makeFeature, makeManifest, SHA_B } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { UnknownManifestError } from "./errors.ts";
+import { StoreError, UnknownManifestError } from "./errors.ts";
 import { openStore } from "./store.ts";
 
 describe("amendManifestAliases", () => {
@@ -41,6 +41,32 @@ describe("amendManifestAliases", () => {
     ]);
     expect(amended.features.map((f) => f.id)).toEqual(["signals", "deliverables"]);
     expect(store.getDriftBaseline()).toBeNull();
+    store.close();
+  });
+
+  it("refuses an alias that is too long or holds a control character, writing nothing", () => {
+    const store = openStore(":memory:");
+    store.putManifest(makeManifest());
+    for (const bad of ["x".repeat(61), "/a\u202Eb", "a\nb", "a\u0000b"]) {
+      expect(() =>
+        store.amendManifestAliases(makeManifest().sha, { signals: ["/fine", bad] }),
+      ).toThrow(StoreError);
+    }
+    expect(store.getManifest(makeManifest().sha)).toEqual(makeManifest());
+    store.close();
+  });
+
+  it("names the feature and quotes a long refused alias in short", () => {
+    const store = openStore(":memory:");
+    store.putManifest(makeManifest());
+    expect(() =>
+      store.amendManifestAliases(makeManifest().sha, { signals: ["x".repeat(5000)] }),
+    ).toThrow(/signals.*is 5000 characters; use at most 60/);
+    try {
+      store.amendManifestAliases(makeManifest().sha, { signals: ["x".repeat(5000)] });
+    } catch (error) {
+      expect((error as Error).message.length).toBeLessThan(300);
+    }
     store.close();
   });
 

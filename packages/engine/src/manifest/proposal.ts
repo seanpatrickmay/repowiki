@@ -1,7 +1,6 @@
-import { FeatureId } from "@repowiki/core";
+import { ALIAS_MAX_LENGTH, aliasProblem, controlCharacters, FeatureId } from "@repowiki/core";
 import { z } from "zod";
 import type { Cluster } from "../cluster/index.ts";
-import { controlCharacters } from "./prompt.ts";
 
 /**
  * What the manifest call returns: the features, then one assignment per cluster. Assigning each
@@ -22,7 +21,7 @@ export const MAX_ALIASES = 8;
 export const MAX_FEATURE_ID_LENGTH = 40;
 /** Titles and aliases go into page headings and every write call's prompt, so they stay short. */
 export const MAX_TITLE_LENGTH = 80;
-export const MAX_ALIAS_LENGTH = 60;
+export const MAX_ALIAS_LENGTH = ALIAS_MAX_LENGTH;
 /** Longest list of problems sent back to the model; the rest are summarized as a count. */
 export const MAX_REPORTED_PROBLEMS = 20;
 const MAX_QUOTED_LENGTH = 80;
@@ -48,20 +47,6 @@ export function cleanAliases(title: string, aliases: readonly string[]): string[
     out.push(trimmed);
   }
   return out;
-}
-
-/**
- * Whether a string from outside the model (a code identifier) may become a manifest alias: not
- * blank, at most MAX_ALIAS_LENGTH code points, and free of control and invisible characters. The
- * same limits proposalProblems enforces on model aliases; a caller skips a failing string rather
- * than shortening it.
- */
-export function isAcceptableAlias(alias: string): boolean {
-  return (
-    alias.trim() !== "" &&
-    [...alias].length <= MAX_ALIAS_LENGTH &&
-    controlCharacters(alias).length === 0
-  );
 }
 
 /**
@@ -107,7 +92,8 @@ export function proposalProblems(
         `feature ${quote(feature.id)} has ${aliases.length} distinct aliases; give ${MIN_ALIASES} to ${MAX_ALIASES}`,
       );
     }
-    for (const alias of aliases) {
+    const badAliases = aliases.filter((alias) => aliasProblem(alias) !== null);
+    for (const alias of badAliases) {
       const length = [...alias].length;
       if (length > MAX_ALIAS_LENGTH) {
         problems.push(
@@ -115,7 +101,7 @@ export function proposalProblems(
         );
       }
     }
-    const aliasControls = [...new Set(aliases.flatMap(controlCharacters))];
+    const aliasControls = [...new Set(badAliases.flatMap(controlCharacters))];
     if (aliasControls.length > 0) {
       problems.push(
         `feature ${quote(feature.id)} has a control or invisible character in an alias (${aliasControls.join(", ")})`,

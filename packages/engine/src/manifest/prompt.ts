@@ -1,3 +1,4 @@
+import { CONTROL_CHARACTERS } from "@repowiki/core";
 import type { ClusterSummary } from "../cluster/index.ts";
 
 /** Instructions for the manifest call. Frozen text: it heads the prompt-cached prefix. */
@@ -36,22 +37,6 @@ export function estimateTokens(text: string): number {
 
 /** Longest repository-controlled string put in the prompt, in code points, before the "…". */
 const MAX_NAME_LENGTH = 200;
-/**
- * C0 and C1 controls (newline, tab and DEL included: Cc), U+2028 / U+2029 (Zl, Zp), and the invisible
- * characters that reorder or hide text: bidi embeddings and overrides U+202A-U+202E, bidi isolates
- * U+2066-U+2069, and the byte order mark U+FEFF. Not all of Cf: ZWJ (U+200D) and ZWNJ (U+200C)
- * are needed by emoji sequences and by Persian, Indic and Arabic scripts, so they pass through.
- */
-const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
-
-/** The distinct characters plain() would replace, in order of appearance, as "U+XXXX". */
-export function controlCharacters(text: string): string[] {
-  const found = (text.match(CONTROL_CHARACTERS) ?? []).map(
-    (c) => `U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`,
-  );
-  return [...new Set(found)];
-}
-
 /**
  * A repository-controlled string (path, directory, symbol, package or repository name), safe to
  * put in the prompt. Git paths can hold newlines and any other text, so a path could otherwise

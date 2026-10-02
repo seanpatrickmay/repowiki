@@ -1,4 +1,5 @@
 import {
+  aliasProblem,
   GitSha,
   LedgerEntry,
   Manifest,
@@ -44,8 +45,9 @@ export interface Store {
    * transaction. Additive only: an alias already present (case-insensitively, or equal to the
    * title) is skipped, and nothing else about the manifest changes, so ids, membership,
    * llm_revised and the drift baseline's identity are untouched. Throws UnknownManifestError for
-   * a sha with no manifest. Callers vet the strings (see isAcceptableAlias); the store enforces
-   * only the Manifest schema, which it parses before writing.
+   * a sha with no manifest, and a StoreError for an alias that fails core's aliasProblem (blank
+   * ones are skipped), in which case nothing is written. The Manifest schema is parsed before
+   * writing.
    */
   amendManifestAliases(
     sha: string,
@@ -281,7 +283,15 @@ export function openStore(path: string): Store {
           const added: string[] = [];
           for (const alias of wanted) {
             const trimmed = alias.trim();
-            if (trimmed === "" || names.has(trimmed.toLowerCase())) continue;
+            if (trimmed === "") continue;
+            const problem = aliasProblem(trimmed);
+            if (problem !== null) {
+              const shown = [...trimmed].slice(0, 40).join("");
+              throw new StoreError(
+                `alias ${JSON.stringify(trimmed === shown ? shown : `${shown}…`)} for feature ${feature.id} ${problem}`,
+              );
+            }
+            if (names.has(trimmed.toLowerCase())) continue;
             names.add(trimmed.toLowerCase());
             added.push(trimmed);
           }

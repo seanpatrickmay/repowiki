@@ -1,5 +1,4 @@
-import { type Manifest, parseMemberId } from "@repowiki/core";
-import { isAcceptableAlias } from "../manifest/index.ts";
+import { aliasProblem, type Manifest, parseMemberId } from "@repowiki/core";
 
 /** A pattern for one kind of code identifier; group 1 is the identifier. */
 interface IdentifierPattern {
@@ -64,7 +63,8 @@ export function codeAliases(
     for (const { pattern } of IDENTIFIER_PATTERNS) {
       for (const match of text.matchAll(pattern)) {
         const identifier = match[1] ?? "";
-        if (identifier.length < MIN_IDENTIFIER_LENGTH || !isAcceptableAlias(identifier)) continue;
+        if (identifier.length < MIN_IDENTIFIER_LENGTH || aliasProblem(identifier) !== null)
+          continue;
         const entry = found.get(identifier) ?? { features: new Set(), counts: new Map() };
         entry.features.add(featureId);
         entry.counts.set(featureId, (entry.counts.get(featureId) ?? 0) + 1);
