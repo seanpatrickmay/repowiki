@@ -101,6 +101,8 @@ function scanLine(
   depth: number,
 ): { depth: number; terminated: boolean } {
   let quote = "";
+  // The last character that was not a space, to tell a type's `{` from the body's.
+  let previous = "";
   for (let i = 0; i < text.length; i++) {
     const c = text[i] as string;
     if (quote !== "") {
@@ -108,10 +110,15 @@ function scanLine(
       else if (c === quote) quote = "";
       continue;
     }
+    const before = previous;
+    if (c !== " " && c !== "\t") previous = c;
     if (c === '"' || c === "'" || (c === "`" && !python)) quote = c;
     else if (python ? c === "#" : c === "/" && text[i + 1] === "/") break;
     else if (c === "(" || c === "[" || c === "{") {
-      if (c === "{" && depth === 0 && !python) return { depth, terminated: true };
+      // After `<`, `:`, `|`, `&` or `,` a `{` opens an object-literal type, not the body.
+      if (c === "{" && depth === 0 && !python && !"<:|&,".includes(before || "x")) {
+        return { depth, terminated: true };
+      }
       depth++;
     } else if (c === ")" || c === "]" || c === "}") depth = Math.max(0, depth - 1);
     else if (depth === 0 && python && c === ":") return { depth, terminated: true };
@@ -121,6 +128,40 @@ function scanLine(
     }
   }
   return { depth, terminated: false };
+}
+
+/**
+ * Whether a line opening with a decorator also holds the declaration it decorates, as in
+ * `@HostListener("x") onX() {`: after the decorator's name and its balanced arguments comes
+ * more than a comment. A decorator whose arguments run past the line is not one.
+ */
+function decoratesOnOwnLine(text: string): boolean {
+  const name = /^\s*@[\w$.]+/.exec(text);
+  if (name === null) return false;
+  let rest = text.slice(name[0].length);
+  if (rest.startsWith("(")) {
+    const { depth, end } = argumentsEnd(rest);
+    if (depth > 0) return false;
+    rest = rest.slice(end);
+  }
+  rest = rest.trim();
+  return rest !== "" && !/^(?:\/\/|\/\*|#)/.test(rest);
+}
+
+/** Where the parenthesis that opens `text` closes (or the text's end), and the depth left open. */
+function argumentsEnd(text: string): { depth: number; end: number } {
+  let depth = 0;
+  let quote = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] as string;
+    if (quote !== "") {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+    } else if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return { depth, end: i + 1 };
+  }
+  return { depth, end: text.length };
 }
 
 const PYTHON_HEADER = /^\s*(?:async\s+def\s|def\s|class\s[^{]*$)/;
@@ -162,7 +203,10 @@ export function signatureLines(
 
   let first = symbol.startLine;
   let depth = 0;
-  while (first <= last && (depth > 0 || at(first).trim().startsWith("@"))) {
+  while (
+    first <= last &&
+    (depth > 0 || (at(first).trim().startsWith("@") && !decoratesOnOwnLine(at(first))))
+  ) {
     depth = scanLine(at(first), false, depth).depth;
     if (first - symbol.startLine < MAX_DECORATOR_LINES) out.push(first);
     first++;

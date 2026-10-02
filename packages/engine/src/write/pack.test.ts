@@ -452,6 +452,32 @@ describe("signatureLines", () => {
     expect(signatureLines(src, symbol(3, 5))).toEqual([3]);
   });
 
+  it("does not end a signature at the brace of an object-literal type", () => {
+    const src = [
+      "export async function load(",
+      "  id: string,",
+      "): Promise<{",
+      "  a: number;",
+      "}> {",
+      "  return { a: 1 };",
+      "}",
+    ];
+    expect(signatureLines(src, symbol(1, 6))).toEqual([1, 2, 3, 4, 5]);
+    const colon = ["function f(a: string): {", "  b: number;", "} {", "  return null;", "}"];
+    expect(signatureLines(colon, symbol(1, 5))).toEqual([1, 2, 3]);
+    const union = ["function g(a: string): string | {", "  b: number;", "} {", "  return a;", "}"];
+    expect(signatureLines(union, symbol(1, 5))).toEqual([1, 2, 3]);
+  });
+
+  it("takes a decorator on its declaration's own line as that declaration's first line", () => {
+    const same = ["@HostListener('window:resize') onResize() {", "  this.measure();", "}"];
+    expect(signatureLines(same, symbol(1, 3))).toEqual([1]);
+    const withComment = ["@Input() // the id", "id: string;"];
+    expect(signatureLines(withComment, symbol(1, 2))).toEqual([1, 2]);
+    const two = ["@Input() @Required() name: string;", "other = 1;"];
+    expect(signatureLines(two, symbol(1, 1))).toEqual([1]);
+  });
+
   it("ends an arrow-function const at its arrow", () => {
     const multi = [
       "export const load = async (",
