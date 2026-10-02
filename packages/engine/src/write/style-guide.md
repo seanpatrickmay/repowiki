@@ -86,9 +86,10 @@ Never reuse their names, numbers or citations.
 - Citations go only in the claim's cite array, never in its text: no parenthesised commit
   references, no "cite:" and no file and line references written into the sentences.
 - A commit reference is "commit:" and at least 7 hex digits.
-- Keep claims independent: a reader should be able to verify each one from its citations alone.
-- Cite the narrowest lines that show the claim, at most 120 lines. A function's signature and the lines that do
-  the work are better than the whole file.
+- Keep body claims independent: a reader should be able to verify each one from its citations
+  alone. Lead claims carry no citations; they list the body claims they summarize in supports.
+- Cite the narrowest lines that show the claim, at most 120 lines. A function's signature and
+  the lines that do the work are better than the whole file.
 - Hooks ("Did you know…") are surprising, self-contained facts, such as an unusual limit or a
   notable design choice the code makes. At most two per page.
 
