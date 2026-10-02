@@ -140,21 +140,24 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         tokens: usage,
         ...(options.run === undefined ? {} : { runKind: options.run.kind, sha: options.run.sha }),
       });
+      // The ledger row is written: an unusable answer below carries the same numbers.
+      const answered = { usage, model: message.model };
       const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
       if (message.stop_reason !== "end_turn") {
-        throw new LlmOutputError(`model stopped with ${message.stop_reason}`, text);
+        throw new LlmOutputError(`model stopped with ${message.stop_reason}`, text, answered);
       }
       let json: unknown;
       try {
         json = JSON.parse(text);
       } catch {
-        throw new LlmOutputError("model output is not JSON", text);
+        throw new LlmOutputError("model output is not JSON", text, answered);
       }
       const parsed = request.schema.safeParse(json);
       if (!parsed.success) {
         throw new LlmOutputError(
           `model output does not match the schema: ${schemaIssues(parsed.error.issues)}`,
           text,
+          answered,
         );
       }
       return { output: parsed.data, usage, model: message.model };
