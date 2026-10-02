@@ -84,7 +84,10 @@ export function buildJournal(store: Store): BuildJournal {
 export interface WikiBuild {
   /** The stored manifest, with code-identifier aliases added. */
   manifest: Manifest;
-  /** The code aliases of the manifest, per feature (the same list again on a rerun). */
+  /**
+   * The code aliases found this run, per feature. A rerun may find fewer (see codeAliases); the
+   * stored manifest keeps every alias already added.
+   */
   aliases: Record<string, string[]>;
   /** Pages written and stored this run, sorted by feature id; empty when every page existed. */
   stored: Revision[];

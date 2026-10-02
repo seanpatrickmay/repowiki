@@ -14,6 +14,7 @@ import {
   openStore,
   readHistory,
   readSources,
+  resolveCommit,
   StoreError,
   WikiBuildError,
   writeExport,
@@ -52,11 +53,13 @@ async function main(): Promise<void> {
     );
   }
   const models = loadModels(args.config);
+  // The rev is resolved first, so a typo leaves no out dir behind.
+  const sha = resolveCommit(repo, args.rev);
   mkdirSync(out, { recursive: true });
   // A dry run sends nothing, so only a real build needs the out dir to itself.
   const release = args.dryRun ? () => {} : acquireBuildLock(out, (line) => console.error(line));
   try {
-    await runBuild(args, repo, out, models);
+    await runBuild({ ...args, rev: sha }, repo, out, models);
   } finally {
     release();
   }

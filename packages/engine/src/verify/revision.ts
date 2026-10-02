@@ -1,6 +1,6 @@
 import { contentHash, type Revision } from "@repowiki/core";
 import type { CommitInfo } from "../index/index.ts";
-import { citedLines } from "./claims.ts";
+import { citedLines, citedSubject } from "./claims.ts";
 import { diagramProblems } from "./diagram.ts";
 
 /**
@@ -56,13 +56,14 @@ export function revisionProblems(
 
 /**
  * Re-resolves a stored revision's commit citations against `commits`, the history of the wiki's
- * sha (readHistory): each must name a commit there, under the subject it was cited with.
+ * sha (readHistory): each must name a commit there, under the subject it was cited with (a blank
+ * subject is cited as "(no subject)").
  */
 export function commitCitationProblems(
   revision: Revision,
   commits: readonly CommitInfo[],
 ): string[] {
-  const subjects = new Map(commits.map((c) => [c.sha, c.subject]));
+  const subjects = new Map(commits.map((c) => [c.sha, citedSubject(c.subject)]));
   const problems: string[] = [];
   for (const section of revision.sections) {
     for (const claim of section.claims) {

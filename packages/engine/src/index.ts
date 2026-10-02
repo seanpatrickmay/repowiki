@@ -30,6 +30,7 @@ export {
   type RepoIndex,
   readHistory,
   readSources,
+  resolveCommit,
   type SourceLanguage,
   type SymbolDef,
   type SymbolKind,

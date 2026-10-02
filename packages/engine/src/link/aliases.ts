@@ -227,8 +227,10 @@ function cleanIdentifier(kind: IdentifierPattern["kind"], raw: string): string |
  * every alias pointing at one page. One that could not be a manifest alias (core's aliasProblem:
  * too long, or holding a control or bidi character) is skipped, never cut.
  *
- * A feature's own aliases do not count against it, so running this on an amended manifest returns
- * the same list again and adding it again changes nothing.
+ * A feature's own aliases do not count against it, but every other feature's do, code aliases
+ * included, so on an amended manifest this can return a shorter list than the first run did (an
+ * identifier that names another feature's new alias drops out). Adding it again changes nothing,
+ * because aliases are only ever added.
  */
 export function codeAliases(
   manifest: Manifest,

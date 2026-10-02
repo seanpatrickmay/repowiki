@@ -1,4 +1,4 @@
-import { closeSync, openSync, rmSync, statSync, writeSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -116,10 +116,25 @@ export const BUILD_LOCK = "wiki-build.lock";
 /** A lock older than this is left over from a killed build, never a running one (a batch ends in 24 h). */
 const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 
+/** True unless the lock names a pid no process has: a build killed hard leaves such a lock. */
+function holderAlive(path: string): boolean {
+  const pid = Number(/^pid (\d+) /.exec(readFileSync(path, "utf8"))?.[1]);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: the process exists but belongs to someone else.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /**
  * Takes the out dir's build lock, so two builds never send the same batches twice, and returns
- * the function that frees it. A lock another build holds is a WikiBuildError; one older than 24
- * hours is taken over, with a line to `log`. Advisory: it guards wiki:build against itself only.
+ * the function that frees it. The lock holds this process's pid and is freed on exit, SIGINT and
+ * SIGTERM too. A lock another live build holds is a WikiBuildError; one older than 24 hours, or
+ * whose pid no process has, is taken over with a line to `log`. Advisory: it guards wiki:build
+ * against itself only.
  */
 export function acquireBuildLock(out: string, log: (line: string) => void): () => void {
   const path = join(out, BUILD_LOCK);
@@ -128,13 +143,15 @@ export function acquireBuildLock(out: string, log: (line: string) => void): () =
     fd = openSync(path, "wx");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    const age = Date.now() - statSync(path).mtimeMs;
-    if (age < STALE_LOCK_MS) {
+    if (Date.now() - statSync(path).mtimeMs >= STALE_LOCK_MS) {
+      log(`ignoring a stale lock older than 24 hours: ${path}`);
+    } else if (!holderAlive(path)) {
+      log(`ignoring the lock of a build that is no longer running: ${path}`);
+    } else {
       throw new WikiBuildError(
         `another wiki:build is running on ${out} (${path}); if none is, delete the lock file`,
       );
     }
-    log(`ignoring a stale lock older than 24 hours: ${path}`);
     rmSync(path, { force: true });
     fd = openSync(path, "wx");
   }
@@ -143,7 +160,21 @@ export function acquireBuildLock(out: string, log: (line: string) => void): () =
   } finally {
     closeSync(fd);
   }
-  return () => rmSync(path, { force: true });
+  const release = () => {
+    process.off("exit", release);
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    rmSync(path, { force: true });
+  };
+  // Free the lock, then let the signal end the process as it would have.
+  const onSignal = (signal: NodeJS.Signals) => {
+    release();
+    process.kill(process.pid, signal);
+  };
+  process.once("exit", release);
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  return release;
 }
 
 /** The longest model id a usage error echoes. */

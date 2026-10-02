@@ -140,8 +140,13 @@ function resolveCommit(ref: string, prefix: string, ctx: VerifyContext): Resolve
     const why = found === undefined ? "names no commit in this history" : "is ambiguous";
     return { problem: `citation ${quote(ref)} ${why}` };
   }
-  const subject = found.subject.trim() === "" ? "(no subject)" : found.subject;
+  const subject = citedSubject(found.subject);
   return { citation: { kind: "commit", sha: found.sha, subject, pr: found.pr }, lines: null };
+}
+
+/** A commit's subject as a commit citation holds it: a blank subject is "(no subject)". */
+export function citedSubject(subject: string): string {
+  return subject.trim() === "" ? "(no subject)" : subject;
 }
 
 /** The reader's own tokenizer: a code span or a [[link]] token is held aside before anything else. */

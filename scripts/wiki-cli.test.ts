@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -296,6 +297,36 @@ describe("acquireBuildLock", () => {
       release();
       expect(existsSync(lock)).toBe(false);
       acquireBuildLock(dir, () => {})();
+    });
+  });
+
+  it("takes over a lock whose process is gone, and says so", () => {
+    withDir((dir) => {
+      const lock = join(dir, BUILD_LOCK);
+      writeFileSync(lock, "pid 2147483646 since 2026-10-02T00:00:00.000Z\n");
+      const lines: string[] = [];
+      const release = acquireBuildLock(dir, (line) => lines.push(line));
+      expect(lines).toEqual([`ignoring the lock of a build that is no longer running: ${lock}`]);
+      expect(readFileSync(lock, "utf8")).toContain(`pid ${process.pid} `);
+      release();
+    });
+  });
+
+  it("frees the lock when the build is interrupted or terminated", () => {
+    withDir((dir) => {
+      const module = new URL("./wiki-cli.ts", import.meta.url).href;
+      for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        const script = `const { acquireBuildLock } = await import(${JSON.stringify(module)});
+acquireBuildLock(${JSON.stringify(dir)}, () => {});
+process.kill(process.pid, ${JSON.stringify(signal)});
+setTimeout(() => {}, 5000);`;
+        const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+          encoding: "utf8",
+        });
+        expect(result.stderr).toBe("");
+        expect(result.signal).toBe(signal);
+        expect(existsSync(join(dir, BUILD_LOCK))).toBe(false);
+      }
     });
   });
 

@@ -79,6 +79,15 @@ describe("wiki-build.ts as a process (no network)", () => {
     expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
   });
 
+  it("creates no out dir for a rev that names no commit", () => {
+    const { repo } = gitRepo();
+    const out = join(dir, "never");
+    const result = run("scripts/wiki-build.ts", repo, "no-such-rev", "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('"no-such-rev" does not name a commit');
+    expect(existsSync(out)).toBe(false);
+  });
+
   it("refuses to start while another build holds the lock, before any work", () => {
     const { repo, out } = storedRepo();
     writeFileSync(join(out, BUILD_LOCK), "pid 1 since 2026-10-01T00:00:00.000Z\n");

@@ -170,6 +170,27 @@ describe("commitCitationProblems", () => {
     expect(commitCitationProblems(revision, history)).toEqual([]);
   });
 
+  it('matches a blank commit subject with the "(no subject)" the write step cites it as', () => {
+    const blank = makeRevision({
+      sections: [
+        { key: "lead", claims: [leadClaim({ supports: ["c-1", "h-1"] })] },
+        { key: "overview", claims: [bodyClaim()] },
+        {
+          key: "history",
+          claims: [
+            bodyClaim({
+              id: "h-1",
+              kind: "history",
+              citations: [commitCitation({ subject: "(no subject)" })],
+            }),
+          ],
+        },
+      ],
+    });
+    expect(commitCitationProblems(blank, [commit(SHA_A, "")])).toEqual([]);
+    expect(commitCitationProblems(blank, [commit(SHA_A, "  ")])).toEqual([]);
+  });
+
   it("reports a commit the history does not hold and one cited under another subject", () => {
     const history = [commit(SHA_A, "feat: add signal ingestion"), commit(SHA_B, "feat: other")];
     expect(commitCitationProblems(revision, history)).toEqual([
