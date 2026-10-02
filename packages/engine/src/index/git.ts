@@ -51,6 +51,16 @@ export function git(repo: string, args: readonly string[], input?: string): Buff
   return result.stdout;
 }
 
+/** A full 40-hex object id (SHA-1 repositories only; SHA-256 ids are 64 hex and are refused). */
+export function isSha(value: string): boolean {
+  return /^[0-9a-f]{40}$/.test(value);
+}
+
+/** Throws unless `sha` is a full 40-hex id, so a ref, range or option never reaches git. */
+export function assertSha(sha: string): void {
+  if (!isSha(sha)) throw new GitError(`not a 40-hex commit sha: ${JSON.stringify(sha)}`);
+}
+
 /** Full 40-character sha of the commit `rev` names. */
 export function resolveCommit(repo: string, rev: string): string {
   const out = spawnSync(
@@ -60,7 +70,7 @@ export function resolveCommit(repo: string, rev: string): string {
   );
   if (out.error) throw spawnError(out.error);
   const sha = out.stdout?.toString("utf8").trim() ?? "";
-  if (out.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) {
+  if (out.status !== 0 || !isSha(sha)) {
     throw new GitError(`${repo}: "${rev}" does not name a commit`);
   }
   return sha;
@@ -74,7 +84,15 @@ export interface TreeBlob {
 
 /** Regular files at `sha`. Symlinks and submodules are skipped: they have no indexable source. */
 export function listBlobs(repo: string, sha: string): TreeBlob[] {
-  const out = git(repo, ["ls-tree", "-r", "-z", "--long", "--full-tree", sha]).toString("utf8");
+  const out = git(repo, [
+    "ls-tree",
+    "-r",
+    "-z",
+    "--long",
+    "--full-tree",
+    "--end-of-options",
+    sha,
+  ]).toString("utf8");
   const blobs: TreeBlob[] = [];
   for (const entry of out.split("\0")) {
     if (entry === "") continue;
@@ -128,7 +146,7 @@ export function commitFiles(repo: string, sha: string): string[][] {
     // Commit marker: empty token followed by 40-char hex SHA
     if (token === "" && i + 1 < tokens.length) {
       const nextToken = tokens[i + 1];
-      if (nextToken && /^[0-9a-f]{40}$/.test(nextToken)) {
+      if (nextToken && isSha(nextToken)) {
         i += 2; // Skip empty token and SHA
         const paths: string[] = [];
         let isFirstPath = true;
