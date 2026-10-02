@@ -69,8 +69,8 @@ export function uniqueClaims(draft: PageDraft): { key: SectionKey; claim: DraftC
 export interface PageState {
   pack: ContextPack;
   /**
-   * The draft as the model sent it. The retry turn re-sends it with uniqueDraft's ids, the ones
-   * `failing` is named by, so the model sees the ids it is asked to fix.
+   * The draft with uniqueDraft's ids, the ones `verified` and `failing` are named by, so the retry
+   * turn shows the model the ids it is asked to fix.
    */
   draft: PageDraft | null;
   /** Raw answer text of an unusable first answer, and why it was unusable. */

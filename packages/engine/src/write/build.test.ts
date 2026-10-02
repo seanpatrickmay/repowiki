@@ -1,4 +1,5 @@
 import { Revision } from "@repowiki/core";
+import { makeFeature } from "@repowiki/core/test-fixtures";
 import { LlmError, LlmOutputError } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import { type WritePagesOptions, writeCacheKey, writePages } from "./build.ts";
@@ -15,6 +16,7 @@ import { testWiki } from "./test-wiki.ts";
 function run(
   answer: (featureId: string, call: number) => Answer,
   extra: Partial<WritePagesOptions> = {},
+  wiki: ReturnType<typeof testWiki> & { only?: string[] } = testWiki(),
 ) {
   const { provider, requests } = pageProvider(answer);
   const lines: string[] = [];
@@ -26,7 +28,7 @@ function run(
     log: (line) => lines.push(line),
     ...extra,
   };
-  return { written: writePages(testWiki(), options), requests, lines };
+  return { written: writePages(wiki, options), requests, lines };
 }
 
 const answers = (featureId: string) =>
@@ -177,5 +179,154 @@ describe("writePages", () => {
       ["signals", null, false],
     ]);
     expect(lines).toEqual(["deliverables: not written: assembling the page failed: RangeError"]);
+  });
+
+  it("logs a failed call's error class only, unless it is an LlmError with its own message", async () => {
+    class ApiError extends Error {}
+    const { written, lines } = run((featureId) =>
+      featureId === "signals"
+        ? new ApiError('400 {"error":"the model said something private"}')
+        : answers(featureId),
+    );
+    const { pages } = await written;
+    expect(pages[1]?.failure).toBe("the write call failed: ApiError");
+    expect(lines).toEqual(["signals: not written: the write call failed: ApiError"]);
+  });
+
+  it("counts a rejected answer's tokens and takes its model", async () => {
+    const usage = { in: 700, out: 80, cacheRead: 5, cacheWrite: 9 };
+    const { written } = run((featureId) =>
+      featureId === "signals"
+        ? new LlmOutputError("model output is not JSON", "{oops", {
+            usage,
+            model: "claude-haiku-4-5-20251001",
+          })
+        : answers(featureId),
+    );
+    const { pages } = await written;
+    expect(pages[1]).toMatchObject({ revision: null, calls: 1, tokens: usage });
+    expect(pages[0]).toMatchObject({ calls: 1, tokens: { in: 100, out: 10 } });
+  });
+
+  it("rejects an answer with no lead claim or no body claim", async () => {
+    const noLead = deliverablesDraft();
+    noLead.sections = noLead.sections.filter((s) => s.key !== "lead");
+    const noBody = signalsDraft();
+    noBody.sections = noBody.sections.filter((s) => s.key === "lead");
+    const { written, lines } = run((featureId) => (featureId === "signals" ? noBody : noLead));
+    const { pages } = await written;
+    expect(pages.map((p) => [p.featureId, p.revision, p.failure, p.calls, p.dropped])).toEqual([
+      ["deliverables", null, "the write call returned no usable page", 1, []],
+      ["signals", null, "the write call returned no usable page", 1, []],
+    ]);
+    expect(lines).toEqual([
+      "deliverables: not written: the write call returned no usable page",
+      "signals: not written: the write call returned no usable page",
+    ]);
+  });
+
+  it("writes only the features named by `only`", async () => {
+    const wiki = { ...testWiki(), only: ["signals"] };
+    const { written, requests } = run(answers, {}, wiki);
+    const { pages, packs } = await written;
+    expect(pages.map((p) => p.featureId)).toEqual(["signals"]);
+    expect(packs.map((p) => p.featureId)).toEqual(["signals"]);
+    expect(requests.map((r) => r.featureId)).toEqual(["signals"]);
+  });
+
+  it("writes no page for a retired feature or a redirect", async () => {
+    const wiki = testWiki();
+    wiki.manifest.features.push(
+      makeFeature({
+        id: "old-signals",
+        title: "Old signals",
+        aliases: [],
+        status: { kind: "retired" },
+      }),
+      makeFeature({
+        id: "legacy-deliverables",
+        title: "Legacy deliverables",
+        aliases: [],
+        status: { kind: "redirect", to: "deliverables" },
+      }),
+    );
+    const { written, requests } = run(answers, {}, wiki);
+    const { pages } = await written;
+    expect(pages.map((p) => p.featureId)).toEqual(["deliverables", "signals"]);
+    expect(requests.map((r) => r.featureId)).toEqual(["deliverables", "signals"]);
+  });
+
+  it("sends batch: false when asked", async () => {
+    const { written, requests } = run(answers, { batch: false });
+    await written;
+    expect(requests.map((r) => r.batch)).toEqual([false, false]);
+    expect(requests.every((r) => r.cacheKey?.startsWith("write-"))).toBe(true);
+  });
+
+  it("fetches each Wikipedia title once, and none from a dropped claim", async () => {
+    const urls: string[] = [];
+    const fetch = async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return fakeWikipedia(input);
+    };
+    const signals = signalsDraft();
+    const limitation = signals.sections[3]?.claims[0];
+    if (limitation) {
+      limitation.text = "A TODO notes that [[wp:Dropped page]] is truncated.";
+      limitation.cite = ["src/signals/ingest.py:10-14"];
+    }
+    const deliverables = deliverablesDraft();
+    const overview = deliverables.sections[1]?.claims[0];
+    if (overview) overview.text = "`complete()` is like a [[wp:Message queue]] for notes.";
+    const { written } = run((featureId) => (featureId === "signals" ? signals : deliverables), {
+      wikipedia: { cache: memoryWikipediaCache(), fetch },
+    });
+    const { wikipedia } = await written;
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toMatch(/Message_queue$/);
+    expect([...wikipedia.links.keys()]).toEqual(["Message queue"]);
+  });
+
+  it("fails one page, not the build, when verifying its claims throws", async () => {
+    const wiki = testWiki();
+    let armed = false;
+    class Sources extends Map<string, string> {
+      override get(path: string) {
+        if (armed && path === "src/signals/ingest.py") throw new TypeError("private source text");
+        return super.get(path);
+      }
+    }
+    const sources = new Sources(wiki.sources);
+    const { written, lines } = run(
+      (featureId) => {
+        armed = true;
+        return answers(featureId);
+      },
+      {},
+      { ...wiki, sources },
+    );
+    const { pages } = await written;
+    expect(pages.map((p) => [p.featureId, p.failure, p.revision === null])).toEqual([
+      ["deliverables", null, false],
+      ["signals", "verifying the claims failed: TypeError", true],
+    ]);
+    expect(lines).toEqual(["signals: not written: verifying the claims failed: TypeError"]);
+  });
+
+  it("writes every page with plain Wikipedia text when the title check throws", async () => {
+    const cache = {
+      get: () => {
+        throw new RangeError("cache is broken");
+      },
+      put: () => {},
+    };
+    const { written, lines } = run(answers, { wikipedia: { cache, fetch: fakeWikipedia } });
+    const { pages, wikipedia } = await written;
+    expect(pages.map((p) => p.failure)).toEqual([null, null]);
+    const overview = pages[1]?.revision?.sections.find((s) => s.key === "overview");
+    expect(overview?.claims[0]?.text).not.toContain("[[wp:");
+    expect(overview?.claims[0]?.text).toContain("Message queue");
+    expect([...wikipedia.links]).toEqual([["Message queue", null]]);
+    expect(lines).toEqual(["Wikipedia could not be checked (RangeError); left as plain text"]);
   });
 });
