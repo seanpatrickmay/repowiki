@@ -56,3 +56,9 @@ export class DuplicateRevisionError extends StoreError {
     super(`a revision with id ${id} is already stored; revision ids are never reused`);
   }
 }
+
+export class UnknownManifestError extends StoreError {
+  constructor(sha: string) {
+    super(`no manifest is stored for ${sha}`);
+  }
+}

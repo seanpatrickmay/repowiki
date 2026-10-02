@@ -62,6 +62,7 @@ export {
   type Store,
   StoreError,
   UnknownFeatureError,
+  UnknownManifestError,
   UnsupportedSchemaError,
   writeExport,
 } from "./store/index.ts";

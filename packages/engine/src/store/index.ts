@@ -6,6 +6,7 @@ export {
   StaleParentError,
   StoreError,
   UnknownFeatureError,
+  UnknownManifestError,
   UnsupportedSchemaError,
 } from "./errors.ts";
 export { buildExport, type ExportOptions, writeExport } from "./export.ts";

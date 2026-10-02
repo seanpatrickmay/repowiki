@@ -51,6 +51,20 @@ export function cleanAliases(title: string, aliases: readonly string[]): string[
 }
 
 /**
+ * Whether a string from outside the model (a code identifier) may become a manifest alias: not
+ * blank, at most MAX_ALIAS_LENGTH code points, and free of control and invisible characters. The
+ * same limits proposalProblems enforces on model aliases; a caller skips a failing string rather
+ * than shortening it.
+ */
+export function isAcceptableAlias(alias: string): boolean {
+  return (
+    alias.trim() !== "" &&
+    [...alias].length <= MAX_ALIAS_LENGTH &&
+    controlCharacters(alias).length === 0
+  );
+}
+
+/**
  * Every reason the proposal cannot become a manifest; empty when it can. At most
  * MAX_REPORTED_PROBLEMS are listed, then a final "and N more problems" entry.
  */

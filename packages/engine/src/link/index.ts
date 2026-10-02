@@ -1,3 +1,4 @@
+export { codeAliases, IDENTIFIER_PATTERNS, MAX_CODE_ALIASES } from "./aliases.ts";
 export {
   createPageLinker,
   createTargetResolver,
