@@ -113,5 +113,7 @@ describe("writePages through the real batcher (M3 review: the same-tick contract
     );
     expect((await written).pages.map((p) => p.dropped)).toEqual([[], []]);
     expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
+    const retried = api.posts[1]?.requests.map((r) => r.params.messages[0]?.content ?? "");
+    expect(retried?.map(isSignals)).toEqual([true]);
   });
 });

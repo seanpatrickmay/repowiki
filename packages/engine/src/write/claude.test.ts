@@ -20,7 +20,7 @@ const TIMEOUT_MS = mode === "record" ? 180_000 : undefined;
 
 describe("writePages with Claude (cassette)", () => {
   it(
-    "writes the sample wiki's pages with verified citations and links that resolve",
+    "writes both of the sample wiki's pages from the recording, with no dropped claims",
     async () => {
       const ledger = createLedger();
       const provider = createClaudeProvider({
@@ -42,14 +42,18 @@ describe("writePages with Claude (cassette)", () => {
         },
         now: () => new Date("2026-10-01T12:00:00Z"),
       });
+      // The replay is deterministic, so both pages are written and nothing is dropped.
+      expect(pages.map((p) => p.featureId).sort()).toEqual(["deliverables", "signals"]);
+      expect(pages.every((p) => p.failure === null && p.dropped.length === 0)).toBe(true);
       const written = pages.flatMap((p) => (p.revision === null ? [] : [p.revision]));
-      expect(written.length).toBeGreaterThanOrEqual(1);
+      expect(written.length).toBe(2);
       for (const revision of written) expect(Revision.parse(revision)).toEqual(revision);
       const entries = ledger.entries();
       expect(entries.length).toBe(pages.reduce((n, p) => n + p.calls, 0));
       expect(entries.every((e) => e.purpose === "write" && !e.batch && e.runKind === "build")).toBe(
         true,
       );
+      expect(entries.every((e) => e.sha === testWiki().index.sha)).toBe(true);
       expect(entries.every((e) => e.model.startsWith("claude-haiku-4-5"))).toBe(true);
     },
     TIMEOUT_MS,
