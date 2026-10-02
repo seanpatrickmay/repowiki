@@ -1,6 +1,6 @@
 export class StoreError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = new.target.name;
   }
 }
@@ -48,5 +48,11 @@ export class EmptyStoreError extends StoreError {
     super(
       "nothing to export: the store has no head sha or manifest yet; run `repowiki build` first",
     );
+  }
+}
+
+export class DuplicateRevisionError extends StoreError {
+  constructor(id: string) {
+    super(`a revision with id ${id} is already stored; revision ids are never reused`);
   }
 }

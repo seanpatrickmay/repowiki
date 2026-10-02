@@ -5,7 +5,9 @@ import { z } from "zod";
 import {
   DroppedFeatureError,
   DuplicateManifestError,
+  DuplicateRevisionError,
   StaleParentError,
+  StoreError,
   UnknownFeatureError,
 } from "./errors.ts";
 import { migrate } from "./migrations.ts";
@@ -89,12 +91,24 @@ export interface PutManifestOptions {
   llmRevised?: boolean;
 }
 
+/** A driver failure while opening (not a database, unreadable, locked) as a CLI-facing StoreError. */
+function cannotOpen(path: string, error: unknown): StoreError {
+  // Only the driver's first line: the full error rides along as the cause.
+  const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0];
+  return new StoreError(`cannot open ${path} as a RepoWiki store: ${reason}`, { cause: error });
+}
+
 interface BodyRow {
   body: string;
 }
 
 export function openStore(path: string): Store {
-  const db = new Database(path);
+  let db: Database.Database;
+  try {
+    db = new Database(path);
+  } catch (error) {
+    throw cannotOpen(path, error);
+  }
   try {
     // Migrate before switching to WAL: refusing a newer schema must not touch the file.
     migrate(db);
@@ -102,7 +116,7 @@ export function openStore(path: string): Store {
     db.pragma("foreign_keys = ON");
   } catch (error) {
     db.close();
-    throw error;
+    throw error instanceof StoreError ? error : cannotOpen(path, error);
   }
 
   const readManifest = (row: BodyRow | undefined): Manifest | null =>
@@ -230,6 +244,9 @@ export function openStore(path: string): Store {
       db.transaction(() => {
         if (!latestManifest()?.features.some((feature) => feature.id === parsed.featureId)) {
           throw new UnknownFeatureError(parsed.featureId);
+        }
+        if (db.prepare("SELECT 1 FROM revisions WHERE id = ?").get(parsed.id) !== undefined) {
+          throw new DuplicateRevisionError(parsed.id);
         }
         const current = currentRevisionId(parsed.featureId);
         if (current !== parsed.parentId) {

@@ -6,7 +6,12 @@ import {
   SHA_B,
 } from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { StaleParentError, UnknownFeatureError } from "./errors.ts";
+import {
+  DuplicateRevisionError,
+  StaleParentError,
+  StoreError,
+  UnknownFeatureError,
+} from "./errors.ts";
 import { openStore, type Store } from "./store.ts";
 
 let store: Store;
@@ -87,5 +92,14 @@ describe("revisions", () => {
   it("validates before storing", () => {
     expect(() => store.putRevision(makeRevision({ seeAlso: ["signals"] }))).toThrow();
     expect(store.getRevision("rev-1")).toBeNull();
+  });
+
+  it("refuses a revision id that is already stored, as a StoreError naming it", () => {
+    store.putRevision(rev1);
+    const reused = makeRevision({ featureId: "deliverables", seeAlso: [] });
+    expect(() => store.putRevision(reused)).toThrow(DuplicateRevisionError);
+    expect(() => store.putRevision(reused)).toThrow(StoreError);
+    expect(() => store.putRevision(reused)).toThrow("a revision with id rev-1 is already stored");
+    expect(store.getCurrentRevision("deliverables")).toBeNull();
   });
 });
