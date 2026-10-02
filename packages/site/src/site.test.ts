@@ -354,6 +354,25 @@ describe("page shell", () => {
     expect(css).toContain("overflow-wrap:anywhere");
   });
 
+  it("underlines links in prose and lists, so they don't rely on colour alone", () => {
+    const html = site.read("index.html");
+    const sheet = /<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/.exec(html)?.[1] ?? "";
+    const css = site.read(sheet);
+    const underlined = [...css.matchAll(/([^{}]+)\{text-decoration:underline\}/g)].flatMap(
+      (match) => (match[1] ?? "").split(","),
+    );
+    for (const selector of [
+      ".article p a",
+      ".article section li a",
+      ".dab-list a",
+      ".redirect-target a",
+      ".mp-box p a",
+      ".mp-box li a",
+    ]) {
+      expect(underlined).toContain(selector);
+    }
+  });
+
   it("has a skip link, a labelled site nav and a main landmark", () => {
     const html = site.read("index.html");
     expect(html).toContain('<a class="skip-link" href="#content">Jump to content</a>');
