@@ -803,6 +803,118 @@
       "labels": ["v1", "type:task", "area:site"],
       "parent": "F13",
       "body": "**Deliverable:** hover previews for [[wp:Title]] links from WikiExport.wikipedia (export schema 3): one preview file per title under a hashed name, a data-preview attribute on wp: links, and client support in preview.ts.\n\n**Done when:** a wp: link in the fixture site shows its summary card. A follow-up the M4 plan's rulings name; not one of its tasks."
+    },
+    {
+      "key": "F27",
+      "title": "[F27] Architecture article",
+      "labels": ["v1", "type:feature", "area:engine", "area:site"],
+      "body": "**Original point:** (raised by the owner after M4's dry run) The wiki should document the architecture: how the features fit together, not only what each one does.\n\n**Interpretation:** One Architecture article per build, written after the feature pages. Its input is the manifest, the real cross-feature import and call edges from the index, and each page's lead claims. It covers the layers (frontend, API, workers, infrastructure), the main request and data paths end to end, and which features depend on which. Every claim cites code or a commit, or names the feature page that backs it, and goes through verify and link like any other claim. Its diagram draws features as nodes with edges weighted by real cross-feature calls and imports; the Main Page links to it and its feature map can use the same edges instead of See-also pairs.\n\n**Verdict:** v1, added after M4's first full build (before the M4 final review). Spec sections 4, 5, 7 and the Main Page in section 4 get the deltas in the plan that implements it. Cost: about one more page per build (~$0.02 batched on next-chief-of-staff).\n"
+    },
+    {
+      "key": "M4-30",
+      "title": "[M4] tracker: F27 tickets",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F27",
+      "closed": true,
+      "body": "**Deliverable:** F27 entry and M4-30..M4-44 tickets in seed.json.\n\n**Done when:** the seed links M4-30..M4-44 under the existing #142 and creates no F27 issue. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 1."
+    },
+    {
+      "key": "M4-31",
+      "title": "[M4] core: Architecture article schema and export field",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** Architecture, ArchitectureClaim (pages), FeatureEdge and WikiExport.architecture (default [], schema 3).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 2."
+    },
+    {
+      "key": "M4-32",
+      "title": "[M4] store: Architecture revisions and their export",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** store migration 7 architecture_revisions, putArchitecture / getCurrentArchitecture / listArchitectureHistory, the article in buildExport.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 3."
+    },
+    {
+      "key": "M4-33",
+      "title": "[M4] verify: Architecture claims and the pages that back them",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** verifyArchitectureClaim, ArchitectureDraft and ArchitectureFixes, with a page claim's text and citation checks split out of verifyClaim.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 4."
+    },
+    {
+      "key": "M4-34",
+      "title": "[M4] write: cross-feature edges and the Architecture diagram",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** crossFeatureEdges and the engine-drawn diagram (40 nodes, 80 edges).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 5."
+    },
+    {
+      "key": "M4-35",
+      "title": "[M4] write: the Architecture pack",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** buildArchitecturePack within a 40,000-token budget: layout, leads, edges, infrastructure files, entry points.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 6."
+    },
+    {
+      "key": "M4-36",
+      "title": "[M4] write: Architecture prompt and shared round helpers",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** the Architecture instructions and system prompt; uniqueDraft, fixRequest, retryRequest, orderedSections, the claim linker and the Wikipedia check shared with pages.\n\n**Done when:** tests pass, and a page's prompts are unchanged. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 7."
+    },
+    {
+      "key": "M4-37",
+      "title": "[M4] write: write the Architecture article",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** writeArchitecture: one batched call, one retry round, verified, linked, with its diagram.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 8."
+    },
+    {
+      "key": "M4-38",
+      "title": "[M4] write: the Architecture round in buildWiki",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** buildWiki writes and stores the article after the pages, and on a rerun only when the pages changed.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 9."
+    },
+    {
+      "key": "M4-39",
+      "title": "[M4] verify: wiki:check covers the Architecture article",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** architectureProblems, architectureLinkViolations and wiki:check.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 10."
+    },
+    {
+      "key": "M4-40",
+      "title": "[M4] write: wiki:build estimates and reports the Architecture article",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** estimateArchitecture, the summary row and the Cost line, the estimate line in wiki:build.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 11."
+    },
+    {
+      "key": "M4-41",
+      "title": "[M4] site: the Architecture page",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F27",
+      "body": "**Deliverable:** /special/architecture/, the Main Page box and the navigation link.\n\n**Done when:** tests pass and the snapshots are reviewed. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 12."
+    },
+    {
+      "key": "M4-42",
+      "title": "[M4] site: feature map from cross-feature edges",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F27",
+      "body": "**Deliverable:** the Main Page feature map joins articles by the Architecture article's edges.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 13."
+    },
+    {
+      "key": "M4-43",
+      "title": "[M4] write: recorded Architecture call",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** architecture.claude.test.ts and its cassette, recorded live once (about $0.01).\n\n**Done when:** the replay passes and the secret scan is clean. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 14."
+    },
+    {
+      "key": "M4-44",
+      "title": "[M4] write: rebuild next-chief-of-staff with its Architecture article",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** the gate: a full wiki:build of next-chief-of-staff from the pre-M4 store backup, 19 pages and the Architecture article.\n\n**Done when:** every active feature has a page, the article is stored, wiki:check passes, the site builds, and the ledger cost is reported against the estimate. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 15."
     }
   ]
 }

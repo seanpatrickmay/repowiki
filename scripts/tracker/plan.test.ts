@@ -106,12 +106,12 @@ describe("seed.json", () => {
     expect(SeedSchema.safeParse(raw).success).toBe(true);
   });
 
-  it("contains the full feature register F01-F26", () => {
+  it("contains the full feature register F01-F27", () => {
     const keys = SeedSchema.parse(raw)
       .issues.map((i) => i.key)
       .filter((k) => k.startsWith("F"));
     expect(keys).toEqual(
-      Array.from({ length: 26 }, (_, i) => `F${String(i + 1).padStart(2, "0")}`),
+      Array.from({ length: 27 }, (_, i) => `F${String(i + 1).padStart(2, "0")}`),
     );
   });
 });
