@@ -1,22 +1,9 @@
 import { makeFeature, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { aliasSlug, buildSiteModel, featureLink, finalTarget, hasArticleRoute } from "./model.ts";
+import { buildSiteModel, featureLink, finalTarget, hasArticleRoute } from "./model.ts";
 import { fixtureExport, fixtureExportWith } from "./test-fixtures.ts";
 
 const site = buildSiteModel(fixtureExport(), null);
-
-describe("aliasSlug", () => {
-  it.each([
-    ["signal pipeline", "signal-pipeline"],
-    ["SIGNALS_TABLE", "signals-table"],
-    ["/api/signals", "api-signals"],
-    ["Café façade", "cafe-facade"],
-    ["  ---  ", ""],
-    [`${"a".repeat(63)} b`, "a".repeat(63)],
-  ])("slugs %j as %j", (alias, slug) => {
-    expect(aliasSlug(alias)).toBe(slug);
-  });
-});
 
 describe("buildSiteModel", () => {
   it("routes features that have a page, a redirect or a disambiguation", () => {

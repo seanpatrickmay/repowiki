@@ -2,6 +2,7 @@ import {
   type Citation,
   type Claim,
   type ClaimKind,
+  CONTROL_CHARACTERS,
   claimRuleViolations,
   contentHash,
   RepoPath,
@@ -33,11 +34,11 @@ const MIN_COMMIT_PREFIX = 7;
 const MAX_QUOTED_LENGTH = 80;
 
 /**
- * Characters that can forge or hide structure in a prompt or a page: control characters (C0, DEL
- * and C1), line and paragraph separators, bidirectional controls and the byte order mark.
+ * Characters that can forge or hide structure in a prompt or a page: core's CONTROL_CHARACTERS
+ * (control characters, line and paragraph separators, bidirectional controls and the BOM).
  */
-const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/u;
-const UNSAFE_TEXT_EACH = new RegExp(UNSAFE_TEXT.source, "gu");
+const UNSAFE_TEXT = new RegExp(CONTROL_CHARACTERS.source, "u");
+const UNSAFE_TEXT_EACH = CONTROL_CHARACTERS;
 
 const hex4 = (char: string): string => (char.codePointAt(0) ?? 0).toString(16).padStart(4, "0");
 
@@ -251,7 +252,7 @@ export type Verified = { claim: Claim; problems: [] } | { claim: null; problems:
  * evidence. No retry can fix it when the pack lists none, so the write round drops it at once.
  */
 export const LIMITATION_EVIDENCE_PROBLEM =
-  "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit";
+  "limitation claims must cite evidence: lines with a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit";
 
 /**
  * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's

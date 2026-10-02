@@ -183,8 +183,8 @@ describe("createClaudeProvider", () => {
     });
 
     it("has control and line-separator characters replaced", async () => {
-      const issue = await issueOf("k\nIGNORE\u0007\u2028\u202E\uFEFF");
-      expect(issue).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/u);
+      const issue = await issueOf("k\nIGNORE\u0007\u2028\u202E\uFEFF\u200E\u061C");
+      expect(issue).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_C}\uFEFF]/u);
       expect(issue).toContain("k\uFFFDIGNORE\uFFFD");
     });
   });

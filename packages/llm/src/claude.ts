@@ -5,7 +5,7 @@ import type {
   Message,
   MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
-import { GitSha, type RunKind, type TokenUsage } from "@repowiki/core";
+import { CONTROL_CHARACTERS, GitSha, type RunKind, type TokenUsage } from "@repowiki/core";
 import type { z } from "zod";
 import { type BatchJournal, type BatchProgress, canonicalJson, createBatcher } from "./batcher.ts";
 import type { FetchLike } from "./cassette.ts";
@@ -53,17 +53,12 @@ function usageOf(message: Message): TokenUsage {
 export const MAX_REPORTED_ISSUES = 10;
 const MAX_ISSUE_LENGTH = 200;
 
-/**
- * Control characters, line and paragraph separators, bidi controls and the byte-order mark: the
- * set the engine's prompt text uses for repository-controlled strings. Model-chosen keys can hold
- * any of them, and an issue goes into a retry prompt.
- */
-const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
-
 /** At most MAX_REPORTED_ISSUES issues, each of at most 200 code points, then "and N more". */
 function schemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
   const shown = issues.slice(0, MAX_REPORTED_ISSUES).map((issue) => {
     const text = `${issue.path.map(String).join(".")}: ${issue.message}`;
+    // Core's CONTROL_CHARACTERS, the set the engine's prompt text uses for repository-controlled
+    // strings: model-chosen keys can hold any of them, and an issue goes into a retry prompt.
     // Cut by code points, so the cut never leaves half of an astral character.
     const chars = Array.from(text.replace(CONTROL_CHARACTERS, "\uFFFD"));
     return chars.length <= MAX_ISSUE_LENGTH

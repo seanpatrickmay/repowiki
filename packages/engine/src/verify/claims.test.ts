@@ -145,6 +145,7 @@ describe("quote", () => {
       '"a\\u0085b\\u202ec\\u2028d\\u2069e\\ufeff\\u007f"',
     );
     expect(quote("tab\there\nnew")).toBe('"tab\\there\\nnew"');
+    expect(quote("a\u200Eb\u200Fc\u061Cd")).toBe('"a\\u200eb\\u200fc\\u061cd"');
     expect(quote("plain 汉字")).toBe('"plain 汉字"');
   });
 });
@@ -266,6 +267,8 @@ describe("verifyClaim", () => {
     ["a bidi override", "Sig\u202enal."],
     ["a bidi isolate", "Sig\u2066nal."],
     ["a BOM", "Sig\ufeffnal."],
+    ["a left-to-right mark", "Sig\u200enal."],
+    ["an Arabic letter mark", "Sig\u061cnal."],
   ])("refuses claim text holding %s", (_name, text) => {
     const verified = verifyClaim("overview", draft({ text }), testContext());
     expect(verified.claim).toBeNull();
@@ -512,7 +515,7 @@ describe("verifyClaim on known limitations (issue #53)", () => {
   ])("refuses a limitation that cites only %s", (_name, ref) => {
     const verified = verifyClaim("known-limitations", draft({ cite: [ref] }), testContext());
     expect(verified.problems).toEqual([
-      "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
+      "limitation claims must cite evidence: lines with a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit",
     ]);
   });
 });

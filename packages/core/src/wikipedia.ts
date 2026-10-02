@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { INVISIBLE_CHARACTERS } from "./alias.ts";
 import { IsoDateTime } from "./primitives.ts";
 
 /** Longest extract kept, in code points: the hover preview shows a few sentences, not an article. */
@@ -12,7 +13,7 @@ export const WIKIPEDIA_EXTRACT_MAX_LENGTH = 1200;
  * zero-width spaces and soft hyphens, which hide text. The zero-width joiner and non-joiner are
  * kept: Indic and Persian scripts need them to spell words.
  */
-const CONTROL_OR_INVISIBLE = /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const CONTROL_OR_INVISIBLE = new RegExp(INVISIBLE_CHARACTERS.source, "u");
 
 const plainText = (text: string): boolean => !CONTROL_OR_INVISIBLE.test(text);
 

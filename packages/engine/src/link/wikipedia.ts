@@ -1,4 +1,5 @@
 import {
+  INVISIBLE_CHARACTERS,
   WIKIPEDIA_EXTRACT_MAX_LENGTH,
   type WikipediaCacheEntry,
   WikipediaSummary,
@@ -14,8 +15,8 @@ const CONCURRENCY = 4;
 /** How long one lookup may take, headers and body together, before it counts as unreachable. */
 export const WIKIPEDIA_TIMEOUT_MS = 10_000;
 
-/** What core's WikipediaSummary refuses in text: controls, line separators, invisible format marks (ZWJ and ZWNJ are fine). */
-const REFUSED = /(?![\u200c\u200d])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+/** What core's WikipediaSummary refuses in text (ZWJ and ZWNJ are fine). */
+const REFUSED = INVISIBLE_CHARACTERS;
 
 /** Where lookups are kept between runs; the store implements it. */
 export interface WikipediaCache {

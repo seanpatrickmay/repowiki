@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALIAS_MAX_LENGTH, aliasProblem, controlCharacters } from "./alias.ts";
+import { ALIAS_MAX_LENGTH, aliasProblem, aliasSlug, controlCharacters } from "./alias.ts";
 
 describe("aliasProblem", () => {
   it("accepts ordinary names, routes and emoji up to 60 code points", () => {
@@ -29,6 +29,9 @@ describe("aliasProblem", () => {
       ["\u2066", "U+2066"],
       ["\u2069", "U+2069"],
       ["\uFEFF", "U+FEFF"],
+      ["\u061C", "U+061C"],
+      ["\u200E", "U+200E"],
+      ["\u200F", "U+200F"],
     ] as const) {
       expect(aliasProblem(`a${char}b`)).toBe(`has a control or invisible character (${code})`);
     }
@@ -37,5 +40,19 @@ describe("aliasProblem", () => {
   it("lists each distinct control character once, in order of appearance", () => {
     expect(controlCharacters("a\u202Eb\u0007c\u202E")).toEqual(["U+202E", "U+0007"]);
     expect(controlCharacters("plain")).toEqual([]);
+  });
+});
+
+describe("aliasSlug", () => {
+  it.each([
+    ["signal pipeline", "signal-pipeline"],
+    ["SIGNALS_TABLE", "signals-table"],
+    ["/api/signals", "api-signals"],
+    ["Café façade", "cafe-facade"],
+    ["Cafe\u0301 no\u0308el", "cafe-noel"],
+    ["  ---  ", ""],
+    [`${"a".repeat(63)} b`, "a".repeat(63)],
+  ])("slugs %j as %j", (alias, slug) => {
+    expect(aliasSlug(alias)).toBe(slug);
   });
 });

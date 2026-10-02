@@ -1,4 +1,4 @@
-import { aliasProblem, FEATURE_ID_MAX_LENGTH, type Manifest, parseMemberId } from "@repowiki/core";
+import { aliasProblem, aliasSlug, type Manifest, parseMemberId } from "@repowiki/core";
 
 /** A pattern for one kind of code identifier; group 1 is the identifier as written. */
 interface IdentifierPattern {
@@ -141,20 +141,8 @@ export function isTestFile(path: string): boolean {
   );
 }
 
-/**
- * The URL slug the reader site gives an alias (a copy of aliasSlug in packages/site/src/model.ts,
- * which the engine cannot import): two names with one slug are one page's route.
- */
-function slugOf(name: string): string {
-  return name
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, FEATURE_ID_MAX_LENGTH)
-    .replace(/-+$/, "");
-}
+/** Core's aliasSlug, the slug the reader site routes an alias by: one slug is one route. */
+const slugOf = aliasSlug;
 
 /** True when `run` occurs in `tokens` as consecutive tokens. */
 function isTokenRun(run: readonly string[], tokens: readonly string[]): boolean {

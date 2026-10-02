@@ -317,7 +317,10 @@ describe("retry turns", () => {
 
   it("collapse whitespace in the reason and cut it to 500 code points", () => {
     const page = state();
-    page.rejected = { text: "{", reason: `bad\n\nthing\t\u0085\u2028 here ${"😀".repeat(900)}` };
+    page.rejected = {
+      text: "{",
+      reason: `bad\n\nthing\t\u0085\u2028\u200E\u061C here ${"😀".repeat(900)}`,
+    };
     const ask = retryRequest(page)[2]?.content ?? "";
     expect(ask.startsWith("That answer was rejected: bad thing here 😀")).toBe(true);
     const [first, second] = ask.split("\n");

@@ -1,4 +1,4 @@
-import type { Claim, SectionKey, TokenUsage } from "@repowiki/core";
+import { type Claim, CONTROL_CHARACTERS, type SectionKey, type TokenUsage } from "@repowiki/core";
 import type { LlmMessage } from "@repowiki/llm";
 import {
   type DraftClaim,
@@ -20,8 +20,8 @@ export const MAX_FIX_CLAIMS = 40;
 export const MAX_PROBLEMS_PER_CLAIM = 3;
 /** The longest rejection reason the retry turn quotes, in code points. */
 const MAX_REASON_LENGTH = 500;
-/** Whitespace, control, line-break and bidirectional characters: a reason shows them as a space. */
-const REASON_BREAKS = /[\s\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]+/gu;
+/** Whitespace and core's CONTROL_CHARACTERS: a reason shows a run of them as a space. */
+const REASON_BREAKS = new RegExp(`(?:\\s|${CONTROL_CHARACTERS.source})+`, "gu");
 
 /** The first `max` characters of an id, never splitting a surrogate pair. */
 function cut(id: string, max: number): string {
