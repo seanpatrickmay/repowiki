@@ -1,3 +1,4 @@
+import { parseRepoUrl } from "./args.ts";
 import { loadExport } from "./load.ts";
 import { buildSiteModel, type SiteModel } from "./model.ts";
 
@@ -13,7 +14,7 @@ export function getSite(): SiteModel {
   const repoUrl = process.env.REPOWIKI_REPO_URL;
   cached = buildSiteModel(
     loadExport(exportFile),
-    repoUrl === undefined || repoUrl === "" ? null : repoUrl,
+    parseRepoUrl(repoUrl === "" ? undefined : repoUrl, "REPOWIKI_REPO_URL"),
   );
   return cached;
 }
