@@ -152,6 +152,26 @@ function isTokenRun(run: readonly string[], tokens: readonly string[]): boolean 
   return false;
 }
 
+/** A word in its plain English singular: ies → y, (s|x|z|ch|sh)es → -es, s → -s (not ss). */
+function singularOf(word: string): string {
+  if (/[^aeiou]ies$/.test(word)) return `${word.slice(0, -3)}y`;
+  if (/(?:s|x|z|ch|sh)es$/.test(word)) return word.slice(0, -2);
+  if (/[^s]s$/.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+/**
+ * True when a table name shares a word, singular or plural, with one of its feature's own
+ * names. A shared models file declares every feature's tables, so a table that shares none
+ * names some other subject and is no alias of the file's feature.
+ */
+function sharesOwnWord(identifier: string, own: readonly (readonly string[])[]): boolean {
+  const words = new Set(own.flat().map(singularOf));
+  return slugOf(identifier)
+    .split("-")
+    .some((token) => words.has(singularOf(token)));
+}
+
 /** The plain English plurals of a word: +s, +es, and y → ies. */
 function pluralsOf(word: string): string[] {
   return [`${word}s`, `${word}es`, ...(/[^aeiou]y$/.test(word) ? [`${word.slice(0, -1)}ies`] : [])];
@@ -201,7 +221,8 @@ function cleanIdentifier(kind: IdentifierPattern["kind"], raw: string): string |
  * Code identifiers to add as aliases, per active feature: those found in its (non-test) member
  * files and in no other feature's, that collide with no feature's id or title and no other
  * feature's alias (compared lowercased and as site slugs), that name no other active feature's
- * subject (`namesOtherSubject`: a shared models file's tables), most frequent first, at most
+ * subject (`namesOtherSubject`: a shared models file's tables), and, for a table name, that share
+ * a word with the feature's own names (`sharesOwnWord`), most frequent first, at most
  * MAX_CODE_ALIASES. An identifier two features share names neither, so it is left out, which keeps
  * every alias pointing at one page. One that could not be a manifest alias (core's aliasProblem:
  * too long, or holding a control or bidi character) is skipped, never cut.
@@ -277,6 +298,9 @@ export function codeAliases(
     if (keys.some((key) => users.get(key)?.size !== 1)) continue;
     const others = [...subjects].flatMap(([id, names]) => (id === featureId ? [] : names));
     if (namesOtherSubject(identifier, tables.has(identifier), others)) continue;
+    if (tables.has(identifier) && !sharesOwnWord(identifier, subjects.get(featureId) ?? [])) {
+      continue;
+    }
     const list = perFeature.get(featureId) ?? [];
     list.push({ identifier, count: byFeature.get(featureId) ?? 0 });
     perFeature.set(featureId, list);

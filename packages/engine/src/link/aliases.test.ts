@@ -53,7 +53,8 @@ describe("codeAliases (F01)", () => {
     expect(codeAliases(linkManifest(), sources)).toEqual({
       billing: ["STRIPE_KEY", "VITE_API_URL"],
       deliverables: ["/deliverables/:id"],
-      signals: ["/api/signals", "SIGNALS_URL", "ingest-signals", "scores", "signals_table"],
+      // "scores" shares no word with Signal ingestion's names, so it is no table alias of it.
+      signals: ["/api/signals", "SIGNALS_URL", "ingest-signals", "signals_table"],
     });
   });
 
@@ -211,21 +212,22 @@ describe("codeAliases (F01)", () => {
     const text = [
       "-- create table if needed",
       "See: create table of contents (below)",
-      "CREATE TABLE IF NOT EXISTS public.orders (",
-      'CREATE TABLE "public"."line_items" (',
-      "CREATE TEMP TABLE tmp_stage(",
-      "CREATE UNLOGGED TABLE [dbo].[audit_log] (",
-      "CREATE TEMPORARY TABLE IF NOT EXISTS `ev`.`events_x` (",
-      "CREATE TABLE no_column_list",
-      "create table lower_case (",
+      "CREATE TABLE IF NOT EXISTS public.invoices (",
+      'CREATE TABLE "public"."invoice_items" (',
+      "CREATE TEMP TABLE tmp_invoice(",
+      "CREATE UNLOGGED TABLE [dbo].[billing_log] (",
+      "CREATE TEMPORARY TABLE IF NOT EXISTS `ev`.`billing_events` (",
+      "CREATE TABLE billing_no_column_list",
+      "create table lower_invoice (",
     ].join("\n");
+    // Every name shares a word with Billing's own names, so only the parsing decides.
     expect(billingFrom(text)).toEqual([
-      "audit_log",
-      "events_x",
-      "line_items",
-      "lower_case",
-      "orders",
-      "tmp_stage",
+      "billing_events",
+      "billing_log",
+      "invoice_items",
+      "invoices",
+      "lower_invoice",
+      "tmp_invoice",
     ]);
   });
 
@@ -388,6 +390,27 @@ describe("codeAliases (F01)", () => {
     expect(found).toEqual({ "signal-sources": ["signal_rows"] });
   });
 
+  it("gives a feature a table only when the name shares a word with the feature's own names", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-sources", title: "Signal sources", aliases: ["feeds"] }),
+        makeFeature({ id: "planning", title: "Milestone tracking", aliases: [] }),
+      ],
+      membership: { "app/models.py": { featureId: "signal-sources", weight: 1 } },
+    });
+    const models = [
+      '__tablename__ = "project_members"',
+      '__tablename__ = "feed_items"',
+      "CREATE TABLE source_runs (id int)",
+      'op.create_table("audit_log")',
+      'URL = os.getenv("PROJECT_MEMBERS_URL")',
+    ].join("\n");
+    // Tables of a shared models file name other subjects unless they share a word (feeds, sources).
+    expect(codeAliases(manifest, new Map([["app/models.py", models]]))).toEqual({
+      "signal-sources": ["PROJECT_MEMBERS_URL", "feed_items", "source_runs"],
+    });
+  });
+
   it("keeps an identifier that only shares a word with another feature, or names its own", () => {
     const manifest = makeManifest({
       features: [
@@ -397,12 +420,12 @@ describe("codeAliases (F01)", () => {
       membership: { "app/sources.py": { featureId: "signal-sources", weight: 1 } },
     });
     const text = [
-      '__tablename__ = "agent_runs"',
+      '__tablename__ = "source_agent_runs"',
       '__tablename__ = "sources"',
       'URL = os.getenv("AI_AGENTS_URL")',
     ].join("\n");
     expect(codeAliases(manifest, new Map([["app/sources.py", text]]))).toEqual({
-      "signal-sources": ["AI_AGENTS_URL", "agent_runs", "sources"],
+      "signal-sources": ["AI_AGENTS_URL", "source_agent_runs", "sources"],
     });
   });
 
