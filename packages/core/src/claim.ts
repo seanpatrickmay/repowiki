@@ -8,10 +8,18 @@ export type ClaimKind = z.infer<typeof ClaimKind>;
 export const ClaimId = z.string().min(1);
 export type ClaimId = z.infer<typeof ClaimId>;
 
+/**
+ * Longest claim text, in UTF-16 code units. The reader renders claim text on articles, old
+ * revisions, previews and the Main Page, and its inline renderer is quadratic on adversarial
+ * input, so text is capped well above any real claim (M5 final review). It shipped before the
+ * first claim producer (M4's write step), so no stored body can break it and no migration is needed.
+ */
+export const CLAIM_TEXT_MAX_LENGTH = 2000;
+
 export const Claim = z.object({
   id: ClaimId,
   /** Markdown with [[featureId]] / [[featureId|label]] / [[wp:Title]] link tokens. */
-  text: z.string().min(1),
+  text: z.string().min(1).max(CLAIM_TEXT_MAX_LENGTH),
   kind: ClaimKind,
   citations: z.array(Citation),
   /** Lead claims only: ids of the body claims this sentence summarizes. */

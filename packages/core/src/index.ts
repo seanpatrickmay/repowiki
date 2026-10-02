@@ -1,6 +1,6 @@
 export { ALIAS_MAX_LENGTH, aliasProblem, CONTROL_CHARACTERS, controlCharacters } from "./alias.ts";
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
-export { Claim, ClaimId, ClaimKind } from "./claim.ts";
+export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind } from "./claim.ts";
 export { contentHash } from "./content-hash.ts";
 export { WikiExport } from "./export.ts";
 export {
