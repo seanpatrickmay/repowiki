@@ -870,3 +870,58 @@ describe("diagrams", () => {
     }
   });
 });
+
+describe("search", () => {
+  it("puts a labelled search box that submits to /search/ on every page", () => {
+    for (const page of htmlFiles(site.outDir)) {
+      expect(site.read(page)).toContain(
+        '<form class="site-search" role="search" action="/search/" method="get">',
+      );
+    }
+  });
+
+  it("mounts the Pagefind UI from the locally built bundle", () => {
+    const html = site.read("search/index.html");
+    expect(html).toContain('<link rel="stylesheet" href="/pagefind/pagefind-ui.css">');
+    expect(html).toContain('<script src="/pagefind/pagefind-ui.js"></script>');
+  });
+
+  it("indexes exactly the article pages, with their aliases", () => {
+    // Only a current article carries data-pagefind-body: not history, diff, redirect,
+    // disambiguation, the Main Page or /search/ itself. Retired articles stay readable, so they
+    // are indexed too: signals, deliverables, hostile-title and the retired exporter.
+    const indexed = htmlFiles(site.outDir).filter((page) =>
+      site.read(page).includes("data-pagefind-body"),
+    );
+    expect(indexed).toEqual([
+      "wiki/deliverables/index.html",
+      "wiki/exporter/index.html",
+      "wiki/hostile-title/index.html",
+      "wiki/signals/index.html",
+    ]);
+    const entry = JSON.parse(site.read("pagefind/pagefind-entry.json"));
+    expect(entry.languages.en.page_count).toBe(indexed.length);
+    const body = site.read("wiki/signals/index.html").split("data-pagefind-body")[1] ?? "";
+    expect(body).toContain("signal pipeline, SIGNALS_TABLE, /api/signals");
+  });
+
+  it("loads the Pagefind UI without an inline script, which the Content-Security-Policy forbids", () => {
+    const html = site.read("search/index.html");
+    for (const [, attributes = "", body = ""] of html.matchAll(
+      /<script([^>]*)>([\s\S]*?)<\/script>/g,
+    )) {
+      expect(attributes).toMatch(/\ssrc="\/[^"]+"/);
+      expect(body).toBe("");
+    }
+    expect(html).toContain("<noscript>");
+    expect(html).toContain('<meta name="robots" content="noindex">');
+  });
+
+  it("hands the q parameter only to the Pagefind UI, never to markup or a URL", () => {
+    const source = readFileSync(new URL("./client/search.ts", import.meta.url), "utf8");
+    expect(source).toContain("ui.triggerSearch(query)");
+    expect(source).not.toMatch(
+      /innerHTML|outerHTML|insertAdjacentHTML|document\.write|location\.(?:href|assign|replace)|\beval\(|new Function|fetch\(/,
+    );
+  });
+});
