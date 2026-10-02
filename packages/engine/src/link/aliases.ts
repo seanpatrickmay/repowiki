@@ -4,6 +4,8 @@ import { aliasProblem, FEATURE_ID_MAX_LENGTH, type Manifest, parseMemberId } fro
 interface IdentifierPattern {
   kind: "route" | "table" | "env" | "command";
   pattern: RegExp;
+  /** The pattern matches `receiver.method(...)`; skip a match whose receiver is an HTTP client. */
+  receiverCall?: true;
 }
 
 /** One name part of a possibly schema-qualified SQL table name: "x", `x`, [x] or a bare word. */
@@ -36,6 +38,7 @@ export const IDENTIFIER_PATTERNS: readonly IdentifierPattern[] = [
       String.raw`(?<![@\w.])\w+(?:\.\w+)*\.(?:${HTTP_METHODS}|all|use)\(\s*["'\`](\/[^"'\`\s]+)["'\`]`,
       "g",
     ),
+    receiverCall: true,
   },
   { kind: "table", pattern: /__tablename__\s*=\s*["'](\w+)["']/g },
   {
@@ -94,12 +97,44 @@ const UBIQUITOUS_ENV = new Set([
   "LOG_LEVEL",
 ]);
 
-/** tests/ or __tests__/ directories, *.test.* and *.spec.* files, test_*.py and *_test.py. */
+/**
+ * Receivers of `.get("/path")` that call out to a server rather than declare a route: HTTP client
+ * libraries and the clients and sessions built from them (`apiClient`, `authSession`).
+ */
+const HTTP_CLIENTS = new Set([
+  "requests",
+  "httpx",
+  "axios",
+  "http",
+  "https",
+  "client",
+  "session",
+  "request",
+  "superagent",
+  "got",
+  "ky",
+  "supertest",
+  "fetch",
+]);
+
+/** True when the call `receiver.method(` that starts `matched` is on an HTTP client. */
+function isClientCall(matched: string): boolean {
+  const callee = matched.slice(0, matched.indexOf("("));
+  const receiver = callee.slice(0, callee.lastIndexOf(".")).split(".").pop()?.toLowerCase() ?? "";
+  return HTTP_CLIENTS.has(receiver) || receiver.endsWith("client") || receiver.endsWith("session");
+}
+
+/**
+ * tests/, __tests__/, fixtures/ and __fixtures__/ directories, *.test.* and *.spec.* files,
+ * test_*.py, *_test.py, tests.py and conftest.py.
+ */
 function isTestFile(path: string): boolean {
   const segments = path.split("/");
   const name = segments.pop() ?? "";
   return (
-    segments.some((s) => s === "tests" || s === "__tests__") ||
+    segments.some((s) => ["tests", "__tests__", "fixtures", "__fixtures__"].includes(s)) ||
+    name === "tests.py" ||
+    name === "conftest.py" ||
     /\.(?:test|spec)\.[^.]+$/.test(name) ||
     /^test_.*\.py$/.test(name) ||
     /_test\.py$/.test(name)
@@ -179,8 +214,9 @@ export function codeAliases(
     if (parsed === null || parsed.symbol !== null || isTestFile(parsed.path)) continue;
     const text = sources.get(parsed.path);
     if (text === undefined) continue;
-    for (const { kind, pattern } of IDENTIFIER_PATTERNS) {
+    for (const { kind, pattern, receiverCall } of IDENTIFIER_PATTERNS) {
       for (const match of text.matchAll(pattern)) {
+        if (receiverCall && isClientCall(match[0])) continue;
         const identifier = cleanIdentifier(kind, match[1] ?? "");
         if (identifier === null || identifier.length < MIN_IDENTIFIER_LENGTH) continue;
         if (aliasProblem(identifier) !== null || slugOf(identifier) === "") continue;

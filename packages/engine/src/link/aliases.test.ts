@@ -100,11 +100,11 @@ describe("codeAliases (F01)", () => {
   });
 
   it("skips routes holding control, line-separator or bidi characters", () => {
-    const bad = ["‮", "⁦", "﻿", " ", "\u0007", "\u0085"];
+    const bad = ["\u202E", "\u2066", "\uFEFF", "\u2028", "\u0007", "\u0085"];
     const text = [
       ...bad.map((c) => `@router.get("/a${c}b")`),
       '@router.get("/fine")',
-      'x = os.getenv("STRIPE‮_KEY")',
+      'x = os.getenv("STRIPE\u202E_KEY")',
       'y = os.getenv("OTHER_KEY")',
     ].join("\n");
     expect(billingFrom(text)).toEqual(["/fine", "OTHER_KEY"]);
@@ -238,6 +238,40 @@ describe("codeAliases (F01)", () => {
     expect(billingFrom(text)).toEqual(["API_TOKEN", "POPPED_VAR", "SET_DEFAULT_VAR", "VITE_FLAG"]);
   });
 
+  it("skips HTTP-client receivers but keeps routers and blueprints", () => {
+    const clients = [
+      "requests",
+      "httpx",
+      "axios",
+      "http",
+      "https",
+      "client",
+      "session",
+      "request",
+      "superagent",
+      "got",
+      "ky",
+      "supertest",
+      "fetch",
+      "Requests",
+      "apiClient",
+      "ApiClient",
+      "http_client",
+      "authSession",
+      "this.client",
+      "self.session",
+    ];
+    for (const receiver of clients) {
+      expect(billingFrom(`${receiver}.get("/api/x")\n${receiver}.post("/y")`)).toBeUndefined();
+    }
+    expect(billingFrom('requests.get("/x")')).toBeUndefined();
+    expect(billingFrom('axios.get("/api/x")')).toBeUndefined();
+    expect(billingFrom('apiClient.post("/y")')).toBeUndefined();
+    expect(billingFrom('router.get("/x")')).toEqual(["/x"]);
+    expect(billingFrom('@bp.route("/x")')).toEqual(["/x"]);
+    expect(billingFrom('clients.get("/z")\nsessions.get("/w")')).toEqual(["/w", "/z"]);
+  });
+
   it("skips test files", () => {
     const line = 'x = os.getenv("TEST_ONLY_VAR")';
     for (const path of [
@@ -248,11 +282,18 @@ describe("codeAliases (F01)", () => {
       "src/billing.spec.js",
       "src/test_billing.py",
       "src/billing_test.py",
+      "src/conftest.py",
+      "conftest.py",
+      "src/tests.py",
+      "src/fixtures/billing.py",
+      "src/__fixtures__/billing.ts",
     ]) {
       expect(billingAt(path, line)).toBeUndefined();
     }
     expect(billingAt("src/contest.py", line)).toEqual(["TEST_ONLY_VAR"]);
     expect(billingAt("src/latest_billing.py", line)).toEqual(["TEST_ONLY_VAR"]);
+    expect(billingAt("src/my_conftest.py", line)).toEqual(["TEST_ONLY_VAR"]);
+    expect(billingAt("src/fixtures_loader.py", line)).toEqual(["TEST_ONLY_VAR"]);
   });
 
   it("returns the same list for an already-amended manifest, so re-linking adds nothing", () => {

@@ -7,7 +7,7 @@ export const ALIAS_MAX_LENGTH = 60;
  * U+2066-U+2069, and the byte order mark U+FEFF. Not all of Cf: ZWJ (U+200D) and ZWNJ (U+200C)
  * are needed by emoji sequences and by Persian, Indic and Arabic scripts, so they pass through.
  */
-export const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}‪-‮⁦-⁩﻿]/gu;
+export const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
 
 /** The distinct control or invisible characters in `text`, in order of appearance, as "U+XXXX". */
 export function controlCharacters(text: string): string[] {
