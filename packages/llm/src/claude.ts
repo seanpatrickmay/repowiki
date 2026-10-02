@@ -28,6 +28,10 @@ export interface ClaudeProviderOptions {
   /** Wait between batch status polls. Default 30 seconds. */
   pollIntervalMs?: number;
   onBatchProgress?: (progress: BatchProgress) => void;
+  /** Called with each Message Batch's id as soon as it is created, e.g. to log it. */
+  onBatchCreated?: (batch: { id: string; requests: number }) => void;
+  /** Cancel a batch still running this long after its creation. Default: no deadline. */
+  batchDeadlineMs?: number;
   now?: () => Date;
 }
 
@@ -63,6 +67,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
   const batcher = createBatcher(client, {
     pollIntervalMs: options.pollIntervalMs ?? 30_000,
     onProgress: options.onBatchProgress,
+    onBatchCreated: options.onBatchCreated,
+    deadlineMs: options.batchDeadlineMs,
   });
   const now = options.now ?? (() => new Date());
   const prefixes = new Map<string, string>();

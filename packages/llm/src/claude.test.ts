@@ -136,6 +136,45 @@ describe("createClaudeProvider", () => {
     expect(ledger.entries().map((e) => e.batch)).toEqual([true]);
   });
 
+  it("reports created batch ids and cancels a batch past its deadline", async () => {
+    const paths: string[] = [];
+    const inProgress = {
+      id: "msgbatch_slow",
+      type: "message_batch",
+      processing_status: "in_progress",
+      request_counts: { processing: 1, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
+      results_url: null,
+      created_at: "2026-10-01T12:00:00Z",
+      ended_at: null,
+      expires_at: "2026-10-02T12:00:00Z",
+      archived_at: null,
+      cancel_initiated_at: null,
+    };
+    const fetch: FetchLike = async (input, init) => {
+      paths.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+      return new Response(JSON.stringify(inProgress), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const created: string[] = [];
+    const provider = createClaudeProvider({
+      models: DEFAULT_MODELS,
+      ledger: createLedger(),
+      runId: "test-run",
+      apiKey: "canned",
+      fetch,
+      pollIntervalMs: 0,
+      batchDeadlineMs: 0,
+      onBatchCreated: (batch) => created.push(batch.id),
+    });
+    await expect(provider.generate({ ...request, batch: true })).rejects.toThrow(
+      "batch msgbatch_slow passed its 0 s deadline and was canceled",
+    );
+    expect(created).toEqual(["msgbatch_slow"]);
+    expect(paths.at(-1)).toBe("POST /v1/messages/batches/msgbatch_slow/cancel");
+  });
+
   it("refuses to start without an API key", () => {
     const saved = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
