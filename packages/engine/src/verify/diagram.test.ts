@@ -206,17 +206,17 @@ describe("diagramProblems (the Mermaid safety control)", () => {
       ["an escape", '  n3["a\u001Bb"]'],
       ["DEL", '  n3["a\u007Fb"]'],
       ["a C1 control (NEL)", '  n3["a\u0085b"]'],
-      ["a right-to-left override", '  n3["a‮b"]'],
-      ["a right-to-left isolate", '  n3["a⁧b"]'],
-      ["a left-to-right mark", '  n3["a‎b"]'],
-      ["an Arabic letter mark", '  n3["a؜b"]'],
-      ["a zero-width space", '  n3["a​b"]'],
-      ["a byte-order mark", '﻿  n3["a"]'],
-      ["a line separator", '  n3["a b"]'],
-      ["a paragraph separator", '  n3["a b"]'],
+      ["a right-to-left override", '  n3["a\u202Eb"]'],
+      ["a right-to-left isolate", '  n3["a\u2067b"]'],
+      ["a left-to-right mark", '  n3["a\u200Eb"]'],
+      ["an Arabic letter mark", '  n3["a\u061Cb"]'],
+      ["a zero-width space", '  n3["a\u200Bb"]'],
+      ["a byte-order mark", '\uFEFF  n3["a"]'],
+      ["a line separator", '  n3["a\u2028b"]'],
+      ["a paragraph separator", '  n3["a\u2029b"]'],
       ["a lone surrogate", '  n3["a\uD800b"]'],
-      ["a bidi control in an arrow label", '  n1 -->|"a‮b"| n2'],
-      ["a bidi control between the arrow tokens", '  n1 -->‮|"a"| n2'],
+      ["a bidi control in an arrow label", '  n1 -->|"a\u202Eb"| n2'],
+      ["a bidi control between the arrow tokens", '  n1 -->\u202E|"a"| n2'],
     ])("rejects %s", (_name, line) => {
       expect(diagramProblems(`${SAFE}\n${line}`)).toEqual([BAD]);
     });
@@ -225,7 +225,7 @@ describe("diagramProblems (the Mermaid safety control)", () => {
       expect(diagramProblems('flowchart LR\u0000\n  n1["a"]')).toEqual([
         'the diagram must start with "flowchart LR"',
       ]);
-      expect(diagramProblems('flowchart LR‮\n  n1["a"]')).toEqual([
+      expect(diagramProblems('flowchart LR\u202E\n  n1["a"]')).toEqual([
         'the diagram must start with "flowchart LR"',
       ]);
     });

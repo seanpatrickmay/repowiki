@@ -48,6 +48,6 @@ describe("previewData", () => {
     expect(preview?.title).toBe(HOSTILE_TITLE);
     expect(preview?.html).toMatch(/^<p>She said &quot;hi&quot; and it&#39;s fine\.<\/p>/);
     expect(preview?.html).not.toContain("<img");
-    expect(preview?.html).not.toMatch(/[]/);
+    expect(preview?.html).not.toMatch(/[\uE000\uE001]/);
   });
 });

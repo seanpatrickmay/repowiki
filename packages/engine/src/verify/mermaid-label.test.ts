@@ -16,9 +16,9 @@ const HOSTILE = [
   "ﬂ°°x3C¶ßimg src=x ﬂ°°x3E¶ß ﬂ°quot¶ß",
   'n1@{ img: "https://evil.example/x.png" }',
   "a; b # c #58; d",
-  "‮rtl‬ ​zero width  ﻿",
+  "\u202Ertl\u202C \u200Bzero\u2028width\u2029 \uFEFF",
   "nul\u0000 del\u007F nel\u0085",
-  "lone \uD800 surrogate, private , unassigned ͸",
+  "lone \uD800 surrogate, private \uE000, unassigned ͸",
   "emoji 🙂 and 日本語 and naïve",
   "back`tick \\ slash | pipe [ ] { }",
   "a    lot   of   space   ",
