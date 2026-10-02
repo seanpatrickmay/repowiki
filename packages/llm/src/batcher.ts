@@ -46,7 +46,10 @@ export interface JournalEntry {
   createdAt: string;
 }
 
-/** Persists submitted batch requests by request key (e.g. in the store). */
+/**
+ * Persists submitted batch requests by request key (e.g. in the store) until their answers are
+ * collected, so only a batch whose results a run never read is resumed.
+ */
 export interface BatchJournal {
   lookup(requestKey: string): JournalEntry | null;
   record(
@@ -54,6 +57,8 @@ export interface BatchJournal {
     createdAt: string,
     items: readonly { requestKey: string; customId: string }[],
   ): void;
+  /** Drops requests whose answers were collected. */
+  forget(requestKeys: readonly string[]): void;
 }
 
 /** Sends one request through the Message Batches API and resolves with its message. */
@@ -213,6 +218,15 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
       ? error
       : new LlmError(`batch ${id} failed unexpectedly: ${messageOf(error)}`, { cause: error });
 
+  /**
+   * Drops requests settled from their result lines from the journal, so a rerun sends them again
+   * instead of replaying an answer it already has. A failed delete only costs that replay.
+   */
+  const forget = (items: readonly Queued[]): void => {
+    if (options.journal === undefined || items.length === 0) return;
+    observe(() => options.journal?.forget(items.map((item) => requestKey(item.params))));
+  };
+
   /** Resolves, re-queues or rejects each request from its line in an ended batch's results. */
   const settle = (
     batchId: string,
@@ -241,6 +255,8 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
         new LlmError(`batch ${batchId} request ${customId} did not succeed${tries}: ${why}`),
       );
     }
+    // A request queued again stays journaled: its next batch's record replaces the row.
+    forget(sent.flatMap(({ item }) => (item.settled ? [item] : [])));
   };
 
   /** Creates one batch for `items`, records it, then polls, downloads and settles it. */
@@ -288,7 +304,8 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
    * Collects requests a journaled batch already holds, so a run that died while waiting pays
    * nothing twice. The batch is polled under the same deadline and downloaded under the same
    * RESULTS_ATTEMPTS as a new one. A request it did not answer, or every request when the batch
-   * cannot be retrieved, goes out again in a new batch.
+   * no longer exists (404), goes out again in a new batch. Any other failure to retrieve it
+   * rejects them and sends nothing: the batch may still be running, and is already billed.
    */
   const resume = async (
     batchId: string,
@@ -297,8 +314,16 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
     let batch: MessageBatch;
     try {
       batch = await client.messages.batches.retrieve(batchId);
-    } catch {
-      for (const { item } of held) enqueue(item);
+    } catch (error) {
+      if ((error as { status?: unknown } | null)?.status === 404) {
+        for (const { item } of held) enqueue(item);
+        return;
+      }
+      const llmError = new LlmError(
+        `batch ${batchId} could not be retrieved: ${messageOf(error)}; it may still be running; rerun to collect it`,
+        { cause: error },
+      );
+      for (const { item } of held) item.reject(llmError);
       return;
     }
     let results: Map<string, MessageBatchResult>;
@@ -310,11 +335,15 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
       for (const { item } of held) item.reject(llmError);
       return;
     }
+    const collected: Queued[] = [];
     for (const { item, customId } of held) {
       const result = results.get(customId);
-      if (result?.type === "succeeded") item.resolve(result.message);
-      else enqueue(item);
+      if (result?.type === "succeeded") {
+        item.resolve(result.message);
+        collected.push(item);
+      } else enqueue(item);
     }
+    forget(collected);
   };
 
   /**

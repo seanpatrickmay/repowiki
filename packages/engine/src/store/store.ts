@@ -1,5 +1,7 @@
 import { GitSha, LedgerEntry, Manifest, Revision } from "@repowiki/core";
+import { JOURNAL_RESULTS_TTL_MS } from "@repowiki/llm";
 import Database from "better-sqlite3";
+import { z } from "zod";
 import {
   DroppedFeatureError,
   DuplicateManifestError,
@@ -39,12 +41,17 @@ export interface Store {
   listLedger(runId?: string): LedgerEntry[];
   /** Where a Message Batches request (by request key) was submitted, or null. */
   findBatchRequest(requestKey: string): BatchRequestRow | null;
-  /** Remembers the requests of one created batch; a request sent again replaces its row. */
+  /**
+   * Remembers the requests of one created batch; a request sent again replaces its row. Rows of
+   * batches created more than JOURNAL_RESULTS_TTL_MS before this one are dropped.
+   */
   recordBatchRequests(
     batchId: string,
     createdAt: string,
     items: readonly { requestKey: string; customId: string }[],
   ): void;
+  /** Drops journaled requests whose answers were collected. */
+  forgetBatchRequests(requestKeys: readonly string[]): void;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
@@ -69,6 +76,13 @@ export interface BatchRequestRow {
   customId: string;
   createdAt: string;
 }
+
+/** A journal row as read back; one that does not parse is a miss, never an error. */
+const BatchRequestRowSchema = z.object({
+  batchId: z.string().min(1),
+  customId: z.string().min(1),
+  createdAt: z.iso.datetime({ offset: true }),
+});
 
 export interface PutManifestOptions {
   /** True when an LLM call produced or revised this manifest (build, or a drift revision). */
@@ -155,16 +169,30 @@ export function openStore(path: string): Store {
         .prepare(
           "SELECT batch_id AS batchId, custom_id AS customId, created_at AS createdAt FROM batch_requests WHERE request_key = ?",
         )
-        .get(requestKey) as BatchRequestRow | undefined;
-      return row ?? null;
+        .get(requestKey);
+      const parsed = BatchRequestRowSchema.safeParse(row);
+      return parsed.success ? parsed.data : null;
     },
 
     recordBatchRequests(batchId, createdAt, items) {
       const insert = db.prepare(
         "INSERT OR REPLACE INTO batch_requests (request_key, batch_id, custom_id, created_at) VALUES (?, ?, ?, ?)",
       );
+      const cutoff = Date.parse(createdAt) - JOURNAL_RESULTS_TTL_MS;
       db.transaction(() => {
+        if (Number.isFinite(cutoff)) {
+          db.prepare("DELETE FROM batch_requests WHERE julianday(created_at) < julianday(?)").run(
+            new Date(cutoff).toISOString(),
+          );
+        }
         for (const item of items) insert.run(item.requestKey, batchId, item.customId, createdAt);
+      })();
+    },
+
+    forgetBatchRequests(requestKeys) {
+      const remove = db.prepare("DELETE FROM batch_requests WHERE request_key = ?");
+      db.transaction(() => {
+        for (const key of requestKeys) remove.run(key);
       })();
     },
 
