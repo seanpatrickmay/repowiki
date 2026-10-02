@@ -62,3 +62,11 @@ export class UnknownManifestError extends StoreError {
     super(`no manifest is stored for ${sha}`);
   }
 }
+
+export class StaleArchitectureParentError extends StoreError {
+  constructor(current: string | null, parent: string | null) {
+    super(
+      `the Architecture revision names parent ${parent ?? "none"}, but the current one is ${current ?? "none"}`,
+    );
+  }
+}

@@ -1,4 +1,5 @@
 import {
+  Architecture,
   aliasProblem,
   GitSha,
   LedgerEntry,
@@ -14,6 +15,7 @@ import {
   DroppedFeatureError,
   DuplicateManifestError,
   DuplicateRevisionError,
+  StaleArchitectureParentError,
   StaleParentError,
   StoreError,
   UnknownFeatureError,
@@ -102,6 +104,16 @@ export interface Store {
   listHistory(featureId: string): Revision[];
   /** Current claims with a code citation in path overlapping [startLine, endLine], bounds inclusive. */
   findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
+  /**
+   * Stores a revision of the Architecture article (F27) and makes it current. parentId must equal
+   * the current revision's id (null for the first), its id must be new, and every feature its
+   * claims (their pages) and edges name must be in the latest stored manifest.
+   */
+  putArchitecture(article: Architecture): void;
+  /** The current Architecture article, or null when none is stored. */
+  getCurrentArchitecture(): Architecture | null;
+  /** Every stored revision of the Architecture article, oldest first. */
+  listArchitectureHistory(): Architecture[];
 }
 
 /**
@@ -196,6 +208,13 @@ export function openStore(path: string): Store {
 
   const readRevision = (row: BodyRow | undefined): Revision | null =>
     row === undefined ? null : Revision.parse(JSON.parse(row.body));
+
+  const currentArchitecture = (): Architecture | null => {
+    const row = db
+      .prepare("SELECT body FROM architecture_revisions ORDER BY seq DESC LIMIT 1")
+      .get() as BodyRow | undefined;
+    return row === undefined ? null : Architecture.parse(JSON.parse(row.body));
+  };
 
   const currentRevisionId = (featureId: string): string | null => {
     const row = db
@@ -429,5 +448,36 @@ export function openStore(path: string): Store {
         )
         .all(path, endLine, startLine) as CitingClaim[];
     },
+
+    putArchitecture(article) {
+      const parsed = Architecture.parse(article);
+      db.transaction(() => {
+        const known = new Set(latestManifest()?.features.map((feature) => feature.id) ?? []);
+        const named = [
+          ...parsed.sections.flatMap((section) => section.claims.flatMap((claim) => claim.pages)),
+          ...parsed.edges.flatMap((edge) => [edge.from, edge.to]),
+        ];
+        const unknown = named.find((id) => !known.has(id));
+        if (unknown !== undefined) throw new UnknownFeatureError(unknown);
+        const exists = db.prepare("SELECT 1 FROM architecture_revisions WHERE id = ?");
+        if (exists.get(parsed.id) !== undefined) throw new DuplicateRevisionError(parsed.id);
+        const current = currentArchitecture()?.id ?? null;
+        if (current !== parsed.parentId) {
+          throw new StaleArchitectureParentError(current, parsed.parentId);
+        }
+        db.prepare("INSERT INTO architecture_revisions (id, parent_id, body) VALUES (?, ?, ?)").run(
+          parsed.id,
+          parsed.parentId,
+          JSON.stringify(parsed),
+        );
+      })();
+    },
+
+    getCurrentArchitecture: currentArchitecture,
+
+    listArchitectureHistory: () =>
+      (db.prepare("SELECT body FROM architecture_revisions ORDER BY seq").all() as BodyRow[]).map(
+        (row) => Architecture.parse(JSON.parse(row.body)),
+      ),
   };
 }

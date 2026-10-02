@@ -3,6 +3,7 @@ export {
   DuplicateManifestError,
   DuplicateRevisionError,
   EmptyStoreError,
+  StaleArchitectureParentError,
   StaleParentError,
   StoreError,
   UnknownFeatureError,
