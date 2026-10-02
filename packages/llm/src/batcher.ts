@@ -57,8 +57,11 @@ export interface BatchJournal {
     createdAt: string,
     items: readonly { requestKey: string; customId: string }[],
   ): void;
-  /** Drops requests whose answers were collected. */
-  forget(requestKeys: readonly string[]): void;
+  /**
+   * Drops requests whose answers batchId gave. A row that now points at another batch (the same
+   * request sent again) must be kept.
+   */
+  forget(batchId: string, requestKeys: readonly string[]): void;
 }
 
 /** Sends one request through the Message Batches API and resolves with its message. */
@@ -222,9 +225,14 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
    * Drops requests settled from their result lines from the journal, so a rerun sends them again
    * instead of replaying an answer it already has. A failed delete only costs that replay.
    */
-  const forget = (items: readonly Queued[]): void => {
+  const forget = (batchId: string, items: readonly Queued[]): void => {
     if (options.journal === undefined || items.length === 0) return;
-    observe(() => options.journal?.forget(items.map((item) => requestKey(item.params))));
+    observe(() =>
+      options.journal?.forget(
+        batchId,
+        items.map((item) => requestKey(item.params)),
+      ),
+    );
   };
 
   /** Resolves, re-queues or rejects each request from its line in an ended batch's results. */
@@ -256,7 +264,10 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
       );
     }
     // A request queued again stays journaled: its next batch's record replaces the row.
-    forget(sent.flatMap(({ item }) => (item.settled ? [item] : [])));
+    forget(
+      batchId,
+      sent.flatMap(({ item }) => (item.settled ? [item] : [])),
+    );
   };
 
   /** Creates one batch for `items`, records it, then polls, downloads and settles it. */
@@ -343,7 +354,7 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
         collected.push(item);
       } else enqueue(item);
     }
-    forget(collected);
+    forget(batchId, collected);
   };
 
   /**

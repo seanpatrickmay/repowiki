@@ -53,9 +53,26 @@ describe("batch request journal", () => {
       { requestKey: "k0", customId: "req-0" },
       { requestKey: "k1", customId: "req-1" },
     ]);
-    store.forgetBatchRequests(["k0", "k9"]);
+    store.forgetBatchRequests("msgbatch_1", ["k0", "k9"]);
     expect(store.findBatchRequest("k0")).toBeNull();
     expect(store.findBatchRequest("k1")?.customId).toBe("req-1");
+    store.close();
+  });
+
+  it("forgets a request only for the batch that answered it", () => {
+    const store = openStore(":memory:");
+    store.recordBatchRequests("msgbatch_1", "2026-10-01T12:00:00Z", [
+      { requestKey: "k0", customId: "req-0" },
+    ]);
+    store.recordBatchRequests("msgbatch_2", "2026-10-01T13:00:00Z", [
+      { requestKey: "k0", customId: "req-4" },
+    ]);
+    store.forgetBatchRequests("msgbatch_1", ["k0"]);
+    expect(store.findBatchRequest("k0")).toEqual({
+      batchId: "msgbatch_2",
+      customId: "req-4",
+      createdAt: "2026-10-01T13:00:00Z",
+    });
     store.close();
   });
 

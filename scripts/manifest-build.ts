@@ -46,7 +46,7 @@ async function main(): Promise<void> {
             lookup: (key) => store.findBatchRequest(key),
             record: (batchId, createdAt, items) =>
               store.recordBatchRequests(batchId, createdAt, items),
-            forget: (keys) => store.forgetBatchRequests(keys),
+            forget: (batchId, keys) => store.forgetBatchRequests(batchId, keys),
           },
           onBatchCreated: (batch) =>
             console.error(`batch ${batch.id} created (${batch.requests} requests)`),

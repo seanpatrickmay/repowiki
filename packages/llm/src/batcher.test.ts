@@ -823,8 +823,8 @@ describe("createBatcher journal (resuming a submitted batch)", () => {
           recorded.push([key, { batchId, customId, createdAt }]);
         }
       },
-      forget: (keys) => {
-        for (const key of keys) entries.delete(key);
+      forget: (batchId, keys) => {
+        for (const key of keys) if (entries.get(key)?.batchId === batchId) entries.delete(key);
       },
     };
     return { entries, journal, recorded };
@@ -1091,6 +1091,27 @@ describe("createBatcher journal (resuming a submitted batch)", () => {
     const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
     await batcher(params("a"));
     expect([...entries]).toEqual([]);
+  });
+
+  it("keeps a newer batch's row when the batch that answered a request is an older one", async () => {
+    const { client } = apiWithOldBatch([succeededLine("req-7", "kept")]);
+    const key = requestKey(params("a"));
+    const { entries, journal } = memoryJournal({ [key]: old("req-7") });
+    const newer: JournalEntry = {
+      batchId: "msgbatch_newer",
+      customId: "req-2",
+      createdAt: "2026-10-01T11:30:00Z",
+    };
+    // Another run sends the same request again while this one is collecting it from msgbatch_old.
+    const lookup = journal.lookup;
+    journal.lookup = (k) => {
+      const entry = lookup(k);
+      entries.set(k, newer);
+      return entry;
+    };
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "kept" }]);
+    expect([...entries]).toEqual([[key, newer]]);
   });
 
   it("settles a resumed request once and sends no second batch when its tick's harvest throws", async () => {

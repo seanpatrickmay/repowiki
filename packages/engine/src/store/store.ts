@@ -50,8 +50,11 @@ export interface Store {
     createdAt: string,
     items: readonly { requestKey: string; customId: string }[],
   ): void;
-  /** Drops journaled requests whose answers were collected. */
-  forgetBatchRequests(requestKeys: readonly string[]): void;
+  /**
+   * Drops journaled requests whose answers batchId gave; a row a newer batch of the same request
+   * replaced is kept.
+   */
+  forgetBatchRequests(batchId: string, requestKeys: readonly string[]): void;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
@@ -70,19 +73,16 @@ export interface Store {
   findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
 }
 
-/** One journaled Message Batches request: which batch holds it and under which custom id. */
-export interface BatchRequestRow {
-  batchId: string;
-  customId: string;
-  createdAt: string;
-}
-
-/** A journal row as read back; one that does not parse is a miss, never an error. */
-const BatchRequestRowSchema = z.object({
+/**
+ * One journaled Message Batches request: which batch holds it and under which custom id. A row
+ * that does not parse as read back is a miss, never an error.
+ */
+const BatchRequestRow = z.object({
   batchId: z.string().min(1),
   customId: z.string().min(1),
   createdAt: z.iso.datetime({ offset: true }),
 });
+export type BatchRequestRow = z.infer<typeof BatchRequestRow>;
 
 export interface PutManifestOptions {
   /** True when an LLM call produced or revised this manifest (build, or a drift revision). */
@@ -170,7 +170,7 @@ export function openStore(path: string): Store {
           "SELECT batch_id AS batchId, custom_id AS customId, created_at AS createdAt FROM batch_requests WHERE request_key = ?",
         )
         .get(requestKey);
-      const parsed = BatchRequestRowSchema.safeParse(row);
+      const parsed = BatchRequestRow.safeParse(row);
       return parsed.success ? parsed.data : null;
     },
 
@@ -189,10 +189,12 @@ export function openStore(path: string): Store {
       })();
     },
 
-    forgetBatchRequests(requestKeys) {
-      const remove = db.prepare("DELETE FROM batch_requests WHERE request_key = ?");
+    forgetBatchRequests(batchId, requestKeys) {
+      const remove = db.prepare(
+        "DELETE FROM batch_requests WHERE request_key = ? AND batch_id = ?",
+      );
       db.transaction(() => {
-        for (const key of requestKeys) remove.run(key);
+        for (const key of requestKeys) remove.run(key, batchId);
       })();
     },
 
