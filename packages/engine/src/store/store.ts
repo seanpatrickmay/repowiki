@@ -37,6 +37,14 @@ export interface Store {
   appendLedger(entry: LedgerEntry): void;
   /** Ledger entries in the order they were appended, optionally only those of one run. */
   listLedger(runId?: string): LedgerEntry[];
+  /** Where a Message Batches request (by request key) was submitted, or null. */
+  findBatchRequest(requestKey: string): BatchRequestRow | null;
+  /** Remembers the requests of one created batch; a request sent again replaces its row. */
+  recordBatchRequests(
+    batchId: string,
+    createdAt: string,
+    items: readonly { requestKey: string; customId: string }[],
+  ): void;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
@@ -53,6 +61,13 @@ export interface Store {
   listHistory(featureId: string): Revision[];
   /** Current claims with a code citation in path overlapping [startLine, endLine], bounds inclusive. */
   findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
+}
+
+/** One journaled Message Batches request: which batch holds it and under which custom id. */
+export interface BatchRequestRow {
+  batchId: string;
+  customId: string;
+  createdAt: string;
 }
 
 export interface PutManifestOptions {
@@ -134,6 +149,24 @@ export function openStore(path: string): Store {
               .prepare("SELECT body FROM ledger WHERE run_id = ? ORDER BY seq")
               .all(runId)) as BodyRow[]
       ).map((row) => LedgerEntry.parse(JSON.parse(row.body))),
+
+    findBatchRequest(requestKey) {
+      const row = db
+        .prepare(
+          "SELECT batch_id AS batchId, custom_id AS customId, created_at AS createdAt FROM batch_requests WHERE request_key = ?",
+        )
+        .get(requestKey) as BatchRequestRow | undefined;
+      return row ?? null;
+    },
+
+    recordBatchRequests(batchId, createdAt, items) {
+      const insert = db.prepare(
+        "INSERT OR REPLACE INTO batch_requests (request_key, batch_id, custom_id, created_at) VALUES (?, ?, ?, ?)",
+      );
+      db.transaction(() => {
+        for (const item of items) insert.run(item.requestKey, batchId, item.customId, createdAt);
+      })();
+    },
 
     getManifest: (sha) =>
       readManifest(
