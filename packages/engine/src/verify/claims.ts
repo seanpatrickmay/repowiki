@@ -24,7 +24,10 @@ export interface VerifyContext {
 
 /** A citation must point at a passage, not a whole module. */
 export const MAX_CITED_LINES = 120;
-/** Claim text is a sentence or two; this bounds what reaches pages and hover previews. */
+/**
+ * Claim text is a sentence or two. The write step asks for at most 1000 characters, well inside
+ * core's CLAIM_TEXT_MAX_LENGTH (2000), so a verified claim always stores.
+ */
 export const MAX_CLAIM_LENGTH = 1000;
 const MIN_COMMIT_PREFIX = 7;
 const MAX_QUOTED_LENGTH = 80;
@@ -140,6 +143,62 @@ function resolveCommit(ref: string, prefix: string, ctx: VerifyContext): Resolve
   return { citation: { kind: "commit", sha: found.sha, subject, pr: found.pr }, lines: null };
 }
 
+/**
+ * Claim text uses only the reader's markdown subset (spec §5 rule 11): **bold**, *italic*,
+ * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. The
+ * reader renders a code span as escaped code, so markup characters inside one are fine. A line
+ * break is refused by verifyClaim's control-character check, which names it once.
+ */
+function markupProblems(text: string): string[] {
+  const outsideCode = text.replace(/`[^`]+`/g, " ");
+  const found: string[] = [];
+  if (/\]\([^)]*\)/.test(outsideCode)) found.push("a [text](url) link");
+  if (/<\/?[A-Za-z!][^>]*>/.test(outsideCode)) found.push("an HTML tag");
+  if (/(^|\s)#{1,6}\s/.test(outsideCode)) found.push("a heading");
+  return found.length === 0
+    ? []
+    : [
+        `the claim uses markup outside **bold**, *italic*, \`code\` and [[links]]: ${found.join(", ")}`,
+      ];
+}
+
+const PATH_SEGMENT = String.raw`[\p{L}\p{N}_.@+~-]+`;
+/** "path:12", "path:12-30" and their L-forms; a path run that starts mid-token or after "://" is skipped. */
+const CITATION_IN_TEXT = new RegExp(
+  String.raw`(?<![\p{L}\p{N}_/.@:~+-])(/?${PATH_SEGMENT}(?:/${PATH_SEGMENT})*):L?\d+(?:-L?\d+)?(?![\p{L}\p{N}_])`,
+  "gu",
+);
+const COMMIT_IN_TEXT = /(?<![\p{L}\p{N}_/.@:~+-])commit:[0-9a-f]{7,64}\b/giu;
+const FILE_EXTENSION = /(?:^|[^.])\.([A-Za-z][A-Za-z0-9]{0,9})$/;
+/** Hosts, not files: "example.com:8080" is an address. A real file of that name still counts. */
+const HOST_SUFFIXES = new Set(["com", "org", "net", "io", "dev", "edu", "gov", "local"]);
+const MAX_NAMED_TOKENS = 3;
+
+function looksLikeFile(path: string, ctx: VerifyContext): boolean {
+  if (ctx.sources.has(path)) return true;
+  const extension = FILE_EXTENSION.exec(path.slice(path.lastIndexOf("/") + 1))?.[1];
+  return extension !== undefined && !HOST_SUFFIXES.has(extension.toLowerCase());
+}
+
+/**
+ * Citations go in `cite`, never in the text, where nothing would check them. A "path:12-30" or
+ * "commit:abcdef1" token in the text is refused; times ("10:30"), ratios ("3:1"), URLs and
+ * "host:port" pairs are not citation-shaped, because a path must look like a repository file.
+ */
+function citationProblems(text: string, ctx: VerifyContext): string[] {
+  const tokens = new Set<string>();
+  for (const match of text.matchAll(CITATION_IN_TEXT)) {
+    if (looksLikeFile(match[1] ?? "", ctx)) tokens.add(match[0]);
+  }
+  for (const match of text.matchAll(COMMIT_IN_TEXT)) tokens.add(match[0]);
+  if (tokens.size === 0) return [];
+  const named = [...tokens].slice(0, MAX_NAMED_TOKENS).map(quote).join(", ");
+  const more = tokens.size > MAX_NAMED_TOKENS ? ", and more" : "";
+  return [
+    `the claim text holds ${tokens.size === 1 ? "a citation" : "citations"} (${named}${more}); citations go only in "cite", never in the text`,
+  ];
+}
+
 function kindOf(key: SectionKey): ClaimKind {
   if (key === "history") return "history";
   if (key === "known-limitations") return "limitation";
@@ -150,7 +209,8 @@ export type Verified = { claim: Claim; problems: [] } | { claim: null; problems:
 
 /**
  * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's
- * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short.
+ * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short,
+ * in the reader's markdown subset, and free of citation tokens.
  * The claim keeps the draft's id and supports; the page assembly renumbers them.
  */
 export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyContext): Verified {
@@ -166,6 +226,8 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
       "the claim text holds a control or line-break character; write one plain paragraph",
     );
   }
+  problems.push(...markupProblems(text));
+  problems.push(...citationProblems(text, ctx));
   const citations: Citation[] = [];
   let evidence = false;
   let unresolved = false;

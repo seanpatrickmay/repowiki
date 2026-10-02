@@ -1,8 +1,10 @@
+import { CLAIM_TEXT_MAX_LENGTH, Claim } from "@repowiki/core";
 import { codeCitation } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   citedLines,
   MAX_CITED_LINES,
+  MAX_CLAIM_LENGTH,
   quote,
   resolveReference,
   sourceLines,
@@ -191,6 +193,15 @@ describe("verifyClaim", () => {
     ["empty text", "overview", { text: "  " }, /has no text/],
     ["text over 1000 characters", "overview", { text: "a".repeat(1001) }, /over 1000 characters/],
     ["an unresolvable reference", "overview", { cite: ["nope.py:1"] }, /names no file/],
+    ["a line break", "overview", { text: "One.\nTwo." }, /one plain paragraph/],
+    [
+      "a markdown link",
+      "overview",
+      { text: "See [docs](https://x.example)." },
+      /markup outside .*: a \[text\]\(url\) link/,
+    ],
+    ["an HTML tag", "overview", { text: "Uses <b>bold</b>." }, /markup outside .*: an HTML tag/],
+    ["a heading", "overview", { text: "## Heading" }, /markup outside .*: a heading/],
     ["a path that climbs out", "overview", { cite: ["../etc/passwd:1-2"] }, /not a safe/],
   ])("refuses %s", (_name, key, overrides, why) => {
     const verified = verifyClaim(key as never, draft(overrides), testContext());
@@ -274,6 +285,127 @@ describe("verifyClaim", () => {
     expect(verified.claim).toBeNull();
     for (const problem of verified.problems) expect(inOneLine(problem)).toBe(true);
     expect(verified.problems).toHaveLength(3);
+  });
+});
+
+describe("verifyClaim markup", () => {
+  const problemsOf = (text: string): string[] =>
+    verifyClaim("overview", draft({ text }), testContext()).problems;
+
+  it("accepts the documented subset: bold, italic, code and link tokens", () => {
+    const text =
+      "**Ingest** keeps *one* signal per `sentence` for [[deliverables]] and [[wp:Cron]] (a < b).";
+    expect(problemsOf(text)).toEqual([]);
+  });
+
+  it("accepts markup characters inside a code span, which the reader renders as code", () => {
+    expect(problemsOf("Returns a `Map<string, number>` built by `# x` and `f](y)`.")).toEqual([]);
+  });
+
+  it("names every kind of stray markup in one problem", () => {
+    const problems = problemsOf("## See [docs](https://x.example) and <b>this</b>");
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toBe(
+      "the claim uses markup outside **bold**, *italic*, `code` and [[links]]: a [text](url) link, an HTML tag, a heading",
+    );
+  });
+
+  it("reports a line break once, as the control-character problem", () => {
+    const problems = problemsOf("One.\nTwo.");
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/control or line-break character/);
+  });
+
+  it("reports markup alongside the citation problems in one pass", () => {
+    const verified = verifyClaim(
+      "overview",
+      draft({ text: "<i>x</i>", cite: ["nope.py:1"] }),
+      testContext(),
+    );
+    expect(verified.problems).toHaveLength(2);
+  });
+});
+
+describe("verifyClaim citation-shaped text", () => {
+  const problemsOf = (text: string, ctx = testContext()): string[] =>
+    verifyClaim("overview", draft({ text }), ctx).problems;
+  const withMakefile = {
+    ...testContext(),
+    sources: new Map([...testContext().sources, ["Makefile", "all:\n"]]),
+  };
+
+  it.each([
+    ["a path with a line range", "Chunks load in src/signals/ingest.py:10-24."],
+    ["a path with one line", "See src/signals/ingest.py:7 for it."],
+    ["an L-form range", "See ingest.py:L10-L24."],
+    ["an L-form line", "See ingest.py:L10."],
+    ["a path in a code span", "See `src/signals/ingest.py:10-24`."],
+    ["a relative path", "See ./ingest.py:3."],
+    ["a path that names no file", "See src/missing.py:1-2 now."],
+    ["a nested test path", "Skipped in tests/test_ingest.py:4."],
+    ["a commit with a prefix", "Added in commit:abcdef1."],
+    ["a commit in capitals", "Added in COMMIT:ABCDEF1234."],
+    ["a full commit sha", `Added in commit:${"a".repeat(40)}`],
+  ])("refuses %s and says citations go only in cite", (_name, text) => {
+    const problems = problemsOf(text);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/citations? go only in "cite"/);
+    expect(inOneLine(problems[0] ?? "")).toBe(true);
+  });
+
+  it("refuses an extension-less file that is a key of the sources", () => {
+    expect(problemsOf("The Makefile:1 runs all.", withMakefile)).toHaveLength(1);
+    expect(problemsOf("The Makefile:1 runs all.")).toEqual([]);
+  });
+
+  it("quotes the token it names and names each once", () => {
+    const [problem] = problemsOf("a.py:1 and a.py:1 and b.py:2-3");
+    expect(problem).toContain('"a.py:1"');
+    expect(problem).toContain('"b.py:2-3"');
+    expect(problem?.match(/a\.py:1/g)).toHaveLength(1);
+  });
+
+  it.each([
+    ["a time", "The job runs at 10:30 every day."],
+    ["a time range", "Open 9:00-17:00 on weekdays."],
+    ["a ratio", "Chunks outnumber sentences 3:1."],
+    ["a URL with a port", "See http://example.com:8080/docs for it."],
+    ["a URL to a file line", "See https://example.com/src/a.py:10 for it."],
+    ["a host and port", "It listens on localhost:8080."],
+    ["a dotted host and port", "It listens on example.com:8080."],
+    ["a version", "Needs version 3.12:1 or later."],
+    ["a slash pair and a number", "Speaks TCP/IP:80 only."],
+    ["a short commit prefix", "Written as commit:abc12 here."],
+    ["a word after commit:", "Follows the commit:message format."],
+    ["a label and a number", "Note:3 items remain."],
+    ["a Python slice", "Reads chunks[1:3] of the list."],
+  ])("accepts %s", (_name, text) => {
+    expect(problemsOf(text)).toEqual([]);
+  });
+
+  it("reports a citation in the text alongside a markup problem as two problems", () => {
+    expect(problemsOf("## ingest.py:3")).toHaveLength(2);
+  });
+});
+
+describe("verifyClaim and the core text cap", () => {
+  it("keeps MAX_CLAIM_LENGTH code points inside CLAIM_TEXT_MAX_LENGTH UTF-16 code units", () => {
+    expect(MAX_CLAIM_LENGTH * 2).toBeLessThanOrEqual(CLAIM_TEXT_MAX_LENGTH);
+  });
+
+  it("stores a verified claim of the longest allowed text, even in two-unit characters", () => {
+    const astral = "\u{1F600}".repeat(MAX_CLAIM_LENGTH);
+    expect(astral.length).toBe(2 * MAX_CLAIM_LENGTH);
+    for (const text of [astral, "a".repeat(MAX_CLAIM_LENGTH)]) {
+      const verified = verifyClaim("overview", draft({ text }), testContext());
+      expect(verified.problems).toEqual([]);
+      expect(Claim.safeParse(verified.claim).success).toBe(true);
+    }
+  });
+
+  it("refuses one more character than the write step allows", () => {
+    const text = "\u{1F600}".repeat(MAX_CLAIM_LENGTH + 1);
+    expect(verifyClaim("overview", draft({ text }), testContext()).claim).toBeNull();
   });
 });
 
