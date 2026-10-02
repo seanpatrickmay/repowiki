@@ -106,6 +106,34 @@ describe("verifyArchitectureClaim", () => {
     ]);
   });
 
+  it("still checks the citation and lead rules when a page is unknown", () => {
+    expect(
+      verifyArchitectureClaim("request-paths", draft({ cite: [], pages: ["ghost"] }), ctx).problems,
+    ).toEqual([
+      'the claim names "ghost", which is not a feature page of this wiki',
+      "body claims need a citation or a feature page",
+      "request-path claims need a code or commit citation",
+    ]);
+    expect(
+      verifyArchitectureClaim("lead", draft({ id: "l1", cite: [], pages: ["ghost"] }), ctx)
+        .problems,
+    ).toEqual([
+      'the claim names "ghost", which is not a feature page of this wiki',
+      "lead claims must support at least one body claim",
+    ]);
+    expect(
+      verifyArchitectureClaim(
+        "lead",
+        draft({ id: "l1", cite: [], pages: ["ghost", "signals"] }),
+        ctx,
+      ).problems,
+    ).toEqual([
+      'the claim names "ghost", which is not a feature page of this wiki',
+      "lead claims carry no citations or pages; list the body claims they support",
+      "lead claims must support at least one body claim",
+    ]);
+  });
+
   it("refuses a page that is not a feature id even when the context lists it", () => {
     const result = verifyArchitectureClaim(
       "dependencies",
@@ -117,6 +145,7 @@ describe("verifyArchitectureClaim", () => {
       problems: [
         'the claim names "Sig\\u2028nals", which is not a feature page of this wiki',
         'the claim names "", which is not a feature page of this wiki',
+        "body claims need a citation or a feature page",
       ],
     });
   });
@@ -133,6 +162,7 @@ describe("verifyArchitectureClaim", () => {
       'the claim names "g1", which is not a feature page of this wiki',
       'the claim names "g2", which is not a feature page of this wiki',
       "the claim names more than 3 pages; name the closest ones",
+      "body claims need a citation or a feature page",
     ]);
   });
 });

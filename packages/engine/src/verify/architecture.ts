@@ -50,8 +50,9 @@ export type VerifiedArchitectureClaim =
  * checked, every reference resolves at ctx.sha, every page it names is a feature id and a page of
  * this build (at most MAX_CLAIM_PAGES, each once), and the article's rules hold (core's
  * architectureClaimViolations): a body claim cites code or a commit or names a page, and a
- * request-path claim cites code or a commit. Page ids are model-written: they are trimmed, and a
- * refused one appears only quote()d, in at most MAX_CLAIM_PAGES problems.
+ * request-path claim cites code or a commit, judged on the pages that are known. Page ids are
+ * model-written: they are trimmed, and a refused one appears only quote()d, in at most
+ * MAX_CLAIM_PAGES problems.
  */
 export function verifyArchitectureClaim(
   key: ArchitectureSectionKey,
@@ -66,6 +67,7 @@ export function verifyArchitectureClaim(
   problems.push(...unresolvable);
   const pages = [...new Set(draft.pages.map((id) => id.trim()))];
   const unknown = pages.filter((id) => !FeatureId.safeParse(id).success || !ctx.pages.has(id));
+  const known = pages.filter((id) => !unknown.includes(id));
   for (const id of unknown.slice(0, MAX_CLAIM_PAGES)) {
     problems.push(`the claim names ${quote(id)}, which is not a feature page of this wiki`);
   }
@@ -78,15 +80,15 @@ export function verifyArchitectureClaim(
     kind: "fact",
     citations,
     supports: key === "lead" ? draft.supports : [],
-    pages: unknown.length === 0 ? pages.slice(0, MAX_CLAIM_PAGES) : [],
+    pages: known.slice(0, MAX_CLAIM_PAGES),
     staleSince: null,
     hook: false,
   };
   if (key !== "lead" && draft.supports.length > 0) {
     problems.push("only lead claims may support other claims");
   }
-  if (!unresolved && unknown.length === 0) {
-    problems.push(...architectureClaimViolations(key, claim));
-  }
+  // The rules need every reference resolved, but not every page: they are judged on the known
+  // pages, so the retry round hears about a missing citation or support alongside a bad page.
+  if (!unresolved) problems.push(...architectureClaimViolations(key, claim));
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };
 }
