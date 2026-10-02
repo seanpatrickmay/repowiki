@@ -175,20 +175,21 @@ export interface SymbolSpan {
 }
 
 /**
- * Ties a binding to its resolved targets. A Python from-import that names a submodule binds that
- * module; otherwise the binding names a symbol of the first target. Null when nothing resolved.
+ * Ties a binding to its resolved targets. A Python from-import binds a module only when it names a
+ * submodule: a target whose path ends in `<module>/<name>.py` or `<module>/<name>/__init__.py`
+ * (just `<name>` for `from . import name`). The module's own file never counts, so
+ * `from .util import util` imports the symbol `util`. Otherwise the binding names a symbol of the
+ * first target. Null when nothing resolved.
  */
 export function resolveBinding(
   binding: ImportBinding,
   targets: readonly string[],
 ): ResolvedBinding | null {
-  const { local, imported } = binding;
-  if (binding.raw.kind === "python" && imported !== null) {
+  const { local, imported, raw } = binding;
+  if (raw.kind === "python" && imported !== null) {
+    const stem = [...raw.module.split("."), imported].filter((s) => s !== "").join("/");
     const submodule = targets.find(
-      (t) =>
-        t === `${imported}.py` ||
-        t.endsWith(`/${imported}.py`) ||
-        t.endsWith(`/${imported}/__init__.py`),
+      (t) => t === `${stem}.py` || t.endsWith(`/${stem}.py`) || t.endsWith(`/${stem}/__init__.py`),
     );
     if (submodule !== undefined) return { local, imported: null, target: submodule };
   }
@@ -201,6 +202,11 @@ export function resolveBinding(
  * attribute, a top-level symbol of the same file, `self.m()` inside class K as K.m, or K.m() for a
  * class K of the same file. Calls on other objects cannot be resolved without types, so they are
  * left out. Self-edges are dropped; each (from, to) pair keeps its first line.
+ *
+ * Names are matched without scope analysis. A top-level symbol of the calling file beats an import
+ * of the same name (Python's later `def` wins), but a parameter, nested def or local const that
+ * shadows an imported or top-level name is not tracked, so such a call resolves to the wrong
+ * symbol. Treat call edges as hints, not proof.
  */
 export function resolveCalls(
   file: { id: string; path: string; symbols: readonly SymbolSpan[] },
@@ -230,8 +236,10 @@ export function resolveCalls(
       if (binding?.imported === null) return find(binding.target, call.name);
       return binding === undefined ? find(file.path, `${call.receiver}.${call.name}`) : undefined;
     }
+    const own = find(file.path, call.name);
+    if (own !== undefined) return own;
     const binding = byLocal.get(call.name);
-    if (binding === undefined) return find(file.path, call.name);
+    if (binding === undefined) return undefined;
     if (binding.imported === null) return undefined;
     if (binding.imported === "default") {
       return find(binding.target, "default") ?? find(binding.target, binding.local);

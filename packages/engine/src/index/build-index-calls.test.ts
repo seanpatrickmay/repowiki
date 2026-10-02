@@ -40,3 +40,26 @@ describe("indexRepo call edges", () => {
     ]);
   });
 });
+
+describe("indexRepo call edges: names shared with modules and locals", () => {
+  beforeEach(() => {
+    repo.write("app/config.py", "class Config:\n    pass\n\n\ndef load():\n    return 1\n");
+    repo.write("app/util.py", "def util(x):\n    return x\n");
+    repo.write("app/sub.py", "def f():\n    return 1\n");
+    repo.write("app/store.py", "def save(x):\n    return x\n");
+    repo.write(
+      "app/samename.py",
+      "from .config import config\nfrom .util import util\nfrom . import sub\nfrom .store import save\n\n\ndef save(x):\n    return x\n\n\ndef run():\n    config.load()\n    util(1)\n    sub.f()\n    save(2)\n",
+    );
+    repo.commit("samename");
+  });
+
+  it("treats from-imports of a same-named symbol as symbols, real submodules as modules, and a later local def as the callee", async () => {
+    const index = await indexRepo(repo.dir, "HEAD");
+    expect(index.calls.filter((c) => c.from === "app/samename.py#run")).toEqual([
+      { from: "app/samename.py#run", to: "app/samename.py#save", line: 15 },
+      { from: "app/samename.py#run", to: "app/sub.py#f", line: 14 },
+      { from: "app/samename.py#run", to: "app/util.py#util", line: 13 },
+    ]);
+  });
+});
