@@ -393,6 +393,23 @@ function normalized(path: string): string {
   return site.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
 }
 
+describe("not-found page", () => {
+  it("writes a 404.html that points the reader at All articles and search", () => {
+    const html = site.read("404.html");
+    expect(html).toContain("<title>Page not found - demo-repo wiki</title>");
+    expect(html).toContain('<h1 class="page-title">Page not found</h1>');
+    expect(html).toContain("There is no article at this address in the demo-repo wiki.");
+    expect(html).toContain('<a href="/special/all-pages/">All articles</a>');
+    expect(html).toContain('<a href="/search/">search</a>');
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).not.toContain("data-pagefind-body");
+  });
+
+  it("is one of the pages the every-page checks cover", () => {
+    expect(htmlFiles(site.outDir)).toContain("404.html");
+  });
+});
+
 describe("article page", () => {
   it("renders the lead, sections, references and infobox", () => {
     const html = site.read("wiki/signals/index.html");
