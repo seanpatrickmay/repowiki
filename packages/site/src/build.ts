@@ -131,6 +131,11 @@ export async function buildSite(
 
 /** Serves a built site on http://127.0.0.1:4321/ until the process is stopped. */
 export async function previewSite(outDir: string): Promise<void> {
+  if (!existsSync(`${outDir}/.repowiki-site`)) {
+    throw new UsageError(
+      `no built site in ${outDir}; run \`pnpm site:build --export <file>\` first`,
+    );
+  }
   process.env.ASTRO_TELEMETRY_DISABLED = "1";
   const previousCwd = process.cwd();
   try {

@@ -100,6 +100,18 @@ describe("site build input validation", () => {
     expect(result.stderr).toContain("cannot read export");
   });
 
+  it("exits 2 and names the build command when previewing a site that was never built", () => {
+    const missing = runCli(["preview", "--out", join(dir, "never-built")]);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr.trim()).toBe(
+      `no built site in ${join(dir, "never-built")}; run \`pnpm site:build --export <file>\` first`,
+    );
+    mkdirSync(join(dir, "empty"));
+    const unmarked = runCli(["preview", "--out", join(dir, "empty")]);
+    expect(unmarked.status).toBe(2);
+    expect(unmarked.stderr).toContain("pnpm site:build --export");
+  }, 30_000);
+
   it("exits 2 with usage on bad arguments", () => {
     const result = runCli(["build"]);
     expect(result.status).toBe(2);
