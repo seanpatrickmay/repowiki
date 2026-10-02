@@ -851,7 +851,7 @@
       "title": "[M4] write: the Architecture pack",
       "labels": ["v1", "type:task", "area:engine"],
       "parent": "F27",
-      "body": "**Deliverable:** buildArchitecturePack within a 40,000-token budget: layout, leads, edges, infrastructure files, entry points.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 6."
+      "body": "**Deliverable:** buildArchitecturePack within a 50,000-token budget: the project title, layout, leads, edges, the README and top-level docs, infrastructure files, entry points.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 6."
     },
     {
       "key": "M4-36",
@@ -893,7 +893,7 @@
       "title": "[M4] site: the Architecture page",
       "labels": ["v1", "type:task", "area:site"],
       "parent": "F27",
-      "body": "**Deliverable:** /special/architecture/, the Main Page box and the navigation link.\n\n**Done when:** tests pass and the snapshots are reviewed. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 12."
+      "body": "**Deliverable:** /special/about/ titled with the project name, the Main Page opening with its lead, and the \"About <project>\" navigation link.\n\n**Done when:** tests pass and the snapshots are reviewed. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 12."
     },
     {
       "key": "M4-42",
@@ -914,7 +914,14 @@
       "title": "[M4] write: rebuild next-chief-of-staff with its Architecture article",
       "labels": ["v1", "type:task", "area:engine"],
       "parent": "F27",
-      "body": "**Deliverable:** the gate: a full wiki:build of next-chief-of-staff from the pre-M4 store backup, 19 pages and the Architecture article.\n\n**Done when:** every active feature has a page, the article is stored, wiki:check passes, the site builds, and the ledger cost is reported against the estimate. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 15."
+      "body": "**Deliverable:** the gate: a full wiki:build of next-chief-of-staff from the pre-M4 store backup, 19 pages and the project's About article.\n\n**Done when:** every active feature has a page, the article is stored, wiki:check passes, the site builds, and the ledger cost is reported against the estimate. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 15."
+    },
+    {
+      "key": "M4-45",
+      "title": "[M4] core: the project's own article: its title and Purpose and features",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F27",
+      "body": "**Deliverable:** Architecture.title (the project's name, from the README's first heading or the repo name) and the `purpose` section key, between the lead and the layers.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 5b."
     }
   ]
 }

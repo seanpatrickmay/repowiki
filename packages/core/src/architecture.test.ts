@@ -3,7 +3,8 @@ import {
   Architecture,
   ArchitectureClaim,
   ArchitectureSection,
-  type ArchitectureSectionKey,
+  ArchitectureSectionKey,
+  ArchitectureTitle,
   architectureClaimViolations,
   FeatureEdge,
 } from "./architecture.ts";
@@ -32,6 +33,12 @@ describe("architectureClaimViolations", () => {
     ],
     ["a claim with both", "infrastructure", architectureClaim({ pages: ["signals"] })],
     ["a cited request path", "request-paths", architectureClaim()],
+    [
+      "a purpose backed by a page",
+      "purpose",
+      architectureClaim({ citations: [], pages: ["signals"] }),
+    ],
+    ["a purpose citing the README", "purpose", architectureClaim()],
   ];
   it.each(valid)("accepts %s", (_name, key, claim) => {
     expect(architectureClaimViolations(key, claim)).toEqual([]);
@@ -177,5 +184,40 @@ describe("Architecture", () => {
     expect(ok({ reason: "update" })).toBe(false);
     expect(ok({ reason: "update", parentId: "architecture-0" })).toBe(true);
     expect(ok({ reason: "build", parentId: "architecture-0" })).toBe(true);
+  });
+});
+
+describe("the project's own article", () => {
+  it("puts Purpose and features right after the lead", () => {
+    expect(ArchitectureSectionKey.options.slice(0, 3)).toEqual(["lead", "purpose", "layers"]);
+  });
+
+  it("needs a citation or a page on a purpose claim, like any body claim", () => {
+    expect(architectureClaimViolations("purpose", architectureClaim({ citations: [] }))).toEqual([
+      "body claims need a citation or a feature page",
+    ]);
+  });
+
+  it("is titled with the project's name, which it requires", () => {
+    expect(Architecture.parse(makeArchitecture()).title).toBe("demo");
+    const { title: _title, ...untitled } = makeArchitecture();
+    expect(Architecture.safeParse(untitled).success).toBe(false);
+  });
+
+  it.each([
+    ["an empty title", ""],
+    ["a padded title", " demo "],
+    ["a title with a newline", "demo\n# Injected"],
+    ["a title with a bidi override", "demo\u202e"],
+    ["a title with a zero-width space", "de\u200bmo"],
+    ["a title over 120 characters", "x".repeat(121)],
+  ])("refuses %s", (_name, title) => {
+    expect(ArchitectureTitle.safeParse(title).success).toBe(false);
+  });
+
+  it("accepts a title of 120 characters, non-Latin letters and an emoji sequence", () => {
+    for (const title of ["x".repeat(120), "Chief of Staff 数据", "Ops \u{1F469}\u200D\u{1F4BB}"]) {
+      expect(ArchitectureTitle.safeParse(title).success).toBe(true);
+    }
   });
 });

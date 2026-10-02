@@ -1,13 +1,18 @@
 import { z } from "zod";
+import { INVISIBLE_CHARACTERS } from "./alias.ts";
 import { Claim } from "./claim.ts";
 import { FeatureId } from "./feature.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 import { RevisionReason, TokenUsage } from "./revision.ts";
 import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rules.ts";
 
-/** Sections of the Architecture article (F27), in page order. */
+/**
+ * Sections of the Architecture article (F27), the documented project's own article, in page
+ * order: the lead, "Purpose and features", then the four architecture sections.
+ */
 export const ArchitectureSectionKey = z.enum([
   "lead",
+  "purpose",
   "layers",
   "request-paths",
   "dependencies",
@@ -80,15 +85,36 @@ export type FeatureEdge = z.infer<typeof FeatureEdge>;
 
 const ARTICLE_ID = /^architecture-[0-9a-f]{12}-[1-9][0-9]*$/;
 
+/** The longest project title, in code points. */
+export const ARCHITECTURE_TITLE_MAX_LENGTH = 120;
+const INVISIBLE = new RegExp(INVISIBLE_CHARACTERS.source, "u");
+
 /**
- * One revision of the Architecture article (F27): how the features fit together. It is not a
- * feature page, so it has no feature id, infobox or See also; it lives at /special/architecture/.
+ * The project's name, the article's title: plain text the engine derives from the repository
+ * (never written by the model), trimmed, with no control or invisible character.
+ */
+export const ArchitectureTitle = z
+  .string()
+  .min(1)
+  .refine(
+    (title) => [...title].length <= ARCHITECTURE_TITLE_MAX_LENGTH,
+    `a title is at most ${ARCHITECTURE_TITLE_MAX_LENGTH} characters`,
+  )
+  .refine((title) => title === title.trim(), "a title has no leading or trailing space")
+  .refine((title) => !INVISIBLE.test(title), "a title has no control or invisible character");
+
+/**
+ * One revision of the Architecture article (F27): the documented project's own article, titled
+ * with its name, saying what the project is and how its features fit together. It is not a
+ * feature page, so it has no feature id, infobox or See also; it lives at /special/about/.
  */
 export const Architecture = z
   .object({
     /** `architecture-<sha12>-<n>`: the first 12 characters of `sha`, then the 1-based position. */
     id: z.string().regex(ARTICLE_ID, "expected an id like architecture-<sha12>-<n>"),
     sha: GitSha,
+    /** The project's name (see ArchitectureTitle). */
+    title: ArchitectureTitle,
     commitDate: IsoDateTime,
     generatedAt: IsoDateTime,
     parentId: z.string().min(1).nullable(),
