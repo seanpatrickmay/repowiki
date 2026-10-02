@@ -13,6 +13,14 @@ import type { ContextPack } from "./pack.ts";
 const MAX_ID_LENGTH = 80;
 /** How many unknown supports a problem names before it says "and N more". */
 const MAX_NAMED_SUPPORTS = 3;
+/** The retry turn names this many failing claims, then "and N more claims failed". */
+export const MAX_FIX_CLAIMS = 40;
+/** The retry turn gives this many problems per claim, then "and N more". */
+export const MAX_PROBLEMS_PER_CLAIM = 3;
+/** The longest rejection reason the retry turn quotes, in code points. */
+const MAX_REASON_LENGTH = 500;
+/** Whitespace, control, line-break and bidirectional characters: a reason shows them as a space. */
+const REASON_BREAKS = /[\s\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]+/gu;
 
 /** The first `max` characters of an id, never splitting a surrogate pair. */
 function cut(id: string, max: number): string {
@@ -21,37 +29,48 @@ function cut(id: string, max: number): string {
 }
 
 /**
- * A draft's claims with ids made unique on the page ("o1", then "o1-2"), in section order. The
- * ids are the model's own strings, so they are trimmed (a blank one becomes "claim") and cut to 80
- * characters before they are made unique, and the work is linear in the number of claims.
+ * The draft with its claim ids made unique on the page ("o1", then "o1-2"), sections and claims
+ * in their original order (repeated and empty sections kept). The ids are the model's own
+ * strings, so they are trimmed (a blank one becomes "claim") and cut to 80 characters before they
+ * are made unique, and the work is linear in the number of claims. The draft is not changed.
  */
-export function uniqueClaims(draft: PageDraft): { key: SectionKey; claim: DraftClaim }[] {
+export function uniqueDraft(draft: PageDraft): PageDraft {
   const seen = new Set<string>();
   /** The next suffix to try for each base id, so a run of one id costs one step per claim. */
   const next = new Map<string, number>();
-  const out: { key: SectionKey; claim: DraftClaim }[] = [];
-  for (const section of draft.sections) {
-    for (const claim of section.claims) {
-      const base = cut(claim.id.trim() || "claim", MAX_ID_LENGTH);
-      let id = base;
-      for (let n = next.get(base) ?? 2; seen.has(id); n++) {
-        const suffix = `-${n}`;
-        id = cut(base, MAX_ID_LENGTH - suffix.length) + suffix;
-        next.set(base, n + 1);
-      }
-      seen.add(id);
-      out.push({ key: section.key, claim: { ...claim, id } });
+  const uniqueId = (raw: string): string => {
+    const base = cut(raw.trim() || "claim", MAX_ID_LENGTH);
+    let id = base;
+    for (let n = next.get(base) ?? 2; seen.has(id); n++) {
+      const suffix = `-${n}`;
+      id = cut(base, MAX_ID_LENGTH - suffix.length) + suffix;
+      next.set(base, n + 1);
     }
-  }
-  return out;
+    seen.add(id);
+    return id;
+  };
+  return {
+    ...draft,
+    sections: draft.sections.map((section) => ({
+      ...section,
+      claims: section.claims.map((claim) => ({ ...claim, id: uniqueId(claim.id) })),
+    })),
+  };
+}
+
+/** A draft's claims with ids made unique on the page (see uniqueDraft), in section order. */
+export function uniqueClaims(draft: PageDraft): { key: SectionKey; claim: DraftClaim }[] {
+  return uniqueDraft(draft).sections.flatMap((section) =>
+    section.claims.map((claim) => ({ key: section.key, claim })),
+  );
 }
 
 /** Where one page stands between the write call and its retry. */
 export interface PageState {
   pack: ContextPack;
   /**
-   * The draft as the retry turn re-sends it, verbatim. The ids of `failing` are named to the
-   * model, so keep the draft's own ids equal to them (uniqueClaims makes them unique).
+   * The draft as the model sent it. The retry turn re-sends it with uniqueDraft's ids, the ones
+   * `failing` is named by, so the model sees the ids it is asked to fix.
    */
   draft: PageDraft | null;
   /** Raw answer text of an unusable first answer, and why it was unusable. */
@@ -117,30 +136,50 @@ export function verifyAll(
   }
 }
 
-/** The retry turn for a page with failing claims: the pack, the draft, and every problem. */
+/** The retry turn for a page with failing claims: the pack, the draft, and the first problems. */
 export function fixRequest(state: PageState): LlmMessage[] {
-  const listed = [...state.failing.values()].map(
-    ({ claim, problems }) => `- ${quote(claim.id)}: ${problems.join("; ")}`,
-  );
+  if (state.draft === null) throw new Error("fixRequest needs the page's draft");
+  if (state.failing.size === 0) throw new Error("fixRequest needs a failing claim");
+  const failing = [...state.failing.values()];
+  const listed = failing.slice(0, MAX_FIX_CLAIMS).map(({ claim, problems }) => {
+    const shown = problems.slice(0, MAX_PROBLEMS_PER_CLAIM);
+    if (problems.length > MAX_PROBLEMS_PER_CLAIM) {
+      shown.push(`and ${problems.length - MAX_PROBLEMS_PER_CLAIM} more`);
+    }
+    return `- ${quote(claim.id)}: ${shown.join("; ")}`;
+  });
+  if (failing.length > MAX_FIX_CLAIMS) {
+    listed.push(`- and ${failing.length - MAX_FIX_CLAIMS} more claims failed`);
+  }
   return [
     { role: "user", content: state.pack.text },
-    { role: "assistant", content: JSON.stringify(state.draft) },
+    { role: "assistant", content: JSON.stringify(uniqueDraft(state.draft)) },
     {
       role: "user",
-      content: `These claims failed verification:\n${listed.join("\n")}\nReturn corrected versions of only these claims, under the same ids, citing only lines and commits the pack shows. To give up a claim the pack cannot support, return it with an empty cite list.`,
+      content: `These claims failed verification:\n${listed.join("\n")}\nReturn corrected versions of only these claims, under the same ids, citing only lines and commits the pack shows. To give up a body claim the pack cannot support, return it with an empty cite list; to give up a lead claim, return it with an empty supports list.`,
     },
   ];
 }
 
+/** A rejection reason as one line of at most 500 characters. */
+function oneLine(reason: string): string {
+  const line = reason.replace(REASON_BREAKS, " ").trim();
+  const chars = [...line.slice(0, 2 * MAX_REASON_LENGTH)];
+  return chars.length <= MAX_REASON_LENGTH && line.length <= 2 * MAX_REASON_LENGTH
+    ? line
+    : `${chars.slice(0, MAX_REASON_LENGTH - 1).join("")}…`;
+}
+
 /** The retry turn for a page whose first answer was unusable (spec §6.3: retry once). */
 export function retryRequest(state: PageState): LlmMessage[] {
-  const rejected = state.rejected ?? { text: "", reason: "" };
+  const { rejected } = state;
+  if (rejected === null) throw new Error("retryRequest needs the rejected answer");
   return [
     { role: "user", content: state.pack.text },
     { role: "assistant", content: rejected.text.trim() === "" ? "(no answer)" : rejected.text },
     {
       role: "user",
-      content: `That answer was rejected: ${rejected.reason}\nReturn the corrected JSON object.`,
+      content: `That answer was rejected: ${oneLine(rejected.reason)}\nReturn the corrected JSON object.`,
     },
   ];
 }
