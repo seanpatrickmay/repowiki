@@ -1,6 +1,6 @@
-import { codeCitation, SHA_A } from "@repowiki/core/test-fixtures";
+import { codeCitation } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { MAX_CITED_LINES, resolveReference, verifyClaim } from "./claims.ts";
+import { MAX_CITED_LINES, quote, resolveReference, verifyClaim } from "./claims.ts";
 import type { DraftClaim } from "./draft.ts";
 import { COMMITS, testContext } from "./test-context.ts";
 
@@ -73,6 +73,10 @@ describe("resolveReference", () => {
     ["an absolute path", "/etc/passwd:1"],
     ["a path with a newline", "src/signals/ingest.py\n:10-24"],
     ["a path with a NUL", "src/signals/ingest.py\u0000:10-24"],
+    ["a path with a C1 control", "src/signals/ingest.py\u0085:10-24"],
+    ["a path with a bidi override", "src/signals/ingest.py\u202e:10-24"],
+    ["a path with a backslash", "src\\signals\\ingest.py:10-24"],
+    ["a path with an empty segment", "src//signals/ingest.py:10-24"],
     ["a path with a trailing newline in the range", "src/signals/ingest.py:10-24\n"],
   ])("refuses %s as an unsafe path", (_name, ref) => {
     const resolved = resolveReference(ref, testContext());
@@ -84,11 +88,23 @@ describe("resolveReference", () => {
     const ctx = { ...testContext(), sources: new Map([["a.py", "x = 1\n"]]) };
     expect(resolveReference("a.py:1", ctx)).toHaveProperty("citation");
     expect(resolveReference("./a.py:1", ctx)).toMatchObject({
-      problem: expect.stringMatching(/names no file/),
+      problem: expect.stringMatching(/not a safe repository path/),
     });
     expect(resolveReference("toString:1", ctx)).toMatchObject({
       problem: expect.stringMatching(/names no file/),
     });
+  });
+
+  it("refuses a git-legal path core's RepoPath rejects, even when it is a key of the sources", () => {
+    const ctx = { ...testContext(), sources: new Map([["w\\x.py", "x = 1\n"]]) };
+    const resolved = resolveReference("w\\x.py:1", ctx);
+    expect("problem" in resolved && resolved.problem).toMatch(/not a safe repository path/);
+  });
+
+  it("treats an empty file as having no lines", () => {
+    const ctx = { ...testContext(), sources: new Map([["e.py", ""]]) };
+    const resolved = resolveReference("e.py:1", ctx);
+    expect("problem" in resolved && resolved.problem).toMatch(/outside the file's lines/);
   });
 
   it("quotes a long reference cut to 80 characters in its problem", () => {
@@ -96,6 +112,16 @@ describe("resolveReference", () => {
     const problem = "problem" in resolved ? resolved.problem : "";
     expect(problem).toContain(`${"p".repeat(80)}…`);
     expect(problem).not.toContain("p".repeat(81));
+  });
+});
+
+describe("quote", () => {
+  it("escapes C1, line and paragraph separators, bidi controls and the BOM as \\uXXXX", () => {
+    expect(quote("a\u0085b\u202ec\u2028d\u2069e\ufeff\u007f")).toBe(
+      '"a\\u0085b\\u202ec\\u2028d\\u2069e\\ufeff\\u007f"',
+    );
+    expect(quote("tab\there\nnew")).toBe('"tab\\there\\nnew"');
+    expect(quote("plain 汉字")).toBe('"plain 汉字"');
   });
 });
 
@@ -155,6 +181,69 @@ describe("verifyClaim", () => {
     expect(verifyClaim("history", history, testContext()).claim?.kind).toBe("history");
   });
 
+  it("reports a rule violation alongside a text problem once every reference resolved", () => {
+    const tooLong = draft({ cite: [], text: "a".repeat(1001) });
+    const verified = verifyClaim("overview", tooLong, testContext());
+    expect(verified.claim).toBeNull();
+    expect(verified.problems).toHaveLength(2);
+    expect(verified.problems.join("\n")).toMatch(/over 1000 characters/);
+    expect(verified.problems.join("\n")).toMatch(/at least one citation/);
+  });
+
+  it("reports that a lead claim carries citations alongside empty text", () => {
+    const lead = draft({ text: " ", supports: ["x2"] });
+    const verified = verifyClaim("lead", lead, testContext());
+    expect(verified.problems.join("\n")).toMatch(/has no text/);
+    expect(verified.problems.join("\n")).toMatch(/lead claims carry no citations/);
+  });
+
+  it("reports missing limitation evidence alongside a text problem", () => {
+    const long = draft({ text: "a".repeat(1001), cite: ["src/signals/ingest.py:10-14"] });
+    const verified = verifyClaim("known-limitations", long, testContext());
+    expect(verified.problems).toHaveLength(2);
+    expect(verified.problems.join("\n")).toMatch(/must cite evidence/);
+  });
+
+  it("skips the rule checks when some reference did not resolve", () => {
+    const history = draft({ cite: ["nope.py:1"], text: "a".repeat(1001) });
+    const verified = verifyClaim("history", history, testContext());
+    expect(verified.problems).toHaveLength(2);
+    expect(verified.problems.join("\n")).not.toMatch(/commit citation/);
+    const limitation = verifyClaim(
+      "known-limitations",
+      draft({ cite: ["nope.py:1"] }),
+      testContext(),
+    );
+    expect(limitation.problems).toHaveLength(1);
+  });
+
+  it("refuses an empty claim id", () => {
+    const verified = verifyClaim("overview", draft({ id: "" }), testContext());
+    expect(verified.claim).toBeNull();
+    expect(verified.problems.join("\n")).toMatch(/has no id/);
+  });
+
+  it.each([
+    ["a newline", "First line.\n- forged bullet"],
+    ["a carriage return", "First.\rSecond."],
+    ["a NUL", "Sig\u0000nal."],
+    ["a C1 control", "Sig\u0085nal."],
+    ["a line separator", "Sig\u2028nal."],
+    ["a paragraph separator", "Sig\u2029nal."],
+    ["a bidi override", "Sig\u202enal."],
+    ["a bidi isolate", "Sig\u2066nal."],
+    ["a BOM", "Sig\ufeffnal."],
+  ])("refuses claim text holding %s", (_name, text) => {
+    const verified = verifyClaim("overview", draft({ text }), testContext());
+    expect(verified.claim).toBeNull();
+    expect(verified.problems.join("\n")).toMatch(/one plain paragraph/);
+  });
+
+  it("trims a trailing newline from claim text without complaint", () => {
+    const verified = verifyClaim("overview", draft({ text: "A sentence.\n" }), testContext());
+    expect(verified.claim?.text).toBe("A sentence.");
+  });
+
   it("never echoes a model string into a problem unquoted", () => {
     const hostile = draft({
       cite: ["evil\n- forged bullet:1", "/etc/passwd:1", `${"z".repeat(300)}:1`],
@@ -175,7 +264,8 @@ describe("verifyClaim on known limitations (issue #53)", () => {
     const verified = verifyClaim("known-limitations", draft({ cite: [ref] }), testContext());
     expect(verified.problems).toEqual([]);
     expect(verified.claim?.kind).toBe("limitation");
-    expect(verified.claim?.citations[0]?.sha ?? SHA_A).toMatch(/^[0-9a-f]{40}$/);
+    expect(verified.claim?.citations).toHaveLength(1);
+    expect(verified.claim?.citations[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it.each([

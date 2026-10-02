@@ -4,6 +4,7 @@ import {
   type ClaimKind,
   claimRuleViolations,
   contentHash,
+  RepoPath,
   type SectionKey,
 } from "@repowiki/core";
 import type { CommitInfo } from "../index/index.ts";
@@ -28,14 +29,31 @@ export const MAX_CLAIM_LENGTH = 1000;
 const MIN_COMMIT_PREFIX = 7;
 const MAX_QUOTED_LENGTH = 80;
 
-/** A model-supplied string, safe to quote in a retry prompt: JSON-escaped and cut to 80. */
+/**
+ * Characters that can forge or hide structure in a prompt or a page: control characters (C0, DEL
+ * and C1), line and paragraph separators, bidirectional controls and the byte order mark.
+ */
+const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/u;
+const UNSAFE_TEXT_EACH = new RegExp(UNSAFE_TEXT.source, "gu");
+
+const hex4 = (char: string): string => (char.codePointAt(0) ?? 0).toString(16).padStart(4, "0");
+
+/**
+ * A model-supplied string, safe to quote in a retry prompt: JSON-escaped, cut to 80, and with
+ * every character JSON leaves raw but UNSAFE_TEXT names (C1, U+2028/9, bidi, BOM) escaped too.
+ */
 export function quote(text: string): string {
   const chars = [...text];
-  if (chars.length <= MAX_QUOTED_LENGTH) return JSON.stringify(text);
-  return JSON.stringify(`${chars.slice(0, MAX_QUOTED_LENGTH).join("")}…`);
+  const json =
+    chars.length <= MAX_QUOTED_LENGTH
+      ? JSON.stringify(text)
+      : JSON.stringify(`${chars.slice(0, MAX_QUOTED_LENGTH).join("")}…`);
+  return json.replace(UNSAFE_TEXT_EACH, (char) => `\\u${hex4(char)}`);
 }
 
-const lineCount = (text: string): number => text.replace(/\n$/, "").split("\n").length;
+/** An empty file has no lines; otherwise a final newline ends a line rather than starting one. */
+const lineCount = (text: string): number =>
+  text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
 
 /** Lines start..end (1-based, inclusive) of a file's text. */
 export function citedLines(text: string, start: number, end: number): string {
@@ -43,21 +61,6 @@ export function citedLines(text: string, start: number, end: number): string {
     .split("\n")
     .slice(start - 1, end)
     .join("\n");
-}
-
-/** Whether text holds a C0 or C1 control character, NUL and newlines included. */
-function hasControlCharacter(text: string): boolean {
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
-  }
-  return false;
-}
-
-/** A relative path with no `..` segment; the caller still requires it to be a key of the sources. */
-function isSafePath(path: string): boolean {
-  if (path.startsWith("/") || path.startsWith("\\")) return false;
-  return !path.split(/[\\/]/).includes("..");
 }
 
 export type Resolved = { citation: Citation; lines: string | null } | { problem: string };
@@ -71,7 +74,7 @@ export type Resolved = { citation: Citation; lines: string | null } | { problem:
 export function resolveReference(ref: string, ctx: VerifyContext): Resolved {
   const commit = /^commit:([0-9a-f]+)$/i.exec(ref.trim());
   if (commit) return resolveCommit(ref, (commit[1] ?? "").toLowerCase(), ctx);
-  if (hasControlCharacter(ref)) {
+  if (UNSAFE_TEXT.test(ref)) {
     return { problem: `citation ${quote(ref)} is not a safe repository path` };
   }
   const code = /^(.+):L?(\d+)(?:-L?(\d+))?$/.exec(ref.trim());
@@ -79,7 +82,7 @@ export function resolveReference(ref: string, ctx: VerifyContext): Resolved {
     return { problem: `citation ${quote(ref)} is neither "path:start-end" nor "commit:sha"` };
   }
   const path = code[1] ?? "";
-  if (!isSafePath(path)) {
+  if (!RepoPath.safeParse(path).success) {
     return { problem: `citation ${quote(ref)} is not a safe repository path` };
   }
   const startLine = Number(code[2]);
@@ -146,17 +149,25 @@ export type Verified = { claim: Claim; problems: [] } | { claim: null; problems:
 export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyContext): Verified {
   const problems: string[] = [];
   const text = draft.text.trim();
+  if (draft.id === "") problems.push("the claim has no id");
   if (text === "") problems.push("the claim has no text");
   if ([...text].length > MAX_CLAIM_LENGTH) {
     problems.push(`the claim is over ${MAX_CLAIM_LENGTH} characters; split or shorten it`);
   }
+  if (UNSAFE_TEXT.test(text)) {
+    problems.push(
+      "the claim text holds a control or line-break character; write one plain paragraph",
+    );
+  }
   const citations: Citation[] = [];
   let evidence = false;
+  let unresolved = false;
   const seen = new Set<string>();
   for (const ref of draft.cite) {
     const resolved = resolveReference(ref, ctx);
     if ("problem" in resolved) {
       problems.push(resolved.problem);
+      unresolved = true;
       continue;
     }
     const fingerprint = JSON.stringify(resolved.citation);
@@ -177,12 +188,17 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
   if (key !== "lead" && draft.supports.length > 0) {
     problems.push("only lead claims may support other claims");
   }
-  // Rule violations are only meaningful once every reference resolved.
-  if (problems.length === 0) problems.push(...claimRuleViolations(key, claim));
-  if (problems.length === 0 && key === "known-limitations" && !evidence) {
-    problems.push(
-      "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
-    );
+  // The citation rules and the evidence check need every reference resolved, but not clean text:
+  // the retry round should hear about every problem at once, or the claim is dropped for a
+  // problem the model was never told about.
+  if (!unresolved) {
+    const violations = claimRuleViolations(key, claim);
+    problems.push(...violations);
+    if (violations.length === 0 && key === "known-limitations" && !evidence) {
+      problems.push(
+        "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
+      );
+    }
   }
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };
 }
