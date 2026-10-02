@@ -2,10 +2,13 @@ import { contentHash } from "@repowiki/core";
 import {
   bodyClaim,
   codeCitation,
+  commitCitation,
   INGEST_PY,
   leadClaim,
   makeRevision,
   SHA_A,
+  SHA_B,
+  SHA_C,
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { revisionProblems } from "./revision.ts";
@@ -40,5 +43,87 @@ describe("revisionProblems", () => {
       "signals c-2 gone.py:10-24: no such file at aaaaaaa",
       "signals: diagram line 2 is not a node or a labelled arrow",
     ]);
+  });
+
+  describe("at each citation's own sha", () => {
+    const OLD = INGEST_PY.replace("MAX_SIGNALS = 50", "MAX_SIGNALS = 5");
+    const withClaims = (...citations: ReturnType<typeof codeCitation>[]) =>
+      makeRevision({
+        sections: [
+          { key: "lead", claims: [leadClaim({ supports: ["c-1"] })] },
+          { key: "overview", claims: [bodyClaim({ citations })] },
+        ],
+      });
+    const bySha = (calls: string[]) => (sha: string) => {
+      calls.push(sha);
+      if (sha === SHA_A) return new Map([["src/signals/ingest.py", INGEST_PY]]);
+      if (sha === SHA_B) return new Map([["src/signals/ingest.py", OLD]]);
+      throw new Error(`unknown revision ${sha}`);
+    };
+
+    it("hashes each citation against the file at its own sha, not the revision's", () => {
+      const atB = codeCitation({
+        sha: SHA_B,
+        startLine: 7,
+        endLine: 7,
+        contentHash: contentHash("MAX_SIGNALS = 5"),
+      });
+      const atA = codeCitation({
+        sha: SHA_A,
+        startLine: 7,
+        endLine: 7,
+        contentHash: contentHash("MAX_SIGNALS = 50"),
+      });
+      expect(revisionProblems(withClaims(atA, atB), bySha([]))).toEqual([]);
+      // The same two hashes swapped: each only matches at the other sha.
+      const wrongB = { ...atB, contentHash: atA.contentHash };
+      const wrongA = { ...atA, contentHash: atB.contentHash };
+      expect(revisionProblems(withClaims(wrongA, wrongB), bySha([]))).toEqual([
+        "signals c-1 src/signals/ingest.py:7-7: the cited lines changed",
+        "signals c-1 src/signals/ingest.py:7-7: the cited lines changed",
+      ]);
+    });
+
+    it("reads each distinct sha once", () => {
+      const calls: string[] = [];
+      const citations = [
+        codeCitation(),
+        codeCitation({
+          sha: SHA_B,
+          contentHash: contentHash(OLD.split("\n").slice(9, 24).join("\n")),
+        }),
+        codeCitation(),
+        codeCitation({ sha: SHA_B, contentHash: contentHash("other") }),
+      ];
+      expect(revisionProblems(withClaims(...citations), bySha(calls))).toEqual([
+        "signals c-1 src/signals/ingest.py:10-24: the cited lines changed",
+      ]);
+      expect(calls).toEqual([SHA_A, SHA_B]);
+    });
+
+    it("reports an unknown sha for every citation at it, and never throws", () => {
+      const calls: string[] = [];
+      const gone = [codeCitation({ sha: SHA_C }), codeCitation({ sha: SHA_C, path: "other.py" })];
+      expect(revisionProblems(withClaims(codeCitation(), ...gone), bySha(calls))).toEqual([
+        `signals c-1 src/signals/ingest.py:10-24: no such commit ${SHA_C}`,
+        `signals c-1 other.py:10-24: no such commit ${SHA_C}`,
+      ]);
+      expect(calls).toEqual([SHA_A, SHA_C]);
+    });
+
+    it("skips commit citations: no hashing, no lookup, no problem", () => {
+      const calls: string[] = [];
+      const revision = makeRevision({
+        sections: [
+          { key: "lead", claims: [leadClaim({ supports: ["c-1"] })] },
+          {
+            key: "overview",
+            claims: [bodyClaim({ citations: [commitCitation({ sha: SHA_C })] })],
+          },
+        ],
+      });
+      expect(revisionProblems(revision, bySha(calls))).toEqual([]);
+      expect(calls).toEqual([]);
+    });
   });
 });
