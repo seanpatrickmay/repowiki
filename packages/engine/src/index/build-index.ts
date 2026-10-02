@@ -1,4 +1,13 @@
 import { memberId, RepoPath } from "@repowiki/core";
+import {
+  type CallEdge,
+  type CallSite,
+  extractBindings,
+  extractCalls,
+  type ResolvedBinding,
+  resolveBinding,
+  resolveCalls,
+} from "./calls.ts";
 import { type CoChange, computeCoChange, DEFAULT_MAX_FILES_PER_COMMIT } from "./cochange.ts";
 import {
   commitFiles,
@@ -51,6 +60,8 @@ export interface RepoIndex {
   sha: string;
   files: IndexedFile[];
   imports: ImportEdge[];
+  /** Calls between indexed symbols, resolved by name through imports (spec §4; diagrams use them). */
+  calls: CallEdge[];
   /** Tracked paths excluded because they are not valid RepoPaths (e.g. contain a backslash), sorted. */
   invalidPaths: string[];
   unresolved: UnresolvedImport[];
@@ -112,6 +123,7 @@ export async function indexRepo(
   const files: IndexedFile[] = [];
   const edges = new Map<string, ImportEdge>();
   const unresolved: UnresolvedImport[] = [];
+  const callSites: { file: IndexedFile; calls: CallSite[]; bindings: ResolvedBinding[] }[] = [];
 
   for (const blob of blobs) {
     const content = read(blob);
@@ -154,10 +166,24 @@ export async function indexRepo(
             edges.set(key, { from: blob.path, to, line: raw.line });
         }
       }
+      const bindings = extractBindings(language, parsed.root).flatMap(
+        (binding) =>
+          resolveBinding(binding, resolver.resolve(blob.path, binding.raw).targets) ?? [],
+      );
+      callSites.push({ file, calls: extractCalls(language, parsed.root), bindings });
     } finally {
       parsed.dispose();
     }
   }
+
+  const symbolsByPath = new Map(files.map((file) => [file.path, file.symbols]));
+  const calls = callSites
+    .flatMap(({ file, calls: sites, bindings }) =>
+      resolveCalls(file, sites, bindings, (path) => symbolsByPath.get(path) ?? []),
+    )
+    .sort((a, b) =>
+      a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : a.to > b.to ? 1 : 0,
+    );
 
   const byPath = (a: { from: string; line: number }, b: { from: string; line: number }) =>
     a.from < b.from ? -1 : a.from > b.from ? 1 : a.line - b.line;
@@ -165,6 +191,7 @@ export async function indexRepo(
     sha,
     files,
     invalidPaths,
+    calls,
     imports: [...edges.values()].sort(
       (a, b) => byPath(a, b) || (a.to < b.to ? -1 : a.to > b.to ? 1 : 0),
     ),

@@ -148,3 +148,105 @@ function calleeOf(
   if (isSelf) return { name: name.text, receiver: "self" };
   return object.type === "identifier" ? { name: name.text, receiver: object.text } : null;
 }
+
+/** An import binding whose target file is known. `imported` null: the binding is that module. */
+export interface ResolvedBinding {
+  local: string;
+  imported: string | null;
+  target: string;
+}
+
+/** A call from one indexed member to an indexed symbol, at the first line it happens. */
+export interface CallEdge {
+  /** memberId of the innermost symbol around the call, or of the file for module-level code. */
+  from: string;
+  /** memberId of the called symbol. */
+  to: string;
+  line: number;
+}
+
+/** What resolving calls needs to know about a file's symbols. */
+export interface SymbolSpan {
+  id: string;
+  qualifiedName: string;
+  kind: string;
+  startLine: number;
+  endLine: number;
+}
+
+/**
+ * Ties a binding to its resolved targets. A Python from-import that names a submodule binds that
+ * module; otherwise the binding names a symbol of the first target. Null when nothing resolved.
+ */
+export function resolveBinding(
+  binding: ImportBinding,
+  targets: readonly string[],
+): ResolvedBinding | null {
+  const { local, imported } = binding;
+  if (binding.raw.kind === "python" && imported !== null) {
+    const submodule = targets.find(
+      (t) =>
+        t === `${imported}.py` ||
+        t.endsWith(`/${imported}.py`) ||
+        t.endsWith(`/${imported}/__init__.py`),
+    );
+    if (submodule !== undefined) return { local, imported: null, target: submodule };
+  }
+  const target = targets[0];
+  return target === undefined ? null : { local, imported, target };
+}
+
+/**
+ * Call edges out of one file, resolved by name only: an imported name, a module binding's
+ * attribute, a top-level symbol of the same file, `self.m()` inside class K as K.m, or K.m() for a
+ * class K of the same file. Calls on other objects cannot be resolved without types, so they are
+ * left out. Self-edges are dropped; each (from, to) pair keeps its first line.
+ */
+export function resolveCalls(
+  file: { id: string; path: string; symbols: readonly SymbolSpan[] },
+  calls: readonly CallSite[],
+  bindings: readonly ResolvedBinding[],
+  symbolsOf: (path: string) => readonly SymbolSpan[],
+): CallEdge[] {
+  const find = (path: string, qualifiedName: string) =>
+    symbolsOf(path).find((s) => s.qualifiedName === qualifiedName);
+  const byLocal = new Map(bindings.map((b) => [b.local, b]));
+  const enclosing = (line: number, kind?: string) =>
+    file.symbols
+      .filter(
+        (s) => s.startLine <= line && line <= s.endLine && (kind === undefined || s.kind === kind),
+      )
+      .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))[0];
+
+  const callee = (call: CallSite): SymbolSpan | undefined => {
+    if (call.receiver === "self") {
+      const owner = enclosing(call.line, "class");
+      return owner === undefined
+        ? undefined
+        : find(file.path, `${owner.qualifiedName}.${call.name}`);
+    }
+    if (call.receiver !== null) {
+      const binding = byLocal.get(call.receiver);
+      if (binding?.imported === null) return find(binding.target, call.name);
+      return binding === undefined ? find(file.path, `${call.receiver}.${call.name}`) : undefined;
+    }
+    const binding = byLocal.get(call.name);
+    if (binding === undefined) return find(file.path, call.name);
+    if (binding.imported === null) return undefined;
+    if (binding.imported === "default") {
+      return find(binding.target, "default") ?? find(binding.target, binding.local);
+    }
+    return find(binding.target, binding.imported);
+  };
+
+  const edges = new Map<string, CallEdge>();
+  for (const call of calls) {
+    const to = callee(call);
+    if (to === undefined) continue;
+    const from = enclosing(call.line)?.id ?? file.id;
+    if (from === to.id) continue;
+    const key = `${from}\0${to.id}`;
+    if (!edges.has(key)) edges.set(key, { from, to: to.id, line: call.line });
+  }
+  return [...edges.values()];
+}
