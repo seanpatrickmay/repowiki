@@ -66,7 +66,7 @@ const SECTION_RESERVE = 800;
  * Dockerfiles, Compose files, GitHub Actions workflows and Procfiles.
  */
 export const INFRA_FILE =
-  /\.(?:tf|tfvars|hcl)$|(?:^|\/)(?:Dockerfile|Containerfile)(?:\.(?!md$)[^/.]+)?$|(?:^|\/)(?:docker-)?compose(?:\.[^/]*)?\.ya?ml$|^\.github\/workflows\/[^/]+\.ya?ml$|(?:^|\/)Procfile$/;
+  /^(?!(?:.*\/)?\.terraform\.lock\.hcl$)[\s\S]*(?:\.(?:tf|tfvars|hcl)$|(?:^|\/)(?:Dockerfile|Containerfile)(?:\.(?!md$)[^/.]+)?$|(?:^|\/)(?:docker-)?compose(?:\.[^/]*)?\.ya?ml$|^\.github\/workflows\/[^/]+\.ya?ml$|(?:^|\/)Procfile$)/;
 /** A top-level line of a file: it starts in column 1 and is not a comment or a closing bracket. */
 const OUTLINE_LINE = /^(?![\s#/*})\]]|<!--|--)\S/;
 
@@ -74,9 +74,13 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** A top-level README, in any of the usual spellings. */
 const README = /^readme(?:\.(?:md|markdown|rst|txt))?$/i;
-/** Top-level Markdown files and docs/*.md that are not a README, licence, changelog or guide. */
+/**
+ * Top-level Markdown files and docs/*.md that are not a README, licence, changelog or guide, nor
+ * an instruction file for a coding agent (CLAUDE, AGENTS, GEMINI): those address a model, not a reader.
+ * The exclusions match the whole file name, so `security-model.md` stays.
+ */
 const DOC =
-  /^(?:docs\/)?(?!readme|license|licence|changelog|contributing|code_of_conduct|security)[^/]+\.md$/i;
+  /^(?:docs\/)?(?!(?:readme|license|licence|changelog|contributing|code_of_conduct|security|claude|agents|gemini)\.md$)[^/]+\.md$/i;
 const INVISIBLE = new RegExp(INVISIBLE_CHARACTERS.source, "gu");
 
 /** The repository's README: a top-level README file, Markdown first, then by path. */
@@ -87,27 +91,60 @@ export function readmePath(sources: ReadonlyMap<string, string>): string | undef
 }
 
 /**
- * A heading or a repository name as a title: images and HTML tags dropped, links reduced to
- * their words, Markdown emphasis and code marks removed, control and invisible characters
- * removed, whitespace collapsed, and cut to ARCHITECTURE_TITLE_MAX_LENGTH code points.
+ * A heading or a repository name as a title: images and HTML tags (a `<` that starts with a letter
+ * or `/`) dropped, links reduced to their words, Markdown emphasis and code marks removed (an
+ * underscore only where it is not inside a word, so `my_repo` keeps it), whitespace collapsed
+ * (before the invisible characters go, so a tab is a space), control and invisible characters
+ * removed, and cut to ARCHITECTURE_TITLE_MAX_LENGTH code points.
  */
 function titleText(text: string): string {
   const words = text
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/<[^>]*>/g, "")
-    .replace(/[*_`]/g, "")
-    .replace(INVISIBLE, "")
+    .replace(/<\/?[A-Za-z][^>]*>/g, "")
+    .replace(/[*`]/g, "")
+    .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
     .replace(/\s+/g, " ")
+    .replace(INVISIBLE, "")
+    .replace(/ {2,}/g, " ")
     .trim();
   return [...words].slice(0, ARCHITECTURE_TITLE_MAX_LENGTH).join("").trim();
+}
+
+/** A line without its `<!-- ... -->` comments; `open` says whether one is still open at its end. */
+function outsideComments(line: string, open: boolean): { text: string; open: boolean } {
+  let text = "";
+  let rest = line;
+  let inside = open;
+  while (rest !== "") {
+    if (inside) {
+      const end = rest.indexOf("-->");
+      if (end < 0) break;
+      rest = rest.slice(end + 3);
+      inside = false;
+    } else {
+      const start = rest.indexOf("<!--");
+      if (start < 0) {
+        text += rest;
+        break;
+      }
+      text += rest.slice(0, start);
+      rest = rest.slice(start + 4);
+      inside = true;
+    }
+  }
+  return { text, open: inside };
 }
 
 /** The README's first level-1 heading (`# Title`, or a line underlined with `===`), outside code. */
 function firstHeading(text: string): string | undefined {
   const lines = sourceLines(text).slice(0, MAX_TITLE_SCAN_LINES);
   let fenced = false;
-  for (const [i, line] of lines.entries()) {
+  let commented = false;
+  for (const [i, raw] of lines.entries()) {
+    const visible = outsideComments(raw, commented);
+    const line = visible.text;
+    commented = visible.open;
     if (/^\s{0,3}(?:```|~~~)/.test(line)) fenced = !fenced;
     if (fenced) continue;
     const atx = /^\s{0,3}#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*\r?$/.exec(line);
@@ -163,21 +200,30 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   const parts: string[] = [];
   let used = tail.length;
 
-  /** Adds a section: its items while they fit, then "and N more", or "(none)" when it has none. */
-  const section = (heading: string, items: readonly string[], more: (n: number) => string) => {
+  /**
+   * Adds a section: each item that fits (one that does not is skipped, so a smaller one after it
+   * can still fit), then "and N more" for the items left out plus `omitted`, the ones the caller
+   * has already left out; "(none)" when there is nothing at all.
+   */
+  const section = (
+    heading: string,
+    items: readonly string[],
+    more: (n: number) => string,
+    omitted = 0,
+  ) => {
     const lines = [heading];
     let length = 2 + heading.length;
     let kept = 0;
     for (const item of items) {
-      const rest = items.length - kept - 1;
+      const rest = items.length - kept - 1 + omitted;
       const reserve = rest > 0 ? 1 + more(rest).length : 0;
-      if (used + length + 1 + item.length + reserve > budgetChars) break;
+      if (used + length + 1 + item.length + reserve > budgetChars) continue;
       lines.push(item);
       length += 1 + item.length;
       kept += 1;
     }
-    if (items.length === 0) lines.push("(none)");
-    else if (kept < items.length) lines.push(more(items.length - kept));
+    if (items.length === 0 && omitted === 0) lines.push("(none)");
+    else if (kept < items.length || omitted > 0) lines.push(more(items.length - kept + omitted));
     const text = lines.join("\n");
     used += 2 + text.length;
     parts.push(text);
@@ -233,11 +279,9 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   });
   section(
     "## Project documents",
-    [
-      ...documents,
-      ...(docs.length > MAX_DOCS ? [`- and ${docs.length - MAX_DOCS} more documents`] : []),
-    ],
-    (n) => `- and ${n} more documents not shown`,
+    documents,
+    (n) => `- and ${n} more documents`,
+    Math.max(0, docs.length - MAX_DOCS),
   );
 
   const features = pages.map((page) => {
@@ -276,8 +320,13 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
       .slice(0, MAX_OUTLINE_LINES);
     if (numbers.length === 0) return [];
     const width = String(lines.length).length;
+    // Only the key of a line that sets a value: `db_password = "..."`, `ENV TOKEN=...`.
+    const keys = lines.map((line) => {
+      const equals = line.indexOf("=");
+      return equals < 0 ? line : `${line.slice(0, equals).trimEnd()} = \u2026`;
+    });
     return [
-      `### ${clean(path)} (${lines.length} lines; top-level lines)\n${numbered(lines, numbers, width)}`,
+      `### ${clean(path)} (${lines.length} lines; top-level lines)\n${numbered(keys, numbers, width)}`,
     ];
   });
   const listed = infra.slice(MAX_OUTLINED_FILES, MAX_OUTLINED_FILES + MAX_LISTED_INFRA_FILES);
