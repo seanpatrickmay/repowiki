@@ -36,7 +36,7 @@ function spawnError(error: NodeJS.ErrnoException): GitError {
 }
 
 /** Runs a read-only git command against `repo`; never touches its working tree or index. */
-function git(repo: string, args: readonly string[], input?: string): Buffer {
+export function git(repo: string, args: readonly string[], input?: string): Buffer {
   const result = spawnSync("git", ["-C", repo, ...args], {
     input,
     maxBuffer: 1 << 30,
