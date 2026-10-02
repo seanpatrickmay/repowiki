@@ -101,6 +101,15 @@ const EXTENSION_NAMES: Record<string, string> = {
   ".toml": "TOML",
 };
 const MAX_LANGUAGES = 5;
+
+/** The language a file is counted under: its parser's, else its extension's; undefined if neither. */
+export function languageName(
+  path: string,
+  language: SourceLanguage | null | undefined,
+): string | undefined {
+  const extension = /\.[^./]+$/.exec(path)?.[0] ?? "";
+  return language ? LANGUAGE_NAMES[language] : EXTENSION_NAMES[extension];
+}
 const MAX_ENTRY_POINTS = 3;
 
 /** Orders ISO 8601 date-times by instant, then by code-unit order of the text for equal instants. */
@@ -136,8 +145,7 @@ export function computeInfobox(
   for (const path of files) {
     const file = byPath.get(path);
     loc += file?.loc ?? 0;
-    const extension = /\.[^./]+$/.exec(path)?.[0] ?? "";
-    const name = file?.language ? LANGUAGE_NAMES[file.language] : EXTENSION_NAMES[extension];
+    const name = languageName(path, file?.language);
     if (name !== undefined) languages.set(name, (languages.get(name) ?? 0) + 1);
   }
   // Tests import the code and nothing imports them, so they are left out of the rule entirely.
