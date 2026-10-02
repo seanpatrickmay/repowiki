@@ -247,6 +247,13 @@ function kindOf(key: SectionKey): ClaimKind {
 export type Verified = { claim: Claim; problems: [] } | { claim: null; problems: string[] };
 
 /**
+ * The problem of a limitation claim whose citations resolve and follow the rules but show no
+ * evidence. No retry can fix it when the pack lists none, so the write round drops it at once.
+ */
+export const LIMITATION_EVIDENCE_PROBLEM =
+  "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit";
+
+/**
  * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's
  * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short,
  * in the reader's markdown subset, and free of citation tokens.
@@ -308,9 +315,7 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
     const violations = claimRuleViolations(key, claim);
     problems.push(...violations);
     if (violations.length === 0 && key === "known-limitations" && !evidence) {
-      problems.push(
-        "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
-      );
+      problems.push(LIMITATION_EVIDENCE_PROBLEM);
     }
   }
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };

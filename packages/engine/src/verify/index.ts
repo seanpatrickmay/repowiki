@@ -1,5 +1,6 @@
 export {
   citedLines,
+  LIMITATION_EVIDENCE_PROBLEM,
   MAX_CITED_LINES,
   MAX_CLAIM_LENGTH,
   quote,

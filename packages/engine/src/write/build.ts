@@ -26,6 +26,7 @@ import {
   newPageState,
   type PageState,
   retryRequest,
+  setAsideUnfixable,
   uniqueClaims,
   uniqueDraft,
   verifyAll,
@@ -118,7 +119,7 @@ const callFailure = (error: unknown): string =>
  * Writes every active feature's page (spec §7): one write call per page, all issued in the same
  * tick so they share one Message Batch, then one retry round, also one batch, for pages whose
  * answer was unusable or had claims that failed verification. A claim that fails twice is
- * dropped and logged; a page whose retry call fails, or that is left without a lead or a body, is
+ * dropped and logged, and so is a limitation claim that only lacks evidence, without a retry; a page whose retry call fails, or that is left without a lead or a body, is
  * not written. Links are resolved after verification, Wikipedia titles checked through the cache, and each page gets its infobox, diagram and See also. An unexpected error
  * while verifying or assembling one page fails that page only, and a Wikipedia check that throws
  * leaves every Wikipedia link as plain text; neither loses the paid-for answers. Nothing here
@@ -214,6 +215,7 @@ export async function writePages(
       state.draft = draft;
       try {
         verifyAll(state, claims, ctx);
+        setAsideUnfixable(state);
       } catch (error) {
         // One page's unexpected error fails that page only; its message may hold model text.
         state.failure = `verifying the claims failed: ${errorClass(error)}`;
@@ -312,7 +314,8 @@ export async function writePages(
   const commitDate = history.find((c) => c.sha === index.sha)?.date;
   const pages = states.map((state): PageOutcome => {
     const featureId = state.pack.featureId;
-    const dropped = [...state.failing.values()].map(({ key, claim, problems }) => ({
+    const failed = [...state.unfixable.values(), ...state.failing.values()];
+    const dropped = failed.map(({ key, claim, problems }) => ({
       section: key,
       text: claim.text,
       problems,

@@ -2,6 +2,7 @@ import { Revision } from "@repowiki/core";
 import { makeFeature } from "@repowiki/core/test-fixtures";
 import { CassetteMissError, LlmError, LlmOutputError } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
+import { LIMITATION_EVIDENCE_PROBLEM } from "../verify/index.ts";
 import { type WritePagesOptions, writeCacheKey, writePages } from "./build.ts";
 import { memoryWikipediaCache } from "./test-cache.ts";
 import {
@@ -116,29 +117,76 @@ describe("writePages", () => {
 
   it("drops a claim that fails twice, logs it, and keeps the rest of the page", async () => {
     const broken = signalsDraft();
-    const limitation = broken.sections[3]?.claims[0];
-    if (limitation) limitation.cite = ["src/signals/ingest.py:10-14"];
+    const overview = broken.sections[1]?.claims[0];
+    if (overview) overview.cite = ["src/signals/ingest.py:90-99"];
     const { written, lines } = run((featureId, call) =>
       featureId !== "signals"
         ? deliverablesDraft()
         : call === 1
           ? broken
-          : ({ claims: [limitation] } as Answer),
+          : ({ claims: [overview] } as Answer),
     );
     const { pages } = await written;
+    expect(pages[1]?.calls).toBe(2);
+    expect(pages[1]?.dropped).toEqual([
+      {
+        section: "overview",
+        text: "`ingest_chunk()` keeps at most 50 signals, like a [[wp:Message queue]] would.",
+        problems: ['citation "src/signals/ingest.py:90-99" is outside the file\'s lines 1-31'],
+      },
+    ]);
+    expect(pages[1]?.revision?.sections.map((s) => s.key)).toEqual([
+      "lead",
+      "history",
+      "known-limitations",
+    ]);
+    expect(lines).toEqual([
+      expect.stringMatching(/^signals: dropped an? overview claim: citation/),
+    ]);
+  });
+
+  it("drops a limitation claim that lacks only evidence at once: no retry can give it one", async () => {
+    const broken = signalsDraft();
+    const limitation = broken.sections[3]?.claims[0];
+    if (limitation) limitation.cite = ["src/signals/ingest.py:10-14"];
+    const { written, requests, lines } = run((featureId) =>
+      featureId !== "signals" ? deliverablesDraft() : broken,
+    );
+    const { pages } = await written;
+    expect(requests).toHaveLength(2);
+    expect(pages[1]?.calls).toBe(1);
     expect(pages[1]?.dropped).toEqual([
       {
         section: "known-limitations",
         text: "A TODO notes that long chunks are truncated.",
-        problems: [
-          "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
-        ],
+        problems: [LIMITATION_EVIDENCE_PROBLEM],
       },
     ]);
     expect(pages[1]?.revision?.sections.map((s) => s.key)).toEqual(["lead", "overview", "history"]);
     expect(lines).toEqual([
       expect.stringMatching(/^signals: dropped a known-limitations claim: limitation claims/),
     ]);
+  });
+
+  it("retries a page's other failing claims without the evidence-less limitation claim", async () => {
+    const broken = signalsDraft();
+    const overview = broken.sections[1]?.claims[0];
+    if (overview) overview.cite = ["src/signals/ingest.py:90-99"];
+    const limitation = broken.sections[3]?.claims[0];
+    if (limitation) limitation.cite = ["src/signals/ingest.py:10-14"];
+    const { written, requests } = run((featureId, call) =>
+      featureId !== "signals"
+        ? deliverablesDraft()
+        : call === 1
+          ? broken
+          : ({ claims: [{ ...overview, cite: ["src/signals/ingest.py:10-24"] }] } as Answer),
+    );
+    const { pages } = await written;
+    const turn = requests[2]?.messages.at(-1)?.content ?? "";
+    expect(turn).toContain('- "o1": ');
+    expect(turn).not.toContain('"k1"');
+    expect(pages[1]?.dropped.map((d) => d.section)).toEqual(["known-limitations"]);
+    expect(pages[1]?.revision?.sections.map((s) => s.key)).toEqual(["lead", "overview", "history"]);
   });
 
   it("asks again for the whole page when the first answer is unusable", async () => {
