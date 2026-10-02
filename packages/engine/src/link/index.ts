@@ -3,6 +3,7 @@ export {
   createPageLinker,
   createTargetResolver,
   LINK_TOKEN,
+  linkTokensIn,
   normalizeWikipediaTitle,
   unlinkText,
   wikipediaTitlesIn,

@@ -1,5 +1,11 @@
 import { CLAIM_TEXT_MAX_LENGTH, Revision, Section, type SectionKey } from "@repowiki/core";
-import { bodyClaim, commitCitation, leadClaim, makeRevision } from "@repowiki/core/test-fixtures";
+import {
+  bodyClaim,
+  commitCitation,
+  leadClaim,
+  makeFeature,
+  makeRevision,
+} from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import type { CommitInfo } from "../index/index.ts";
 import { verifyClaim } from "../verify/index.ts";
@@ -260,6 +266,7 @@ describe("assembleRevision", () => {
       "`ingest_chunk()` keeps at most 50 signals, like a Message queue would.",
     );
     expect(assembled.revision?.diagram).toContain('n1 -->|"saves signals"| n2');
+    expect(Revision.parse(assembled.revision)).toEqual(assembled.revision);
   });
 
   it("returns a revision the core schema accepts, with the lead linking the other page", () => {
@@ -336,5 +343,90 @@ describe("assembleRevision", () => {
     const stored = revision?.sections[1]?.claims[0]?.text ?? "";
     expect(stored).toBe(`${filler} deliverables deliverables`);
     expect(Revision.parse(revision)).toEqual(revision);
+  });
+
+  const withText = (base: RevisionParts, key: SectionKey, text: string): RevisionParts => ({
+    ...base,
+    claims: base.claims.map((c) => (c.key === key ? { ...c, claim: { ...c.claim, text } } : c)),
+  });
+  const textOf = (assembled: ReturnType<typeof assembleRevision>, section: number) =>
+    assembled.revision?.sections[section]?.claims.map((c) => c.text);
+
+  it("does not throw or write a live link for a redirect title that holds brackets", () => {
+    const base = parts();
+    const manifest = {
+      ...base.manifest,
+      features: [
+        ...base.manifest.features,
+        makeFeature({
+          id: "old",
+          title: "a`x [[nope",
+          aliases: [],
+          status: { kind: "redirect" as const, to: "deliverables" },
+        }),
+      ],
+    };
+    const assembled = assembleRevision({
+      ...withText(withText(base, "lead", "A plain lead."), "overview", "Uses ` tick [[old]] here."),
+      manifest,
+    });
+    expect(textOf(assembled, 1)).toEqual(["Uses ` tick [[deliverables|ax nope]] here."]);
+    expect(Revision.parse(assembled.revision)).toEqual(assembled.revision);
+  });
+
+  it("replaces a claim whose Wikipedia link is not one that checked out", () => {
+    const base = parts();
+    // A canonical title holding "|" would be written as a link to "wp:Message", which was never checked.
+    const assembled = assembleRevision({
+      ...withText(base, "overview", "Like a [[wp:Message queue]] would."),
+      wikipedia: new Map([["Message queue", "Message|queue"]]),
+    });
+    expect(textOf(assembled, 1)).toEqual(["Like a queue|Message queue would."]);
+  });
+
+  it("drops claims that are blank once linked, and a lead left without support", () => {
+    const base = parts();
+    const blank = `${String.fromCharCode(0xe000)}[[ ]]`;
+    const overview = base.claims.filter((c) => c.key === "overview");
+    const extra = overview.map((c) => ({
+      ...c,
+      claim: { ...c.claim, id: "o2", text: blank, citations: [], supports: [] },
+    }));
+    const assembled = assembleRevision({ ...base, claims: [...base.claims, ...extra] });
+    const ids = assembled.revision?.sections.flatMap((s) => s.claims.map((c) => c.text)) ?? [];
+    expect(ids.every((t) => t.trim() !== "")).toBe(true);
+    expect(textOf(assembled, 1)).toHaveLength(1);
+    expect(Revision.parse(assembled.revision)).toEqual(assembled.revision);
+
+    const leadBlank = assembleRevision(withText(base, "lead", blank));
+    expect(leadBlank).toEqual({
+      revision: null,
+      failure: "no lead or no body claim survived verification",
+    });
+  });
+
+  it("re-checks the lead after blank body claims are dropped", () => {
+    const base = parts();
+    const blank = String.fromCharCode(0xe000);
+    const claims = base.claims.map((c) =>
+      c.key === "overview" || c.key === "history"
+        ? { ...c, claim: { ...c.claim, text: blank } }
+        : c,
+    );
+    expect(assembleRevision({ ...base, claims }).revision).toBeNull();
+  });
+
+  it("does not let a lead claim that is dropped use up a concept's first mention", () => {
+    const base = parts();
+    const lead = base.claims.find((c) => c.key === "lead");
+    if (lead === undefined) throw new Error("fixture has a lead");
+    const orphan = {
+      key: "lead" as const,
+      claim: { ...lead.claim, id: "l9", text: "Orphan [[deliverables]].", supports: ["gone"] },
+    };
+    const assembled = assembleRevision({ ...base, claims: [orphan, ...base.claims] });
+    expect(textOf(assembled, 0)).toEqual([
+      "**Signal ingestion** turns chunks into signals for [[deliverables|deliverable records]].",
+    ]);
   });
 });
