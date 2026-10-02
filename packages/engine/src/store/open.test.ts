@@ -33,6 +33,7 @@ describe("openStore driver errors (issue #53)", () => {
       }
     })();
     expect(error).toBeInstanceOf(StoreError);
+    expect((error as Error).message).toContain(`cannot open ${path} as a RepoWiki store`);
     expect((error as Error).cause).toBeInstanceOf(Error);
   });
 });

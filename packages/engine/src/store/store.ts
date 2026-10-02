@@ -91,10 +91,19 @@ export interface PutManifestOptions {
   llmRevised?: boolean;
 }
 
-/** A driver failure while opening (not a database, unreadable, locked) as a CLI-facing StoreError. */
-function cannotOpen(path: string, error: unknown): StoreError {
-  // Only the driver's first line: the full error rides along as the cause.
-  const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0];
+/**
+ * A failure while opening or migrating as a CLI-facing StoreError. A driver error (not a
+ * database, unreadable, locked, or the TypeError the driver throws for a missing directory)
+ * gives its first line as the reason. Anything else (a migration's own error, a SyntaxError or
+ * ZodError from stored data) may quote that data, so only its class name is given. The full
+ * error is always the cause.
+ */
+function cannotOpen(path: string, error: unknown, opening: boolean): StoreError {
+  const isDriverError =
+    error instanceof Database.SqliteError || (opening && error instanceof TypeError);
+  const reason = isDriverError
+    ? error.message.split("\n")[0]
+    : `stored data failed to migrate (${error instanceof Error ? error.name : "unknown error"})`;
   return new StoreError(`cannot open ${path} as a RepoWiki store: ${reason}`, { cause: error });
 }
 
@@ -107,7 +116,7 @@ export function openStore(path: string): Store {
   try {
     db = new Database(path);
   } catch (error) {
-    throw cannotOpen(path, error);
+    throw cannotOpen(path, error, true);
   }
   try {
     // Migrate before switching to WAL: refusing a newer schema must not touch the file.
@@ -116,7 +125,7 @@ export function openStore(path: string): Store {
     db.pragma("foreign_keys = ON");
   } catch (error) {
     db.close();
-    throw error instanceof StoreError ? error : cannotOpen(path, error);
+    throw error instanceof StoreError ? error : cannotOpen(path, error, false);
   }
 
   const readManifest = (row: BodyRow | undefined): Manifest | null =>

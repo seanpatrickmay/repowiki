@@ -26,7 +26,9 @@ describe("the codeCitation fixture (issue #53)", () => {
     expect(cited).toHaveLength(15);
     expect(cited[0]).toBe("def ingest_chunk(chunk):");
     expect(cited.at(-1)).toBe("    return signals");
-    expect(codeCitation().contentHash).toBe(contentHash(cited.join("\n")));
+    const citation = codeCitation();
+    expect([citation.startLine, citation.endLine]).toEqual([10, 24]);
+    expect(citation.contentHash).toBe(contentHash(cited.join("\n")));
     expect(sourceLines(INGEST_PY, 10, 24)).toBe(cited.join("\n"));
   });
 
