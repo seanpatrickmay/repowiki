@@ -12,6 +12,7 @@ import {
 import type { CommitInfo, RepoIndex, SourceLanguage } from "../index/index.ts";
 import {
   createPageLinker,
+  isTestFile,
   linkTokensIn,
   linkViolations,
   seeAlsoFor,
@@ -110,7 +111,8 @@ function byInstant(a: string, b: string): number {
  * The infobox, computed from the index and git (spec §7.3): member files and their lines, the
  * languages with the most files, the entry points, and the dates of the first and last commit
  * that touched a member file. Entry points are member code files no other member imports that
- * import a member themselves; failing that, the heaviest code file. Commit dates keep the
+ * import a member themselves; failing that, the heaviest code file. Test files are never entry
+ * points, and their imports do not count. Commit dates keep the
  * committer's own offset (`Infobox` takes an ISO 8601 date-time with an offset or `Z`) and are
  * compared as instants; history is newest first by commit date, which clock skew can break.
  * With no usable commit, both dates are `commitDate`.
@@ -134,12 +136,14 @@ export function computeInfobox(
     const name = file?.language ? LANGUAGE_NAMES[file.language] : EXTENSION_NAMES[extension];
     if (name !== undefined) languages.set(name, (languages.get(name) ?? 0) + 1);
   }
+  // Tests import the code and nothing imports them, so they are left out of the rule entirely.
+  const code = files.filter((path) => byPath.get(path)?.language && !isTestFile(path));
+  const isCode = new Set(code);
   const internal = index.imports.filter(
-    (e) => e.from !== e.to && mine.has(e.from) && mine.has(e.to),
+    (e) => e.from !== e.to && isCode.has(e.from) && isCode.has(e.to),
   );
   const imported = new Set(internal.map((e) => e.to));
   const importing = new Set(internal.map((e) => e.from));
-  const code = files.filter((path) => byPath.get(path)?.language);
   const roots = code.filter((path) => importing.has(path) && !imported.has(path));
   const entryPoints = (roots.length > 0 ? roots : code.slice(0, 1)).slice(0, MAX_ENTRY_POINTS);
   const dates = commits

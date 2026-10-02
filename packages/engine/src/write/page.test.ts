@@ -1,4 +1,10 @@
-import { CLAIM_TEXT_MAX_LENGTH, Revision, Section, type SectionKey } from "@repowiki/core";
+import {
+  CLAIM_TEXT_MAX_LENGTH,
+  memberId,
+  Revision,
+  Section,
+  type SectionKey,
+} from "@repowiki/core";
 import {
   bodyClaim,
   commitCitation,
@@ -144,6 +150,27 @@ describe("computeInfobox", () => {
       firstCommitDate: "2026-01-26T09:00:00-05:00",
       lastCommitDate: "2026-02-03T10:00:00-05:00",
     });
+  });
+
+  it("never names a test file as an entry point, and falls back to the heaviest other code", () => {
+    const { index, manifest, history } = testWiki();
+    const ingest = index.files.find((f) => f.path === "src/signals/ingest.py");
+    const tests = ["tests/conftest.py", "src/signals/test_ingest.py", "src/signals/ingest.test.ts"];
+    for (const path of tests) {
+      if (ingest) index.files.push({ ...ingest, id: memberId(path), path, symbols: [] });
+      index.imports.push({ from: path, to: "src/signals/ingest.py", line: 1 });
+      manifest.membership[memberId(path)] = { featureId: "signals", weight: 0.9 };
+    }
+    const box = computeInfobox("signals", manifest, index, history, "2026-03-01T00:00:00Z");
+    expect(box.entryPoints).toEqual(["src/signals/ingest.py"]);
+    // With the importing code gone, the heaviest code file that is not a test.
+    index.imports = index.imports.filter((e) => e.from !== "src/signals/ingest.py");
+    const fallback = computeInfobox("signals", manifest, index, history, "2026-03-01T00:00:00Z");
+    expect(fallback.entryPoints).toEqual(["src/signals/ingest.py"]);
+    for (const path of tests)
+      manifest.membership[memberId(path)] = { featureId: "signals", weight: 2 };
+    const heavy = computeInfobox("signals", manifest, index, history, "2026-03-01T00:00:00Z");
+    expect(heavy.entryPoints).toEqual(["src/signals/ingest.py"]);
   });
 
   it("falls back to the build commit's date when no commit touched the feature", () => {

@@ -128,7 +128,7 @@ function isClientCall(matched: string): boolean {
  * tests/, __tests__/, fixtures/ and __fixtures__/ directories, *.test.* and *.spec.* files,
  * test_*.py, *_test.py, tests.py and conftest.py.
  */
-function isTestFile(path: string): boolean {
+export function isTestFile(path: string): boolean {
   const segments = path.split("/");
   const name = segments.pop() ?? "";
   return (
