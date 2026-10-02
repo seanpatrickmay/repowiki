@@ -1,10 +1,30 @@
 import type { Citation } from "@repowiki/core";
 
-/** A TODO or FIXME comment marker. */
-export const TODO_MARKER = /\b(?:TODO|FIXME)\b/;
+/**
+ * A TODO, FIXME, XXX or HACK marker as a whole word after a comment opener (`#`, `//`, `/*`,
+ * `<!--`, `--`, or a block comment's leading `*`) on the same line. A name like `Status.TODO` or a
+ * string like `"TODO"` is not a marker.
+ */
+export const TODO_MARKER = /(?:^[ \t]*\*|#|\/\/|\/\*|<!--|--)[^\n]*\b(?:TODO|FIXME|XXX|HACK)\b/m;
+
+/** The start of a line that is only a comment, so a skip mentioned in it is not a skip. */
+const COMMENT_LINE = "[ \\t]*(?:#|//|/\\*|\\*|<!--|--)";
+/** Not preceded by an identifier character, `$` or `.`: `obj.xit(` and `$xit(` are other things. */
+const BARE = "(?<![\\w$.])";
+const SKIPS = [
+  // pytest: decorators, a module-level `pytestmark = ...`, and imperative skips
+  "pytest\\.mark\\.(?:skip|skipif|xfail)\\b",
+  "\\bpytest\\.skip\\(",
+  // unittest
+  "@unittest\\.skip",
+  "\\bself\\.skipTest\\(",
+  // Vitest, Jest and Mocha
+  `${BARE}(?:it|test|describe)\\.(?:skip(?:\\.each)?|todo|skipIf)\\(`,
+  `${BARE}(?:xit|xtest|xdescribe)\\(`,
+];
 /** A skipped, expected-to-fail or to-do test in pytest, unittest, Vitest, Jest or Mocha. */
-export const SKIPPED_TEST =
-  /@pytest\.mark\.(?:skip|skipif|xfail)\b|@unittest\.skip|\bpytest\.skip\(|\b(?:it|test|describe)\.(?:skip|todo)\(|\b(?:xit|xtest|xdescribe)\(/;
+export const SKIPPED_TEST = new RegExp(`^(?!${COMMENT_LINE})[^\\n]*?(?:${SKIPS.join("|")})`, "m");
+
 /** A commit that undoes another: git's `Revert "…"`, or a Conventional Commits `revert:`. */
 export const REVERT_SUBJECT = /^revert\b/i;
 
