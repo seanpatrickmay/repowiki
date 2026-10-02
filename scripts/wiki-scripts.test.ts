@@ -177,8 +177,10 @@ describe("wiki-check.ts as a process (no network)", () => {
     const result = run("scripts/wiki-check.ts", repo, "--out", pageOf(repo, sha, sha));
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
+    // The page's See also names deliverables, an active feature with no page.
     expect(result.stdout).toBe(
-      "1 pages: 1 code citations re-hashed and 1 commit citations resolved; no problems\n",
+      "1 pages: 1 code citations re-hashed and 1 commit citations resolved; no problems\n" +
+        "1 links name an active feature with no stored page (the site shows them as plain text)\n",
     );
   });
 
