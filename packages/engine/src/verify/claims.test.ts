@@ -395,6 +395,22 @@ describe("verifyClaim citation-shaped text", () => {
     expect(problemsOf("See nope.js:3 for it.")).toEqual([]);
   });
 
+  it("lists the sources' basenames once per context, not once per bare file name", () => {
+    const base = testContext();
+    let listed = 0;
+    const sources = new Map(base.sources);
+    const keys = sources.keys.bind(sources);
+    sources.keys = () => {
+      listed += 1;
+      return keys();
+    };
+    const ctx = { ...base, sources };
+    const text = "See a.py:1, b.py:2, c.py:3 and missing.py:4.";
+    for (let i = 0; i < 3; i++) expect(problemsOf(text, ctx)).toEqual([]);
+    expect(listed).toBe(1);
+    expect(problemsOf("See ingest.py:3 for it.", ctx)).toHaveLength(1);
+  });
+
   it("refuses a citation that follows a colon", () => {
     expect(problemsOf("see:src/signals/ingest.py:10")).toHaveLength(1);
     expect(problemsOf("see:commit:abcdef1")).toHaveLength(1);

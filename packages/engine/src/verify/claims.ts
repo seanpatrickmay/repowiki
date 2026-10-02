@@ -182,7 +182,9 @@ function hasHtmlTag(text: string): boolean {
  * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. Code
  * spans and link tokens are blanked first, as the reader tokenizes them, so markup characters
  * inside a code span are fine and `[[ingest]](the stage)` is a link followed by text. A line break
- * is refused by verifyClaim's control-character check, which names it once. Every scan is linear.
+ * is refused by verifyClaim's control-character check, which names it once. The link and tag
+ * scans are linear, but blanking READER_TOKEN is quadratic on runs of "[[": verifyClaim calls this
+ * only on text within MAX_CLAIM_LENGTH, and that gate is what bounds it.
  */
 function markupProblems(text: string): string[] {
   const plain = text.replace(READER_TOKEN, " ");
@@ -208,6 +210,22 @@ const COMMIT_IN_TEXT = /(?<![\p{L}\p{N}_/.@~+-])commit:[0-9a-f]{7,64}\b/giu;
 const FILE_EXTENSION = /(?:^|[^.])\.[A-Za-z][A-Za-z0-9]{0,9}$/;
 const MAX_NAMED_TOKENS = 3;
 
+/** The basenames of the source files under a directory, built once per (read-only) sources map. */
+const basenames = new WeakMap<ReadonlyMap<string, string>, Set<string>>();
+
+function basenamesOf(sources: ReadonlyMap<string, string>): Set<string> {
+  let names = basenames.get(sources);
+  if (names === undefined) {
+    names = new Set();
+    for (const file of sources.keys()) {
+      const slash = file.lastIndexOf("/");
+      if (slash !== -1) names.add(file.slice(slash + 1));
+    }
+    basenames.set(sources, names);
+  }
+  return names;
+}
+
 /**
  * Whether "path" in "path:12" names a repository file. With a "/" it does when its last segment
  * has an extension; without one ("Node.js:18", "redis.internal:6379") only when it is a file of
@@ -216,8 +234,7 @@ const MAX_NAMED_TOKENS = 3;
 function looksLikeFile(path: string, ctx: VerifyContext): boolean {
   if (ctx.sources.has(path)) return true;
   if (path.includes("/")) return FILE_EXTENSION.test(path.slice(path.lastIndexOf("/") + 1));
-  for (const file of ctx.sources.keys()) if (file.endsWith(`/${path}`)) return true;
-  return false;
+  return basenamesOf(ctx.sources).has(path);
 }
 
 /**
