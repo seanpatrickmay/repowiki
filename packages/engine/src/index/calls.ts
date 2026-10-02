@@ -203,10 +203,11 @@ export function resolveBinding(
  * class K of the same file. Calls on other objects cannot be resolved without types, so they are
  * left out. Self-edges are dropped; each (from, to) pair keeps its first line.
  *
- * Names are matched without scope analysis. A top-level symbol of the calling file beats an import
- * of the same name (Python's later `def` wins), but a parameter, nested def or local const that
- * shadows an imported or top-level name is not tracked, so such a call resolves to the wrong
- * symbol. Treat call edges as hints, not proof.
+ * Names are matched without scope analysis. A top-level symbol of the calling file always beats an
+ * import of the same name, whichever comes first in the file (Python binds whichever ran last, so
+ * an import after the `def` resolves wrongly here). A parameter, nested def or local const that
+ * shadows an imported or top-level name is not tracked either, so such a call resolves to the
+ * wrong symbol. Treat call edges as hints, not proof.
  */
 export function resolveCalls(
   file: { id: string; path: string; symbols: readonly SymbolSpan[] },
