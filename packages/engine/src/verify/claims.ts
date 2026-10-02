@@ -143,18 +143,53 @@ function resolveCommit(ref: string, prefix: string, ctx: VerifyContext): Resolve
   return { citation: { kind: "commit", sha: found.sha, subject, pr: found.pr }, lines: null };
 }
 
+/** The reader's own tokenizer: a code span or a [[link]] token is held aside before anything else. */
+const READER_TOKEN = /`([^`]+)`|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+/** Element names that make `<name …>` markup. Other `<word>` text is prose or a type name. */
+const HTML_ELEMENTS = new Set(
+  (
+    "a abbr address area article aside audio b base bdi bdo big blockquote body br button canvas " +
+    "caption center cite code col data dd del details dfn dialog div dl dt em embed fieldset " +
+    "figure font footer form h1 h2 h3 h4 h5 h6 head header hr html i iframe img input ins kbd " +
+    "label legend li link main map mark marquee menu meta nav noscript object ol option p " +
+    "picture pre q s samp script section select small source span strike strong style sub " +
+    "summary sup svg table tbody td template textarea tfoot th thead time title tr tt u ul var " +
+    "video wbr"
+  ).split(" "),
+);
+const TAG_START = /^<\/?([A-Za-z][A-Za-z0-9]*)(?=[\s/>])/;
+const TAG_HEAD_LENGTH = 40;
+
+/** True when the text holds `<element …>`, `</element>`, a comment or a doctype. One pass. */
+function hasHtmlTag(text: string): boolean {
+  let close = -1;
+  for (let open = text.indexOf("<"); open !== -1; open = text.indexOf("<", open + 1)) {
+    if (close < open) {
+      close = text.indexOf(">", open);
+      if (close === -1) return false;
+    }
+    const head = text.slice(open, Math.min(close + 1, open + TAG_HEAD_LENGTH));
+    if (/^<!(--|doctype\b)/i.test(head)) return true;
+    const name = TAG_START.exec(head)?.[1];
+    if (name !== undefined && HTML_ELEMENTS.has(name.toLowerCase())) return true;
+  }
+  return false;
+}
+
 /**
  * Claim text uses only the reader's markdown subset (spec §5 rule 11): **bold**, *italic*,
- * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. The
- * reader renders a code span as escaped code, so markup characters inside one are fine. A line
- * break is refused by verifyClaim's control-character check, which names it once.
+ * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. Code
+ * spans and link tokens are blanked first, as the reader tokenizes them, so markup characters
+ * inside a code span are fine and `[[ingest]](the stage)` is a link followed by text. A line break
+ * is refused by verifyClaim's control-character check, which names it once. Every scan is linear.
  */
 function markupProblems(text: string): string[] {
-  const outsideCode = text.replace(/`[^`]+`/g, " ");
+  const plain = text.replace(READER_TOKEN, " ");
   const found: string[] = [];
-  if (/\]\([^)]*\)/.test(outsideCode)) found.push("a [text](url) link");
-  if (/<\/?[A-Za-z!][^>]*>/.test(outsideCode)) found.push("an HTML tag");
-  if (/(^|\s)#{1,6}\s/.test(outsideCode)) found.push("a heading");
+  const linkOpen = plain.indexOf("](");
+  if (linkOpen !== -1 && plain.indexOf(")", linkOpen + 2) !== -1) found.push("a [text](url) link");
+  if (hasHtmlTag(plain)) found.push("an HTML tag");
+  if (/^#{1,6}\s/.test(plain)) found.push("a heading");
   return found.length === 0
     ? []
     : [
@@ -163,27 +198,31 @@ function markupProblems(text: string): string[] {
 }
 
 const PATH_SEGMENT = String.raw`[\p{L}\p{N}_.@+~-]+`;
-/** "path:12", "path:12-30" and their L-forms; a path run that starts mid-token or after "://" is skipped. */
+/** "path:12", "path:12-30" and their L-forms; a path run that starts mid-token or after "/" is skipped. */
 const CITATION_IN_TEXT = new RegExp(
-  String.raw`(?<![\p{L}\p{N}_/.@:~+-])(/?${PATH_SEGMENT}(?:/${PATH_SEGMENT})*):L?\d+(?:-L?\d+)?(?![\p{L}\p{N}_])`,
+  String.raw`(?<![\p{L}\p{N}_/.@~+-])(/?${PATH_SEGMENT}(?:/${PATH_SEGMENT})*):L?\d+(?:-L?\d+)?(?![\p{L}\p{N}_])`,
   "gu",
 );
-const COMMIT_IN_TEXT = /(?<![\p{L}\p{N}_/.@:~+-])commit:[0-9a-f]{7,64}\b/giu;
-const FILE_EXTENSION = /(?:^|[^.])\.([A-Za-z][A-Za-z0-9]{0,9})$/;
-/** Hosts, not files: "example.com:8080" is an address. A real file of that name still counts. */
-const HOST_SUFFIXES = new Set(["com", "org", "net", "io", "dev", "edu", "gov", "local"]);
+const COMMIT_IN_TEXT = /(?<![\p{L}\p{N}_/.@~+-])commit:[0-9a-f]{7,64}\b/giu;
+const FILE_EXTENSION = /(?:^|[^.])\.[A-Za-z][A-Za-z0-9]{0,9}$/;
 const MAX_NAMED_TOKENS = 3;
 
+/**
+ * Whether "path" in "path:12" names a repository file. With a "/" it does when its last segment
+ * has an extension; without one ("Node.js:18", "redis.internal:6379") only when it is a file of
+ * the commit or the basename of one. Either way a key of the sources counts.
+ */
 function looksLikeFile(path: string, ctx: VerifyContext): boolean {
   if (ctx.sources.has(path)) return true;
-  const extension = FILE_EXTENSION.exec(path.slice(path.lastIndexOf("/") + 1))?.[1];
-  return extension !== undefined && !HOST_SUFFIXES.has(extension.toLowerCase());
+  if (path.includes("/")) return FILE_EXTENSION.test(path.slice(path.lastIndexOf("/") + 1));
+  for (const file of ctx.sources.keys()) if (file.endsWith(`/${path}`)) return true;
+  return false;
 }
 
 /**
  * Citations go in `cite`, never in the text, where nothing would check them. A "path:12-30" or
  * "commit:abcdef1" token in the text is refused; times ("10:30"), ratios ("3:1"), URLs and
- * "host:port" pairs are not citation-shaped, because a path must look like a repository file.
+ * "host:port" pairs are not, because a path must look like a repository file.
  */
 function citationProblems(text: string, ctx: VerifyContext): string[] {
   const tokens = new Set<string>();
@@ -218,7 +257,8 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
   const text = draft.text.trim();
   if (draft.id === "") problems.push("the claim has no id");
   if (text === "") problems.push("the claim has no text");
-  if ([...text].length > MAX_CLAIM_LENGTH) {
+  const length = [...text].length;
+  if (length > MAX_CLAIM_LENGTH) {
     problems.push(`the claim is over ${MAX_CLAIM_LENGTH} characters; split or shorten it`);
   }
   if (UNSAFE_TEXT.test(text)) {
@@ -226,8 +266,12 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
       "the claim text holds a control or line-break character; write one plain paragraph",
     );
   }
-  problems.push(...markupProblems(text));
-  problems.push(...citationProblems(text, ctx));
+  // Over-length text is refused above; scanning it for markup would only spend time on a claim
+  // that is dropped anyway.
+  if (length <= MAX_CLAIM_LENGTH) {
+    problems.push(...markupProblems(text));
+    problems.push(...citationProblems(text, ctx));
+  }
   const citations: Citation[] = [];
   let evidence = false;
   let unresolved = false;
