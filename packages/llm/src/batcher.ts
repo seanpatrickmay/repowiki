@@ -45,6 +45,8 @@ interface Queued {
   reject: (error: unknown) => void;
   /** Batches this request has been sent in so far. */
   attempts: number;
+  /** Set once the request's promise is settled, so a queued-again request is not sent after that. */
+  settled: boolean;
 }
 
 /** Downloads of a finished batch's results are tried this many times before giving up. */
@@ -227,8 +229,11 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
   const enqueue = (item: Queued): void => {
     if (queue.length === 0) {
       setImmediate(() => {
-        const items = queue;
+        // An item can be settled while queued: a failure of `run` rejects every item of its batch,
+        // including those already queued again.
+        const items = queue.filter((item) => !item.settled);
         queue = [];
+        if (items.length === 0) return;
         // `run` settles every item itself; this catch only keeps a bug in it from leaking as an
         // unhandled rejection that would leave the callers pending forever.
         run(items).catch((error: unknown) => {
@@ -244,5 +249,20 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
   };
 
   return (params) =>
-    new Promise((resolve, reject) => enqueue({ params, resolve, reject, attempts: 0 }));
+    new Promise((resolve, reject) => {
+      const item: Queued = {
+        params,
+        attempts: 0,
+        settled: false,
+        resolve: (message) => {
+          item.settled = true;
+          resolve(message);
+        },
+        reject: (error) => {
+          item.settled = true;
+          reject(error);
+        },
+      };
+      enqueue(item);
+    });
 }

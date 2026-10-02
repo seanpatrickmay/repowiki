@@ -690,12 +690,64 @@ describe("createBatcher per-item retries", () => {
   });
 
   it.each([
-    ["an invalid request", errored("req-0", "invalid_request_error"), /invalid_request_error/],
-    ["a canceled item", { custom_id: "req-0", result: { type: "canceled" } }, /canceled/],
-  ])("never sends %s again", async (_name, line, why) => {
-    const { batcher, posts } = roundsApi([[line]]);
-    await expect(batcher(params("a"))).rejects.toThrow(why);
+    "invalid_request_error",
+    "authentication_error",
+    "permission_error",
+    "not_found_error",
+    "request_too_large",
+    "billing_error",
+  ])("never sends a %s item again", async (type) => {
+    const { batcher, posts } = roundsApi([[errored("req-0", type)], [succeededLine("req-0", "x")]]);
+    await expect(batcher(params("a"))).rejects.toThrow(`did not succeed: ${type}: ${type}`);
     expect(posts).toHaveLength(1);
+  });
+
+  it("never sends a canceled item again", async () => {
+    const { batcher, posts } = roundsApi([
+      [{ custom_id: "req-0", result: { type: "canceled" } }],
+      [succeededLine("req-0", "x")],
+    ]);
+    await expect(batcher(params("a"))).rejects.toThrow("did not succeed: canceled");
+    expect(posts).toHaveLength(1);
+  });
+
+  it.each(["rate_limit_error", "timeout_error"])(
+    "sends a %s item again in the next batch and resolves it",
+    async (type) => {
+      const { batcher, posts } = roundsApi([
+        [errored("req-0", type)],
+        [succeededLine("req-0", "x")],
+      ]);
+      expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "x" }]);
+      expect(posts).toHaveLength(2);
+    },
+  );
+
+  it("gives a fresh request that joins a retry batch three tries of its own", async () => {
+    const overloaded = errored("req-0", "overloaded_error");
+    const overloadedSecond = errored("req-1", "overloaded_error");
+    const { batcher, posts } = roundsApi([
+      // Round 1: "a" fails retryably; "c" fails for good, which is when "b" is made.
+      [overloaded, errored("req-1", "invalid_request_error")],
+      // Round 2: "a" (attempt 2) and the fresh "b" (attempt 1) both fail again.
+      [overloaded, overloadedSecond],
+      // Round 3: "a" is out of attempts; "b" is on its second.
+      [overloaded, overloadedSecond],
+      // Round 4: "b"'s third attempt.
+      [succeededLine("req-0", "done")],
+    ]);
+    const a = batcher(params("a"));
+    let b: Promise<unknown> = Promise.resolve();
+    // Rejecting "c" runs this after round 1's harvest queued "a" again but before that batch goes.
+    const c = batcher(params("c")).catch(() => {
+      b = batcher(params("b"));
+    });
+    const [settledA] = await Promise.allSettled([a, c]);
+    expect(String(settledA.status === "rejected" && settledA.reason)).toContain(
+      "request req-0 did not succeed (attempt 3 of 3): overloaded_error",
+    );
+    expect(await b).toMatchObject({ content: [{ type: "text", text: "done" }] });
+    expect(posts.map((p) => p.requests.length)).toEqual([2, 2, 2, 1]);
   });
 
   it(`gives up after ${ITEM_ATTEMPTS} batches`, async () => {
@@ -710,6 +762,23 @@ describe("createBatcher per-item retries", () => {
       `did not succeed (attempt ${ITEM_ATTEMPTS} of ${ITEM_ATTEMPTS}): api_error`,
     );
     expect(posts).toHaveLength(ITEM_ATTEMPTS);
+  });
+
+  it("sends no wasted batch when reading a result throws after an item was queued again", async () => {
+    const { batcher, posts } = roundsApi([
+      // "a" is queued again; the malformed line for "b" (no `error`) then throws in the harvest.
+      [errored("req-0", "overloaded_error"), { custom_id: "req-1", result: { type: "errored" } }],
+      [succeededLine("req-0", "x")],
+    ]);
+    const settled = await Promise.allSettled([batcher(params("a")), batcher(params("b"))]);
+    expect(settled.map((s) => (s.status === "rejected" ? String(s.reason) : "ok"))).toEqual([
+      expect.stringContaining("LlmError: batch run failed unexpectedly"),
+      expect.stringContaining("LlmError: batch run failed unexpectedly"),
+    ]);
+    // The batch for the queued-again "a" would go out on the next tick.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(posts).toHaveLength(1);
   });
 
   it("reports each retry batch to onBatchCreated", async () => {

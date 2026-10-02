@@ -136,6 +136,33 @@ describe("createClaudeProvider", () => {
     expect(ledger.entries().map((e) => e.batch)).toEqual([true]);
   });
 
+  it("ledgers a batched call once when its first attempt errors and its second succeeds", async () => {
+    const rounds = [
+      cannedBatchApi([
+        {
+          custom_id: "req-0",
+          result: {
+            type: "errored",
+            error: { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+          },
+        },
+      ]),
+      cannedBatchApi([succeededLine("req-0", PARIS)]),
+    ];
+    let round = 0;
+    const fetch: FetchLike = async (input, init) => {
+      if (init?.method === "POST") round += 1;
+      const api = rounds[Math.max(round - 1, 0)];
+      if (!api) throw new Error("no canned round");
+      return api.fetch(input, init);
+    };
+    const { ledger, provider } = setup(fetch);
+    const result = await provider.generate({ ...request, batch: true });
+    expect(result.output.city).toBe("Paris");
+    expect(round).toBe(2);
+    expect(ledger.entries().map((e) => e.batch)).toEqual([true]);
+  });
+
   it("reports created batch ids and cancels a batch past its deadline", async () => {
     const paths: string[] = [];
     const inProgress = {
