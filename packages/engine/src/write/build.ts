@@ -8,8 +8,10 @@ import {
 } from "@repowiki/core";
 import {
   CassetteMissError,
+  type GenerateRequest,
   type GenerateResult,
   LlmError,
+  type LlmMessage,
   LlmOutputError,
   type Provider,
 } from "@repowiki/llm";
@@ -104,6 +106,10 @@ const addTokens = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
 });
 
 type Settled<T> = { result: GenerateResult<T> } | { error: unknown };
+/** A round-2 answer: a whole page again, or fixes for the failing claims. */
+type RetryAnswer =
+  | { kind: "page"; outcome: Settled<PageDraft> }
+  | { kind: "fixes"; outcome: Settled<ClaimFixes> };
 const settle = <T>(promise: Promise<GenerateResult<T>>): Promise<Settled<T>> =>
   promise.then(
     (result) => ({ result }),
@@ -125,11 +131,13 @@ const callFailure = (error: unknown): string =>
  * Writes every active feature's page (spec §7): one write call per page, all issued in the same
  * tick so they share one Message Batch, then one retry round, also one batch, for pages whose
  * answer was unusable or had claims that failed verification. A claim that fails twice is
- * dropped and logged, and so is a limitation claim that only lacks evidence, without a retry; a page whose retry call fails, or that is left without a lead or a body, is
- * not written. Links are resolved after verification, Wikipedia titles checked through the cache, and each page gets its infobox, diagram and See also. An unexpected error
- * while verifying or assembling one page fails that page only, and a Wikipedia check that throws
- * leaves every Wikipedia link as plain text; neither loses the paid-for answers. Nothing here
- * touches the store.
+ * dropped and logged, and so is a limitation claim that only lacks evidence, without a retry. A
+ * page whose retry call fails, or that is left without a lead or a body, is not written. Links
+ * are resolved after verification, the Wikipedia titles of the pages still being written are
+ * checked through the cache, and each page gets its infobox, diagram and See also. An unexpected
+ * error while verifying or assembling one page fails that page only, and a Wikipedia check that
+ * throws leaves every Wikipedia link as plain text; neither loses the paid-for answers. Nothing
+ * here touches the store.
  */
 export async function writePages(
   input: WritePagesInput,
@@ -238,43 +246,49 @@ export async function writePages(
   const retrying = states.filter(
     (s) => s.failure === null && (s.rejected !== null || s.failing.size > 0),
   );
+  /** One round-2 call: the same system prompt, no cacheKey (spec §6.3: retry once). */
+  const retry = <T>(
+    state: PageState,
+    messages: LlmMessage[],
+    schema: GenerateRequest<T>["schema"],
+    max: number,
+  ) =>
+    settle(
+      options.provider.generate({
+        purpose: "write",
+        featureId: state.pack.featureId,
+        system,
+        messages,
+        schema,
+        maxTokens: max,
+        batch,
+      }),
+    );
+  // Each async callback makes its call before its first await, so every call is in this tick.
   const second = await Promise.all(
-    retrying.map((state) =>
-      state.rejected !== null
-        ? settle(
-            options.provider.generate({
-              purpose: "write",
-              featureId: state.pack.featureId,
-              system,
-              messages: retryRequest(state),
-              schema: PageDraft,
-              maxTokens: MAX_PAGE_OUTPUT_TOKENS,
-              batch,
-            }),
-          )
-        : settle(
-            options.provider.generate({
-              purpose: "write",
-              featureId: state.pack.featureId,
-              system,
-              messages: fixRequest(state),
-              schema: ClaimFixes,
-              maxTokens: MAX_FIX_OUTPUT_TOKENS,
-              batch,
-            }),
-          ),
+    retrying.map(
+      async (state): Promise<RetryAnswer> =>
+        state.rejected !== null
+          ? {
+              kind: "page",
+              outcome: await retry(state, retryRequest(state), PageDraft, MAX_PAGE_OUTPUT_TOKENS),
+            }
+          : {
+              kind: "fixes",
+              outcome: await retry(state, fixRequest(state), ClaimFixes, MAX_FIX_OUTPUT_TOKENS),
+            },
     ),
   );
-  second.forEach((outcome, i) => {
+  second.forEach((answer, i) => {
     const state = retrying[i] as PageState;
-    record(state, outcome);
-    if (!("result" in outcome)) {
-      state.failure = `the write call failed twice: ${callFailure(outcome.error)}`;
+    record(state, answer.outcome);
+    if (!("result" in answer.outcome)) {
+      state.failure = `the write call failed twice: ${callFailure(answer.outcome.error)}`;
       return;
     }
     try {
-      if (state.rejected !== null) {
-        const draft = uniqueDraft(outcome.result.output as PageDraft);
+      if (answer.kind === "page") {
+        const draft = uniqueDraft(answer.outcome.result.output);
         state.draft = draft;
         verifyAll(state, uniqueClaims(draft), ctx);
         return;
@@ -282,7 +296,7 @@ export async function writePages(
       // Only a claim still failing is fixed: an id already verified, or unknown, is ignored. A
       // body claim given up has no cite list and a lead claim no supports; both stay failing,
       // and are dropped.
-      const fixes = new Map((outcome.result.output as ClaimFixes).claims.map((c) => [c.id, c]));
+      const fixes = new Map(answer.outcome.result.output.claims.map((c) => [c.id, c]));
       const again = [...state.failing.values()].flatMap(({ key, claim }) => {
         const fix = fixes.get(claim.id);
         const gaveUp = key === "lead" ? fix?.supports.length === 0 : fix?.cite.length === 0;
@@ -295,9 +309,12 @@ export async function writePages(
     }
   });
 
-  // Wikipedia titles of every surviving claim, checked once for the whole run.
+  // Wikipedia titles of every surviving claim of a page still being written, checked once for
+  // the whole run: a failed page's links are never shown, so they cost no lookup.
   const titles = states.flatMap((s) =>
-    [...s.verified.values()].flatMap(({ claim }) => wikipediaTitlesIn(claim.text)),
+    s.failure !== null
+      ? []
+      : [...s.verified.values()].flatMap(({ claim }) => wikipediaTitlesIn(claim.text)),
   );
   let wikipedia: WikipediaCheck;
   try {

@@ -116,6 +116,7 @@ describe("writePages", () => {
     const retry = requests[2];
     expect(retry?.turn).toBe(1);
     expect(retry?.cacheKey).toBeUndefined();
+    expect(requests.map((r) => r.maxTokens)).toEqual([8000, 8000, 4000]);
     expect(retry?.messages.at(-1)?.content).toContain(
       '- "o1": citation "src/signals/ingest.py:90-99" is outside the file\'s lines 1-31',
     );
@@ -207,6 +208,7 @@ describe("writePages", () => {
     );
     const { pages } = await written;
     expect(pages[1]?.failure).toBeNull();
+    expect(requests.map((r) => r.maxTokens)).toEqual([8000, 8000, 8000]);
     expect(requests[2]?.messages.slice(1)).toEqual([
       { role: "assistant", content: "{oops" },
       {
@@ -572,6 +574,66 @@ describe("writePages", () => {
       ["signals", "verifying the claims failed: TypeError", true],
     ]);
     expect(lines).toEqual(["signals: not written: verifying the claims failed: TypeError"]);
+  });
+
+  it("fails one page, not the build, when verifying its fixed claims throws", async () => {
+    const wiki = testWiki();
+    const broken = signalsDraft();
+    const history = broken.sections[2]?.claims[0];
+    if (history) history.cite = ["src/signals/ingest.py:90-99"];
+    let armed = false;
+    class Sources extends Map<string, string> {
+      override get(path: string) {
+        if (armed && path === "src/signals/ingest.py") throw new TypeError("private source text");
+        return super.get(path);
+      }
+    }
+    const sources = new Sources(wiki.sources);
+    const { written, lines } = run(
+      (featureId, call) => {
+        if (featureId !== "signals") return deliverablesDraft();
+        if (call === 1) return broken;
+        armed = true;
+        return { claims: [{ ...history, cite: ["src/signals/ingest.py:10-24"] }] } as Answer;
+      },
+      {},
+      { ...wiki, sources },
+    );
+    const { pages } = await written;
+    expect(pages.map((p) => [p.featureId, p.failure, p.calls])).toEqual([
+      ["deliverables", null, 1],
+      ["signals", "verifying the claims failed: TypeError", 2],
+    ]);
+    expect(lines).toContain("signals: not written: verifying the claims failed: TypeError");
+  });
+
+  it("checks no Wikipedia title of a page that will not be written", async () => {
+    const broken = signalsDraft();
+    const history = broken.sections[2]?.claims[0];
+    if (history) history.cite = ["src/signals/ingest.py:90-99"];
+    const urls: string[] = [];
+    const { written } = run(
+      (featureId, call) =>
+        featureId !== "signals"
+          ? deliverablesDraft()
+          : call === 1
+            ? broken
+            : new LlmError("expired"),
+      {
+        wikipedia: {
+          cache: memoryWikipediaCache(),
+          fetch: async (input) => {
+            urls.push(String(input));
+            return fakeWikipedia(input);
+          },
+        },
+      },
+    );
+    const { pages, wikipedia } = await written;
+    // The overview claim, with its [[wp:Message queue]], verified before the retry failed.
+    expect(pages[1]?.failure).toBe("the write call failed twice: LlmError: expired");
+    expect(urls).toEqual([]);
+    expect([...wikipedia.links.keys()]).toEqual([]);
   });
 
   it("writes every page with plain Wikipedia text when the title check throws", async () => {
