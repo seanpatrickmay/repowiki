@@ -81,6 +81,11 @@ export function allPagesEntries(site: SiteModel): AllPagesEntry[] {
 
 const calendarDate = (iso: string): string => iso.slice(0, 10);
 
+/** Code-unit order: fixed-width YYYY-MM-DD dates sort correctly without any locale. */
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function mainPageView(site: SiteModel): MainPageView {
   // Hook text can hold [[links]]; articleLink asks for a hover preview only where one is served.
   const link = (id: string) => articleLink(site, id);
@@ -124,7 +129,7 @@ export function mainPageView(site: SiteModel): MainPageView {
     .sort(
       (a, b) =>
         // The date as written first, so the list never contradicts the dates shown.
-        calendarDate(b.commitDate).localeCompare(calendarDate(a.commitDate)) ||
+        compareStrings(calendarDate(b.commitDate), calendarDate(a.commitDate)) ||
         Date.parse(b.commitDate) - Date.parse(a.commitDate) ||
         (a.featureId < b.featureId ? -1 : 1),
     )
