@@ -1,5 +1,10 @@
 import type { GenerateRequest, Provider } from "@repowiki/llm";
-import type { ClaimFixes, PageDraft } from "../verify/index.ts";
+import type {
+  ArchitectureDraft,
+  ArchitectureFixes,
+  ClaimFixes,
+  PageDraft,
+} from "../verify/index.ts";
 
 /** A page draft for testWiki()'s signals feature that verifies cleanly. Test-only. */
 export function signalsDraft(): PageDraft {
@@ -91,7 +96,7 @@ export function deliverablesDraft(): PageDraft {
   };
 }
 
-export type Answer = PageDraft | ClaimFixes | Error;
+export type Answer = PageDraft | ClaimFixes | ArchitectureDraft | ArchitectureFixes | Error;
 
 /**
  * Answers write calls from `answer(featureId, call)`, where call counts that feature's calls from
