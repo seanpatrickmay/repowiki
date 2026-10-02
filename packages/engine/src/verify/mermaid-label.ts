@@ -9,6 +9,12 @@
 /** Characters that stay as they are inside a quoted Mermaid label. */
 const LITERAL = /^[\p{L}\p{M}\p{N}]$/u;
 const LITERAL_PUNCTUATION = new Set([".", ",", "-", "_", "/", "+", "!", "?", "@", "*"]);
+/**
+ * The letters of Mermaid's entity placeholders (U+FB02 U+00B0 U+00B0 code U+00B6 U+00DF, which it
+ * decodes after parsing): written as entities, so a label cannot forge one. Degree and pilcrow
+ * are not letters, so they already are.
+ */
+const PLACEHOLDER_LETTERS = new Set(["\u00DF", "\uFB02"]);
 /** Control characters and every kind of space and line break: each becomes one space. */
 const SPACING = /^[\p{Cc}\p{Z}]$/u;
 /** Private-use, format (zero-width, bidi), unassigned and lone-surrogate characters: dropped. */
@@ -33,7 +39,11 @@ export function mermaidLabel(text: string): string {
   for (const char of text) {
     if (SPACING.test(char)) out += " ";
     else if (DROPPED.test(char)) continue;
-    else if (LITERAL.test(char) || LITERAL_PUNCTUATION.has(char)) out += char;
+    else if (
+      LITERAL_PUNCTUATION.has(char) ||
+      (LITERAL.test(char) && !PLACEHOLDER_LETTERS.has(char))
+    )
+      out += char;
     else out += NAMED_ENTITIES[char] ?? `#${char.codePointAt(0)};`;
   }
   return out.replace(/ +/g, " ").trim();

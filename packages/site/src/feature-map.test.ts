@@ -105,10 +105,12 @@ describe("mermaidLabel", () => {
     expect(mermaidLabel("#quot; and #35;")).toBe("#35;quot#59; and #35;35#59;");
   });
 
-  it("keeps ordinary words, digits and non-ASCII letters", () => {
-    expect(mermaidLabel("Signal ingestion v2 - größe 数据")).toBe(
-      "Signal ingestion v2 - größe 数据",
+  it("keeps ordinary words, digits and non-ASCII letters, but not Mermaid's placeholder letters", () => {
+    expect(mermaidLabel("Signal ingestion v2 - grösse 数据")).toBe(
+      "Signal ingestion v2 - grösse 数据",
     );
+    // U+00DF and U+FB02 spell Mermaid's entity placeholders, so they are entities.
+    expect(mermaidLabel("größe")).toBe("grö#223;e");
   });
 
   it("falls back to an empty string for a label with nothing printable", () => {
