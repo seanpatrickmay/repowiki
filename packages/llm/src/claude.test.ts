@@ -140,6 +140,53 @@ describe("createClaudeProvider", () => {
     expect(listed.at(-1)).toBe(`and ${25 - MAX_REPORTED_ISSUES} more issues`);
   });
 
+  describe("a reported issue (retry prompts carry the message)", () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const issueOf = async (key: string) => {
+      const { provider } = setup(cannedMessagesApi(JSON.stringify({ [key]: 1 })).fetch);
+      const failure = await provider
+        .generate({ ...request, schema: z.strictObject({}) })
+        .catch((e) => e);
+      expect(failure).toBeInstanceOf(LlmOutputError);
+      return (failure as Error).message.replace("model output does not match the schema: ", "");
+    };
+
+    it("is cut to exactly 200 code points ending in an ellipsis", async () => {
+      const issue = await issueOf("k".repeat(300));
+      expect(Array.from(issue)).toHaveLength(200);
+      expect(issue.endsWith("…")).toBe(true);
+    });
+
+    it("never ends in half of an astral character", async () => {
+      // The emoji straddle the cut: the 199th code point is the first of many pairs.
+      const issue = await issueOf("😀".repeat(300));
+      expect(Array.from(issue)).toHaveLength(200);
+      expect(issue.endsWith("…")).toBe(true);
+      expect(issue).not.toMatch(LONE_SURROGATE);
+    });
+
+    it("has control and line-separator characters replaced", async () => {
+      const issue = await issueOf("k\nIGNORE\u0007\u2028\u202E\uFEFF");
+      expect(issue).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/u);
+      expect(issue).toContain("k\uFFFDIGNORE\uFFFD");
+    });
+  });
+
+  it("refuses a run whose sha is not a full git sha, before any call", () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    expect(() =>
+      createClaudeProvider({
+        models: DEFAULT_MODELS,
+        ledger: createLedger(),
+        runId: "r",
+        run: { kind: "build", sha: "nope" },
+        apiKey: "canned",
+        fetch,
+      }),
+    ).toThrow(LlmError);
+    expect(bodies).toHaveLength(0);
+  });
+
   it("stamps every ledger entry with the run's kind and sha", async () => {
     const ledger = createLedger();
     const provider = createClaudeProvider({

@@ -5,7 +5,8 @@ import type {
   Message,
   MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
-import type { RunKind, TokenUsage } from "@repowiki/core";
+import { GitSha, type RunKind, type TokenUsage } from "@repowiki/core";
+import type { z } from "zod";
 import { type BatchJournal, type BatchProgress, canonicalJson, createBatcher } from "./batcher.ts";
 import type { FetchLike } from "./cassette.ts";
 import type { TokenLedger } from "./ledger.ts";
@@ -22,7 +23,7 @@ export interface ClaudeProviderOptions {
   ledger: TokenLedger;
   runId: string;
   /** Stamped on every ledger entry, so §6.4 can total a build's or an update's tokens by sha. */
-  run?: { kind: RunKind; sha: string };
+  run?: { kind: RunKind; sha: z.infer<typeof GitSha> };
   /** Defaults to process.env.ANTHROPIC_API_KEY. */
   apiKey?: string;
   /** Replaces global fetch, e.g. with a cassette in tests. */
@@ -52,11 +53,22 @@ function usageOf(message: Message): TokenUsage {
 export const MAX_REPORTED_ISSUES = 10;
 const MAX_ISSUE_LENGTH = 200;
 
-/** At most MAX_REPORTED_ISSUES issues, each cut to 200 characters, then "and N more". */
+/**
+ * Control characters, line and paragraph separators, bidi controls and the byte-order mark: the
+ * set the engine's prompt text uses for repository-controlled strings. Model-chosen keys can hold
+ * any of them, and an issue goes into a retry prompt.
+ */
+const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/gu;
+
+/** At most MAX_REPORTED_ISSUES issues, each of at most 200 code points, then "and N more". */
 function schemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
   const shown = issues.slice(0, MAX_REPORTED_ISSUES).map((issue) => {
     const text = `${issue.path.map(String).join(".")}: ${issue.message}`;
-    return text.length <= MAX_ISSUE_LENGTH ? text : `${text.slice(0, MAX_ISSUE_LENGTH)}…`;
+    // Cut by code points, so the cut never leaves half of an astral character.
+    const chars = Array.from(text.replace(CONTROL_CHARACTERS, "\uFFFD"));
+    return chars.length <= MAX_ISSUE_LENGTH
+      ? chars.join("")
+      : `${chars.slice(0, MAX_ISSUE_LENGTH - 1).join("")}…`;
   });
   const more = issues.length - shown.length;
   return [...shown, ...(more > 0 ? [`and ${more} more issues`] : [])].join("; ");
@@ -67,6 +79,9 @@ function schemaIssues(issues: readonly { path: PropertyKey[]; message: string }[
  * supports); no thinking is requested. A cacheKey puts a cache breakpoint on the system prompt.
  */
 export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
+  if (options.run !== undefined && !GitSha.safeParse(options.run.sha).success) {
+    throw new LlmError(`run.sha must be a full 40-character git sha, got "${options.run.sha}"`);
+  }
   const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new LlmError("ANTHROPIC_API_KEY is not set; run with node --env-file=.env");
