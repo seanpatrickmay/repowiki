@@ -152,6 +152,60 @@ describe("computeInfobox", () => {
     });
   });
 
+  /** testWiki()'s signals feature plus member files at `paths`, each importing `imports[path]`. */
+  function withFiles(paths: string[], imports: Record<string, string> = {}) {
+    const wiki = testWiki();
+    const ingest = wiki.index.files.find((f) => f.path === "src/signals/ingest.py");
+    for (const [i, path] of paths.entries()) {
+      const language = path.endsWith(".py") ? ("python" as const) : null;
+      if (ingest) {
+        wiki.index.files.push({ ...ingest, id: memberId(path), path, language, symbols: [] });
+      }
+      wiki.manifest.membership[memberId(path)] = { featureId: "signals", weight: 0.7 - i / 100 };
+    }
+    for (const [from, to] of Object.entries(imports)) {
+      wiki.index.imports.push({ from, to, line: 1 });
+    }
+    return wiki;
+  }
+  const infobox = (wiki: ReturnType<typeof testWiki>) =>
+    computeInfobox("signals", wiki.manifest, wiki.index, wiki.history, "2026-03-01T00:00:00Z");
+
+  it("names at most 5 languages, the most used first, ties by name", () => {
+    const wiki = withFiles(["a.tf", "b.tf", "c.cjs", "d.cjs", "e.json", "f.yml", "g.sql", "h.sh"]);
+    // Python 2, Markdown 1, Terraform 2, JavaScript 2 (.cjs), JSON, YAML, SQL, Shell 1 each.
+    expect(infobox(wiki).languages).toEqual([
+      "JavaScript",
+      "Python",
+      "Terraform",
+      "JSON",
+      "Markdown",
+    ]);
+  });
+
+  it("names at most 3 entry points", () => {
+    const roots = ["src/signals/a.py", "src/signals/b.py", "src/signals/c.py", "src/signals/d.py"];
+    const wiki = withFiles(
+      roots,
+      Object.fromEntries(roots.map((path) => [path, "src/signals/store.py"])),
+    );
+    wiki.index.imports = wiki.index.imports.filter((e) => e.from !== "src/signals/ingest.py");
+    expect(infobox(wiki).entryPoints).toEqual(roots.slice(0, 3));
+  });
+
+  it("falls back to the heaviest code file when the member files import each other in a cycle", () => {
+    const wiki = testWiki();
+    wiki.index.imports.push({ from: "src/signals/store.py", to: "src/signals/ingest.py", line: 1 });
+    expect(infobox(wiki).entryPoints).toEqual(["src/signals/ingest.py"]);
+  });
+
+  it("refuses a build commit date that is not an ISO 8601 date-time", () => {
+    const { index, manifest } = testWiki();
+    expect(() => computeInfobox("signals", manifest, index, [], "last tuesday")).toThrow(
+      "commitDate must be an ISO 8601 date-time",
+    );
+  });
+
   it("never names a test file as an entry point, and falls back to the heaviest other code", () => {
     const { index, manifest, history } = testWiki();
     const ingest = index.files.find((f) => f.path === "src/signals/ingest.py");

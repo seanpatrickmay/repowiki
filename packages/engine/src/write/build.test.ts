@@ -75,6 +75,16 @@ describe("writePages", () => {
     ).toBe(true);
   });
 
+  it("still writes the pages when the build commit's date is not ISO 8601", async () => {
+    const wiki = testWiki();
+    const at = { ...(wiki.history[0] as (typeof wiki.history)[0]), sha: wiki.index.sha };
+    wiki.history.unshift({ ...at, date: "last tuesday", files: ["README.md"] });
+    const { written } = run(answers, {}, wiki);
+    const { pages } = await written;
+    expect(pages.map((p) => p.failure)).toEqual([null, null]);
+    expect(pages[0]?.revision?.infobox.lastCommitDate).toBe("2026-01-26T09:00:00-05:00");
+  });
+
   it("issues every page's first call in one event-loop turn, so they share one batch", async () => {
     const { written, requests } = run(answers);
     await written;

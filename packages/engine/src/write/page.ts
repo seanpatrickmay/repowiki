@@ -89,6 +89,7 @@ const EXTENSION_NAMES: Record<string, string> = {
   ".js": "JavaScript",
   ".jsx": "JavaScript",
   ".mjs": "JavaScript",
+  ".cjs": "JavaScript",
   ".md": "Markdown",
   ".json": "JSON",
   ".yml": "YAML",
@@ -115,7 +116,7 @@ function byInstant(a: string, b: string): number {
  * points, and their imports do not count. Commit dates keep the
  * committer's own offset (`Infobox` takes an ISO 8601 date-time with an offset or `Z`) and are
  * compared as instants; history is newest first by commit date, which clock skew can break.
- * With no usable commit, both dates are `commitDate`.
+ * With no usable commit, both dates are `commitDate`, which must be an ISO 8601 date-time.
  */
 export function computeInfobox(
   featureId: string,
@@ -124,6 +125,9 @@ export function computeInfobox(
   commits: readonly CommitInfo[],
   commitDate: string,
 ): Infobox {
+  if (!IsoDateTime.safeParse(commitDate).success) {
+    throw new Error("commitDate must be an ISO 8601 date-time");
+  }
   const files = featureFiles(manifest, featureId);
   const mine = new Set(files);
   const byPath = new Map(index.files.map((f) => [f.path, f]));

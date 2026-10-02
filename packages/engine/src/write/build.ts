@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import type { Manifest, Revision, SectionKey, TokenUsage } from "@repowiki/core";
+import {
+  IsoDateTime,
+  type Manifest,
+  type Revision,
+  type SectionKey,
+  type TokenUsage,
+} from "@repowiki/core";
 import {
   CassetteMissError,
   type GenerateResult,
@@ -311,7 +317,9 @@ export async function writePages(
   for (const title of wikipedia.failed)
     log(`Wikipedia could not be reached for ${quote(title)}; left as plain text`);
 
-  const commitDate = history.find((c) => c.sha === index.sha)?.date;
+  // The build commit's own date, unless git gave one the infobox cannot store.
+  const buildDate = history.find((c) => c.sha === index.sha)?.date;
+  const commitDate = IsoDateTime.safeParse(buildDate).success ? buildDate : undefined;
   const pages = states.map((state): PageOutcome => {
     const featureId = state.pack.featureId;
     const failed = [...state.unfixable.values(), ...state.failing.values()];
