@@ -85,6 +85,38 @@ describe("crossFeatureEdges", () => {
     expect(order([...imports].reverse())).toEqual(forward);
   });
 
+  it("ignores an import or call whose end belongs to no feature", () => {
+    const { index, manifest } = testWiki();
+    const before = crossFeatureEdges(index, manifest, both);
+    index.imports.push(
+      { from: "src/deliverables/crud.py", to: "src/unmapped.py", line: 2 },
+      { from: "src/unmapped.py", to: "src/signals/ingest.py", line: 3 },
+    );
+    index.calls.push({
+      from: "src/deliverables/crud.py#complete",
+      to: "src/unmapped.py#helper",
+      line: 8,
+    });
+    expect(crossFeatureEdges(index, manifest, both)).toEqual(before);
+  });
+
+  it("lists a repeated site once, so the two kept sites are two different lines", () => {
+    const { index, manifest } = testWiki();
+    const crud = "src/deliverables/crud.py";
+    index.imports = [];
+    index.calls = [
+      { from: `${crud}#complete`, to: "src/signals/ingest.py#ingest_chunk", line: 7 },
+      { from: `${crud}#complete`, to: "src/signals/store.py#save_signal", line: 7 },
+      { from: `${crud}#complete`, to: "src/signals/ingest.py#Signal", line: 9 },
+    ];
+    const [edge] = crossFeatureEdges(index, manifest, both);
+    expect(edge?.calls).toBe(3);
+    expect(edge?.sites).toEqual([
+      { path: crud, line: 7, kind: "call" },
+      { path: crud, line: 9, kind: "call" },
+    ]);
+  });
+
   it("finds nothing in a repository with no cross-feature edge", () => {
     const { index, manifest } = testWiki();
     index.imports = [];
@@ -256,6 +288,82 @@ describe("architectureDiagram", () => {
     }
   });
 
+  it("draws the heaviest edges whatever order they come in", () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      id: `f${String(i).padStart(2, "0")}`,
+      title: `F${i}`,
+    }));
+    // 29 + 28 + ... = 435 pairs would be too many; use 3 targets each: 87 edges, weights 1..87.
+    const edges = many.flatMap((f, i) =>
+      many
+        .slice(i + 1, i + 4)
+        .map((g, j) => ({ from: f.id, to: g.id, imports: 1, calls: i * 3 + j })),
+    );
+    const lightestFirst = [...edges].sort((x, y) => x.calls - y.calls);
+    const heaviestFirst = [...lightestFirst].reverse();
+    const source = architectureDiagram(lightestFirst, many);
+    expect(source).toBe(architectureDiagram(heaviestFirst, many));
+    const weights = (source ?? "")
+      .split("\n")
+      .filter((l) => l.includes("-->"))
+      .map((l) => Number(/"(\d+) call/.exec(l)?.[1] ?? Number.NaN) + 1);
+    expect(weights).toHaveLength(MAX_ARCHITECTURE_EDGES);
+    const heaviest = heaviestFirst.slice(0, MAX_ARCHITECTURE_EDGES).map((e) => e.calls + 1);
+    expect(weights).toEqual(heaviest);
+  });
+
+  it("never draws an edge with nothing in it", () => {
+    const source = architectureDiagram(
+      [
+        { from: "deliverables", to: "signals", imports: 1, calls: 0 },
+        { from: "signals", to: "deliverables", imports: 0, calls: 0 },
+      ],
+      features,
+    );
+    expect(source?.split("\n").filter((l) => l.includes("-->"))).toHaveLength(1);
+    expect(
+      architectureDiagram(
+        [{ from: "signals", to: "deliverables", imports: 0, calls: 0 }],
+        features,
+      ),
+    ).toBeNull();
+  });
+
+  it("cuts a long title to 80 characters, by code point, before escaping it", () => {
+    const long = "\u{1F600}".repeat(500);
+    const source = architectureDiagram(
+      [{ from: "a", to: "b", imports: 1, calls: 0 }],
+      [
+        { id: "a", title: `${"x".repeat(79)}${long}` },
+        { id: "b", title: "y".repeat(500) },
+      ],
+    );
+    const lines = (source ?? "").split("\n");
+    expect(lines[1]).toBe(`  n1[["${"x".repeat(79)}#128512;"]]`);
+    expect(lines[2]).toBe(`  n2[["${"y".repeat(80)}"]]`);
+    expect(diagramProblems(source ?? "")).toEqual([]);
+  });
+
+  it("breaks node-selection ties by id when more features tie than fit", () => {
+    const many = Array.from({ length: 45 }, (_, i) => ({
+      id: `feature-${String(i).padStart(2, "0")}`,
+      title: `Feature ${i}`,
+    }));
+    const ring = many.map((f, i) => ({
+      from: f.id,
+      to: many[(i + 1) % many.length]?.id ?? "",
+      imports: 1,
+      calls: 1,
+    }));
+    const source = architectureDiagram([...ring].reverse(), [...many].reverse()) ?? "";
+    const nodes = source.split("\n").filter((l) => l.includes("[["));
+    expect(nodes).toHaveLength(MAX_ARCHITECTURE_NODES);
+    expect(nodes[0]).toBe('  n1[["Feature 0"]]');
+    expect(nodes[39]).toBe('  n40[["Feature 39"]]');
+    expect(source).not.toContain('"Feature 40"');
+    expect(diagramProblems(source)).toEqual([]);
+  });
+
   it("keeps the 40 best-connected of 70 features and the 80 heaviest edges, under verify's caps", () => {
     const many = Array.from({ length: 70 }, (_, i) => {
       const id = `feature-${String(i).padStart(2, "0")}`;
@@ -271,6 +379,17 @@ describe("architectureDiagram", () => {
     const lines = source.split("\n");
     expect(lines.filter((l) => l.includes("[[")).length).toBe(MAX_ARCHITECTURE_NODES);
     expect(lines.filter((l) => l.includes("-->")).length).toBe(MAX_ARCHITECTURE_EDGES);
+    const keptIds = new Set(
+      many.filter((f) => source.includes(`[["${f.title}"]]`)).map((f) => f.id),
+    );
+    const eligible = edges.filter((e) => keptIds.has(e.from) && keptIds.has(e.to));
+    expect(eligible.length).toBeGreaterThan(MAX_ARCHITECTURE_EDGES);
+    const drawnWeights = lines
+      .filter((l) => l.includes("-->"))
+      .map((l) => Number(/"(\d+) call/.exec(l)?.[1]) + 1);
+    const weightOf = (e: { calls: number; imports: number }) => e.calls + e.imports;
+    const droppedHeaviest = Math.max(...eligible.slice(MAX_ARCHITECTURE_EDGES).map(weightOf));
+    expect(Math.min(...drawnWeights)).toBeGreaterThanOrEqual(droppedHeaviest);
     expect(source).toContain('[["Feature 0 with a long descriptive title"]]');
     expect(source).not.toContain('[["Feature 69 with a long descriptive title"]]');
     expect(source.length).toBeLessThan(MAX_DIAGRAM_CHARS);

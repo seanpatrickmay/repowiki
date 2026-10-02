@@ -14,6 +14,8 @@ export interface CrossFeatureEdge extends FeatureEdge {
   sites: EdgeSite[];
 }
 
+/** Longest node title drawn, in code points; a longer one is cut before it is escaped. */
+export const MAX_NODE_TITLE = 80;
 /** Lines of proof kept per edge. */
 export const MAX_EDGE_SITES = 2;
 /** The Architecture diagram's caps (see architectureDiagram). */
@@ -22,6 +24,25 @@ export const MAX_ARCHITECTURE_EDGES = 80;
 
 /** Code-unit order, so the same index gives the same bytes in every locale. */
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+const weightOf = (edge: FeatureEdge): number => edge.calls + edge.imports;
+/** Heaviest first, ties by `from`, then `to`. */
+const heaviestFirst = (x: FeatureEdge, y: FeatureEdge): number =>
+  weightOf(y) - weightOf(x) || byText(x.from, y.from) || byText(x.to, y.to);
+
+/** Sites in path, line and kind order, each distinct (path, line, kind) once. */
+function uniqueSites(sites: readonly EdgeSite[]): EdgeSite[] {
+  const sorted = [...sites].sort(
+    (x, y) => byText(x.path, y.path) || x.line - y.line || byText(x.kind, y.kind),
+  );
+  return sorted.filter(
+    (s, i) =>
+      i === 0 ||
+      s.path !== sorted[i - 1]?.path ||
+      s.line !== sorted[i - 1]?.line ||
+      s.kind !== sorted[i - 1]?.kind,
+  );
+}
 
 /**
  * Every pair of features in `among` whose files are joined by an import or call edge of the
@@ -61,14 +82,9 @@ export function crossFeatureEdges(
   return [...edges.values()]
     .map((edge) => ({
       ...edge,
-      sites: edge.sites
-        .sort((x, y) => byText(x.path, y.path) || x.line - y.line || byText(x.kind, y.kind))
-        .slice(0, MAX_EDGE_SITES),
+      sites: uniqueSites(edge.sites).slice(0, MAX_EDGE_SITES),
     }))
-    .sort(
-      (x, y) =>
-        y.calls + y.imports - (x.calls + x.imports) || byText(x.from, y.from) || byText(x.to, y.to),
-    );
+    .sort(heaviestFirst);
 }
 
 /** "3 calls, 1 import": what an edge carries, with no zero part. */
@@ -77,9 +93,13 @@ export function edgeWeightLabel(edge: FeatureEdge): string {
   return [...part(edge.calls, "call"), ...part(edge.imports, "import")].join(", ");
 }
 
-/** A node's label: the escaped title, else the escaped id, else "feature" (never empty). */
+/** The first MAX_NODE_TITLE code points of `text`, escaped. */
+const cutLabel = (text: string): string =>
+  mermaidLabel(Array.from(text).slice(0, MAX_NODE_TITLE).join(""));
+
+/** A node's label: the cut, escaped title, else the escaped id, else "feature" (never empty). */
 function nodeLabel(feature: { id: string; title: string }): string {
-  return mermaidLabel(feature.title) || mermaidLabel(feature.id) || "feature";
+  return cutLabel(feature.title) || cutLabel(feature.id) || "feature";
 }
 
 /**
@@ -88,8 +108,10 @@ function nodeLabel(feature: { id: string; title: string }): string {
  * edge, labelled with its weight. A repository map has to show every feature, so the caps are the
  * page's own, not a feature page's 12 nodes: at most MAX_ARCHITECTURE_NODES features (those with
  * the most edge weight, ties by id) and the MAX_ARCHITECTURE_EDGES heaviest edges among them, far
- * inside verify's MAX_DIAGRAM_CHARS and MAX_DIAGRAM_EDGES. Nodes are numbered in feature-id order.
- * Null when fewer than two features or no edge would be drawn.
+ * inside verify's MAX_DIAGRAM_CHARS and MAX_DIAGRAM_EDGES. The edges are sorted here (heaviest
+ * first, ties by `from`, then `to`), so the cap keeps the heaviest whatever order they arrive in;
+ * an edge with no import and no call is never drawn. A title is cut to MAX_NODE_TITLE code points.
+ * Nodes are numbered in feature-id order. Null when fewer than two features or no edge would be drawn.
  */
 export function architectureDiagram(
   edges: readonly FeatureEdge[],
@@ -99,7 +121,7 @@ export function architectureDiagram(
   for (const edge of edges) {
     for (const id of [edge.from, edge.to]) {
       const w = weight.get(id);
-      if (w !== undefined) weight.set(id, w + edge.calls + edge.imports);
+      if (w !== undefined) weight.set(id, w + weightOf(edge));
     }
   }
   const kept = [...features]
@@ -108,7 +130,8 @@ export function architectureDiagram(
     .sort((a, b) => byText(a.id, b.id));
   const node = new Map(kept.map((f, i) => [f.id, `n${i + 1}`]));
   const drawn = edges
-    .filter((e) => node.has(e.from) && node.has(e.to) && e.from !== e.to)
+    .filter((e) => weightOf(e) > 0 && node.has(e.from) && node.has(e.to) && e.from !== e.to)
+    .sort(heaviestFirst)
     .slice(0, MAX_ARCHITECTURE_EDGES);
   if (kept.length < 2 || drawn.length === 0) return null;
   return [
