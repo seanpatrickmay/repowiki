@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { getSite } from "./site.ts";
 import { fixtureExport } from "./test-fixtures.ts";
 
-const ENV_KEYS = ["REPOWIKI_EXPORT", "REPOWIKI_REPO_URL"] as const;
+const ENV_KEYS = ["REPOWIKI_BUILD", "REPOWIKI_EXPORT", "REPOWIKI_REPO_URL"] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 let dir: string;
 let exportFile: string;
@@ -30,6 +30,7 @@ describe("getSite", () => {
     "https://github.com/acme/r#frag",
     "javascript:alert(1)",
   ])("validates REPOWIKI_REPO_URL like --repo-url: %j", (url) => {
+    process.env.REPOWIKI_BUILD = `bad-url ${url}`;
     process.env.REPOWIKI_EXPORT = exportFile;
     process.env.REPOWIKI_REPO_URL = url;
     expect(() => getSite()).toThrow(/^REPOWIKI_REPO_URL /);
@@ -38,5 +39,19 @@ describe("getSite", () => {
     } catch (error) {
       expect((error as Error).message).not.toContain("ghp_SECRET");
     }
+  });
+
+  it("loads once per build token and reloads for a new one, even from the same path", () => {
+    process.env.REPOWIKI_EXPORT = exportFile;
+    process.env.REPOWIKI_REPO_URL = "";
+    process.env.REPOWIKI_BUILD = "build-1";
+    const first = getSite();
+    expect(getSite()).toBe(first);
+    expect(first.wiki.repo).toBe("demo-repo");
+
+    writeFileSync(exportFile, JSON.stringify({ ...fixtureExport(), repo: "second-repo" }));
+    expect(getSite()).toBe(first);
+    process.env.REPOWIKI_BUILD = "build-2";
+    expect(getSite().wiki.repo).toBe("second-repo");
   });
 });

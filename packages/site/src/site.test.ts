@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport } from "./test-fixtures.ts";
 import {
@@ -103,6 +105,51 @@ describe("site build input validation", () => {
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("--export is required");
   }, 30_000);
+});
+
+describe("in-process rebuilds", () => {
+  it("renders each buildSite call's own export, even from the same path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-twice-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      const second = { ...fixtureExport(), repo: "second-repo" };
+      const build = fileURLToPath(new URL("./build.ts", import.meta.url));
+      const script = [
+        `import { writeFileSync } from "node:fs";`,
+        `import { buildSite } from ${JSON.stringify(build)};`,
+        `const [file, a, b, next] = process.argv.slice(1);`,
+        `await buildSite(file, a, null);`,
+        `writeFileSync(file, next);`,
+        `await buildSite(file, b, null);`,
+      ].join("\n");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport()));
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          script,
+          exportFile,
+          join(dir, "a"),
+          join(dir, "b"),
+          JSON.stringify(second),
+        ],
+        {
+          encoding: "utf8",
+          timeout: 220_000,
+          cwd: dir,
+          env: { ...process.env, NODE_ENV: "production" },
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const titleOf = (out: string) =>
+        /<title>(.*?)<\/title>/.exec(readFileSync(join(dir, out, "index.html"), "utf8"))?.[1];
+      expect(titleOf("a")).toBe("Main page - demo-repo wiki");
+      expect(titleOf("b")).toBe("Main page - second-repo wiki");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 240_000);
 });
 
 describe("site build directory safety", () => {

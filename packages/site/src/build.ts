@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,9 +61,13 @@ function validateOutDir(exportFile: string, outDir: string): void {
   }
 }
 
-/** Environment the Astro pages read (see site.ts). Telemetry is off: builds never touch the network. */
+/**
+ * Environment the Astro pages read (see site.ts). Telemetry is off: builds never touch the network.
+ * REPOWIKI_BUILD is new on every call, so a second build in the same process loads its own export.
+ */
 function setBuildEnv(exportFile: string, repoUrl: string | null): void {
   process.env.ASTRO_TELEMETRY_DISABLED = "1";
+  process.env.REPOWIKI_BUILD = randomUUID();
   process.env.REPOWIKI_EXPORT = exportFile;
   process.env.REPOWIKI_REPO_URL = repoUrl ?? "";
 }
