@@ -5,7 +5,7 @@ import type {
   Message,
   MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
-import type { TokenUsage } from "@repowiki/core";
+import type { RunKind, TokenUsage } from "@repowiki/core";
 import { type BatchJournal, type BatchProgress, canonicalJson, createBatcher } from "./batcher.ts";
 import type { FetchLike } from "./cassette.ts";
 import type { TokenLedger } from "./ledger.ts";
@@ -21,6 +21,8 @@ export interface ClaudeProviderOptions {
   models: ModelConfig;
   ledger: TokenLedger;
   runId: string;
+  /** Stamped on every ledger entry, so §6.4 can total a build's or an update's tokens by sha. */
+  run?: { kind: RunKind; sha: string };
   /** Defaults to process.env.ANTHROPIC_API_KEY. */
   apiKey?: string;
   /** Replaces global fetch, e.g. with a cassette in tests. */
@@ -44,6 +46,20 @@ function usageOf(message: Message): TokenUsage {
     cacheRead: message.usage.cache_read_input_tokens ?? 0,
     cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
   };
+}
+
+/** Schema issues listed in an LlmOutputError (and so in a retry prompt); the rest are counted. */
+export const MAX_REPORTED_ISSUES = 10;
+const MAX_ISSUE_LENGTH = 200;
+
+/** At most MAX_REPORTED_ISSUES issues, each cut to 200 characters, then "and N more". */
+function schemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
+  const shown = issues.slice(0, MAX_REPORTED_ISSUES).map((issue) => {
+    const text = `${issue.path.map(String).join(".")}: ${issue.message}`;
+    return text.length <= MAX_ISSUE_LENGTH ? text : `${text.slice(0, MAX_ISSUE_LENGTH)}…`;
+  });
+  const more = issues.length - shown.length;
+  return [...shown, ...(more > 0 ? [`and ${more} more issues`] : [])].join("; ");
 }
 
 /**
@@ -107,6 +123,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         batch,
         cacheKey: request.cacheKey ?? null,
         tokens: usage,
+        ...(options.run === undefined ? {} : { runKind: options.run.kind, sha: options.run.sha }),
       });
       const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
       if (message.stop_reason !== "end_turn") {
@@ -120,9 +137,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
       }
       const parsed = request.schema.safeParse(json);
       if (!parsed.success) {
-        const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
         throw new LlmOutputError(
-          `model output does not match the schema: ${issues.join("; ")}`,
+          `model output does not match the schema: ${schemaIssues(parsed.error.issues)}`,
           text,
         );
       }
