@@ -13,8 +13,25 @@ export interface Preview {
   html: string;
 }
 
-/** Preview for a link target. Redirects preview their final target; null when there is none. */
+const previews = new WeakMap<SiteModel, Map<string, Preview | null>>();
+
+/**
+ * Preview for a link target. Redirects preview their final target; null when there is none.
+ * Memoized per site and id: every link on every page asks, and each answer renders a lead.
+ */
 export function previewData(site: SiteModel, id: string): Preview | null {
+  let byId = previews.get(site);
+  if (byId === undefined) {
+    byId = new Map();
+    previews.set(site, byId);
+  }
+  if (byId.has(id)) return byId.get(id) ?? null;
+  const preview = computePreview(site, id);
+  byId.set(id, preview);
+  return preview;
+}
+
+function computePreview(site: SiteModel, id: string): Preview | null {
   if (!hasArticleRoute(site, id)) return null;
   const targetId = finalTarget(site, id);
   const feature = site.features.get(targetId);
