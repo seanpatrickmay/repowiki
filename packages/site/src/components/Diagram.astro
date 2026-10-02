@@ -1,0 +1,13 @@
+---
+interface Props {
+  /** Mermaid source; Astro escapes it and Mermaid reads it back as text. */
+  source: string;
+  caption: string;
+}
+
+const { source, caption } = Astro.props;
+---
+<figure class="diagram">
+  <pre class="mermaid">{source}</pre>
+  <figcaption>{caption}</figcaption>
+</figure>

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <link rel="icon" href="data:,">
+    <title>Signal ingestion: Difference between revisions - demo-repo wiki</title>
+    
+    <link rel="canonical" href="/wiki/signals/">
+  
+  <link rel="stylesheet" href="/_astro/ASSET"></head>
+  <body>
+    <a class="skip-link" href="#content">Jump to content</a>
+    <header class="site-header">
+      <a class="site-name" href="/">demo-repo<span class="site-tagline">wiki</span></a>
+      <form class="site-search" role="search" action="/search/" method="get">
+        <label class="visually-hidden" for="site-search-q">Search the demo-repo wiki</label>
+        <input id="site-search-q" name="q" type="search" placeholder="Search demo-repo wiki">
+        <button type="submit">Search</button>
+      </form>
+    </header>
+    <div class="page">
+      <nav class="site-nav" aria-label="Site">
+        <ul>
+          <li><a href="/">Main page</a></li>
+          <li><a href="/random/">Random article</a></li>
+          <li><a href="/special/all-pages/">All articles</a></li>
+        </ul>
+      </nav>
+      <main id="content" class="content">
+        
+  
+  <nav class="page-tabs" aria-label="Page views">
+  <a href="/wiki/signals/">Article</a>
+  <a href="/wiki/signals/history/" aria-current="page">View history</a>
+</nav>
+  <h1 class="page-title">Signal ingestion: Difference between revisions</h1>
+  <div class="diff-header">
+    <p><a href="/wiki/signals/history/1/">Revision as of 3 February 2026</a> (commit <a class="external" href="https://github.com/acme/demo-repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"><code>aaaaaaa</code></a>)</p>
+    <p><a href="/wiki/signals/history/2/">Revision as of 10 March 2026</a> (commit <a class="external" href="https://github.com/acme/demo-repo/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"><code>bbbbbbb</code></a>)</p>
+  </div>
+  <section class="diff-section">
+      <h2>Lead</h2>
+      <div class="diff-row diff-changed">
+          <span class="diff-sign" aria-hidden="true">~</span>
+          <span class="visually-hidden">Changed: </span>
+          <span class="diff-text">**Signal ingestion** <ins>is the subsystem of demo-repo that </ins>turns <ins>ingested </ins>chunks into <del>signals.</del><ins>[[deliverables|deliverable records]].</ins></span>
+        </div><div class="diff-row diff-added">
+          <span class="diff-sign" aria-hidden="true">+</span>
+          <span class="visually-hidden">Added: </span>
+          <span class="diff-text">It retries failed fetches with [[wp:Exponential backoff]].</span>
+        </div>
+    </section><section class="diff-section">
+      <h2>Overview</h2>
+      <div class="diff-row diff-changed">
+          <span class="diff-sign" aria-hidden="true">~</span>
+          <span class="visually-hidden">Changed: </span>
+          <span class="diff-text">Signals are <del>built</del><ins>created</ins> from <del>chunks.</del><ins>ingested chunks by `ingest_chunk`.</ins></span>
+        </div><div class="diff-row diff-added">
+          <span class="diff-sign" aria-hidden="true">+</span>
+          <span class="visually-hidden">Added: </span>
+          <span class="diff-text">Each signal stores its source chunk and a *confidence* score.</span>
+        </div>
+    </section><section class="diff-section">
+      <h2>How it works</h2>
+      <div class="diff-row diff-added">
+          <span class="diff-sign" aria-hidden="true">+</span>
+          <span class="visually-hidden">Added: </span>
+          <span class="diff-text">The [[scheduler]] triggers ingestion every five minutes.</span>
+        </div><div class="diff-row diff-added">
+          <span class="diff-sign" aria-hidden="true">+</span>
+          <span class="visually-hidden">Added: </span>
+          <span class="diff-text">Failed fetches are retried up to three times; [[ghost]] described the old approach. Payloads containing `&lt;script&gt;` tags are stored escaped, and so is &lt;b&gt;this&lt;/b&gt;.</span>
+        </div>
+    </section><section class="diff-section">
+      <h2>Data flow</h2>
+      <div class="diff-row diff-added">
+          <span class="diff-sign" aria-hidden="true">+</span>
+          <span class="visually-hidden">Added: </span>
+          <span class="diff-text">Chunks pass through [[legacy-signals]] storage before promotion.</span>
+        </div>
+    </section><section class="diff-section">
+      <h2>History</h2>
+      <div class="diff-row diff-added">
+          <span class="diff-sign" aria-hidden="true">+</span>
+          <span class="visually-hidden">Added: </span>
+          <span class="diff-text">Signal ingestion was introduced in PR #45.</span>
+        </div>
+    </section><section class="diff-section">
+      <h2>Known limitations</h2>
+      <div class="diff-row diff-changed">
+          <span class="diff-sign" aria-hidden="true">~</span>
+          <span class="visually-hidden">Changed: </span>
+          <span class="diff-text"><del>Fetch errors</del><ins>Deduplication</ins> <del>are</del><ins>is</ins> not <del>retried</del><ins>implemented</ins> (a `TODO` <del>notes</del><ins>in</ins> <del>it).</del><ins>the ingest module).</ins></span>
+        </div>
+    </section>
+      </main>
+    </div>
+    <footer class="site-footer">
+      Generated by RepoWiki from <code>demo-repo</code> at commit
+      <code>ccccccc</code>.
+    </footer>
+    <script type="module" src="/_astro/ASSET"></script></body>
+</html>

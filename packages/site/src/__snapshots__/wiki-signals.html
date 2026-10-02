@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <link rel="icon" href="data:,">
+    <title>Signal ingestion - demo-repo wiki</title>
+    
+  <link rel="stylesheet" href="/_astro/ASSET"></head>
+  <body>
+    <a class="skip-link" href="#content">Jump to content</a>
+    <header class="site-header">
+      <a class="site-name" href="/">demo-repo<span class="site-tagline">wiki</span></a>
+      <form class="site-search" role="search" action="/search/" method="get">
+        <label class="visually-hidden" for="site-search-q">Search the demo-repo wiki</label>
+        <input id="site-search-q" name="q" type="search" placeholder="Search demo-repo wiki">
+        <button type="submit">Search</button>
+      </form>
+    </header>
+    <div class="page">
+      <nav class="site-nav" aria-label="Site">
+        <ul>
+          <li><a href="/">Main page</a></li>
+          <li><a href="/random/">Random article</a></li>
+          <li><a href="/special/all-pages/">All articles</a></li>
+        </ul>
+      </nav>
+      <main id="content" class="content">
+        
+    <nav class="page-tabs" aria-label="Page views">
+  <a href="/wiki/signals/" aria-current="page">Article</a>
+  <a href="/wiki/signals/history/">View history</a>
+</nav>
+<article class="article" data-pagefind-body>
+  <h1 class="page-title">Signal ingestion</h1>
+  <p class="tagline">From the demo-repo wiki</p>
+  <p class="redirect-note" id="redirected-from" hidden></p>
+  
+  <table class="infobox">
+    <caption>Signal ingestion</caption>
+    <tbody>
+      <tr>
+          <th scope="row">Also known as</th>
+          <td>signal pipeline, SIGNALS_TABLE, /api/signals</td>
+        </tr><tr>
+          <th scope="row">Files</th>
+          <td>4</td>
+        </tr><tr>
+          <th scope="row">Lines of code</th>
+          <td>1,312</td>
+        </tr><tr>
+          <th scope="row">Languages</th>
+          <td>Python, TypeScript</td>
+        </tr><tr>
+          <th scope="row">Entry points</th>
+          <td><code>src/signals/ingest.py</code><br><code>src/signals/api.ts</code></td>
+        </tr><tr>
+          <th scope="row">First commit</th>
+          <td>26 January 2026</td>
+        </tr><tr>
+          <th scope="row">Last commit</th>
+          <td>10 March 2026</td>
+        </tr><tr>
+          <th scope="row">Revision</th>
+          <td><a class="external" href="https://github.com/acme/demo-repo/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"><code>bbbbbbb</code></a> (PR #88)</td>
+        </tr>
+    </tbody>
+  </table>
+  
+  <p class="lead"><b>Signal ingestion</b> is the subsystem of demo-repo that turns ingested chunks into <a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">deliverable records</a>. It retries failed fetches with <a class="external" href="https://en.wikipedia.org/wiki/Exponential_backoff" title="Wikipedia: Exponential backoff">Exponential backoff</a>.</p>
+  
+  <nav class="toc" aria-labelledby="toc-heading">
+      <h2 id="toc-heading">Contents</h2>
+      <ol>
+        <li><a href="#overview">Overview</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#data-flow">Data flow</a></li><li><a href="#history">History</a></li><li><a href="#known-limitations">Known limitations</a></li><li><a href="#see-also">See also</a></li><li><a href="#references">References</a></li>
+      </ol>
+    </nav>
+  <section aria-labelledby="overview">
+      <h2 id="overview">Overview</h2>
+      
+      
+      <p>Signals are created from ingested chunks by <code>ingest_chunk</code>.<sup class="reference" id="cite-ref-1-0"><a href="#cite-note-1">[1]</a></sup> Each signal stores its source chunk and a <i>confidence</i> score.<sup class="reference" id="cite-ref-1-1"><a href="#cite-note-1">[1]</a></sup><sup class="reference" id="cite-ref-2-0"><a href="#cite-note-2">[2]</a></sup></p>
+    </section><section aria-labelledby="how-it-works">
+      <h2 id="how-it-works">How it works</h2>
+      <div class="ambox ambox-stale" role="note">This section may be out of date.</div>
+      
+      <p>The scheduler triggers ingestion every five minutes.<sup class="reference" id="cite-ref-3-0"><a href="#cite-note-3">[3]</a></sup> Failed fetches are retried up to three times; ghost described the old approach. Payloads containing <code>&lt;script&gt;</code> tags are stored escaped, and so is &lt;b&gt;this&lt;/b&gt;.<sup class="reference" id="cite-ref-2-1"><a href="#cite-note-2">[2]</a></sup></p>
+    </section><section aria-labelledby="data-flow">
+      <h2 id="data-flow">Data flow</h2>
+      
+      <figure class="diagram">
+  <pre class="mermaid">flowchart LR
+  fetch[Fetcher] --&gt; ingest[ingest_chunk]
+  ingest --&gt; store[(signals table)]</pre>
+  <figcaption>Data flow of Signal ingestion</figcaption>
+</figure>
+      <p>Chunks pass through <a class="wikilink" href="/wiki/legacy-signals/" title="Legacy signals" data-preview="legacy-signals">Legacy signals</a> storage before promotion.<sup class="reference" id="cite-ref-1-2"><a href="#cite-note-1">[1]</a></sup></p>
+    </section><section aria-labelledby="history">
+      <h2 id="history">History</h2>
+      
+      
+      <p>Signal ingestion was introduced in PR #45.<sup class="reference" id="cite-ref-4-0"><a href="#cite-note-4">[4]</a></sup></p>
+    </section><section aria-labelledby="known-limitations">
+      <h2 id="known-limitations">Known limitations</h2>
+      
+      
+      <p>Deduplication is not implemented (a <code>TODO</code> in the ingest module).<sup class="reference" id="cite-ref-5-0"><a href="#cite-note-5">[5]</a></sup></p>
+    </section>
+  <section aria-labelledby="see-also">
+      <h2 id="see-also">See also</h2>
+      <ul>
+        <li><a class="wikilink" href="/wiki/deliverables/">Deliverables</a></li><li><a class="wikilink" href="/wiki/reports/">Reports</a></li>
+      </ul>
+    </section>
+  <section aria-labelledby="references">
+      <h2 id="references">References</h2>
+      <ol class="references">
+        <li id="cite-note-1">
+            <span class="ref-backs">^ <a class="ref-back" href="#cite-ref-1-0" aria-label="Back to citing claim 1">a</a> <a class="ref-back" href="#cite-ref-1-1" aria-label="Back to citing claim 2">b</a> <a class="ref-back" href="#cite-ref-1-2" aria-label="Back to citing claim 3">c</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/signals/ingest.py#L10-L24"><code>src/signals/ingest.py:L10-24@aaaaaaa</code></a> (<code>ingest_chunk</code>)</span>
+          </li><li id="cite-note-2">
+            <span class="ref-backs">^ <a class="ref-back" href="#cite-ref-2-0" aria-label="Back to citing claim 1">a</a> <a class="ref-back" href="#cite-ref-2-1" aria-label="Back to citing claim 2">b</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/signals/models.py#L3-L18"><code>src/signals/models.py:L3-18@aaaaaaa</code></a></span>
+          </li><li id="cite-note-3">
+            <span class="ref-backs"><a class="ref-back" href="#cite-ref-3-0" aria-label="Back to the citing claim">^</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/src/signals/odd%20name%231.py#L1-L9"><code>src/signals/odd name#1.py:L1-9@bbbbbbb</code></a> (<code>ingest_chunk</code>)</span>
+          </li><li id="cite-note-4">
+            <span class="ref-backs"><a class="ref-back" href="#cite-ref-4-0" aria-label="Back to the citing claim">^</a></span> <span>Commit <a class="external" href="https://github.com/acme/demo-repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"><code>aaaaaaa</code></a>: &quot;feat: add signal ingestion&quot; (<a class="external" href="https://github.com/acme/demo-repo/pull/45">PR #45</a>)</span>
+          </li><li id="cite-note-5">
+            <span class="ref-backs"><a class="ref-back" href="#cite-ref-5-0" aria-label="Back to the citing claim">^</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/src/signals/ingest.py#L30"><code>src/signals/ingest.py:L30@bbbbbbb</code></a></span>
+          </li>
+      </ol>
+    </section>
+  <p class="last-edited">This page was last edited on 10 March 2026, at commit <a class="external" href="https://github.com/acme/demo-repo/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"><code>bbbbbbb</code></a> (PR #88).</p>
+</article>
+<script type="module" src="/_astro/ASSET"></script>
+  
+      </main>
+    </div>
+    <footer class="site-footer">
+      Generated by RepoWiki from <code>demo-repo</code> at commit
+      <code>ccccccc</code>.
+    </footer>
+    <script type="module" src="/_astro/ASSET"></script></body>
+</html>

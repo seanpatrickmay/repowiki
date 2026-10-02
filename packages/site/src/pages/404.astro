@@ -1,0 +1,17 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getSite } from "../site.ts";
+
+const { wiki } = getSite();
+---
+<Layout title="Page not found">
+  <Fragment slot="head">
+    <meta name="robots" content="noindex" />
+  </Fragment>
+  <h1 class="page-title">Page not found</h1>
+  <p>There is no article at this address in the {wiki.repo} wiki.</p>
+  <p>
+    You can <a href="/search/">search</a> for it, or browse
+    <a href="/special/all-pages/">All articles</a>.
+  </p>
+</Layout>

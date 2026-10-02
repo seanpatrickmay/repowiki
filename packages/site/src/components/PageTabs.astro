@@ -1,0 +1,14 @@
+---
+import { articleUrl, historyUrl } from "../urls.ts";
+
+interface Props {
+  featureId: string;
+  current: "article" | "history";
+}
+
+const { featureId, current } = Astro.props;
+---
+<nav class="page-tabs" aria-label="Page views">
+  <a href={articleUrl(featureId)} aria-current={current === "article" ? "page" : undefined}>Article</a>
+  <a href={historyUrl(featureId)} aria-current={current === "history" ? "page" : undefined}>View history</a>
+</nav>

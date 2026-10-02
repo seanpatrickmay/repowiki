@@ -1,0 +1,16 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+<Layout title="Search">
+  <Fragment slot="head">
+    <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+    <meta name="robots" content="noindex" />
+  </Fragment>
+  <h1 class="page-title">Search</h1>
+  <div id="search"></div>
+  <noscript><p>Search needs JavaScript. <a href="/special/all-pages/">All articles</a> lists every article.</p></noscript>
+  <script is:inline src="/pagefind/pagefind-ui.js"></script>
+  <script>
+    import "../client/search.ts";
+  </script>
+</Layout>
