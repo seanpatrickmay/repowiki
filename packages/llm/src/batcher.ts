@@ -52,6 +52,18 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
+ * Runs a caller's observer hook. A throwing hook must not stop a batch that is already created
+ * (and billed), so its error is swallowed here.
+ */
+function observe(hook: () => void): void {
+  try {
+    hook();
+  } catch {
+    // The batch carries on; a broken hook is the caller's bug, not the batch's failure.
+  }
+}
+
+/**
  * Requests made in the same tick of the event loop go out together as one Message Batch (half
  * price). Each request settles on its own: an errored, expired, or missing item rejects only its
  * own promise; a failure of the batch itself rejects them all.
@@ -70,13 +82,14 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
     let interval = Math.min(pollIntervalMs, maxPollIntervalMs);
     let consecutiveFailures = 0;
     while (batch.processing_status !== "ended") {
-      options.onProgress?.({
+      const progress = {
         id: batch.id,
         status: batch.processing_status,
         processing: batch.request_counts.processing,
         succeeded: batch.request_counts.succeeded,
         errored: batch.request_counts.errored,
-      });
+      };
+      observe(() => options.onProgress?.(progress));
       const left =
         options.deadlineMs === undefined ? Infinity : options.deadlineMs - (now() - started);
       if (left <= 0) throw await cancelAfterDeadline(batch.id);
@@ -89,7 +102,7 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
         consecutiveFailures += 1;
         if (consecutiveFailures >= 4) {
           throw new LlmError(
-            `batch ${batch.id} failed after 4 consecutive poll failures: ${messageOf(error)}`,
+            `batch ${batch.id} failed after 4 consecutive poll failures: ${messageOf(error)}; it may still be running; cancel it by hand`,
             { cause: error },
           );
         }
@@ -110,7 +123,11 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
     }
   };
 
-  /** Every result line of an ended batch, keyed by custom id; the download is retried. */
+  /**
+   * Every result line of an ended batch, keyed by custom id; the download is retried. It is not
+   * bound by the deadline on purpose: the batch has ended and its results are already paid for.
+   * Each attempt starts from an empty map, so a stream that breaks mid-way leaves nothing behind.
+   */
   const download = async (id: string): Promise<Map<string, MessageBatchResult>> => {
     for (let attempt = 1; ; attempt++) {
       try {
@@ -146,14 +163,20 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
       for (const item of items) item.reject(llmError);
       return;
     }
-    options.onBatchCreated?.({ id: batch.id, requests: items.length });
+    const id = batch.id;
 
     let results: Map<string, MessageBatchResult>;
     try {
+      observe(() => options.onBatchCreated?.({ id, requests: items.length }));
       await awaitEnd(batch);
-      results = await download(batch.id);
+      results = await download(id);
     } catch (error) {
-      for (const item of items) item.reject(error);
+      // Nothing may escape: `run` is started without an awaiter, and the batch is billed.
+      const llmError =
+        error instanceof LlmError
+          ? error
+          : new LlmError(`batch ${id} failed unexpectedly: ${messageOf(error)}`, { cause: error });
+      for (const item of items) item.reject(llmError);
       return;
     }
 
@@ -177,7 +200,14 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
         setImmediate(() => {
           const items = queue;
           queue = [];
-          void run(items);
+          // `run` settles every item itself; this catch only keeps a bug in it from leaking as an
+          // unhandled rejection that would leave the callers pending forever.
+          run(items).catch((error: unknown) => {
+            const llmError = new LlmError(`batch run failed unexpectedly: ${messageOf(error)}`, {
+              cause: error,
+            });
+            for (const item of items) item.reject(llmError);
+          });
         });
       }
       queue.push({ params, resolve, reject });

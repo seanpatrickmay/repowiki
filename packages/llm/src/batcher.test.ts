@@ -376,10 +376,15 @@ function scriptedApi(options: {
   results?: unknown[];
   failResults?: number;
   failCancel?: boolean;
+  /** Every status poll answers 500. */
+  failPolls?: boolean;
+  /** The first N results downloads send a stale line, then break mid-stream. */
+  breakResults?: number;
 }) {
   const calls: string[] = [];
   const statuses = [...(options.statuses ?? [])];
   let resultFailures = options.failResults ?? 0;
+  let resultBreaks = options.breakResults ?? 0;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fetch: FetchLike = async (input, init) => {
@@ -396,6 +401,20 @@ function scriptedApi(options: {
         resultFailures -= 1;
         return new Response("unavailable", { status: 503 });
       }
+      if (resultBreaks > 0) {
+        resultBreaks -= 1;
+        const stale = `${JSON.stringify(succeededLine("req-0", "stale"))}\n`;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(stale));
+            controller.error(new Error("connection reset"));
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "content-type": "application/x-jsonl" },
+        });
+      }
       const lines = (options.results ?? [succeededLine("req-0", "a")]).map((l) =>
         JSON.stringify(l),
       );
@@ -404,6 +423,7 @@ function scriptedApi(options: {
         headers: { "content-type": "application/x-jsonl" },
       });
     }
+    if (options.failPolls) return json({ type: "error", error: { type: "api_error" } }, 500);
     return json(batchResponse(statuses.shift() ?? "ended"));
   };
   return { calls, fetch };
@@ -504,5 +524,109 @@ describe("createBatcher deadline, cancel and downloads (issue #113)", () => {
     });
     await Promise.all([batcher(params("a")), batcher(params("b"))]);
     expect(seen).toEqual(["msgbatch_canned 2 1"]);
+  });
+
+  it("keeps polling and harvesting when onBatchCreated throws", async () => {
+    const api = scriptedApi({ statuses: ["in_progress"] });
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      sleep: async () => {},
+      onBatchCreated: () => {
+        throw new Error("hook broke");
+      },
+    });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "a" }]);
+    expect(api.calls.filter((c) => c.endsWith("/results"))).toHaveLength(1);
+    // Two status polls, plus the retrieve the SDK makes to find the results URL.
+    expect(api.calls.filter((c) => c.startsWith("GET") && !c.endsWith("/results"))).toHaveLength(3);
+  });
+
+  it("keeps polling and harvesting when onProgress throws", async () => {
+    const api = scriptedApi({ statuses: ["in_progress"] });
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      sleep: async () => {},
+      onProgress: () => {
+        throw new Error("hook broke");
+      },
+    });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "a" }]);
+    expect(api.calls.filter((c) => c.endsWith("/results"))).toHaveLength(1);
+  });
+
+  it("rejects every request, naming the batch, when polling itself breaks unexpectedly", async () => {
+    const api = scriptedApi({ statuses: ["in_progress"] });
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      deadlineMs: 1000,
+      now: () => {
+        throw new Error("clock broke");
+      },
+      sleep: async () => {},
+    });
+    const settled = await Promise.allSettled([batcher(params("a")), batcher(params("b"))]);
+    expect(settled.map((s) => (s.status === "rejected" ? String(s.reason) : "ok"))).toEqual([
+      "LlmError: batch msgbatch_canned failed unexpectedly: clock broke",
+      "LlmError: batch msgbatch_canned failed unexpectedly: clock broke",
+    ]);
+  });
+
+  it("names the batch and says to cancel it by hand after four failed polls", async () => {
+    const api = scriptedApi({ failPolls: true });
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, { sleep: async () => {} });
+    await expect(batcher(params("a"))).rejects.toThrow(
+      /batch msgbatch_canned failed after 4 consecutive poll failures: .*; it may still be running; cancel it by hand/,
+    );
+  });
+
+  it("tries the download exactly 3 times, spaced pollIntervalMs x attempt apart", async () => {
+    expect(RESULTS_ATTEMPTS).toBe(3);
+    const api = scriptedApi({ failResults: 3 });
+    const sleeps: number[] = [];
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      pollIntervalMs: 1000,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+    await expect(batcher(params("a"))).rejects.toThrow(
+      /after 3 attempts: .*; the results stay downloadable for 29 days/,
+    );
+    expect(api.calls.filter((c) => c.endsWith("/results"))).toHaveLength(3);
+    // One poll wait for the in-progress batch, then 1 x 1000 and 2 x 1000 between downloads.
+    expect(sleeps).toEqual([1000, 1000, 2000]);
+  });
+
+  it("discards a download that fails mid-stream and resolves each item once from the retry", async () => {
+    const api = scriptedApi({
+      breakResults: 1,
+      results: [succeededLine("req-0", "a"), succeededLine("req-1", "b")],
+    });
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, { sleep: async () => {} });
+    const settled = await Promise.all([batcher(params("a")), batcher(params("b"))]);
+    expect(settled.map((m) => m.content)).toEqual([
+      [{ type: "text", text: "a" }],
+      [{ type: "text", text: "b" }],
+    ]);
+    expect(api.calls.filter((c) => c.endsWith("/results"))).toHaveLength(2);
+  });
+
+  it("harvests, rather than cancels, a batch that ends on the poll landing at the deadline", async () => {
+    const api = scriptedApi({ statuses: ["ended"] });
+    let clock = 0;
+    const client = new Anthropic({ apiKey: "canned", fetch: api.fetch, maxRetries: 0 });
+    const batcher = createBatcher(client, {
+      pollIntervalMs: 1000,
+      deadlineMs: 1000,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "a" }]);
+    expect(api.calls.some((c) => c.endsWith("/cancel"))).toBe(false);
   });
 });
