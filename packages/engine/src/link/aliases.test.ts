@@ -111,28 +111,41 @@ describe("codeAliases (F01)", () => {
     expect(billingFrom(text)).toEqual(["/fine", "OTHER_KEY"]);
   });
 
-  it("finishes fast on a 200 KB line of repeated decorator prefixes", () => {
+  it("scans adversarial lines in linear time: 8 times the text costs far less than 64 times", () => {
+    // Each line at n units of its adversarial shape. A backtracking pattern is at least quadratic
+    // on one of them, so its 8x line would cost about 64x; a linear one costs about 8x. The bound
+    // is that growth, not a wall-clock ceiling, so a slow or loaded machine does not fail it.
     const unit = "@a.b.c.d.e.f.g.h";
-    const lines = [
-      unit.repeat(Math.ceil(200_000 / unit.length)),
-      "@a".repeat(100_000),
-      `@${"a.".repeat(100_000)}`,
-      `@${"a".repeat(200_000)}`,
-      "CREATE ".repeat(30_000),
-      `CREATE${" ".repeat(200_000)}TABLE${" ".repeat(10)}`,
-      `CREATE TABLE${" ".repeat(200_000)}`,
-      `os.getenv(${" ".repeat(200_000)}`,
-      `app.get(${" ".repeat(200_000)}`,
-      "a.".repeat(100_000),
-      `CREATE TABLE ${"a.".repeat(100_000)}`,
-      `CREATE TEMP TABLE IF NOT EXISTS ${"[a].".repeat(50_000)}`,
-      `process.env[${" ".repeat(200_000)}`,
-      `@a.get("/${"a".repeat(200_000)}`,
+    const shapes: ((n: number) => string)[] = [
+      (n) => unit.repeat(Math.ceil((2 * n) / unit.length)),
+      (n) => "@a".repeat(n),
+      (n) => `@${"a.".repeat(n)}`,
+      (n) => `@${"a".repeat(2 * n)}`,
+      (n) => "CREATE ".repeat(Math.ceil((3 * n) / 10)),
+      (n) => `CREATE${" ".repeat(2 * n)}TABLE${" ".repeat(10)}`,
+      (n) => `CREATE TABLE${" ".repeat(2 * n)}`,
+      (n) => `os.getenv(${" ".repeat(2 * n)}`,
+      (n) => `app.get(${" ".repeat(2 * n)}`,
+      (n) => "a.".repeat(n),
+      (n) => `CREATE TABLE ${"a.".repeat(n)}`,
+      (n) => `CREATE TEMP TABLE IF NOT EXISTS ${"[a].".repeat(Math.ceil(n / 2))}`,
+      (n) => `process.env[${" ".repeat(2 * n)}`,
+      (n) => `@a.get("/${"a".repeat(2 * n)}`,
     ];
-    for (const line of lines) {
-      const started = performance.now();
-      expect(billingFrom(line)).toBeUndefined();
-      expect(performance.now() - started).toBeLessThan(500);
+    /** The fastest of three scans, so one pause of the machine is not counted. */
+    const cost = (line: string) =>
+      Math.min(
+        ...[1, 2, 3].map(() => {
+          const started = performance.now();
+          expect(billingFrom(line)).toBeUndefined();
+          return performance.now() - started;
+        }),
+      );
+    for (const shape of shapes) {
+      const small = cost(shape(2_500));
+      const large = cost(shape(20_000));
+      // 32x is 4 times the linear growth and half the quadratic; 20 ms absorbs timer noise.
+      expect(large).toBeLessThan(32 * small + 20);
     }
   });
 
