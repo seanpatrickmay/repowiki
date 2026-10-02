@@ -92,7 +92,8 @@ export function createTargetResolver(manifest: Manifest): (target: string) => Fe
  * removed so the words can never join their neighbours into a new token or code span (a freed
  * backtick pairing with a later one would uncover a token the linker left alone as code).
  */
-const plainWords = (words: string): string => words.replace(/[[\]`]/g, "");
+const plainWords = (words: string): string =>
+  words.replace(/[[\]`]/g, "").replace(PLACEHOLDER_CHARS, "");
 
 /**
  * A text with every link token replaced by its plain words, the way the linker writes a link it
@@ -145,8 +146,10 @@ export function createPageLinker(
       return words === canonical ? `[[wp:${canonical}]]` : `[[wp:${canonical}|${words}]]`;
     }
     const feature = resolve(target);
-    // An id shows as the title of the feature it names, even when that feature redirects.
-    const words = (label ?? titles.get(target) ?? target).replace(/]/g, "");
+    // An id shows as the title of the feature it names, even when that feature redirects. A
+    // label is already in the scanned text; a title is model-written data that is not, so it gets
+    // the stripping of a dropped link: it must not open a token or pair a backtick on the page.
+    const words = label?.replace(/]/g, "") ?? plainWords(titles.get(target) ?? target);
     if (feature === null || feature.id === pageId || linked.has(feature.id)) {
       return plainWords(words);
     }
