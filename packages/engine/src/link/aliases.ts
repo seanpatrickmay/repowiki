@@ -156,6 +156,38 @@ function slugOf(name: string): string {
     .replace(/-+$/, "");
 }
 
+/** True when `run` occurs in `tokens` as consecutive tokens. */
+function isTokenRun(run: readonly string[], tokens: readonly string[]): boolean {
+  for (let i = 0; i + run.length <= tokens.length; i++) {
+    if (run.every((token, j) => tokens[i + j] === token)) return true;
+  }
+  return false;
+}
+
+/** The plain English plurals of a word: +s, +es, and y → ies. */
+function pluralsOf(word: string): string[] {
+  return [`${word}s`, `${word}es`, ...(/[^aeiou]y$/.test(word) ? [`${word.slice(0, -1)}ies`] : [])];
+}
+
+/**
+ * True when an identifier names another feature's subject (spec §7.3 aliases point at one page):
+ * its slug is a run of whole tokens in that feature's id, title slug or an alias slug
+ * ("deliverables" in deliverables-management, "agents" in ai-agents), or, for a one-word table
+ * name, a plural of one of their tokens ("milestones" for milestone-tracking).
+ */
+function namesOtherSubject(
+  identifier: string,
+  table: boolean,
+  others: readonly (readonly string[])[],
+): boolean {
+  const run = slugOf(identifier).split("-");
+  return others.some(
+    (tokens) =>
+      isTokenRun(run, tokens) ||
+      (table && run.length === 1 && tokens.some((t) => pluralsOf(t).includes(run[0] ?? ""))),
+  );
+}
+
 /** The forms a name is compared in: lowercased and slugified (empty slugs left out). */
 function keysOf(name: string): string[] {
   const slug = slugOf(name);
@@ -180,7 +212,8 @@ function cleanIdentifier(kind: IdentifierPattern["kind"], raw: string): string |
 /**
  * Code identifiers to add as aliases, per active feature: those found in its (non-test) member
  * files and in no other feature's, that collide with no feature's id or title and no other
- * feature's alias (compared lowercased and as site slugs), most frequent first, at most
+ * feature's alias (compared lowercased and as site slugs), that name no other active feature's
+ * subject (`namesOtherSubject`: a shared models file's tables), most frequent first, at most
  * MAX_CODE_ALIASES. An identifier two features share names neither, so it is left out, which keeps
  * every alias pointing at one page. One that could not be a manifest alias (core's aliasProblem:
  * too long, or holding a control or bidi character) is skipped, never cut.
@@ -205,6 +238,19 @@ export function codeAliases(
   const active = new Set(
     manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id),
   );
+  // Each active feature's id, title and alias slugs, as token lists.
+  const subjects = new Map(
+    manifest.features
+      .filter((f) => active.has(f.id))
+      .map((f) => [
+        f.id,
+        [f.id, f.title, ...f.aliases]
+          .map(slugOf)
+          .filter((slug) => slug !== "")
+          .map((slug) => slug.split("-")),
+      ]),
+  );
+  const tables = new Set<string>();
   // identifier -> feature -> occurrences; key -> features using any spelling of it.
   const counts = new Map<string, Map<string, number>>();
   const users = new Map<string, Set<string>>();
@@ -220,6 +266,7 @@ export function codeAliases(
         const identifier = cleanIdentifier(kind, match[1] ?? "");
         if (identifier === null || identifier.length < MIN_IDENTIFIER_LENGTH) continue;
         if (aliasProblem(identifier) !== null || slugOf(identifier) === "") continue;
+        if (kind === "table") tables.add(identifier);
         const perFeature = counts.get(identifier) ?? new Map<string, number>();
         perFeature.set(featureId, (perFeature.get(featureId) ?? 0) + 1);
         counts.set(identifier, perFeature);
@@ -240,6 +287,8 @@ export function codeAliases(
       continue;
     }
     if (keys.some((key) => users.get(key)?.size !== 1)) continue;
+    const others = [...subjects].flatMap(([id, names]) => (id === featureId ? [] : names));
+    if (namesOtherSubject(identifier, tables.has(identifier), others)) continue;
     const list = perFeature.get(featureId) ?? [];
     list.push({ identifier, count: byFeature.get(featureId) ?? 0 });
     perFeature.set(featureId, list);

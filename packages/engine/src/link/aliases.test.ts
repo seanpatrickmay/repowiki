@@ -1,4 +1,5 @@
 import type { Manifest } from "@repowiki/core";
+import { makeFeature, makeManifest } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { codeAliases, IDENTIFIER_PATTERNS, MAX_CODE_ALIASES } from "./aliases.ts";
 import { linkManifest } from "./test-manifest.ts";
@@ -354,6 +355,42 @@ describe("codeAliases (F01)", () => {
       ["src/deliverables/crud.py", '@router.get("/shared-table")'],
     ]);
     expect(codeAliases(linkManifest(), files)).toEqual({});
+  });
+
+  it("never gives a feature a table named after another feature's subject", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-sources", title: "Signal sources", aliases: [] }),
+        makeFeature({ id: "deliverables-management", title: "Deliverables management" }),
+        makeFeature({ id: "ai-agents", title: "AI agents", aliases: [] }),
+        makeFeature({ id: "planning", title: "Milestone tracking", aliases: [] }),
+      ],
+      membership: { "app/models.py": { featureId: "signal-sources", weight: 1 } },
+    });
+    // The shared models file belongs to one feature, but most of its tables name the others.
+    const models = ["deliverables", "agents", "milestones", "signal_rows"]
+      .map((table) => `    __tablename__ = "${table}"`)
+      .join("\n");
+    const found = codeAliases(manifest, new Map([["app/models.py", models]]));
+    expect(found).toEqual({ "signal-sources": ["signal_rows"] });
+  });
+
+  it("keeps an identifier that only shares a word with another feature, or names its own", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-sources", title: "Signal sources", aliases: [] }),
+        makeFeature({ id: "ai-agents", title: "AI agents", aliases: [] }),
+      ],
+      membership: { "app/sources.py": { featureId: "signal-sources", weight: 1 } },
+    });
+    const text = [
+      '__tablename__ = "agent_runs"',
+      '__tablename__ = "sources"',
+      'URL = os.getenv("AI_AGENTS_URL")',
+    ].join("\n");
+    expect(codeAliases(manifest, new Map([["app/sources.py", text]]))).toEqual({
+      "signal-sources": ["AI_AGENTS_URL", "agent_runs", "sources"],
+    });
   });
 
   it("lets only active features own identifiers", () => {
