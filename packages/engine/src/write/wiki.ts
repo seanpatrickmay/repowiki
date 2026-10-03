@@ -164,17 +164,22 @@ export async function buildWiki(
     written = await writePages({ ...input, manifest, only: missing }, { ...rest, wikipedia });
     stored = written.pages.flatMap((page) => (page.revision === null ? [] : [page.revision]));
     if (stored.length === 0) {
-      // Every page failed; its answers are settled all the same.
+      // Every missing page failed; its answers are settled all the same.
       store.transaction(() => journal?.flush());
-      throw new WikiBuildError(
-        `no page could be written: ${written.pages.map((p) => `${p.featureId}: ${p.failure}`).join("; ")}`,
-      );
+      // Only a wiki with no page at all has nothing to go on with: with others already stored (a
+      // rerun, where the head is already this sha), the article is still owed its round.
+      if (active.every((f) => store.getCurrentRevision(f.id) === null)) {
+        throw new WikiBuildError(
+          `no page could be written: ${written.pages.map((p) => `${p.featureId}: ${p.failure}`).join("; ")}`,
+        );
+      }
+    } else {
+      store.transaction(() => {
+        for (const revision of stored) store.putRevision(revision);
+        store.setHead(index.sha);
+        journal?.flush();
+      });
     }
-    store.transaction(() => {
-      for (const revision of stored) store.putRevision(revision);
-      store.setHead(index.sha);
-      journal?.flush();
-    });
   }
   const done = { manifest, aliases, stored, written };
 

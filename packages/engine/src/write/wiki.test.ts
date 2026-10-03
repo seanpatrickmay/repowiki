@@ -187,6 +187,7 @@ describe("buildWiki", () => {
     expect(build).toMatchObject({ architecture: null, architectureSkipped: "too few pages" });
     expect(requests.map((r) => r.featureId)).toEqual(["signals"]);
     expect(alone.getCurrentArchitecture()).toBeNull();
+    alone.close();
     store.close();
   });
 
@@ -203,6 +204,25 @@ describe("buildWiki", () => {
     expect(requests.map((r) => r.featureId)).toEqual([undefined]);
     expect(again.stored).toEqual([]);
     expect(first.store.getCurrentArchitecture()?.parentId).toBeNull();
+  });
+
+  it("still writes the article when a rerun's only missing page fails again, others being stored", async () => {
+    const extra = makeFeature({ id: "extra", title: "Extra", aliases: [] });
+    const first = setup(["extra", ""], [extra]);
+    const build = await buildWiki(first.store, first.input, first.options);
+    expect(build.stored.map((r) => r.featureId)).toEqual(["deliverables", "signals"]);
+    expect(build.architecture?.failure).not.toBeNull();
+    expect(first.store.getCurrentArchitecture()).toBeNull();
+
+    // The same page fails again; the other two are stored, so the article must still be written.
+    const { requests, options } = setup(["extra"], [extra]);
+    const again = await buildWiki(first.store, first.input, options);
+    expect(again.stored).toEqual([]);
+    expect(again.written?.pages.map((p) => [p.featureId, p.revision])).toEqual([["extra", null]]);
+    expect(again.architecture?.failure).toBeNull();
+    expect(requests.map((r) => r.featureId)).toEqual(["extra", undefined]);
+    expect(first.store.getCurrentArchitecture()?.basis).toHaveLength(2);
+    expect(first.store.getHead()).toBe(first.input.index.sha);
   });
 
   it("rewrites the article, parented on the old one, when the set of pages changed", async () => {
@@ -297,6 +317,25 @@ describe("buildWiki", () => {
       /no page could be written/,
     );
     expect(keys.map((key) => store.findBatchRequest(key))).toEqual([null, null]);
+  });
+
+  it("forgets a failed article's journal row too, and stores nothing for it", async () => {
+    const { store, input, options } = setup([""]);
+    const journal = buildJournal(store);
+    journal.record("msgbatch_2", new Date().toISOString(), [
+      { requestKey: "architecture", customId: "req-a" },
+    ]);
+    const provider: Provider = {
+      generate(request) {
+        if (request.featureId === undefined) journal.forget("msgbatch_2", ["architecture"]);
+        return options.provider.generate(request);
+      },
+    };
+    const build = await buildWiki(store, input, { ...options, provider, journal });
+    expect(build.architecture?.failure).not.toBeNull();
+    expect(store.findBatchRequest("architecture")).toBeNull();
+    expect(store.getCurrentArchitecture()).toBeNull();
+    expect(store.listCurrentRevisions()).toHaveLength(2);
   });
 
   it("forgets the project article's journal row only once the article is stored", async () => {

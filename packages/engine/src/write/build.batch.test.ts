@@ -205,6 +205,76 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     expect(journaled.map((key) => store.findBatchRequest(key))).toEqual([null, null, null, null]);
   });
 
+  it("collects the article's batch a build was killed in, instead of paying for it again", async () => {
+    // Batch 1 holds both pages; batch 2 is the article's, whose polls never end in the first run.
+    let reached!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let killed = true;
+    const api = batchesApi(
+      (page) =>
+        isProject(page)
+          ? architectureDraft()
+          : isSignals(page)
+            ? signalsDraft()
+            : deliverablesDraft(),
+      (n) => {
+        if (n !== 2 || !killed) return null;
+        reached();
+        return new Promise<never>(() => {});
+      },
+    );
+    const { manifest, ...input } = testWiki();
+    input.sources.set("README.md", SAMPLE_README);
+    const store = openStore(":memory:");
+    store.putManifest(manifest, { llmRevised: true });
+    const journaled: string[] = [];
+    const build = () => {
+      const journal = buildJournal(store);
+      const record = journal.record;
+      journal.record = (batchId, createdAt, items) => {
+        journaled.push(...items.map((item) => item.requestKey));
+        record(batchId, createdAt, items);
+      };
+      const provider = createClaudeProvider({
+        models: DEFAULT_MODELS,
+        ledger: createLedger(),
+        runId: "test-run",
+        apiKey: "canned",
+        fetch: api.fetch,
+        pollIntervalMs: 0,
+        batchJournal: journal,
+      });
+      return buildWiki(store, input, {
+        provider,
+        journal,
+        repoName: "sample",
+        wikipediaFetch: fakeWikipedia,
+      });
+    };
+    void build();
+    await waiting;
+    // The pages are stored and forgotten; only the article's row is left, and no article is.
+    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
+    expect(store.listCurrentRevisions()).toHaveLength(2);
+    expect(store.getCurrentArchitecture()).toBeNull();
+    expect(journaled).toHaveLength(3);
+    expect(journaled.map((key) => store.findBatchRequest(key) !== null)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+    killed = false;
+    const rerun = await build();
+    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
+    expect(rerun.stored).toEqual([]);
+    expect(rerun.architecture?.failure).toBeNull();
+    expect(store.getCurrentArchitecture()?.title).toBe("Sample Ops");
+    expect(journaled).toHaveLength(3);
+    expect(journaled.map((key) => store.findBatchRequest(key))).toEqual([null, null, null]);
+  });
+
   it("keeps every row of a page whose retry batch was canceled, so a rerun pays for nothing", async () => {
     const broken = signalsDraft();
     const overview = broken.sections[1]?.claims[0];
