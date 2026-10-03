@@ -132,7 +132,7 @@ describe("writeArchitecture", () => {
       (call) =>
         call === 1
           ? architectureDraft()
-          : { claims: [{ ...ghost, cite: ["src/signals/store.py:1-2"], pages: [] }] },
+          : { claims: [{ ...ghost, cite: ["src/signals/ingest.py:10-11"], pages: [] }] },
       withClaim("layers", ghost),
     );
     const outcome = await result;
@@ -145,6 +145,29 @@ describe("writeArchitecture", () => {
     expect(requests[1]?.maxTokens).toBe(4000);
     const layers = outcome.architecture?.sections.find((s) => s.key === "layers");
     expect(layers?.claims.map((c) => c.text)).toContain("Ghosts haunt it.");
+  });
+
+  it("sends a claim citing lines the pack did not show to the retry round", async () => {
+    // The pack shows crud.py's lines 4-5 (signatures) and 1 and 7 (edge sites), not line 6.
+    const y1 = { id: "y1", text: "`complete()` hands notes on.", pages: [], supports: [] };
+    const { result, requests } = run(
+      (call) =>
+        call === 1
+          ? architectureDraft()
+          : { claims: [{ ...y1, cite: ["src/deliverables/crud.py:4-5"] }] },
+      (draft) => {
+        const layers = draft.sections.find((s) => s.key === "layers");
+        if (layers !== undefined)
+          layers.claims = [{ ...y1, cite: ["src/deliverables/crud.py:4-7"] }];
+      },
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ failure: null, dropped: [], calls: 2 });
+    expect(String(requests[1]?.messages.at(-1)?.content)).toContain(
+      '- "y1": the claim cites "src/deliverables/crud.py" lines 4-7, which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead',
+    );
+    const layers = outcome.architecture?.sections.find((s) => s.key === "layers");
+    expect(layers?.claims[0]?.citations).toMatchObject([{ startLine: 4, endLine: 5 }]);
   });
 
   it("drops a claim given up or failing twice, and logs it", async () => {
@@ -209,6 +232,9 @@ describe("writeArchitecture", () => {
       const draft = architectureDraft();
       const layer = draft.sections[1]?.claims[0];
       if (layer !== undefined) layer.text = "It calls [[ghost]] and [[javascript:alert(1)|x]].";
+      // Without edges the pack gives no edge site to cite, so the request path cites a signature.
+      const path = draft.sections.find((s) => s.key === "request-paths")?.claims[0];
+      if (path !== undefined) path.cite = ["src/deliverables/crud.py:4"];
       return draft;
     });
     const input = testArchitectureInput();

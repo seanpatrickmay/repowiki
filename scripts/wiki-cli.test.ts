@@ -370,7 +370,7 @@ describe("renderBuildSummary with the About article", () => {
     dropped: [],
     calls: 1,
     tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
-    pack: { text: "", tokens: 0, features: [] },
+    pack: { text: "", tokens: 0, features: [], shown: new Map() },
     ...overrides,
   });
   const row = (summary: string) =>

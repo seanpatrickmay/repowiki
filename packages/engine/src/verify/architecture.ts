@@ -35,10 +35,15 @@ export type ArchitectureDraft = z.infer<typeof ArchitectureDraft>;
 export const ArchitectureFixes = z.object({ claims: z.array(ArchitectureDraftClaim) });
 export type ArchitectureFixes = z.infer<typeof ArchitectureFixes>;
 
-/** What an Architecture claim is checked against: the build's files and commits, and its pages. */
+/**
+ * What an Architecture claim is checked against: the build's files and commits, its pages, and
+ * the lines its pack showed.
+ */
 export interface ArchitectureContext extends VerifyContext {
   /** Ids of the active features with a page in this build: the only pages a claim may name. */
   pages: ReadonlySet<string>;
+  /** Path to the lines the pack showed (ArchitecturePack.shown): the only lines a claim may cite. */
+  shown: ReadonlyMap<string, ReadonlySet<number>>;
 }
 
 export type VerifiedArchitectureClaim =
@@ -47,7 +52,8 @@ export type VerifiedArchitectureClaim =
 
 /**
  * Checks one draft claim of the Architecture article: its text as a feature page's claim text is
- * checked, every reference resolves at ctx.sha, every page it names is a feature id and a page of
+ * checked, every reference resolves at ctx.sha, every code citation's lines are lines the pack
+ * showed (the article's writer saw nothing else of the code), every page it names is a feature id and a page of
  * this build (at most MAX_CLAIM_PAGES, each once), and the article's rules hold (core's
  * architectureClaimViolations): a body claim cites code or a commit or names a page, and a
  * request-path claim cites code or a commit, judged on the pages that are known. Page ids are
@@ -65,6 +71,18 @@ export function verifyArchitectureClaim(
   problems.push(...claimTextProblems(text, ctx));
   const { citations, problems: unresolvable, unresolved } = resolveCitations(draft.cite, ctx);
   problems.push(...unresolvable);
+  for (const citation of citations) {
+    if (citation.kind !== "code") continue;
+    const { path, startLine, endLine } = citation;
+    const lines = ctx.shown.get(path);
+    for (let line = startLine; line <= endLine; line++) {
+      if (lines?.has(line)) continue;
+      problems.push(
+        `the claim cites ${quote(path)} lines ${startLine}-${endLine}, which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead`,
+      );
+      break;
+    }
+  }
   const pages = [...new Set(draft.pages.map((id) => id.trim()))];
   const unknown = pages.filter((id) => !FeatureId.safeParse(id).success || !ctx.pages.has(id));
   const known = pages.filter((id) => !unknown.includes(id));

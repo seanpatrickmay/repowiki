@@ -143,6 +143,7 @@ export async function writeArchitecture(
     symbolsOf: (path) => symbols.get(path) ?? [],
     commits: history,
     pages: pageIds,
+    shown: pack.shown,
   };
   const system = architectureSystemPrompt(options.repoName, manifest);
   const state: State = {

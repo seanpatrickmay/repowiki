@@ -34,6 +34,18 @@ export interface ArchitecturePack {
   tokens: number;
   /** Ids of the features it covers, sorted: the pages an Architecture claim may name. */
   features: string[];
+  /**
+   * Path to the 1-based lines the pack showed: the numbered lines it printed (README, documents,
+   * infrastructure outlines, entry-point signatures) and the edge sites it gave. An article claim
+   * may cite only these.
+   */
+  shown: ReadonlyMap<string, ReadonlySet<number>>;
+}
+
+/** A pack line, or block, and the file lines it shows. */
+interface Shown {
+  text: string;
+  shows: readonly { path: string; lines: readonly number[] }[];
 }
 
 /**
@@ -207,6 +219,7 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   const tail = "Write the article.";
   const parts: string[] = [];
   let used = tail.length;
+  const shown = new Map<string, Set<number>>();
 
   /**
    * Adds a section: each item that fits (one that does not is skipped, so a smaller one after it
@@ -215,20 +228,26 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
    */
   const section = (
     heading: string,
-    items: readonly string[],
+    items: readonly (string | Shown)[],
     more: (n: number) => string,
     omitted = 0,
   ) => {
     const lines = [heading];
     let length = 2 + heading.length;
     let kept = 0;
-    for (const item of items) {
+    for (const entry of items) {
+      const item = typeof entry === "string" ? entry : entry.text;
       const rest = items.length - kept - 1 + omitted;
       const reserve = rest > 0 ? 1 + more(rest).length : 0;
       if (used + length + 1 + item.length + reserve > budgetChars) continue;
       lines.push(item);
       length += 1 + item.length;
       kept += 1;
+      for (const { path, lines: numbers } of typeof entry === "string" ? [] : entry.shows) {
+        const set = shown.get(path) ?? new Set<number>();
+        for (const n of numbers) set.add(n);
+        shown.set(path, set);
+      }
     }
     if (items.length === 0 && omitted === 0) lines.push("(none)");
     else if (kept < items.length || omitted > 0) lines.push(more(items.length - kept + omitted));
@@ -283,7 +302,10 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
     const width = String(shown).length;
     const range =
       shown === lines.length ? `${lines.length} lines` : `lines 1-${shown} of ${lines.length}`;
-    return `### ${clean(path)} (${range})\n${numbered(lines, numbers, width)}`;
+    return {
+      text: `### ${clean(path)} (${range})\n${numbered(lines, numbers, width)}`,
+      shows: [{ path, lines: numbers }],
+    };
   });
   section(
     "## Project documents",
@@ -308,7 +330,10 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
 
   const edges = input.edges.map((edge) => {
     const sites = edge.sites.map((s) => `${clean(s.path)}:${s.line} (${s.kind})`).join(", ");
-    return `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}; at ${sites}`;
+    return {
+      text: `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}; at ${sites}`,
+      shows: edge.sites.map((s) => ({ path: s.path, lines: [s.line] })),
+    };
   });
   section(
     "## Cross-feature edges (heaviest first; from the feature that imports or calls)",
@@ -320,7 +345,7 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
     .filter((f) => f.skipped === null && INFRA_FILE.test(f.path) && sources.has(f.path))
     .map((f) => f.path)
     .sort(byText);
-  const outlines = infra.slice(0, MAX_OUTLINED_FILES).flatMap((path) => {
+  const outlines = infra.slice(0, MAX_OUTLINED_FILES).flatMap((path): Shown[] => {
     const lines = sourceLines(sources.get(path) ?? "");
     const numbers = lines
       .map((line, i) => (OUTLINE_LINE.test(line) ? i + 1 : 0))
@@ -334,7 +359,10 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
       return equals < 0 ? line : `${line.slice(0, equals).trimEnd()} = \u2026`;
     });
     return [
-      `### ${clean(path)} (${lines.length} lines; top-level lines)\n${numbered(keys, numbers, width)}`,
+      {
+        text: `### ${clean(path)} (${lines.length} lines; top-level lines)\n${numbered(keys, numbers, width)}`,
+        shows: [{ path, lines: numbers }],
+      },
     ];
   });
   const listed = infra.slice(MAX_OUTLINED_FILES, MAX_OUTLINED_FILES + MAX_LISTED_INFRA_FILES);
@@ -347,7 +375,7 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   );
 
   const byPath = new Map(index.files.map((f) => [f.path, f]));
-  const entries = pages.flatMap((page) => {
+  const entries = pages.flatMap((page): Shown[] => {
     const path = page.infobox.entryPoints[0];
     const file = path === undefined ? undefined : byPath.get(path);
     const text = path === undefined ? undefined : sources.get(path);
@@ -362,7 +390,10 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
     if (numbers.length === 0) return [];
     const width = String(lines.length).length;
     return [
-      `### ${clean(path)} (${clean(page.featureId)}; ${lines.length} lines; signatures only)\n${numbered(lines, numbers, width)}`,
+      {
+        text: `### ${clean(path)} (${clean(page.featureId)}; ${lines.length} lines; signatures only)\n${numbered(lines, numbers, width)}`,
+        shows: [{ path, lines: numbers }],
+      },
     ];
   });
   section("## Entry points", entries, (n) => `- and ${n} more entry points not shown`);
@@ -372,5 +403,6 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
     text,
     tokens: estimateTokens(text),
     features: pages.map((p) => p.featureId),
+    shown,
   };
 }

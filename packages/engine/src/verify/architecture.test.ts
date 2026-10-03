@@ -7,7 +7,17 @@ import {
 } from "./architecture.ts";
 import { testContext } from "./test-context.ts";
 
-const ctx: ArchitectureContext = { ...testContext(), pages: new Set(["signals", "deliverables"]) };
+/** The pack showed lines 10-24 of ingest.py and nothing else. */
+const shown = new Map([
+  ["src/signals/ingest.py", new Set(Array.from({ length: 15 }, (_, i) => i + 10))],
+]);
+const ctx: ArchitectureContext = {
+  ...testContext(),
+  pages: new Set(["signals", "deliverables"]),
+  shown,
+};
+const NOT_SHOWN =
+  "which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead";
 
 const draft = (overrides: Partial<ArchitectureDraftClaim> = {}): ArchitectureDraftClaim => ({
   id: "y1",
@@ -33,6 +43,18 @@ describe("verifyArchitectureClaim", () => {
       },
       problems: [],
     });
+  });
+
+  it("refuses a code citation of a line the pack did not show, in a file it showed or not", () => {
+    expect(
+      verifyArchitectureClaim("layers", draft({ cite: ["src/signals/ingest.py:20-25"] }), ctx),
+    ).toEqual({
+      claim: null,
+      problems: [`the claim cites "src/signals/ingest.py" lines 20-25, ${NOT_SHOWN}`],
+    });
+    expect(
+      verifyArchitectureClaim("layers", draft(), { ...ctx, shown: new Map() }).problems,
+    ).toEqual([`the claim cites "src/signals/ingest.py" lines 10-24, ${NOT_SHOWN}`]);
   });
 
   it("accepts a claim backed by pages of this build alone, trimmed and named once", () => {
