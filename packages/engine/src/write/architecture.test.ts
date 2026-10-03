@@ -170,6 +170,26 @@ describe("writeArchitecture", () => {
     expect(layers?.claims[0]?.citations).toMatchObject([{ startLine: 4, endLine: 5 }]);
   });
 
+  it("keeps a lead claim that carries citations or pages, without them, in one call", async () => {
+    const { result, requests } = run(
+      () => architectureDraft(),
+      (draft) => {
+        const lead = draft.sections[0]?.claims[0];
+        if (lead === undefined) return;
+        lead.cite = ["README.md:3-5"];
+        lead.pages = ["signals"];
+      },
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ failure: null, dropped: [], calls: 1 });
+    expect(requests).toHaveLength(1);
+    const lead = outcome.architecture?.sections[0];
+    expect(lead?.key).toBe("lead");
+    expect(lead?.claims).toHaveLength(1);
+    expect(lead?.claims[0]).toMatchObject({ citations: [], pages: [] });
+    expect(lead?.claims[0]?.supports.length).toBeGreaterThan(0);
+  });
+
   it("drops a claim given up or failing twice, and logs it", async () => {
     const ghost = { id: "g1", text: "Ghosts haunt it.", cite: [], pages: ["ghost"], supports: [] };
     const { result, lines } = run(

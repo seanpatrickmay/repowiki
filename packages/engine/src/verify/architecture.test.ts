@@ -117,12 +117,19 @@ describe("verifyArchitectureClaim", () => {
     ]);
   });
 
-  it("keeps a lead's supports, and refuses a lead that cites or names a page", () => {
+  it("keeps a lead's supports, and strips the citations and pages a lead carries", () => {
     const lead = draft({ id: "l1", cite: [], supports: ["y1"] });
     expect(verifyArchitectureClaim("lead", lead, ctx).claim?.supports).toEqual(["y1"]);
-    expect(verifyArchitectureClaim("lead", { ...lead, pages: ["signals"] }, ctx).problems).toEqual([
-      "lead claims carry no citations or pages; list the body claims they support",
-    ]);
+    // Even references that would not resolve, or lines the pack never showed: they are dropped.
+    const carrying = {
+      ...lead,
+      cite: ["src/signals/ingest.py:1-2", "nope.py:1"],
+      pages: ["ghost"],
+    };
+    expect(verifyArchitectureClaim("lead", carrying, ctx)).toEqual({
+      claim: expect.objectContaining({ id: "l1", citations: [], pages: [], supports: ["y1"] }),
+      problems: [],
+    });
     expect(verifyArchitectureClaim("layers", draft({ supports: ["y2"] }), ctx).problems).toEqual([
       "only lead claims may support other claims",
     ]);
@@ -137,23 +144,9 @@ describe("verifyArchitectureClaim", () => {
       "request-path claims need a code or commit citation",
     ]);
     expect(
-      verifyArchitectureClaim("lead", draft({ id: "l1", cite: [], pages: ["ghost"] }), ctx)
+      verifyArchitectureClaim("lead", draft({ id: "l1", pages: ["ghost", "signals"] }), ctx)
         .problems,
-    ).toEqual([
-      'the claim names "ghost", which is not a feature page of this wiki',
-      "lead claims must support at least one body claim",
-    ]);
-    expect(
-      verifyArchitectureClaim(
-        "lead",
-        draft({ id: "l1", cite: [], pages: ["ghost", "signals"] }),
-        ctx,
-      ).problems,
-    ).toEqual([
-      'the claim names "ghost", which is not a feature page of this wiki',
-      "lead claims carry no citations or pages; list the body claims they support",
-      "lead claims must support at least one body claim",
-    ]);
+    ).toEqual(["lead claims must support at least one body claim"]);
   });
 
   it("refuses a page that is not a feature id even when the context lists it", () => {

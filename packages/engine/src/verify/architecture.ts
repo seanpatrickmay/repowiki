@@ -56,7 +56,8 @@ export type VerifiedArchitectureClaim =
  * showed (the article's writer saw nothing else of the code), every page it names is a feature id and a page of
  * this build (at most MAX_CLAIM_PAGES, each once), and the article's rules hold (core's
  * architectureClaimViolations): a body claim cites code or a commit or names a page, and a
- * request-path claim cites code or a commit, judged on the pages that are known. Page ids are
+ * request-path claim cites code or a commit, judged on the pages that are known. A lead claim's
+ * citations and pages are stripped: its backing is its supports. Page ids are
  * model-written: they are trimmed, and a refused one appears only quote()d, in at most
  * MAX_CLAIM_PAGES problems.
  */
@@ -69,7 +70,11 @@ export function verifyArchitectureClaim(
   const text = draft.text.trim();
   if (draft.id === "") problems.push("the claim has no id");
   problems.push(...claimTextProblems(text, ctx));
-  const { citations, problems: unresolvable, unresolved } = resolveCitations(draft.cite, ctx);
+  // A lead claim rests on its supports alone: citations or pages it carries are dropped, not
+  // refused, so the claim is kept when its supports hold.
+  const cite = key === "lead" ? [] : draft.cite;
+  const named = key === "lead" ? [] : draft.pages;
+  const { citations, problems: unresolvable, unresolved } = resolveCitations(cite, ctx);
   problems.push(...unresolvable);
   for (const citation of citations) {
     if (citation.kind !== "code") continue;
@@ -83,7 +88,7 @@ export function verifyArchitectureClaim(
       break;
     }
   }
-  const pages = [...new Set(draft.pages.map((id) => id.trim()))];
+  const pages = [...new Set(named.map((id) => id.trim()))];
   const unknown = pages.filter((id) => !FeatureId.safeParse(id).success || !ctx.pages.has(id));
   const known = pages.filter((id) => !unknown.includes(id));
   for (const id of unknown.slice(0, MAX_CLAIM_PAGES)) {
