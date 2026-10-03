@@ -16,6 +16,12 @@ const seeAlsoOnly = () => ({ ...fixtureExport(), architecture: [] });
 const edgeLines = (source: string | null) =>
   (source ?? "").split("\n").filter((l) => l.includes(" --- "));
 
+/** The fixture export with the project article's edges replaced. */
+function withEdges(edges: FeatureEdge[]) {
+  const wiki = fixtureExport();
+  return { ...wiki, architecture: wiki.architecture.map((a) => ({ ...a, edges })) };
+}
+
 /**
  * An export with `count` active features f000, f001, … (node n<i> is f<i>), each with a page and
  * no See also, and a project article with the given edges.
@@ -73,12 +79,24 @@ describe("featureMapSource", () => {
     expect(lines).toEqual([...heaviest].sort());
   });
 
-  it("joins no pair when the Architecture article has no edge", () => {
-    const wiki = fixtureExport();
-    const architecture = wiki.architecture.map((a) => ({ ...a, edges: [] }));
-    const source = featureMapSource(buildSiteModel({ ...wiki, architecture }, null)) ?? "";
-    expect(source).not.toContain(" --- ");
-    expect(source.split("\n").filter((l) => l.startsWith("  click"))).toHaveLength(3);
+  it("falls back to See also pairs and caption when the article has no edge", () => {
+    const site = buildSiteModel(withEdges([]), null);
+    expect(edgeLines(featureMapSource(site))).toEqual(["  n0 --- n1", "  n0 --- n2"]);
+    expect(featureMapCaption(site)).toContain("See also");
+  });
+
+  it("falls back to See also pairs and caption when no article edge joins two map nodes", () => {
+    // scheduler has no page, exporter is retired, and legacy-signals redirects to signals.
+    const site = buildSiteModel(
+      withEdges([
+        { from: "signals", to: "scheduler", imports: 3, calls: 0 },
+        { from: "exporter", to: "deliverables", imports: 0, calls: 2 },
+        { from: "legacy-signals", to: "signals", imports: 1, calls: 0 },
+      ]),
+      null,
+    );
+    expect(edgeLines(featureMapSource(site))).toEqual(["  n0 --- n1", "  n0 --- n2"]);
+    expect(featureMapCaption(site)).toContain("See also");
   });
 
   it("draws one clickable node per active article and one edge per See also pair without one", () => {

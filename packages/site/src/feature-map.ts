@@ -54,15 +54,13 @@ export const MAX_ARCHITECTURE_EDGES = 80;
 /**
  * Main Page feature map (F10): one clickable node per active article, and one undirected edge per
  * pair of articles joined by the project article's cross-feature edges (F27, real calls and
- * imports; the MAX_ARCHITECTURE_EDGES heaviest pairs) when the export has one, else per pair that
- * lists each other, or one the other, in See also. Null when empty. Labels come from feature
- * titles (untrusted) through `mermaidLabel`; the only other text is node ids and `articleUrl(id)`
- * for feature ids, which the export schema limits to kebab-case.
+ * imports; the MAX_ARCHITECTURE_EDGES heaviest pairs) when any of them joins two articles, else
+ * per pair that lists each other, or one the other, in See also. Null when empty. Labels come
+ * from feature titles (untrusted) through `mermaidLabel`; the only other text is node ids and
+ * `articleUrl(id)` for feature ids, which the export schema limits to kebab-case.
  */
 export function featureMapSource(site: SiteModel): string | null {
-  const ids = [...site.pages.keys()]
-    .filter((id) => site.features.get(id)?.status.kind === "active")
-    .sort();
+  const ids = mapNodes(site);
   if (ids.length === 0) return null;
   const node = new Map(ids.map((id, index) => [id, `n${index}`]));
   const lines = ["flowchart LR"];
@@ -70,10 +68,24 @@ export function featureMapSource(site: SiteModel): string | null {
     const label = mermaidLabel(site.features.get(id)?.title ?? id);
     lines.push(`  ${node.get(id)}["${label === "" ? id : label}"]`);
   }
-  const edges = mapPairs(site, new Set(ids)).map(([a, b]) => `  ${node.get(a)} --- ${node.get(b)}`);
-  lines.push(...edges.sort());
+  const { pairs } = mapPairs(site, new Set(ids));
+  lines.push(...pairs.map(([a, b]) => `  ${node.get(a)} --- ${node.get(b)}`).sort());
   for (const id of ids) lines.push(`  click ${node.get(id)} "${articleUrl(id)}"`);
   return lines.join("\n");
+}
+
+/** What the feature map's lines mean, for its caption. */
+export function featureMapCaption(site: SiteModel): string {
+  return mapPairs(site, new Set(mapNodes(site))).fromArticle
+    ? "Each box is an article; a line joins two articles when code in one calls or imports code in the other."
+    : "Each box is an article; a line joins two articles when one lists the other under See also.";
+}
+
+/** The map's nodes: the active features with a page, sorted. */
+function mapNodes(site: SiteModel): string[] {
+  return [...site.pages.keys()]
+    .filter((id) => site.features.get(id)?.status.kind === "active")
+    .sort();
 }
 
 /** Two map nodes a line joins, sorted. */
@@ -89,22 +101,27 @@ function mapPair(site: SiteModel, nodes: ReadonlySet<string>, x: string, y: stri
   return [a, b];
 }
 
-/** The distinct pairs of map nodes the map joins, each sorted. */
-function mapPairs(site: SiteModel, nodes: ReadonlySet<string>): Pair[] {
-  if (site.architecture !== null) {
-    // Weight per undirected pair: both directions and every edge through a redirect add up.
-    const weighted = new Map<string, { pair: Pair; weight: number }>();
-    for (const edge of site.architecture.edges) {
-      const pair = mapPair(site, nodes, edge.from, edge.to);
-      if (pair === null) continue;
-      const key = pair.join(" ");
-      const weight = (weighted.get(key)?.weight ?? 0) + edge.imports + edge.calls;
-      weighted.set(key, { pair, weight });
-    }
-    return [...weighted]
+/**
+ * The distinct pairs of map nodes the map joins, each sorted: the project article's heaviest when
+ * any of its edges joins two map nodes (a Go or Rust repository's article has none), else the See
+ * also pairs.
+ */
+function mapPairs(site: SiteModel, nodes: ReadonlySet<string>) {
+  // Weight per undirected pair: both directions and every edge through a redirect add up.
+  const weighted = new Map<string, { pair: Pair; weight: number }>();
+  for (const edge of site.architecture?.edges ?? []) {
+    const pair = mapPair(site, nodes, edge.from, edge.to);
+    if (pair === null) continue;
+    const key = pair.join(" ");
+    const weight = (weighted.get(key)?.weight ?? 0) + edge.imports + edge.calls;
+    weighted.set(key, { pair, weight });
+  }
+  if (weighted.size > 0) {
+    const pairs = [...weighted]
       .sort(([p, v], [q, w]) => w.weight - v.weight || (p < q ? -1 : p > q ? 1 : 0))
       .slice(0, MAX_ARCHITECTURE_EDGES)
       .map(([, { pair }]) => pair);
+    return { pairs, fromArticle: true };
   }
   const seeAlso = new Map<string, Pair>();
   for (const id of nodes) {
@@ -113,12 +130,5 @@ function mapPairs(site: SiteModel, nodes: ReadonlySet<string>): Pair[] {
       if (pair !== null) seeAlso.set(pair.join(" "), pair);
     }
   }
-  return [...seeAlso.values()];
-}
-
-/** What the feature map's lines mean, for its caption. */
-export function featureMapCaption(site: SiteModel): string {
-  return site.architecture !== null
-    ? "Each box is an article; a line joins two articles when code in one calls or imports code in the other."
-    : "Each box is an article; a line joins two articles when one lists the other under See also.";
+  return { pairs: [...seeAlso.values()], fromArticle: false };
 }
