@@ -10,6 +10,7 @@ export {
 } from "./links.ts";
 export { featureNeighbours, SEE_ALSO_LIMIT, seeAlsoFor } from "./see-also.ts";
 export {
+  architectureLinksWithoutPage,
   architectureLinkViolations,
   linksWithoutPage,
   linkViolations,

@@ -197,7 +197,12 @@ describe("wiki-check.ts as a process (no network)", () => {
   });
 
   /** pageOf's store plus the project's article at the same sha, backed by `pages`. */
-  function withArticle(repo: string, sha: string, pages: string[]): string {
+  function withArticle(
+    repo: string,
+    sha: string,
+    pages: string[],
+    text = "Signals feed deliverables.",
+  ): string {
     const out = pageOf(repo, sha, sha);
     const store = openStore(join(out, "wiki.db"));
     const code = codeCitation({
@@ -216,7 +221,7 @@ describe("wiki-check.ts as a process (no network)", () => {
         edges: [],
         sections: [
           ...(lead === undefined ? [] : [lead]),
-          { key: "purpose", claims: [architectureClaim({ citations: [code], pages })] },
+          { key: "purpose", claims: [architectureClaim({ text, citations: [code], pages })] },
         ],
       }),
     );
@@ -234,11 +239,21 @@ describe("wiki-check.ts as a process (no network)", () => {
     );
   });
 
-  it("reports a page the article names that has none", () => {
+  it("counts a page the article names that has none, as the pages' own links are", () => {
     const { repo, sha } = gitRepo();
     const out = withArticle(repo, sha, ["deliverables"]);
     const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    // The page's See also names deliverables once, and the article names it once.
+    expect(result.stdout).toContain("2 links name an active feature with no stored page");
+  });
+
+  it("reports a link in the article to an id that is not a feature", () => {
+    const { repo, sha } = gitRepo();
+    const out = withArticle(repo, sha, [], "Signals feed [[nowhere]].");
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
     expect(result.status).toBe(1);
-    expect(result.stderr).toBe('architecture "a-1": names "deliverables", which has no page\n');
+    expect(result.stderr).toBe('architecture "a-1": a link to "nowhere" is not a feature id\n');
   });
 });

@@ -38,6 +38,7 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  architectureLinksWithoutPage,
   architectureLinkViolations,
   codeAliases,
   featureNeighbours,
