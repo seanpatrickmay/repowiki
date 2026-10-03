@@ -71,7 +71,7 @@ a verdict. Each row becomes one GitHub feature issue titled `[Fnn] …`. Rows ma
 | F14 | People pages, war-chronicle voice | A dated narrative per contributor, linking to the features they worked on. | v2 (#6) |
 | F15 | Contribution graphs, whole repo and per person | Activity over time, with zoom. | v2 (#6) |
 | F16 | *Derived:* identity merge | Merging author identities (e.g. `seanpatrickmay` = `Sean May`) via a mailmap. | v2 (#6) |
-| F17 | As-is vs full history | Resolved by splitting the problem in two: line authorship uses `git blame -C -C -M`; article history comes from replay (§6.2), so full history costs incremental-update tokens rather than one full regeneration per point in time. | v1 |
+| F17 | As-is vs full history | Resolved by splitting the problem in two: line authorship uses `git blame -C -C -M`; article history comes from replay (§6.2), so full history costs incremental-update tokens rather than one full regeneration per point in time. **M6:** the blame half is deferred to v2 (ADR-0003); no v1 view shows line authorship. | v1 |
 | F18 | User edits | No edits in v1. Later, edits become generator guidance that is checked against the code. | v2 (#7), open |
 | F19 | Hygiene so it can run on itself | The protocol in §10. | adopted |
 | F20 | Opinionated articles, opinion setting | Reshaped: NPOV voice; only evidence-backed *Known limitations*. The opinion setting is deferred. | v1 (NPOV) / v2 (setting) |
@@ -212,17 +212,24 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
 ### 6.1 `update shaA → shaB`
 
 1. **Diff and incremental index.** Run `git diff -M shaA shaB`, re-parse only the changed files, and add the new commits to the co-change matrix. No LLM calls.
+   - **Index (M6).** The whole tree is re-indexed at `shaB` (about a second on next-chief-of-staff); "incremental" means only the changed files' citations and membership are re-examined.
 2. **Remap citations.** For each code citation in a touched file, translate its line range through the diff hunks and follow renames. Recompute `contentHash` at `shaB`. If it matches, update the line numbers and the sha; the claim stays fresh. If it doesn't match, or the range was deleted, mark the claim stale. No LLM calls.
 3. **Find coverage gaps.** New symbols that no claim cites get assigned to a feature using import neighbours, co-change, and directory. The LLM (the tie-break model) is called only when those signals disagree. Each gap is recorded against its feature.
 4. **Check manifest drift.** Track cumulative membership churn per feature (weight added + weight removed, divided by the weight at the last manifest revision). The last manifest revision is the drift baseline. It is persisted: the store marks every manifest an LLM produced or revised (`putManifest(m, { llmRevised: true })`), and `getDriftBaseline()` returns the latest one, so manifests that only gained members never reset the baseline. If no feature exceeds `driftThreshold` (default 0.20, configurable), the manifest changes only by adding new members. If one does, a single constrained LLM call returns operations (`rename | merge | split | create | retire`) applied to the existing manifest, and the affected pages get `reason: "manifest-change"`.
+   - **Drift (M6).** Churn is the weight moved (added, removed or changed) since the baseline over the baseline's weight; a feature with no baseline weight has infinite churn once it gains any. A store with no manifest marked LLM-revised (every store built before M3) gets its earliest manifest marked by migration 8, so a built wiki always has a baseline. The operations (`rename`, `move`, `create`, `merge`, `split`, `retire`) are made over the clusters at `shaB`; ids are permanent, a cluster is used once, `retire` needs no file left, and no active feature may end up empty. An empty list is a revision (the baseline moves); two refused answers leave the manifest unrevised, and the next update asks again. Features the operations changed, and active features with no page, are written whole.
 5. **Rewrite dirty sections.** A section is dirty if it contains a stale claim. Coverage gaps make the feature's `how-it-works` section dirty. Membership changes cause the diagram to be rebuilt, and new commits are appended to `history`. The LLM receives the old section with stale claims marked, plus the new code context, and is told to reproduce unchanged claims word for word. The lead is rewritten only if a claim it `supports` changed.
+   - **Dirty pages (M6).** A page is dirty when a claim went stale, a coverage gap is found for its feature, or one of its member files changed. The model returns only rewrites of the stale claims and new claims for the sections the pack opens (`how-it-works` for gaps, `history` for new commits); the engine keeps every other claim word for word. A new history claim must cite a commit of this update. A claim already stale from an earlier update is tried again only when a file it cites changed. The update prefix is cached only when two or more pages of one update share it.
 6. **Verify, link, store.** Only pages with changes get a new revision; all other pages carry forward unchanged. Links to merged IDs resolve through redirects.
+   - **Stored links (M6).** A carried page's links are judged against the manifest at its own sha, and must still lead to a page today (a redirect counts).
+   - **The About article (M6).** Rewritten after the pages are stored, in its own round, only when the features with a page differ from its basis's, a basis page's lead text changed, or a claim names a feature that is no longer active; otherwise carried forward. A changed line it cites does not make it due: its citations stay valid at its own sha.
 
 ### 6.2 Replay
 
 `replay` calls `update(prev, merge)` for each first-parent merge commit on `main`.
 The PR number is parsed from `Merge pull request #N` and stored on the revision.
 Building at an old commit and replaying forward produces the full dated history (F06, F17).
+
+**Replay (M6).** Replay walks the first-parent line of `<to>` (which need not be `main`): every merge after `<from>`, then `<to>` itself when it is not a merge. It resumes from the store's head, collecting any batch a killed run left through the batch journal; `--limit N` bounds one run. PR numbers come from "Merge pull request #N" or a squash's trailing "(#N)". After each step it records the §8 invariants in a summary file.
 
 ### 6.3 Failure handling
 
@@ -231,13 +238,15 @@ Building at an old commit and replaying forward produces the full dated history 
 - During the initial `build`, a claim that fails verification twice is dropped, and the drop is logged.
   - **Build rounds (M4).** The first round is one batch and the retry round another. A page whose first answer is unusable (not JSON, wrong shape, no lead or no body) is asked for again whole; claims that failed verification go back once with their problems. A page left without a lead or a body claim is not stored, the build reports it, and a rerun at the same sha writes it again.
 - If a provider call fails (network, rate limit), retry with exponential backoff, at most 3 attempts. After that, the update aborts without writing a partial revision. Updates are transactional per run.
+  - **Update rounds (M6).** Every round is batched by default. A whole batch that fails aborts the update like a failed call; the batch journal keeps the paid answers for the next run. An unusable tie-break answer falls back deterministically (most shared edge weight, then the smallest id). An answer cut off at `max_tokens` is asked for again, shorter, with the same cap.
 
 ### 6.4 Cost accounting
 
 Every `update` records its total tokens alongside the token cost of the most
 recent full `build` of the same repo. Both figures appear in the export.
 From M4, ledger rows carry `runKind` and `sha`, so both totals are sums over
-`(runKind, sha)`; `manifest:build` rows count toward the full build.
+`(runKind, sha)`; `manifest:build` rows count toward the full build. From M6 the export carries
+them as `WikiExport.runs` (calls and tokens per run).
 
 ## 7. Generation quality
 
@@ -275,7 +284,7 @@ prompt-cached prefix for every write call.
 ## 8. Testing
 
 - **Unit tests (Vitest)** for every engine module.
-- **Property tests (`fast-check`)** for citation remapping: random edits above, below, overlapping, and inside cited ranges, plus renames, each checked against the expected fresh/stale outcome.
+- **Property tests** for citation remapping: random edits above, below, overlapping, and inside cited ranges, plus renames, each checked against the expected fresh/stale outcome. **M6:** a seeded generator in the test file instead of `fast-check`, so no dependency is added.
 - **A fixture repo builder** creates small git repos with scripted histories inside tests. `index`, `freshness`, and `replay` are tested against them in CI.
 - **LLM record/replay cassettes.** CI never calls a live API. Live calls happen only in `eval` and in manual runs.
   - **What a cassette is.** Record/replay works at the SDK's `fetch` layer. A cassette is committed JSON in a `__cassettes__/` directory beside its test, holding each exchange's request method, path and body and its response status, content type and body. It holds no headers, so no key can leak, and Biome skips these files.
