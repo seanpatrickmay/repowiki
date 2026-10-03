@@ -31,15 +31,22 @@ function run(script: string, ...args: string[]) {
   return runWith({}, script, ...args);
 }
 
-/** `run` with extra environment variables, for a test that sets a key and a dead endpoint. */
+/** Variables that steer a request off the machine or choose its credentials, in any case. */
+const OUTBOUND_ENV =
+  /^(ANTHROPIC_.*|(HTTP|HTTPS|ALL|NO)_PROXY|NODE_USE_ENV_PROXY|REPOWIKI_CASSETTE)$/i;
+
+/**
+ * `run` with extra environment variables, for a test that sets a key and a dead endpoint. The
+ * child gets none of the caller's API or proxy settings, only HOME and `extra` on top of the rest.
+ */
 function runWith(extra: NodeJS.ProcessEnv, script: string, ...args: string[]) {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_BASE_URL;
-  delete env.REPOWIKI_CASSETTE;
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!OUTBOUND_ENV.test(name)) env[name] = value;
+  }
   return spawnSync(process.execPath, [script, ...args], {
     encoding: "utf8",
-    env: { ...env, ...extra },
+    env: { ...env, HOME: dir, ...extra },
   });
 }
 
@@ -176,9 +183,11 @@ describe("wiki-build.ts as a process (no network)", () => {
     );
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("0 of 1 pages written, 0 claims dropped.");
-    expect(result.stdout).toMatch(/^\| `extra` \| 0 \| 0 \| \d+ \| `the write call failed: /m);
     expect(result.stdout).toMatch(
-      /^\| About article \| 0 \| 0 \| \d+ \| `the architecture call failed: /m,
+      /^\| `extra` \| 0 \| 0 \| \d+ \| `the write call failed: APIConnectionError` \|$/m,
+    );
+    expect(result.stdout).toMatch(
+      /^\| About article \| 0 \| 0 \| \d+ \| `the architecture call failed: APIConnectionError` \|$/m,
     );
     expect(existsSync(join(out, `build-${sha.slice(0, 7)}.md`))).toBe(true);
     expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
