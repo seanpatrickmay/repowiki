@@ -207,3 +207,67 @@ describe("mermaidLabel", () => {
     expect(mermaidLabel("\uE000\n\t")).toBe("");
   });
 });
+
+describe("featureMapSource article-edge rules", () => {
+  // Map nodes: n0 deliverables, n1 hostile-title, n2 signals.
+  const linesFor = (edges: FeatureEdge[]) =>
+    edgeLines(featureMapSource(buildSiteModel(withEdges(edges), null)));
+  const edge = (from: string, to: string, calls = 1): FeatureEdge => ({
+    from,
+    to,
+    imports: 0,
+    calls,
+  });
+
+  it("joins a pair once whichever direction its edges run", () => {
+    expect(linesFor([edge("deliverables", "signals"), edge("signals", "deliverables")])).toEqual([
+      "  n0 --- n2",
+    ]);
+  });
+
+  it("adds both directions' weights before keeping the heaviest pairs", () => {
+    // 80 pairs of weight 10 with f000, and f082/f083 joined 6 + 6 = 12 across two edges.
+    const edges = Array.from({ length: 80 }, (_, i) =>
+      edge("f000", `f${String(i + 1).padStart(3, "0")}`, 10),
+    );
+    edges.push(edge("f082", "f083", 6), edge("f083", "f082", 6));
+    const lines = edgeLines(featureMapSource(buildSiteModel(denseExport(84, edges), null)));
+    expect(lines).toHaveLength(MAX_ARCHITECTURE_EDGES);
+    expect(lines).toContain("  n82 --- n83");
+    // The lightest pair by id among the weight-10 ones is the one left out.
+    expect(lines).not.toContain("  n0 --- n80");
+    expect(lines).toContain("  n0 --- n79");
+  });
+
+  it("joins the final article when an edge runs through a redirect", () => {
+    expect(linesFor([edge("hostile-title", "legacy-signals")])).toEqual(["  n1 --- n2"]);
+  });
+
+  it("drops an edge that joins an article to itself through a redirect", () => {
+    expect(linesFor([edge("legacy-signals", "signals"), edge("deliverables", "signals")])).toEqual([
+      "  n0 --- n2",
+    ]);
+  });
+
+  it("drops an edge to a feature without a page or that is not active", () => {
+    // scheduler is active without a page, exporter retired, reports a disambiguation.
+    expect(
+      linesFor([
+        edge("signals", "scheduler", 9),
+        edge("exporter", "deliverables", 9),
+        edge("reports", "signals", 9),
+        edge("deliverables", "hostile-title"),
+      ]),
+    ).toEqual(["  n0 --- n1"]);
+  });
+
+  it("draws a pair named twice, directly and through a redirect, once", () => {
+    expect(
+      linesFor([
+        edge("hostile-title", "signals"),
+        edge("hostile-title", "legacy-signals"),
+        edge("hostile-title", "signals"),
+      ]),
+    ).toEqual(["  n1 --- n2"]);
+  });
+});
