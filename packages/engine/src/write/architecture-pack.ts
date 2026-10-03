@@ -75,12 +75,20 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 /** A top-level README, in any of the usual spellings. */
 const README = /^readme(?:\.(?:md|markdown|rst|txt))?$/i;
 /**
- * Top-level Markdown files and docs/*.md that are not a README, licence, changelog or guide, nor
- * an instruction file for a coding agent (CLAUDE, AGENTS, GEMINI): those address a model, not a reader.
- * The exclusions match the whole file name, so `security-model.md` stays.
+ * Top-level Markdown files and docs/*.md that are not a README, licence, changelog, contributing
+ * guide, nor a list of the project's people, history or policies (authors, adopters, maintainers,
+ * governance, support, history, changes, notice), nor an instruction file for a coding agent
+ * (CLAUDE, AGENTS, GEMINI): those address a model, not a reader. The exclusions match the whole
+ * file name, so `security-model.md` stays.
  */
 const DOC =
-  /^(?:docs\/)?(?!(?:readme|license|licence|changelog|contributing|code_of_conduct|security|claude|agents|gemini)\.md$)[^/]+\.md$/i;
+  /^(?:docs\/)?(?!(?:readme|license|licence|changelog|contributing|code_of_conduct|security|claude|agents|gemini|authors|adopters|maintainers|governance|support|history|changes|notice)\.md$)[^/]+\.md$/i;
+/** A docs/ file whose name says it describes the design. */
+const DESIGN_DOC = /^docs\/[^/]*(?:architecture|overview|design|guide)[^/]*$/i;
+
+/** A document's rank: docs/ design documents, then other docs/ files, then top-level files. */
+const docRank = (path: string): number =>
+  DESIGN_DOC.test(path) ? 0 : path.startsWith("docs/") ? 1 : 2;
 const INVISIBLE = new RegExp(INVISIBLE_CHARACTERS.source, "gu");
 
 /** The repository's README: a top-level README file, Markdown first, then by path. */
@@ -182,10 +190,10 @@ const directoryOf = (path: string): string => path.slice(0, path.lastIndexOf("/"
 
 /**
  * Builds the Architecture call's pack (spec §7.4): the project's title; the repository's
- * top-level layout and languages; the README (its first 120 lines) and up to three top-level
- * documents (60 lines each), numbered so a claim can cite them; every covered feature with its
- * file count, main directories and its page's lead;
- * the cross-feature edges, each with the lines that prove it; the top-level lines of
+ * top-level layout and languages; the README (its first 120 lines) and up to three other
+ * documents (60 lines each, docs/ design documents first), numbered so a claim can cite them;
+ * every covered feature with its file count, main directories and its page's lead; the
+ * cross-feature edges, each with the lines that prove it; the top-level lines of
  * infrastructure files; and the signatures of each feature's first entry point. Sections are
  * filled in that order, item by item, while the pack fits `budgetTokens`; what does not fit is
  * counted in an "and N more" line. Every repository- or model-derived string goes through
@@ -262,7 +270,7 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   const readme = readmePath(sources);
   const docs = [...sources.keys()]
     .filter((path) => path !== readme && DOC.test(path) && indexed.has(path))
-    .sort(byText);
+    .sort((a, b) => docRank(a) - docRank(b) || byText(a, b));
   const documents = [
     ...(readme !== undefined && indexed.has(readme)
       ? [{ path: readme, max: MAX_README_LINES }]

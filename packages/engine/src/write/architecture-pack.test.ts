@@ -266,6 +266,31 @@ describe("buildArchitecturePack", () => {
     expect(text).toContain("### security-model.md (2 lines)");
   });
 
+  it("shows docs/ design documents first, then other docs/ files, then top-level ones, never project lists", () => {
+    const input = testArchitectureInput();
+    const excluded = ["AUTHORS", "ADOPTERS", "MAINTAINERS", "GOVERNANCE", "SUPPORT", "HISTORY"];
+    excluded.push("CHANGES", "NOTICE", "docs/authors");
+    addFiles(input, {
+      ...Object.fromEntries(excluded.map((name) => [`${name}.md`, `# ${name}\n`])),
+      "BUILDING.md": "# Building\n",
+      "docs/architecture.md": "# Architecture\n",
+      "docs/zeta.md": "# Zeta\n",
+    });
+    const headings = pack(input)
+      .text.split("\n")
+      .filter((l) => l.startsWith("### ") && l.includes(".md"));
+    expect(headings).toEqual([
+      expect.stringMatching(/^### README\.md /),
+      "### docs/architecture.md (1 lines)",
+      "### docs/signals.md (3 lines)",
+      "### docs/zeta.md (1 lines)",
+    ]);
+    const text = pack(input).text;
+    // BUILDING.md ranks last, past the limit of three.
+    expect(text).toContain("\n- and 1 more documents\n");
+    for (const name of excluded) expect(text).not.toContain(`${name}.md`);
+  });
+
   it("skips a document that does not fit and still shows the later ones, counting every hidden one", () => {
     const input = testArchitectureInput();
     const big = (n: number) =>
