@@ -1,10 +1,39 @@
+import type { FeatureEdge } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
-import { featureMapCaption, featureMapSource, mermaidLabel } from "./feature-map.ts";
+import {
+  featureMapCaption,
+  featureMapSource,
+  MAX_ARCHITECTURE_EDGES,
+  mermaidLabel,
+} from "./feature-map.ts";
 import { buildSiteModel } from "./model.ts";
-import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
+import { ARCHITECTURE, fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
 
 /** The fixture export without its project article, so the map draws See also pairs. */
 const seeAlsoOnly = () => ({ ...fixtureExport(), architecture: [] });
+
+/** The map's edge lines. */
+const edgeLines = (source: string | null) =>
+  (source ?? "").split("\n").filter((l) => l.includes(" --- "));
+
+/**
+ * An export with `count` active features f000, f001, … (node n<i> is f<i>), each with a page and
+ * no See also, and a project article with the given edges.
+ */
+function denseExport(count: number, edges: FeatureEdge[]) {
+  const wiki = fixtureExport();
+  const feature = wiki.manifest.features.find((f) => f.id === "signals");
+  const page = wiki.pages.find((p) => p.featureId === "signals");
+  if (feature === undefined || page === undefined) throw new Error("fixture changed");
+  const ids = Array.from({ length: count }, (_, i) => `f${String(i).padStart(3, "0")}`);
+  return {
+    ...wiki,
+    manifest: { ...wiki.manifest, features: ids.map((id) => ({ ...feature, id, aliases: [] })) },
+    pages: ids.map((featureId) => ({ ...page, featureId, seeAlso: [] })),
+    history: {},
+    architecture: [{ ...ARCHITECTURE, edges }],
+  };
+}
 
 /** The fixture export with one feature's title replaced. */
 function withTitle(id: string, title: string) {
@@ -22,6 +51,26 @@ describe("featureMapSource", () => {
       "  n1 --- n2",
     ]);
     expect(featureMapCaption(site)).toContain("calls or imports");
+  });
+
+  it("draws only the heaviest article pairs, at most MAX_ARCHITECTURE_EDGES of them", () => {
+    // 100 features, every pair joined, weights with many ties (broken by pair id).
+    const weight = (i: number, j: number) => ((i * 31 + j * 17) % 50) + 1;
+    const edges: FeatureEdge[] = [];
+    const expected: { line: string; weight: number; pair: string }[] = [];
+    for (let i = 0; i < 100; i++) {
+      for (let j = i + 1; j < 100; j++) {
+        const [from, to] = [`f${String(i).padStart(3, "0")}`, `f${String(j).padStart(3, "0")}`];
+        edges.push({ from, to, imports: 0, calls: weight(i, j) });
+        expected.push({ line: `  n${i} --- n${j}`, weight: weight(i, j), pair: `${from} ${to}` });
+      }
+    }
+    expected.sort((a, b) => b.weight - a.weight || (a.pair < b.pair ? -1 : 1));
+    const heaviest = expected.slice(0, 80).map((e) => e.line);
+    const lines = edgeLines(featureMapSource(buildSiteModel(denseExport(100, edges), null)));
+    expect(lines).toHaveLength(80);
+    expect(MAX_ARCHITECTURE_EDGES).toBe(80);
+    expect(lines).toEqual([...heaviest].sort());
   });
 
   it("joins no pair when the Architecture article has no edge", () => {
