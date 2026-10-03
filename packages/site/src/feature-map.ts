@@ -45,10 +45,12 @@ export function mermaidLabel(text: string): string {
 }
 
 /**
- * Main Page feature map (F10): one clickable node per active article, one undirected edge per
- * pair of articles that list each other, or one the other, in See also. Null when empty.
- * Labels come from feature titles (untrusted) through `mermaidLabel`; the only other text is
- * node ids and `articleUrl(id)` for feature ids, which the export schema limits to kebab-case.
+ * Main Page feature map (F10): one clickable node per active article, and one undirected edge per
+ * pair of articles joined by the project article's cross-feature edges (F27, real calls and
+ * imports) when the export has one, else per pair that lists each other, or one the other, in
+ * See also. Null when empty. Labels come from feature titles (untrusted) through `mermaidLabel`;
+ * the only other text is node ids and `articleUrl(id)` for feature ids, which the export schema
+ * limits to kebab-case.
  */
 export function featureMapSource(site: SiteModel): string | null {
   const ids = [...site.pages.keys()]
@@ -61,17 +63,27 @@ export function featureMapSource(site: SiteModel): string | null {
     const label = mermaidLabel(site.features.get(id)?.title ?? id);
     lines.push(`  ${node.get(id)}["${label === "" ? id : label}"]`);
   }
+  const pairs: [string, string][] =
+    site.architecture !== null
+      ? site.architecture.edges.map((edge) => [edge.from, edge.to])
+      : ids.flatMap((id) =>
+          (site.pages.get(id)?.seeAlso ?? []).map((listed): [string, string] => [id, listed]),
+        );
   const edges = new Set<string>();
-  for (const id of ids) {
-    for (const listed of site.pages.get(id)?.seeAlso ?? []) {
-      // A link to a merged feature leads to the article it was merged into.
-      const other = finalTarget(site, listed);
-      if (!node.has(other) || other === id) continue;
-      const [a, b] = [id, other].sort();
-      edges.add(`  ${node.get(a as string)} --- ${node.get(b as string)}`);
-    }
+  for (const [x, y] of pairs) {
+    // A link to a merged feature leads to the article it was merged into.
+    const [a, b] = [finalTarget(site, x), finalTarget(site, y)].sort();
+    if (a === undefined || b === undefined || a === b || !node.has(a) || !node.has(b)) continue;
+    edges.add(`  ${node.get(a)} --- ${node.get(b)}`);
   }
   lines.push(...[...edges].sort());
   for (const id of ids) lines.push(`  click ${node.get(id)} "${articleUrl(id)}"`);
   return lines.join("\n");
+}
+
+/** What the feature map's lines mean, for its caption. */
+export function featureMapCaption(site: SiteModel): string {
+  return site.architecture !== null
+    ? "Each box is an article; a line joins two articles when code in one calls or imports code in the other."
+    : "Each box is an article; a line joins two articles when one lists the other under See also.";
 }
