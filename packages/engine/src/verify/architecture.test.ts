@@ -57,6 +57,34 @@ describe("verifyArchitectureClaim", () => {
     ).toEqual([`the claim cites "src/signals/ingest.py" lines 10-24, ${NOT_SHOWN}`]);
   });
 
+  it("names an edge copied into a citation, showing the path and line to cite instead", () => {
+    const problem = (cite: string, example: string) =>
+      `citation ${JSON.stringify(cite)} names an edge, not a line; cite only the path and line, e.g. ${JSON.stringify(example)}`;
+    const cases: [string, string][] = [
+      ["signals -> deliverables:src/signals/ingest.py:12", "src/signals/ingest.py:12"],
+      ["deliverables:src/signals/ingest.py:12", "src/signals/ingest.py:12"],
+      ["signals -> deliverables: src/signals/ingest.py:12-14", "src/signals/ingest.py:12-14"],
+      ["signals -> deliverables", "src/app.py:12"],
+    ];
+    for (const [cite, example] of cases) {
+      expect(verifyArchitectureClaim("dependencies", draft({ cite: [cite] }), ctx), cite).toEqual({
+        claim: null,
+        problems: [problem(cite, example)],
+      });
+    }
+  });
+
+  it("still resolves a top-level file whose name is a feature id", () => {
+    const sources = new Map([...ctx.sources, ["signals", "a\nb\n"]]);
+    const seen = new Map([...shown, ["signals", new Set([1, 2])]]);
+    const result = verifyArchitectureClaim("layers", draft({ cite: ["signals:1-2"] }), {
+      ...ctx,
+      sources,
+      shown: seen,
+    });
+    expect(result.problems).toEqual([]);
+  });
+
   it("accepts a claim backed by pages of this build alone, trimmed and named once", () => {
     const result = verifyArchitectureClaim(
       "dependencies",

@@ -46,6 +46,37 @@ export interface ArchitectureContext extends VerifyContext {
   shown: ReadonlyMap<string, ReadonlySet<number>>;
 }
 
+/** A path and a line or range, as the pack prints an edge's site or numbers a file's lines. */
+const PATH_LINE = /^[^\s:]+:\d+(?:-\d+)?$/;
+/** A `feature-id:` prefix, and what follows it. */
+const ID_PREFIX = /^([a-z0-9]+(?:-[a-z0-9]+)*):\s*(.*)$/;
+/** The example an edge-shaped citation gets when nothing in it reads as a path and a line. */
+const GENERIC_EXAMPLE = "src/app.py:12";
+
+/**
+ * The problem for a citation copied from an edge rather than a line: one that holds " -> ", or
+ * starts with a feature id of this build and a colon (unless that id is also a top-level file).
+ * Its example is what follows the edge's feature ids, when that reads as a path and a line.
+ * Null for any other citation.
+ */
+function edgeCitationProblem(cite: string, ctx: ArchitectureContext): string | null {
+  const arrow = cite.lastIndexOf(" -> ");
+  let rest = arrow < 0 ? cite.trim() : cite.slice(arrow + " -> ".length).trim();
+  let stripped = false;
+  for (;;) {
+    const prefix = ID_PREFIX.exec(rest);
+    const id = prefix?.[1];
+    if (prefix === null || id === undefined || ctx.sources.has(id)) break;
+    // After an arrow the edge's target is a feature id even when it has no page here.
+    if (!ctx.pages.has(id) && (arrow < 0 || stripped)) break;
+    rest = (prefix[2] ?? "").trim();
+    stripped = true;
+  }
+  if (arrow < 0 && !stripped) return null;
+  const example = PATH_LINE.test(rest) ? rest : GENERIC_EXAMPLE;
+  return `citation ${quote(cite)} names an edge, not a line; cite only the path and line, e.g. ${quote(example)}`;
+}
+
 export type VerifiedArchitectureClaim =
   | { claim: ArchitectureClaim; problems: [] }
   | { claim: null; problems: string[] };
@@ -74,8 +105,17 @@ export function verifyArchitectureClaim(
   // refused, so the claim is kept when its supports hold.
   const cite = key === "lead" ? [] : draft.cite;
   const named = key === "lead" ? [] : draft.pages;
-  const { citations, problems: unresolvable, unresolved } = resolveCitations(cite, ctx);
-  problems.push(...unresolvable);
+  // A citation copied from an edge is named as such, never resolved as a path.
+  const edgeProblems = new Map(cite.map((c) => [c, edgeCitationProblem(c, ctx)]));
+  const lines = cite.filter((c) => edgeProblems.get(c) === null);
+  const resolved = resolveCitations(lines, ctx);
+  const { citations } = resolved;
+  const unresolved = resolved.unresolved || lines.length < cite.length;
+  for (const c of cite) {
+    const problem = edgeProblems.get(c);
+    if (problem !== null && problem !== undefined) problems.push(problem);
+  }
+  problems.push(...resolved.problems);
   for (const citation of citations) {
     if (citation.kind !== "code") continue;
     const { path, startLine, endLine } = citation;
