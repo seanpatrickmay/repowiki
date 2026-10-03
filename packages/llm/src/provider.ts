@@ -50,6 +50,9 @@ export interface AnsweredCall {
   model: string;
 }
 
+/** The stop reason of an answer the model cut off at the request's `maxTokens`. */
+export const MAX_TOKENS_STOP_REASON = "max_tokens";
+
 /**
  * The model answered, but not with valid output. Its tokens are already in the ledger, and a
  * provider that knows them also puts them here, so a caller can total a page's cost.
@@ -61,10 +64,21 @@ export class LlmOutputError extends LlmError {
   readonly usage?: TokenUsage;
   /** The model id that answered; absent when the provider does not report it. */
   readonly model?: string;
+  /**
+   * Why the model stopped when it did not end its turn (MAX_TOKENS_STOP_REASON for an answer cut
+   * off at the cap), or null when it ended its turn and the output was unusable.
+   */
+  readonly stopReason: string | null;
 
-  constructor(message: string, text: string, answered?: AnsweredCall) {
+  constructor(
+    message: string,
+    text: string,
+    answered?: AnsweredCall,
+    stopReason: string | null = null,
+  ) {
     super(message);
     this.text = text;
+    this.stopReason = stopReason;
     if (answered !== undefined) {
       this.usage = answered.usage;
       this.model = answered.model;

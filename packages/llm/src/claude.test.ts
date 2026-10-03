@@ -5,7 +5,7 @@ import { cannedBatchApi, cannedMessagesApi, succeededLine } from "./canned.ts";
 import type { FetchLike } from "./cassette.ts";
 import { createClaudeProvider, MAX_REPORTED_ISSUES } from "./claude.ts";
 import { createLedger, type TokenLedger } from "./ledger.ts";
-import { DEFAULT_MODELS, LlmError, LlmOutputError } from "./provider.ts";
+import { DEFAULT_MODELS, LlmError, LlmOutputError, MAX_TOKENS_STOP_REASON } from "./provider.ts";
 
 const Capital = z.object({ city: z.string(), country: z.string() });
 const PARIS = '{"city":"Paris","country":"France"}';
@@ -144,6 +144,18 @@ describe("createClaudeProvider", () => {
       expect(failure.model).toBe(row?.model);
     },
   );
+
+  it.each([
+    ["a truncated answer", '{"city":', "max_tokens", MAX_TOKENS_STOP_REASON],
+    ["an answer ended by a stop sequence", '{"city":', "stop_sequence", "stop_sequence"],
+    ["text that is not JSON", "Paris", "end_turn", null],
+    ["JSON that misses the schema", '{"city":"Paris"}', "end_turn", null],
+  ])("names the stop reason on the LlmOutputError for %s", async (_n, text, stop, reason) => {
+    const { provider } = setup(cannedMessagesApi(text, stop).fetch);
+    const failure = await provider.generate(request).catch((e) => e);
+    expect(failure).toBeInstanceOf(LlmOutputError);
+    expect(failure.stopReason).toBe(reason);
+  });
 
   it("caps the schema issues an LlmOutputError lists", async () => {
     const Many = z.object(
