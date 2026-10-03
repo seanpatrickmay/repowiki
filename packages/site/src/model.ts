@@ -1,4 +1,10 @@
-import { aliasSlug, type Feature, type Revision, type WikiExport } from "@repowiki/core";
+import {
+  type Architecture,
+  aliasSlug,
+  type Feature,
+  type Revision,
+  type WikiExport,
+} from "@repowiki/core";
 import { articleUrl } from "./urls.ts";
 
 /** An alias URL /wiki/<slug>/: a redirect when it has one target, a disambiguation page otherwise. */
@@ -20,6 +26,8 @@ export interface SiteModel {
   history: ReadonlyMap<string, readonly Revision[]>;
   /** Sorted by slug. Never shadows a feature id. */
   aliases: readonly AliasRoute[];
+  /** The current Architecture article (F27), or null when the export has none. */
+  architecture: Architecture | null;
 }
 
 /** True when /wiki/<id>/ is a page: a redirect, a disambiguation, or a feature with a revision. */
@@ -56,6 +64,7 @@ export function buildSiteModel(wiki: WikiExport, repoUrl: string | null): SiteMo
     pages: new Map(wiki.pages.map((page) => [page.featureId, page])),
     history: new Map(Object.entries(wiki.history)),
     aliases: [],
+    architecture: wiki.architecture.at(-1) ?? null,
   };
 
   const routes = new Map<string, AliasRoute>();

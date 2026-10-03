@@ -1,6 +1,7 @@
 ---
 import "../styles/wiki.css";
 import { getSite } from "../site.ts";
+import { ARCHITECTURE_URL } from "../urls.ts";
 
 interface Props {
   /** Shown in the browser tab as "<title> - <repo> wiki". */
@@ -8,7 +9,7 @@ interface Props {
 }
 
 const { title } = Astro.props;
-const { wiki } = getSite();
+const { wiki, architecture } = getSite();
 ---
 
 <!doctype html>
@@ -41,6 +42,9 @@ const { wiki } = getSite();
           <li><a href="/">Main page</a></li>
           <li><a href="/random/">Random article</a></li>
           <li><a href="/special/all-pages/">All articles</a></li>
+          {architecture !== null && (
+            <li><a href={ARCHITECTURE_URL}>About {architecture.title}</a></li>
+          )}
         </ul>
       </nav>
       <main id="content" class="content">

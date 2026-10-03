@@ -128,7 +128,8 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
   };
 }
 
-function revisionHtml(site: SiteModel, revision: Revision): string {
+/** "<sha>" (linked to the repo when there is one), then " (PR #n)" when the revision has one. */
+export function revisionHtml(site: SiteModel, revision: Pick<Revision, "sha" | "pr">): string {
   const sha = `<code>${shortSha(revision.sha)}</code>`;
   const linked =
     site.repoUrl === null

@@ -195,10 +195,24 @@ describe("mainPageView", () => {
     );
   });
 
+  it("opens with the project's article: its title and its lead", () => {
+    const view = mainPageView(buildSiteModel(fixtureExport(), null));
+    expect(view.architecture?.href).toBe("/special/about/");
+    expect(view.architecture?.title).toBe("Demo Repo");
+    expect(view.architecture?.leadHtml).toMatch(/^<b>Demo Repo<\/b> turns <a class="wikilink"/);
+  });
+
   it("copes with a site that has no articles", () => {
     const base = fixtureExport();
-    const empty = mainPageView(buildSiteModel({ ...base, pages: [], history: {} }, null));
-    expect(empty).toEqual({ articleCount: 0, featured: null, didYouKnow: [], recent: [] });
+    const bare = { ...base, pages: [], history: {}, architecture: [] };
+    const empty = mainPageView(buildSiteModel(bare, null));
+    expect(empty).toEqual({
+      articleCount: 0,
+      architecture: null,
+      featured: null,
+      didYouKnow: [],
+      recent: [],
+    });
   });
 });
 

@@ -1,4 +1,10 @@
-import { type Feature, type Revision, SCHEMA_VERSION, WikiExport } from "@repowiki/core";
+import {
+  type Architecture,
+  type Feature,
+  type Revision,
+  SCHEMA_VERSION,
+  WikiExport,
+} from "@repowiki/core";
 import {
   bodyClaim,
   codeCitation,
@@ -260,6 +266,87 @@ const hostile = makeRevision({
 
 const pages: Revision[] = [deliverables, exporter, hostile, legacy, signalsV2];
 
+const readme = codeCitation({ path: "README.md", startLine: 1, endLine: 4, symbol: null });
+
+const archClaim = (
+  id: string,
+  text: string,
+  overrides: Partial<Architecture["sections"][number]["claims"][number]> = {},
+) => ({
+  ...bodyClaim({ id, text }),
+  pages: [],
+  ...overrides,
+});
+
+/**
+ * The project's article, titled from the README rather than the repo name: a purpose claim cited
+ * to the README, cited architecture claims, a page-backed one with markup, and the drawn map.
+ */
+export const ARCHITECTURE: Architecture = {
+  id: "architecture-cccccccccccc-1",
+  sha: SHA_C,
+  commitDate: "2026-03-10T16:30:00+01:00",
+  generatedAt: "2026-09-30T20:00:00Z",
+  parentId: null,
+  reason: "build",
+  pr: null,
+  title: "Demo Repo",
+  model: "claude-haiku-4-5",
+  tokens: { in: 9000, out: 1500, cacheRead: 0, cacheWrite: 0 },
+  basis: ["deliverables-1", "hostile-1", "signals-2"],
+  edges: [
+    { from: "deliverables", to: "signals", imports: 2, calls: 5 },
+    { from: "hostile-title", to: "signals", imports: 1, calls: 0 },
+  ],
+  diagram:
+    'flowchart LR\n  n1[["Deliverables"]]\n  n2[["Signal ingestion"]]\n  n1 -->|"5 calls, 2 imports"| n2',
+  sections: [
+    {
+      key: "lead",
+      claims: [
+        {
+          ...leadClaim({
+            id: "c1",
+            text: "**Demo Repo** turns [[signals]] into [[deliverables]] for a delivery team.",
+            supports: ["c5", "c2", "c4"],
+          }),
+          pages: [],
+        },
+      ],
+    },
+    {
+      key: "purpose",
+      claims: [
+        archClaim("c5", "A team can review every deliverable against the signals behind it.", {
+          citations: [readme],
+          pages: ["deliverables"],
+        }),
+      ],
+    },
+    {
+      key: "layers",
+      claims: [
+        archClaim("c2", "Ingestion runs in the API layer, in `ingest_chunk`.", {
+          citations: [ingest],
+        }),
+      ],
+    },
+    {
+      key: "request-paths",
+      claims: [archClaim("c3", "A request reaches `crud.py` first.", { citations: [crud] })],
+    },
+    {
+      key: "dependencies",
+      claims: [
+        archClaim("c4", "Deliverables depend on signals <b>and</b> on [[ghost]].", {
+          citations: [],
+          pages: ["deliverables", "signals", "hostile-title"],
+        }),
+      ],
+    },
+  ],
+};
+
 /** A small but complete export: every feature status, two revisions, stale and hook claims. */
 export function fixtureExport(): WikiExport {
   return WikiExport.parse({
@@ -323,6 +410,22 @@ export function fixtureExport(): WikiExport {
       "legacy-signals": [legacy],
       signals: [signalsV1, signalsV2],
     },
+    architecture: [ARCHITECTURE],
+  });
+}
+
+/**
+ * An article title is the README's first heading, so it is untrusted: core allows markup,
+ * quotes, a wikilink and a fragment in it.
+ */
+export const HOSTILE_ARCHITECTURE_TITLE = "<img src=x onerror=alert(1)> \"q\" & 'p' [[ghost]] #x";
+
+/** The fixture export, but with the project's article titled `HOSTILE_ARCHITECTURE_TITLE`. */
+export function hostileArchitectureExport(): WikiExport {
+  const base = fixtureExport();
+  return WikiExport.parse({
+    ...base,
+    architecture: [{ ...ARCHITECTURE, title: HOSTILE_ARCHITECTURE_TITLE }],
   });
 }
 

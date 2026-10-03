@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureExport } from "./test-fixtures.ts";
+import { fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -829,6 +829,86 @@ describe("Main Page, Random article and All articles", () => {
   });
 });
 
+describe("the project's article (About)", () => {
+  it("renders its title, lead, sections, diagram and references at /special/about/", () => {
+    const html = site.read("special/about/index.html");
+    expect(html).toContain("<title>Demo Repo - demo-repo wiki</title>");
+    expect(html).toContain('<h1 class="page-title">Demo Repo</h1>');
+    const headings = ["Purpose and features", "Layers", "Request paths", "Feature dependencies"];
+    for (const heading of [...headings, "References"]) {
+      expect(html).toContain(`>${heading}</h2>`);
+    }
+    expect(html).toContain('<pre class="mermaid">flowchart LR\n  n1[[&quot;Deliverables&quot;]]');
+    expect(html).toContain("Deliverables depend on signals &lt;b&gt;and&lt;/b&gt; on ghost.");
+    expect(html).not.toContain("<b>and</b>");
+    expect(html).not.toContain('content="noindex"');
+  });
+
+  it("opens the Main Page with its lead, and is linked from every page's navigation", () => {
+    const main = site.read("index.html");
+    expect(main).toContain('<h2 id="mp-architecture">About Demo Repo</h2>');
+    expect(main.indexOf("mp-architecture")).toBeLessThan(main.indexOf("mp-featured"));
+    expect(main).toContain('<p>(<a href="/special/about/">Full article...</a>)</p>');
+    for (const page of htmlFiles(site.outDir)) {
+      expect(site.read(page), page).toContain(
+        '<li><a href="/special/about/">About Demo Repo</a></li>',
+      );
+    }
+  });
+
+  it("matches the golden snapshot", async () => {
+    await expect(normalized("special/about/index.html")).toMatchFileSnapshot(
+      "__snapshots__/special-about.html",
+    );
+  });
+});
+
+describe("a hostile article title", () => {
+  // The title is the README's first heading, so it is untrusted: markup, quotes, a wikilink and a
+  // fragment. It is plain text on the page <title>, the <h1>, the Main Page box and every page's
+  // navigation link, and is never a link or markup.
+  const escaped = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39; [[ghost]] #x";
+  let hostileSite: BuiltSite;
+  beforeAll(() => {
+    hostileSite = buildFixtureSite(
+      ["--repo-url", "https://github.com/acme/demo-repo"],
+      hostileArchitectureExport(),
+    );
+  }, 120_000);
+  afterAll(() => hostileSite?.cleanup());
+
+  it("escapes it in the page title and the h1", () => {
+    const html = hostileSite.read("special/about/index.html");
+    expect(html).toContain(`<title>${escaped} - demo-repo wiki</title>`);
+    expect(html).toContain(`<h1 class="page-title">${escaped}</h1>`);
+  });
+
+  it("escapes it in the Main Page box heading", () => {
+    const html = hostileSite.read("index.html");
+    expect(html).toContain(`<h2 id="mp-architecture">About ${escaped}</h2>`);
+  });
+
+  it("escapes it in the navigation link of every page", () => {
+    const pages = htmlFiles(hostileSite.outDir);
+    expect(pages.length).toBeGreaterThan(0);
+    for (const page of pages) {
+      expect(hostileSite.read(page), page).toContain(
+        `<li><a href="/special/about/">About ${escaped}</a></li>`,
+      );
+    }
+  });
+
+  it("never emits it as markup or as a link", () => {
+    for (const page of htmlFiles(hostileSite.outDir)) {
+      const html = hostileSite.read(page);
+      expect(html, page).not.toContain("<img src=x");
+      expect(html, page).not.toContain("onerror=alert(1)>");
+      expect(html, page).not.toMatch(/<a [^>]*href="\/wiki\/ghost\//);
+      expect(html, page).not.toContain("[[ghost]]</a>");
+    }
+  });
+});
+
 describe("diagrams", () => {
   it("draws the page's diagram at the top of its Data flow section", () => {
     const html = site.read("wiki/signals/index.html");
@@ -981,14 +1061,16 @@ describe("search", () => {
     expect(html).toContain('<script src="/pagefind/pagefind-ui.js"></script>');
   });
 
-  it("indexes exactly the current articles of active features, with their aliases", () => {
-    // Only an active feature's current article carries data-pagefind-body: not history, diff,
-    // redirect, disambiguation, the Main Page, /search/ itself or a retired article. The retired
-    // exporter page still renders with its banner and stays in All articles.
+  it("indexes exactly the current articles of active features and the About article", () => {
+    // Only an active feature's current article and the About article carry
+    // data-pagefind-body: not history, diff, redirect, disambiguation, the Main Page, /search/
+    // itself or a retired article. The retired exporter page still renders with its banner and
+    // stays in All articles.
     const indexed = htmlFiles(site.outDir).filter((page) =>
       site.read(page).includes("data-pagefind-body"),
     );
     expect(indexed).toEqual([
+      "special/about/index.html",
       "wiki/deliverables/index.html",
       "wiki/hostile-title/index.html",
       "wiki/signals/index.html",
@@ -996,7 +1078,7 @@ describe("search", () => {
     expect(site.read("wiki/exporter/index.html")).toContain("This feature was retired at commit");
     expect(site.read("special/all-pages/index.html")).toContain('href="/wiki/exporter/"');
     const entry = JSON.parse(site.read("pagefind/pagefind-entry.json"));
-    expect(entry.languages.en.page_count).toBe(3);
+    expect(entry.languages.en.page_count).toBe(4);
     const body = site.read("wiki/signals/index.html").split("data-pagefind-body")[1] ?? "";
     expect(body).toContain("signal pipeline, SIGNALS_TABLE, /api/signals");
   });

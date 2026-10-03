@@ -1,4 +1,4 @@
-import type { Citation, CodeCitation, CommitCitation, Revision } from "@repowiki/core";
+import type { Citation, Claim, CodeCitation, CommitCitation } from "@repowiki/core";
 import { escapeHtml } from "./inline.ts";
 
 /** One footnote marker after a claim: [n], with a unique anchor for the back-link. */
@@ -27,8 +27,13 @@ export function citationKey(citation: Citation): string {
     : `commit ${citation.sha}`;
 }
 
+/** What collectReferences reads: a feature page's revision or the Architecture article. */
+export interface CitingPage {
+  readonly sections: readonly { readonly claims: readonly Pick<Claim, "id" | "citations">[] }[];
+}
+
 /** Numbers citations in reading order across the page's sections. */
-export function collectReferences(revision: Revision): References {
+export function collectReferences(revision: CitingPage): References {
   const byKey = new Map<string, RefNote>();
   const markers = new Map<string, RefMarker[]>();
   for (const section of revision.sections) {
