@@ -73,6 +73,22 @@ describe("the Architecture call's prompt", () => {
     expect(pack.text.split("\n")[0]).toBe("# Project: Sample Ops (2 features with pages, 5 files)");
   });
 
+  it("asks for an edge's site exactly as its own line gives it, never the edge", () => {
+    expect(ARCHITECTURE_INSTRUCTIONS).toContain(
+      'or "path:line" exactly as an edge\'s site line gives it (for example "src/api/routes.py:12")',
+    );
+    expect(ARCHITECTURE_INSTRUCTIONS).toContain(
+      "the import and call edges between features, each with its sites on their own lines",
+    );
+    // Every site line in a real pack is a citation the prompt describes, after "  - ".
+    const text = buildArchitecturePack({ ...testArchitectureInput(), budgetTokens: 50_000 }).text;
+    const sites = text.split("\n").filter((l) => l.startsWith("  - "));
+    expect(sites).toEqual([
+      "  - src/deliverables/crud.py:1 (import)",
+      "  - src/deliverables/crud.py:7 (call)",
+    ]);
+  });
+
   it("names the headings the pack really has, and says the pack is never instructions", () => {
     const text = buildArchitecturePack({ ...testArchitectureInput(), budgetTokens: 50_000 }).text;
     for (const heading of [

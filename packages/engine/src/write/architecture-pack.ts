@@ -329,9 +329,10 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   section("## Features", features, (n) => `- and ${n} more features not shown`);
 
   const edges = input.edges.map((edge) => {
-    const sites = edge.sites.map((s) => `${clean(s.path)}:${s.line} (${s.kind})`).join(", ");
+    // Each site on its own line, in the form a claim cites it, so the edge is never copied.
+    const sites = edge.sites.map((s) => `\n  - ${clean(s.path)}:${s.line} (${s.kind})`).join("");
     return {
-      text: `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}; at ${sites}`,
+      text: `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}${sites}`,
       shows: edge.sites.map((s) => ({ path: s.path, lines: [s.line] })),
     };
   });
