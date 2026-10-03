@@ -1,6 +1,6 @@
 import { Architecture } from "@repowiki/core";
-import { LlmError } from "@repowiki/llm";
-import { describe, expect, it } from "vitest";
+import { LlmError, LlmOutputError } from "@repowiki/llm";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArchitectureDraft, ArchitectureFixes } from "../verify/index.ts";
 import { writeArchitecture } from "./architecture.ts";
 import { ARCHITECTURE_GIVE_UP, architectureSystemPrompt } from "./architecture-prompt.ts";
@@ -8,9 +8,24 @@ import { architectureDraft, testArchitectureInput } from "./test-architecture.ts
 import { memoryWikipediaCache } from "./test-cache.ts";
 import { fakeWikipedia, pageProvider } from "./test-provider.ts";
 
+// A test may force the diagram the engine draws, to reach the branch that refuses a bad one.
+const forced = vi.hoisted(() => ({ diagram: null as string | null }));
+vi.mock("./architecture-edges.ts", async (importOriginal) => {
+  const edges = await importOriginal<typeof import("./architecture-edges.ts")>();
+  return {
+    ...edges,
+    architectureDiagram: (...args: Parameters<typeof edges.architectureDiagram>) =>
+      forced.diagram ?? edges.architectureDiagram(...args),
+  };
+});
+afterEach(() => {
+  forced.diagram = null;
+});
+
 function run(
   answer: (call: number) => ArchitectureDraft | ArchitectureFixes | Error,
   edit: (draft: ArchitectureDraft) => void = () => {},
+  tweak: (input: ReturnType<typeof testArchitectureInput>) => void = () => {},
 ) {
   const { provider, requests } = pageProvider((_featureId, call) => {
     const out = answer(call);
@@ -19,6 +34,7 @@ function run(
   });
   const lines: string[] = [];
   const input = testArchitectureInput();
+  tweak(input);
   const result = writeArchitecture(
     { ...input, parent: null, number: 1 },
     {
@@ -31,6 +47,11 @@ function run(
   );
   return { result, requests, lines, input };
 }
+
+const withSupports = (supports: string[]) => (draft: ArchitectureDraft) => {
+  const lead = draft.sections[0]?.claims[0];
+  if (lead !== undefined) lead.supports = supports;
+};
 
 const withClaim =
   (key: string, claim: ArchitectureDraft["sections"][number]["claims"][number]) =>
@@ -195,6 +216,129 @@ describe("writeArchitecture", () => {
     expect(article.sections[1]?.claims[0]?.text).toBe("It calls ghost and x.");
     expect(article.edges).toEqual([]);
     expect(article.diagram).toBeNull();
+  });
+
+  it("names an unknown lead support once, and says how many more it left out", async () => {
+    const body = ["u1", "y1", "p1", "d1"];
+    const twice = await run(
+      (call) => (call === 1 ? architectureDraft() : { claims: [] }),
+      withSupports([...body, "nothing", "nothing"]),
+    ).result;
+    expect(twice.dropped.map((d) => d.problems)).toEqual([
+      ['the lead supports "nothing", which are not body claims'],
+    ]);
+    const many = run(
+      (call) => (call === 1 ? architectureDraft() : { claims: [] }),
+      withSupports([...body, "a", "b", "c", "d", "e"]),
+    );
+    const outcome = await many.result;
+    expect(outcome.dropped.map((d) => d.problems)).toEqual([
+      ['the lead supports "a", "b", "c", and 2 more, which are not body claims'],
+    ]);
+    expect(String(many.requests[1]?.messages.at(-1)?.content)).toContain(
+      '- "l1": the lead supports "a", "b", "c", and 2 more, which are not body claims',
+    );
+  });
+
+  it("falls back to the build time when the commit's date is not one the article can store", async () => {
+    const commit = (input: ReturnType<typeof testArchitectureInput>, date: string) => {
+      input.history = [
+        { ...(input.history[0] as (typeof input.history)[number]), sha: input.index.sha, date },
+      ];
+    };
+    const good = await run(
+      () => architectureDraft(),
+      () => {},
+      (input) => commit(input, "2026-02-03T10:00:00-05:00"),
+    ).result;
+    expect(good.architecture?.commitDate).toBe("2026-02-03T10:00:00-05:00");
+    const bad = await run(
+      () => architectureDraft(),
+      () => {},
+      (input) => commit(input, "yesterday"),
+    ).result;
+    expect(bad.failure).toBeNull();
+    expect(bad.architecture?.commitDate).toBe("2026-10-02T12:00:00.000Z");
+  });
+
+  it("reports a failed retry as a failure of the second call, with the first call's tokens", async () => {
+    const ghost = { id: "g1", text: "Ghosts haunt it.", cite: [], pages: ["ghost"], supports: [] };
+    const { result, lines } = run(
+      (call) => (call === 1 ? architectureDraft() : new LlmError("gone")),
+      withClaim("layers", ghost),
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ architecture: null, calls: 1 });
+    expect(outcome.tokens.in).toBe(100);
+    expect(outcome.failure).toBe("the architecture call failed twice: LlmError: gone");
+    expect(lines).toContain(
+      "architecture: not written: the architecture call failed twice: LlmError: gone",
+    );
+  });
+
+  it("asks again, and counts the call and its tokens, when the first answer is unusable", async () => {
+    const usage = { in: 7, out: 3, cacheRead: 1, cacheWrite: 2 };
+    const { result, requests } = run((call) =>
+      call === 1
+        ? new LlmOutputError("the answer is not JSON", "not json", { usage, model: "m-1" })
+        : architectureDraft(),
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ failure: null, calls: 2, dropped: [] });
+    expect(outcome.tokens).toEqual({ in: 107, out: 13, cacheRead: 1, cacheWrite: 2 });
+    expect(outcome.architecture?.model).toBe("m-1");
+    expect(requests[1]?.messages.map((m) => m.content)).toEqual([
+      outcome.pack.text,
+      "not json",
+      "That answer was rejected: the answer is not JSON\nReturn the corrected JSON object.",
+    ]);
+  });
+
+  it("fails the article, not the build, when verifying a claim throws", async () => {
+    let armed = 0;
+    const armedSources = (input: ReturnType<typeof testArchitectureInput>) => {
+      const sources = input.sources;
+      input.sources = new (class extends Map<string, string> {
+        override get(path: string) {
+          if (armed > 0) throw new Error("boom: secret model text");
+          return super.get(path);
+        }
+      })(sources);
+    };
+    const first = await run(
+      () => {
+        armed = 1;
+        return architectureDraft();
+      },
+      () => {},
+      armedSources,
+    ).result;
+    expect(first).toMatchObject({ architecture: null, calls: 1 });
+    expect(first.failure).toBe("verifying the claims failed: Error");
+
+    armed = 0;
+    const ghost = { id: "g1", text: "Ghosts haunt it.", cite: [], pages: ["ghost"], supports: [] };
+    const second = await run(
+      (call) => {
+        armed = call === 2 ? 1 : 0;
+        return call === 1
+          ? architectureDraft()
+          : { claims: [{ ...ghost, cite: ["src/signals/store.py:1-2"], pages: [] }] };
+      },
+      withClaim("layers", ghost),
+      armedSources,
+    ).result;
+    expect(second).toMatchObject({ architecture: null, calls: 2 });
+    expect(second.failure).toBe("verifying the claims failed: Error");
+  });
+
+  it("draws no diagram, and logs why, when the diagram fails verification", async () => {
+    forced.diagram = 'flowchart LR\n  click n1 "https://example.com"';
+    const { result, lines } = run(() => architectureDraft());
+    const outcome = await result;
+    expect(outcome.failure).toBeNull();
+    expect(outcome.architecture?.diagram).toBeNull();
+    expect(lines.filter((l) => l.startsWith("architecture: diagram refused: "))).not.toEqual([]);
   });
 
   it("takes its title from the README, else the repository's name, never from the model", async () => {

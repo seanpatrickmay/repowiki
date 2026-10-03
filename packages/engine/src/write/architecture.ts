@@ -2,6 +2,7 @@ import {
   Architecture,
   type ArchitectureClaim,
   ArchitectureSectionKey,
+  IsoDateTime,
   type Manifest,
   type Revision,
   type TokenUsage,
@@ -9,7 +10,7 @@ import {
 import { type LlmMessage, LlmOutputError, type Provider } from "@repowiki/llm";
 import type { z } from "zod";
 import type { CommitInfo, RepoIndex } from "../index/index.ts";
-import { type WikipediaOptions, wikipediaTitlesIn } from "../link/index.ts";
+import { textLinkViolations, type WikipediaOptions, wikipediaTitlesIn } from "../link/index.ts";
 import {
   type ArchitectureContext,
   ArchitectureDraft,
@@ -27,9 +28,9 @@ import {
   projectTitle,
 } from "./architecture-pack.ts";
 import { ARCHITECTURE_GIVE_UP, architectureSystemPrompt } from "./architecture-prompt.ts";
-import { addTokens, callFailure, checkTitles, errorClass, type Settled, settle } from "./build.ts";
+import { callFailure, checkTitles, errorClass, recordCall, settle } from "./build.ts";
 import { createClaimLinker, orderedSections } from "./page.ts";
-import { fixRequest, retryRequest, uniqueDraft } from "./rounds.ts";
+import { fixRequest, retryRequest, uniqueDraft, verifyClaims } from "./rounds.ts";
 
 export interface ArchitectureInput {
   index: RepoIndex;
@@ -65,7 +66,7 @@ export interface ArchitectureOutcome {
   architecture: Architecture | null;
   failure: string | null;
   dropped: { section: ArchitectureSectionKey; text: string; problems: string[] }[];
-  /** Calls the model answered: 1, or 2 with a retry. */
+  /** Calls the model answered: 0 when the first call failed, 1, or 2 with a retry. */
   calls: number;
   tokens: TokenUsage;
   pack: ArchitecturePack;
@@ -81,7 +82,6 @@ interface State {
   pack: ArchitecturePack;
   draft: ArchitectureDraft | null;
   rejected: { text: string; reason: string } | null;
-  failure: string | null;
   verified: Map<string, { key: ArchitectureSectionKey; claim: ArchitectureClaim }>;
   failing: Map<
     string,
@@ -96,35 +96,6 @@ type Keyed = { key: ArchitectureSectionKey; claim: ArchitectureDraftClaim };
 
 const claimsOf = (draft: ArchitectureDraft): Keyed[] =>
   uniqueDraft(draft).sections.flatMap((s) => s.claims.map((claim) => ({ key: s.key, claim })));
-
-/** Verifies claims, lead last, so a lead's supports are checked against the body as it stands. */
-function verifyAll(state: State, claims: readonly Keyed[], ctx: ArchitectureContext): void {
-  const ordered = [...claims].sort((a, b) => Number(a.key === "lead") - Number(b.key === "lead"));
-  for (const { key, claim } of ordered) {
-    const checked = verifyArchitectureClaim(key, claim, ctx);
-    const problems = [...checked.problems];
-    if (key === "lead") {
-      const unknown = claim.supports.filter((id) => {
-        const target = state.verified.get(id) ?? state.failing.get(id);
-        return target === undefined || target.key === "lead";
-      });
-      if (unknown.length > 0) {
-        problems.push(
-          `the lead supports ${unknown
-            .slice(0, 3)
-            .map((id) => quote(id))
-            .join(", ")}, which are not body claims`,
-        );
-      }
-    }
-    if (checked.claim !== null && problems.length === 0) {
-      state.failing.delete(claim.id);
-      state.verified.set(claim.id, { key, claim: checked.claim });
-    } else {
-      state.failing.set(claim.id, { key, claim, problems });
-    }
-  }
-}
 
 /**
  * Writes the Architecture article (spec §7.4), the project's own article titled with
@@ -168,26 +139,14 @@ export async function writeArchitecture(
     pack,
     draft: null,
     rejected: null,
-    failure: null,
     verified: new Map(),
     failing: new Map(),
     tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
     model: null,
     calls: 0,
   };
-  const record = (outcome: Settled<unknown>) => {
-    if ("result" in outcome) {
-      state.calls += 1;
-      state.tokens = addTokens(state.tokens, outcome.result.usage);
-      state.model ??= outcome.result.model;
-    } else if (outcome.error instanceof LlmOutputError) {
-      state.calls += 1;
-      if (outcome.error.usage !== undefined) {
-        state.tokens = addTokens(state.tokens, outcome.error.usage);
-      }
-      state.model ??= outcome.error.model ?? null;
-    }
-  };
+  const verify = (claims: readonly Keyed[]) =>
+    verifyClaims(state, claims, (key, claim) => verifyArchitectureClaim(key, claim, ctx));
   const call = <T>(schema: z.ZodType<T>, messages: readonly LlmMessage[], maxTokens: number) =>
     settle(
       options.provider.generate({ purpose: "write", system, messages, schema, maxTokens, batch }),
@@ -212,7 +171,7 @@ export async function writeArchitecture(
     [{ role: "user", content: pack.text }],
     MAX_ARCHITECTURE_OUTPUT_TOKENS,
   );
-  record(first);
+  recordCall(state, first);
   if ("result" in first) {
     const draft = uniqueDraft(first.result.output);
     const claims = claimsOf(draft);
@@ -222,7 +181,7 @@ export async function writeArchitecture(
     } else {
       state.draft = draft;
       try {
-        verifyAll(state, claims, ctx);
+        verify(claims);
       } catch (error) {
         return outcome(null, `verifying the claims failed: ${errorClass(error)}`);
       }
@@ -242,7 +201,7 @@ export async function writeArchitecture(
           fixRequest(state, ARCHITECTURE_GIVE_UP),
           MAX_FIX_OUTPUT_TOKENS,
         );
-    record(second);
+    recordCall(state, second);
     if (!("result" in second)) {
       return outcome(null, `the architecture call failed twice: ${callFailure(second.error)}`);
     }
@@ -250,7 +209,7 @@ export async function writeArchitecture(
       if (rejected) {
         const draft = uniqueDraft(second.result.output as ArchitectureDraft);
         state.draft = draft;
-        verifyAll(state, claimsOf(draft), ctx);
+        verify(claimsOf(draft));
       } else {
         const fixes = new Map(
           (second.result.output as ArchitectureFixes).claims.map((c) => [c.id, c]),
@@ -263,14 +222,12 @@ export async function writeArchitecture(
               : fix?.cite.length === 0 && fix.pages.length === 0;
           return fix === undefined || gaveUp ? [] : [{ key, claim: { ...fix, id: claim.id } }];
         });
-        verifyAll(state, again, ctx);
+        verify(again);
       }
     } catch (error) {
       return outcome(null, `verifying the claims failed: ${errorClass(error)}`);
     }
   }
-  if (state.draft === null)
-    return outcome(null, "the architecture call returned no usable article");
 
   const titles = [...state.verified.values()].flatMap(({ claim }) => wikipediaTitlesIn(claim.text));
   const wikipedia = await checkTitles(titles, options.wikipedia, log);
@@ -297,11 +254,14 @@ export async function writeArchitecture(
     const refused = diagram === null ? [] : diagramProblems(diagram);
     for (const problem of refused) log(`architecture: diagram refused: ${problem}`);
     if (refused.length > 0) diagram = null;
+    // The build commit's own date, unless git gave one the article cannot store.
+    const buildDate = history.find((c) => c.sha === index.sha)?.date;
+    const commitDate = IsoDateTime.safeParse(buildDate).success ? buildDate : undefined;
     const parsed = Architecture.safeParse({
       id: `architecture-${index.sha.slice(0, 12)}-${input.number}`,
       sha: index.sha,
       title,
-      commitDate: history.find((c) => c.sha === index.sha)?.date ?? now().toISOString(),
+      commitDate: commitDate ?? now().toISOString(),
       generatedAt: now().toISOString(),
       parentId: input.parent?.id ?? null,
       reason: "build",
@@ -319,6 +279,13 @@ export async function writeArchitecture(
         `the article does not match the schema at ${parsed.error.issues[0]?.path.join(".")}`,
       );
     }
+    // The checks above make this unreachable; it stays as the last word on spec §8.
+    const violations = parsed.data.sections.flatMap((section) =>
+      section.claims.flatMap((claim) =>
+        textLinkViolations(claim.text, manifest).map((problem) => `${quote(claim.id)}: ${problem}`),
+      ),
+    );
+    if (violations.length > 0) return outcome(null, `links to nowhere: ${violations.join("; ")}`);
     return outcome(parsed.data, null);
   } catch (error) {
     return outcome(null, `assembling the article failed: ${errorClass(error)}`);
