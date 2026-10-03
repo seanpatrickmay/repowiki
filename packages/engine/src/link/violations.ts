@@ -1,4 +1,4 @@
-import type { Manifest, Revision } from "@repowiki/core";
+import type { Architecture, Manifest, Revision } from "@repowiki/core";
 import { quote } from "../verify/index.ts";
 import { linkTokensIn } from "./links.ts";
 
@@ -68,4 +68,33 @@ export function linksWithoutPage(revisions: readonly Revision[], manifest: Manif
     }
   }
   return count;
+}
+
+/**
+ * linkViolations for the project's article (the Architecture article, F27): every [[id]] token
+ * must name an active page, and every page a claim names as its support must be an active
+ * feature in `pages`, the features with a current page.
+ */
+export function architectureLinkViolations(
+  article: Architecture,
+  manifest: Manifest,
+  pages: ReadonlySet<string>,
+): string[] {
+  const active = new Set(
+    manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id),
+  );
+  const problems: string[] = [];
+  for (const section of article.sections) {
+    for (const claim of section.claims) {
+      for (const problem of textLinkViolations(claim.text, manifest)) {
+        problems.push(`architecture ${quote(claim.id)}: ${problem}`);
+      }
+      for (const id of claim.pages) {
+        if (!active.has(id) || !pages.has(id)) {
+          problems.push(`architecture ${quote(claim.id)}: names ${quote(id)}, which has no page`);
+        }
+      }
+    }
+  }
+  return problems;
 }

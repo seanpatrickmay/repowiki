@@ -1,4 +1,4 @@
-import { contentHash, type Revision } from "@repowiki/core";
+import { type Architecture, contentHash, type Revision } from "@repowiki/core";
 import type { CommitInfo } from "../index/index.ts";
 import { citedLines, citedSubject } from "./claims.ts";
 import { diagramProblems } from "./diagram.ts";
@@ -12,6 +12,36 @@ import { diagramProblems } from "./diagram.ts";
  */
 export function revisionProblems(
   revision: Revision,
+  sourcesAt: (sha: string) => ReadonlyMap<string, string>,
+): string[] {
+  return storedProblems(revision.featureId, revision, sourcesAt);
+}
+
+/** What the stored checks read: a feature page's revision or the project's article. */
+interface StoredPage {
+  diagram: string | null;
+  sections: readonly Pick<Revision["sections"][number], "claims">[];
+}
+
+/**
+ * revisionProblems and commitCitationProblems for the project's article (the Architecture
+ * article, F27): its code citations, its commit citations and its diagram, each problem
+ * labelled "architecture".
+ */
+export function architectureProblems(
+  article: Architecture,
+  sourcesAt: (sha: string) => ReadonlyMap<string, string>,
+  commits: readonly CommitInfo[],
+): string[] {
+  return [
+    ...storedProblems("architecture", article, sourcesAt),
+    ...commitProblems("architecture", article, commits),
+  ];
+}
+
+function storedProblems(
+  label: string,
+  revision: StoredPage,
   sourcesAt: (sha: string) => ReadonlyMap<string, string>,
 ): string[] {
   const problems: string[] = [];
@@ -30,7 +60,7 @@ export function revisionProblems(
     for (const claim of section.claims) {
       for (const citation of claim.citations) {
         if (citation.kind !== "code") continue;
-        const where = `${revision.featureId} ${claim.id} ${citation.path}:${citation.startLine}-${citation.endLine}`;
+        const where = `${label} ${claim.id} ${citation.path}:${citation.startLine}-${citation.endLine}`;
         const sources = sourcesOf(citation.sha);
         if (sources === null) {
           problems.push(`${where}: no such commit ${citation.sha}`);
@@ -48,7 +78,7 @@ export function revisionProblems(
   }
   if (revision.diagram !== null) {
     for (const problem of diagramProblems(revision.diagram)) {
-      problems.push(`${revision.featureId}: ${problem}`);
+      problems.push(`${label}: ${problem}`);
     }
   }
   return problems;
@@ -63,13 +93,21 @@ export function commitCitationProblems(
   revision: Revision,
   commits: readonly CommitInfo[],
 ): string[] {
+  return commitProblems(revision.featureId, revision, commits);
+}
+
+function commitProblems(
+  label: string,
+  revision: Pick<StoredPage, "sections">,
+  commits: readonly CommitInfo[],
+): string[] {
   const subjects = new Map(commits.map((c) => [c.sha, citedSubject(c.subject)]));
   const problems: string[] = [];
   for (const section of revision.sections) {
     for (const claim of section.claims) {
       for (const citation of claim.citations) {
         if (citation.kind !== "commit") continue;
-        const where = `${revision.featureId} ${claim.id} commit:${citation.sha.slice(0, 7)}`;
+        const where = `${label} ${claim.id} commit:${citation.sha.slice(0, 7)}`;
         const subject = subjects.get(citation.sha);
         if (subject === undefined) {
           problems.push(`${where}: no such commit in the history of the wiki's sha`);

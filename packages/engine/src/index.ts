@@ -38,6 +38,7 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  architectureLinkViolations,
   codeAliases,
   featureNeighbours,
   linksWithoutPage,
@@ -79,7 +80,12 @@ export {
   UnsupportedSchemaError,
   writeExport,
 } from "./store/index.ts";
-export { commitCitationProblems, diagramProblems, revisionProblems } from "./verify/index.ts";
+export {
+  architectureProblems,
+  commitCitationProblems,
+  diagramProblems,
+  revisionProblems,
+} from "./verify/index.ts";
 export {
   type ArchitectureOutcome,
   architectureSystemPrompt,

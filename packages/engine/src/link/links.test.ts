@@ -1,4 +1,9 @@
-import { makeFeature, makeRevision } from "@repowiki/core/test-fixtures";
+import {
+  architectureClaim,
+  makeArchitecture,
+  makeFeature,
+  makeRevision,
+} from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   createPageLinker,
@@ -9,7 +14,7 @@ import {
   wikipediaTitlesIn,
 } from "./links.ts";
 import { linkManifest } from "./test-manifest.ts";
-import { linksWithoutPage, linkViolations } from "./violations.ts";
+import { architectureLinkViolations, linksWithoutPage, linkViolations } from "./violations.ts";
 
 const NO_WP = new Map<string, string | null>();
 
@@ -347,5 +352,43 @@ describe("linksWithoutPage", () => {
     // deliverables has no page: once in See also, once as a link. A Wikipedia link is not counted.
     expect(linksWithoutPage([signals, billing], linkManifest())).toBe(2);
     expect(linksWithoutPage([signals], linkManifest())).toBe(4);
+  });
+});
+
+describe("architectureLinkViolations", () => {
+  const pages = new Set(["signals", "deliverables"]);
+  const article = (text: string, claimPages: string[]) =>
+    makeArchitecture({
+      sections: [
+        ...makeArchitecture().sections.slice(0, 2),
+        {
+          key: "dependencies",
+          claims: [architectureClaim({ id: "a-2", text, citations: [], pages: claimPages })],
+        },
+      ],
+    });
+
+  it("passes links and pages that all name active features with a page", () => {
+    expect(
+      architectureLinkViolations(
+        article("[[deliverables]] uses [[signals]].", ["signals"]),
+        linkManifest(),
+        pages,
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports a link to nowhere and a page that is retired or has no page", () => {
+    expect(
+      architectureLinkViolations(
+        article("Uses [[retired-thing]].", ["retired-thing", "billing"]),
+        linkManifest(),
+        pages,
+      ),
+    ).toEqual([
+      'architecture "a-2": a link to "retired-thing" is not an active feature id',
+      'architecture "a-2": names "retired-thing", which has no page',
+      'architecture "a-2": names "billing", which has no page',
+    ]);
   });
 });
