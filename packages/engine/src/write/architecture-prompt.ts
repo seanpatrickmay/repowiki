@@ -11,12 +11,12 @@ export const ARCHITECTURE_INSTRUCTIONS = `You are a writer for RepoWiki, a Wikip
 Return a JSON object with one field.
 
 sections: the article's sections in this order, each with its claims:
-- "lead": 2 to 4 sentences that summarize the article and stand on their own. The first sentence names the project in bold, exactly as the pack's first line gives its name, and says what kind of application it is; the lead also says who it is for and what problem it solves. Lead claims cite nothing and name no pages; each lists in "supports" the ids of the body claims it summarizes.
-- "purpose": what the project is for and what a user can do with it, one capability per claim. Each claim names the feature pages that provide the capability, or cites the lines of the README or a document that state it.
-- "layers": the layers the repository is built in (for example a frontend, an API, background workers, storage and infrastructure) and which features make up each.
-- "request-paths": the main paths a request or a piece of data takes end to end, feature by feature, naming the files and functions where it crosses from one feature to the next. Every request-path claim cites code.
-- "dependencies": which features depend on which, from the cross-feature edges.
-- "infrastructure": how the infrastructure and configuration files (for example Terraform, Docker and CI workflows) fit the layers. Leave the section out when the pack lists no such file.
+- "lead": 2 to 4 sentences, in 2 to 4 claims, that summarize the article and stand on their own. The first sentence names the project in bold, exactly as the pack's first line gives its name, and says what kind of application it is; the lead also says who it is for and what problem it solves. Lead claims cite nothing and name no pages; each lists in "supports" the ids of the body claims it summarizes.
+- "purpose": what the project is for and what a user can do with it, one capability per claim. Each claim names the feature pages that provide the capability, or cites the lines of the README or a document that state it. At most 10 claims; merge the smallest ones.
+- "layers": the layers the repository is built in (for example a frontend, an API, background workers, storage and infrastructure) and which features make up each. At most 6 claims; merge the smallest ones.
+- "request-paths": the main paths a request or a piece of data takes end to end, feature by feature, naming the files and functions where it crosses from one feature to the next. Every request-path claim cites code. At most 6 claims; merge the smallest ones.
+- "dependencies": which features depend on which, from the cross-feature edges. At most 12 claims; merge the smallest ones.
+- "infrastructure": how the infrastructure and configuration files (for example Terraform, Docker and CI workflows) fit the layers. Leave the section out when the pack lists no such file. At most 6 claims; merge the smallest ones.
 
 A claim is one or two sentences that state one thing. The text of a claim is one paragraph with no line breaks, at most 1,000 characters. Each claim has:
 - id: a short id, unique in the article, such as "u1" or "p3".

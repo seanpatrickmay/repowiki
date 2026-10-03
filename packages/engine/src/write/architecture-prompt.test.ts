@@ -46,6 +46,22 @@ describe("the Architecture call's prompt", () => {
     expect(ARCHITECTURE_INSTRUCTIONS).toContain("never in the text");
   });
 
+  it("caps each section's claims, so a large repository's answer fits its output cap", () => {
+    const line = (key: string) =>
+      ARCHITECTURE_INSTRUCTIONS.split("\n").find((l) => l.startsWith(`- "${key}":`)) ?? "";
+    expect(line("lead")).toContain("in 2 to 4 claims");
+    const caps = {
+      purpose: 10,
+      layers: 6,
+      "request-paths": 6,
+      dependencies: 12,
+      infrastructure: 6,
+    };
+    for (const [key, n] of Object.entries(caps)) {
+      expect(line(key)).toContain(`At most ${n} claims; merge the smallest ones.`);
+    }
+  });
+
   it("asks for the project's own article: its name, who it is for, what it solves, its features", () => {
     expect(ARCHITECTURE_INSTRUCTIONS).toContain(
       "names the project in bold, exactly as the pack's first line gives its name",

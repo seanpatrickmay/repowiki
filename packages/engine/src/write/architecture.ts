@@ -7,7 +7,12 @@ import {
   type Revision,
   type TokenUsage,
 } from "@repowiki/core";
-import { type LlmMessage, LlmOutputError, type Provider } from "@repowiki/llm";
+import {
+  type LlmMessage,
+  LlmOutputError,
+  MAX_TOKENS_STOP_REASON,
+  type Provider,
+} from "@repowiki/llm";
 import type { z } from "zod";
 import type { CommitInfo, RepoIndex } from "../index/index.ts";
 import { textLinkViolations, type WikipediaOptions, wikipediaTitlesIn } from "../link/index.ts";
@@ -72,8 +77,13 @@ export interface ArchitectureOutcome {
   pack: ArchitecturePack;
 }
 
-/** Longest answer the article may take; a feature page's cap. */
-export const MAX_ARCHITECTURE_OUTPUT_TOKENS = 8000;
+/**
+ * Longest answer the article may take: twice a feature page's cap, since the article covers every
+ * feature (the prompt also caps each section's claims).
+ */
+export const MAX_ARCHITECTURE_OUTPUT_TOKENS = 16000;
+/** Added to that rejection in the retry turn, so the whole-answer retry fits the same cap. */
+const ANSWER_SHORTER = "it was too long, so answer shorter, with fewer and shorter claims";
 const MAX_FIX_OUTPUT_TOKENS = 4000;
 const ORDER = ArchitectureSectionKey.options;
 const NO_ARTICLE = "no lead or no body claim survived verification";
@@ -187,7 +197,10 @@ export async function writeArchitecture(
       }
     }
   } else if (first.error instanceof LlmOutputError) {
-    state.rejected = { text: first.error.text, reason: first.error.message };
+    const { message } = first.error;
+    const cut = first.error.stopReason === MAX_TOKENS_STOP_REASON;
+    const reason = cut ? `${message}; ${ANSWER_SHORTER}` : message;
+    state.rejected = { text: first.error.text, reason };
   } else {
     return outcome(null, `the architecture call failed: ${callFailure(first.error)}`);
   }
