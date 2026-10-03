@@ -863,6 +863,31 @@ describe("the project's article (About)", () => {
   });
 });
 
+describe("an export without the project's article", () => {
+  let bare: BuiltSite;
+  beforeAll(() => {
+    bare = buildFixtureSite([], { ...fixtureExport(), architecture: [] });
+  }, 120_000);
+  afterAll(() => bare?.cleanup());
+
+  it("links no page to an About article, and the Main Page has no About box", () => {
+    const pages = htmlFiles(bare.outDir);
+    expect(pages).toContain("special/about/index.html");
+    for (const page of pages) {
+      expect(bare.read(page), page).not.toContain('<li><a href="/special/about/">');
+    }
+    expect(bare.read("index.html")).not.toContain("mp-architecture");
+  });
+
+  it("serves /special/about/ as a noindex page that says there is no About article yet", () => {
+    const html = bare.read("special/about/index.html");
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).toContain('<h1 class="page-title">About</h1>');
+    expect(html).toContain("This wiki has no About article yet.");
+    expect(html).not.toContain("data-pagefind-body");
+  });
+});
+
 describe("a hostile article title", () => {
   // The title is the README's first heading, so it is untrusted: markup, quotes, a wikilink and a
   // fragment. It is plain text on the page <title>, the <h1>, the Main Page box and every page's
