@@ -1,4 +1,13 @@
 export {
+  type ArchitectureInput,
+  type ArchitectureOptions,
+  type ArchitectureOutcome,
+  MAX_ARCHITECTURE_OUTPUT_TOKENS,
+  writeArchitecture,
+} from "./architecture.ts";
+export { DEFAULT_ARCHITECTURE_BUDGET_TOKENS } from "./architecture-pack.ts";
+export { architectureSystemPrompt } from "./architecture-prompt.ts";
+export {
   MAX_PAGE_OUTPUT_TOKENS,
   type PageOutcome,
   type WritePagesInput,
@@ -13,6 +22,7 @@ export {
   type BuildJournal,
   buildJournal,
   buildWiki,
+  MIN_ARCHITECTURE_PAGES,
   type WikiBuild,
   WikiBuildError,
   type WikiBuildOptions,

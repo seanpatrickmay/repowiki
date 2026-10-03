@@ -3,6 +3,7 @@ import { makeFeature, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import { LlmError, type Provider } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import { openStore } from "../store/index.ts";
+import { architectureDraft, SAMPLE_README } from "./test-architecture.ts";
 import { deliverablesDraft, fakeWikipedia, pageProvider, signalsDraft } from "./test-provider.ts";
 import { testWiki } from "./test-wiki.ts";
 import { buildJournal, buildWiki, WikiBuildError } from "./wiki.ts";
@@ -11,14 +12,19 @@ function setup(fail: string[] = [], extraFeatures: Feature[] = []) {
   const wiki = testWiki();
   wiki.manifest.features.push(...extraFeatures);
   wiki.sources.set("src/signals/store.py", 'URL = os.getenv("SIGNALS_URL")\n');
+  // The project article's purpose claim cites the README.
+  wiki.sources.set("README.md", SAMPLE_README);
   const store = openStore(":memory:");
   store.putManifest(wiki.manifest, { llmRevised: true });
+  // The Architecture call has no feature id, so the provider sees "" for it.
   const { provider, requests } = pageProvider((featureId) =>
     fail.includes(featureId)
       ? new LlmError("expired")
-      : featureId === "signals"
-        ? signalsDraft()
-        : deliverablesDraft(),
+      : featureId === ""
+        ? architectureDraft()
+        : featureId === "signals"
+          ? signalsDraft()
+          : deliverablesDraft(),
   );
   const options = {
     provider,
@@ -43,6 +49,18 @@ describe("buildWiki", () => {
     expect(store.listCurrentRevisions().map((r) => r.id)).toEqual(build.stored.map((r) => r.id));
     expect(store.getHead()).toBe(input.index.sha);
     expect(store.getWikipediaSummary("Message queue")?.summary?.title).toBe("Message queue");
+    expect(build.architectureSkipped).toBeNull();
+    expect(build.architecture?.failure).toBeNull();
+    expect(store.getCurrentArchitecture()).toEqual(build.architecture?.architecture);
+    expect(store.getCurrentArchitecture()?.basis).toEqual(build.stored.map((r) => r.id).sort());
+  });
+
+  it("asks for the Architecture article only after every page's round, in a call of its own", async () => {
+    const { store, input, options, requests } = setup();
+    await buildWiki(store, input, options);
+    expect(requests.map((r) => r.featureId)).toEqual(["deliverables", "signals", undefined]);
+    const pageTurn = Math.max(...requests.slice(0, 2).map((r) => r.turn));
+    expect(requests[2]?.turn).toBeGreaterThan(pageTurn);
   });
 
   it("makes no call, even to a provider that fails on any, when every page is stored", async () => {
@@ -55,7 +73,12 @@ describe("buildWiki", () => {
       },
     };
     const again = await buildWiki(store, input, { ...options, provider: refusing });
-    expect(again).toMatchObject({ stored: [], written: null });
+    expect(again).toMatchObject({
+      stored: [],
+      written: null,
+      architecture: null,
+      architectureSkipped: "current",
+    });
     expect(requests).toHaveLength(calls);
     expect(again.aliases).toEqual({ signals: ["SIGNALS_URL"] });
     expect(store.getLatestManifest()?.features[0]?.aliases).toEqual([
@@ -70,7 +93,10 @@ describe("buildWiki", () => {
     expect(build.stored.map((r) => r.featureId)).toEqual(["deliverables"]);
     const { requests, options } = setup();
     await buildWiki(first.store, first.input, options);
-    expect(requests.map((r) => r.featureId)).toEqual(["signals"]);
+    // One page was too few for an Architecture article; with both, the rerun writes it.
+    expect(build.architectureSkipped).toBe("too few pages");
+    expect(requests.map((r) => r.featureId)).toEqual(["signals", undefined]);
+    expect(first.store.listArchitectureHistory()).toHaveLength(1);
     expect(first.store.listCurrentRevisions()).toHaveLength(2);
     // The resumed run shares the first run's cached prefix, though it writes fewer pages.
     expect(requests[0]?.cacheKey).toBeDefined();
@@ -123,7 +149,9 @@ describe("buildWiki", () => {
     const { store, input, options, requests } = setup([], [retired, merged]);
     const build = await buildWiki(store, input, options);
     expect(build.stored.map((r) => r.featureId)).toEqual(["deliverables", "signals"]);
-    expect(new Set(requests.map((r) => r.featureId))).toEqual(new Set(["deliverables", "signals"]));
+    expect(new Set(requests.map((r) => r.featureId))).toEqual(
+      new Set(["deliverables", "signals", undefined]),
+    );
     expect(store.getCurrentRevision("legacy-export")).toBeNull();
     expect(store.getCurrentRevision("old-signals")).toBeNull();
 
@@ -133,7 +161,63 @@ describe("buildWiki", () => {
       },
     };
     const again = await buildWiki(store, input, { ...options, provider: refusing });
-    expect(again).toMatchObject({ stored: [], written: null });
+    expect(again).toMatchObject({ stored: [], written: null, architectureSkipped: "current" });
+  });
+
+  it("writes no Architecture article, and makes no call for one, for a one-feature wiki", async () => {
+    const { store, input, options, requests } = setup();
+    const manifest = store.getManifest(input.index.sha);
+    if (manifest === null) throw new Error("no manifest");
+    const alone = openStore(":memory:");
+    alone.putManifest(
+      {
+        ...manifest,
+        features: manifest.features.filter((f) => f.id === "signals"),
+        membership: Object.fromEntries(
+          Object.entries(manifest.membership).map(([member, m]) => [
+            member,
+            { ...m, featureId: "signals" },
+          ]),
+        ),
+      },
+      { llmRevised: true },
+    );
+    const build = await buildWiki(alone, input, options);
+    expect(build.stored.map((r) => r.featureId)).toEqual(["signals"]);
+    expect(build).toMatchObject({ architecture: null, architectureSkipped: "too few pages" });
+    expect(requests.map((r) => r.featureId)).toEqual(["signals"]);
+    expect(alone.getCurrentArchitecture()).toBeNull();
+    store.close();
+  });
+
+  it("keeps the pages when the Architecture call fails, and a rerun writes only the article", async () => {
+    const first = setup([""]);
+    const build = await buildWiki(first.store, first.input, first.options);
+    expect(build.stored).toHaveLength(2);
+    expect(build.architecture?.failure).toBe("the architecture call failed: LlmError: expired");
+    expect(first.store.getHead()).toBe(first.input.index.sha);
+    expect(first.store.getCurrentArchitecture()).toBeNull();
+
+    const { requests, options } = setup();
+    const again = await buildWiki(first.store, first.input, options);
+    expect(requests.map((r) => r.featureId)).toEqual([undefined]);
+    expect(again.stored).toEqual([]);
+    expect(first.store.getCurrentArchitecture()?.parentId).toBeNull();
+  });
+
+  it("rewrites the article, parented on the old one, when the set of pages changed", async () => {
+    const { store, input, options } = setup();
+    const build = await buildWiki(store, input, options);
+    const old = build.architecture?.architecture;
+    // A page stored outside this build (as an update would) changes the article's basis.
+    const signals = store.getCurrentRevision("signals");
+    if (signals === null || old === undefined || old === null) throw new Error("no build");
+    store.putRevision({ ...signals, id: "signals-2", parentId: signals.id, reason: "update" });
+    await buildWiki(store, input, options);
+    const history = store.listArchitectureHistory();
+    expect(history.map((a) => a.parentId)).toEqual([null, old.id]);
+    expect(history[1]?.id).toBe(`architecture-${input.index.sha.slice(0, 12)}-2`);
+    expect(history[1]?.basis).toContain("signals-2");
   });
 
   it("stores nothing when no page could be written", async () => {
@@ -213,5 +297,31 @@ describe("buildWiki", () => {
       /no page could be written/,
     );
     expect(keys.map((key) => store.findBatchRequest(key))).toEqual([null, null]);
+  });
+
+  it("forgets the project article's journal row only once the article is stored", async () => {
+    const { store, input, options } = setup();
+    const journal = buildJournal(store);
+    journal.record("msgbatch_2", new Date().toISOString(), [
+      { requestKey: "architecture", customId: "req-a" },
+    ]);
+    let rowAtStore: unknown = "unread";
+    const watching = {
+      ...store,
+      putArchitecture(article: Parameters<typeof store.putArchitecture>[0]) {
+        rowAtStore = store.findBatchRequest("architecture")?.batchId;
+        store.putArchitecture(article);
+      },
+    };
+    const provider: Provider = {
+      generate(request) {
+        if (request.featureId === undefined) journal.forget("msgbatch_2", ["architecture"]);
+        return options.provider.generate(request);
+      },
+    };
+    await buildWiki(watching, input, { ...options, provider, journal });
+    expect(rowAtStore).toBe("msgbatch_2");
+    expect(store.findBatchRequest("architecture")).toBeNull();
+    expect(store.getCurrentArchitecture()?.title).toBe("Sample Ops");
   });
 });

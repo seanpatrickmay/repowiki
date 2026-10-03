@@ -2,6 +2,7 @@ import { createClaudeProvider, createLedger, DEFAULT_MODELS, type FetchLike } fr
 import { describe, expect, it } from "vitest";
 import { openStore } from "../store/index.ts";
 import { writePages } from "./build.ts";
+import { architectureDraft, SAMPLE_README } from "./test-architecture.ts";
 import { memoryWikipediaCache } from "./test-cache.ts";
 import { deliverablesDraft, fakeWikipedia, signalsDraft } from "./test-provider.ts";
 import { testWiki } from "./test-wiki.ts";
@@ -106,6 +107,8 @@ function run(answer: (page: string, batch: number) => unknown) {
 }
 
 const isSignals = (page: string) => page.startsWith("# Page: Signal ingestion");
+/** The project article's pack, which the article's call sends after the pages' rounds. */
+const isProject = (page: string) => page.startsWith("# Project:");
 
 describe("writePages through the real batcher (M3 review: the same-tick contract)", () => {
   it("sends every page's first call in one Message Batch", async () => {
@@ -144,7 +147,14 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     });
     let killed = true;
     const api = batchesApi(
-      (page, n) => (isSignals(page) ? (n === 1 ? broken : fixed) : deliverablesDraft()),
+      (page, n) =>
+        isProject(page)
+          ? architectureDraft()
+          : isSignals(page)
+            ? n === 1
+              ? broken
+              : fixed
+            : deliverablesDraft(),
       (n) => {
         if (n !== 2 || !killed) return null;
         reached();
@@ -152,6 +162,7 @@ describe("buildWiki through the real batcher and the store's journal", () => {
       },
     );
     const { manifest, ...input } = testWiki();
+    input.sources.set("README.md", SAMPLE_README);
     const store = openStore(":memory:");
     store.putManifest(manifest, { llmRevised: true });
     const journaled: string[] = [];
@@ -183,12 +194,15 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
     killed = false;
     const rerun = await build();
-    // Round 1 and the retry are both collected from the batches the killed build created.
-    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
+    // Round 1 and the retry are both collected from the batches the killed build created; only
+    // the project article's call is new.
+    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1, 1]);
     expect(rerun.stored.map((r) => r.featureId)).toEqual(["deliverables", "signals"]);
-    // The pages are stored, so every row is forgotten: a third run would send afresh.
-    expect(journaled).toHaveLength(3);
-    expect(journaled.map((key) => store.findBatchRequest(key))).toEqual([null, null, null]);
+    expect(rerun.architecture?.failure).toBeNull();
+    // The pages and the article are stored, so every row is forgotten: a third run would send
+    // afresh.
+    expect(journaled).toHaveLength(4);
+    expect(journaled.map((key) => store.findBatchRequest(key))).toEqual([null, null, null, null]);
   });
 
   it("keeps every row of a page whose retry batch was canceled, so a rerun pays for nothing", async () => {
@@ -198,12 +212,20 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     const fixed = { claims: [{ ...overview, cite: ["src/signals/ingest.py:10-24"] }] };
     let first = true;
     const api = batchesApi(
-      (page, n) => (isSignals(page) ? (n === 1 ? broken : fixed) : deliverablesDraft()),
+      (page, n) =>
+        isProject(page)
+          ? architectureDraft()
+          : isSignals(page)
+            ? n === 1
+              ? broken
+              : fixed
+            : deliverablesDraft(),
       () => null,
       // The first build's retry batch never ends in time: its deadline cancels it.
       (n) => first && n === 2,
     );
     const { manifest, ...input } = testWiki();
+    input.sources.set("README.md", SAMPLE_README);
     const store = openStore(":memory:");
     store.putManifest(manifest, { llmRevised: true });
     const build = (deadline?: number) => {
@@ -231,8 +253,9 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     expect(killed.stored.map((r) => r.featureId)).toEqual(["deliverables"]);
     first = false;
     const rerun = await build();
-    // The rerun collects signals' round-1 answer and its retry from the batches already paid for.
-    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1]);
+    // The rerun collects signals' round-1 answer and its retry from the batches already paid for,
+    // then asks for the project article, which one page alone did not get.
+    expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1, 1]);
     expect(rerun.stored.map((r) => r.featureId)).toEqual(["signals"]);
   });
 });
