@@ -1,0 +1,22 @@
+---
+import { articleView } from "../../../article.ts";
+import Article from "../../../components/Article.astro";
+import Layout from "../../../layouts/Layout.astro";
+import { articleFor, type WikiRoute, wikiRoutes } from "../../../routes.ts";
+import { getSite } from "../../../site.ts";
+
+export function getStaticPaths() {
+  return wikiRoutes(getSite()).map((route) => ({ params: { slug: route.slug }, props: { route } }));
+}
+
+interface Props {
+  route: WikiRoute;
+}
+
+const { route } = Astro.props;
+const site = getSite();
+const view = articleView(site, articleFor(site, route));
+---
+<Layout title={view.title}>
+  <Article view={view} indexed={true} />
+</Layout>

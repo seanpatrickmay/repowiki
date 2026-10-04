@@ -1,11 +1,27 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport } from "./test-fixtures.ts";
-import { type BuiltSite, brokenLinks, buildFixtureSite, htmlFiles, runCli } from "./test-site.ts";
+import {
+  type BuiltSite,
+  brokenLinks,
+  buildFixtureSite,
+  htmlFiles,
+  offsiteCssUrls,
+  offsiteResources,
+  runCli,
+} from "./test-site.ts";
 
-let site: BuiltSite | undefined;
+let site: BuiltSite;
 beforeAll(() => {
   site = buildFixtureSite(["--repo-url", "https://github.com/acme/demo-repo"]);
 }, 120_000);
@@ -13,21 +29,27 @@ afterAll(() => site?.cleanup());
 
 describe("site build", () => {
   it("renders the Main Page and a Pagefind index", () => {
-    expect(site!.read("index.html")).toContain("Welcome to the demo-repo wiki");
-    expect(existsSync(join(site!.outDir, "pagefind", "pagefind.js"))).toBe(true);
-    expect(site!.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
+    expect(site.read("index.html")).toContain("Welcome to the demo-repo wiki");
+    expect(existsSync(join(site.outDir, "pagefind", "pagefind.js"))).toBe(true);
+    expect(site.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
   });
 
   it("has no same-site links to missing pages or anchors", () => {
-    expect(htmlFiles(site!.outDir).length).toBeGreaterThan(0);
+    expect(htmlFiles(site.outDir).length).toBeGreaterThan(0);
     // The fixture may have zero internal links; that's legitimate.
-    const result = brokenLinks(site!.outDir);
+    const result = brokenLinks(site.outDir);
     expect(result.broken).toEqual([]);
   });
 
   it("references no off-site scripts, styles or fonts", () => {
-    for (const page of htmlFiles(site!.outDir)) {
-      expect(site!.read(page)).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
+    // Outbound <a> links are navigation and exempt; every other loadable URL must be same-site.
+    for (const page of htmlFiles(site.outDir)) {
+      expect({ page, offsite: offsiteResources(site.read(page)) }).toEqual({ page, offsite: [] });
+    }
+    const stylesheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
+    expect(stylesheets.length).toBeGreaterThan(0);
+    for (const sheet of stylesheets) {
+      expect(offsiteCssUrls(site.read(`_astro/${sheet}`))).toEqual([]);
     }
   });
 });
@@ -243,17 +265,17 @@ describe(".astro dir confinement", () => {
 
 describe("page shell", () => {
   it("links one local stylesheet with dark-mode, phone-width, and overflow rules", () => {
-    const html = site!.read("index.html");
+    const html = site.read("index.html");
     const sheets = [...html.matchAll(/<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/g)];
     expect(sheets).toHaveLength(1);
-    const css = site!.read(sheets[0]?.[1] ?? "");
+    const css = site.read(sheets[0]?.[1] ?? "");
     expect(css).toContain("prefers-color-scheme:dark");
     expect(css).toMatch(/max-width:720px|width<=720px/);
     expect(css).toContain("overflow-wrap:anywhere");
   });
 
   it("has a skip link, a labelled site nav and a main landmark", () => {
-    const html = site!.read("index.html");
+    const html = site.read("index.html");
     expect(html).toContain('<a class="skip-link" href="#content">Jump to content</a>');
     expect(html).toContain('<nav class="site-nav" aria-label="Site">');
     expect(html).toContain('<main id="content" class="content">');
@@ -261,8 +283,87 @@ describe("page shell", () => {
   });
 
   it("uses data: favicon and has no off-site links", () => {
-    const html = site!.read("index.html");
+    const html = site.read("index.html");
     expect(html).toContain('<link rel="icon" href="data:,">');
-    expect(html).not.toMatch(/(?:src|href)="(?:https?:\/\/|\/\/)/);
+    expect(offsiteResources(html)).toEqual([]);
+  });
+});
+
+/** Hashed asset names change with any CSS or script edit; snapshots should not. */
+function normalized(path: string): string {
+  return site.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
+}
+
+describe("article page", () => {
+  it("renders the lead, sections, references and infobox", () => {
+    const html = site.read("wiki/signals/index.html");
+    expect(html).toContain('<h1 class="page-title">Signal ingestion</h1>');
+    expect(html).toContain("<b>Signal ingestion</b> is the subsystem of demo-repo");
+    expect(html).toContain(
+      '<a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">deliverable records</a>',
+    );
+    expect(html).toContain('href="https://en.wikipedia.org/wiki/Exponential_backoff"');
+    expect(html).toContain('<li id="cite-note-5">');
+    expect(html).toContain(
+      "/blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/src/signals/odd%20name%231.py#L1-L9",
+    );
+    expect(html.match(/This section may be out of date\./g)).toHaveLength(1);
+    expect(html).toContain("<td>1,312</td>");
+  });
+
+  it("escapes markup in claim text and leaves unknown links as plain text", () => {
+    const html = site.read("wiki/signals/index.html");
+    expect(html).toContain(
+      "<code>&lt;script&gt;</code> tags are stored escaped, and so is &lt;b&gt;this&lt;/b&gt;.",
+    );
+    expect(html).toContain("The scheduler triggers ingestion");
+    expect(html).toContain("ghost described the old approach");
+    expect(html).not.toContain("/wiki/ghost/");
+  });
+
+  it("indexes current articles for search and marks retired ones", () => {
+    expect(site.read("wiki/signals/index.html")).toContain(
+      '<article class="article" data-pagefind-body>',
+    );
+    expect(site.read("wiki/exporter/index.html")).toContain("This feature was retired at commit");
+    expect(existsSync(join(site.outDir, "wiki", "scheduler"))).toBe(false);
+  });
+
+  it("matches the golden snapshot", async () => {
+    await expect(normalized("wiki/signals/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-signals.html",
+    );
+  });
+});
+
+describe("hostile fixture content", () => {
+  // The fixture feature's title is `<img src=x onerror=alert(1)> "q" & 'p'` plus two private-use
+  // characters; its alias is `<i>x</i>`. Titles and labels are plain text, so every page that
+  // prints them must escape them. The TOC lists the fixed section titles plus "See also" and
+  // "References", never a feature title, so the title reaches the page through the h1, the
+  // caption, the browser-tab title and other pages' See also lists.
+  const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
+
+  it("escapes the title, alias and claim text on the article page", () => {
+    const html = site.read("wiki/hostile-title/index.html");
+    expect(html).toContain(`<h1 class="page-title">${title}</h1>`);
+    expect(html).toContain(`<caption>${title}</caption>`);
+    expect(html).toContain(`<title>${title} - demo-repo wiki</title>`);
+    expect(html).toContain("<td>&lt;i&gt;x&lt;/i&gt;</td>");
+    expect(html).toContain("She said &quot;hi&quot; and it&#39;s fine");
+    expect(html).toContain('<li><a href="#see-also">See also</a></li>');
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<i>x</i>");
+  });
+
+  it("escapes the title in another article's See also list", () => {
+    const html = site.read("wiki/deliverables/index.html");
+    expect(html).toContain(`<li><a class="wikilink" href="/wiki/hostile-title/">${title}</a></li>`);
+  });
+
+  it("emits the hostile markup on no page", () => {
+    for (const page of htmlFiles(site.outDir)) {
+      expect(site.read(page), page).not.toContain("<img src=x");
+    }
   });
 });

@@ -163,7 +163,7 @@ const deliverables = makeRevision({
   id: "deliverables-1",
   featureId: "deliverables",
   commitDate: "2026-02-20T11:00:00-05:00",
-  seeAlso: ["signals"],
+  seeAlso: ["signals", "hostile-title"],
   infobox: {
     files: 2,
     loc: 410,
@@ -227,7 +227,24 @@ const exporter = makeRevision({
   ],
 });
 
-const pages: Revision[] = [deliverables, exporter, legacy, signalsV2];
+/** Plain-text fields (title, alias) and claim text that are markup, quotes and private-use characters. */
+export const HOSTILE_TITLE = "<img src=x onerror=alert(1)> \"q\" & 'p'\uE000\uE001";
+
+const hostile = makeRevision({
+  id: "hostile-1",
+  featureId: "hostile-title",
+  commitDate: "2026-02-25T09:00:00-05:00",
+  seeAlso: ["deliverables"],
+  sections: [
+    {
+      key: "lead",
+      claims: [leadClaim({ text: 'She said "hi" and it\'s \uE000fine.' })],
+    },
+    { key: "overview", claims: [bodyClaim()] },
+  ],
+});
+
+const pages: Revision[] = [deliverables, exporter, hostile, legacy, signalsV2];
 
 /** A small but complete export: every feature status, two revisions, stale and hook claims. */
 export function fixtureExport(): WikiExport {
@@ -276,6 +293,7 @@ export function fixtureExport(): WikiExport {
           ],
         }),
         makeFeature({ id: "scheduler", title: "Scheduler", aliases: [] }),
+        makeFeature({ id: "hostile-title", title: HOSTILE_TITLE, aliases: ["<i>x</i>"] }),
       ],
       membership: {
         "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 },
@@ -287,6 +305,7 @@ export function fixtureExport(): WikiExport {
     history: {
       deliverables: [deliverables],
       exporter: [exporter],
+      "hostile-title": [hostile],
       "legacy-signals": [legacy],
       signals: [signalsV1, signalsV2],
     },

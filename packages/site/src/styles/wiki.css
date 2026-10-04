@@ -185,3 +185,125 @@ code {
     padding: 0.75rem 1rem 2rem;
   }
 }
+
+/* Articles */
+.tagline {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.article h2 {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: normal;
+  line-height: 1.3;
+  margin: 1.5rem 0 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.article p {
+  margin: 0.5rem 0;
+}
+
+.infobox {
+  float: right;
+  clear: right;
+  width: 22rem;
+  margin: 0 0 1rem 1.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.infobox caption {
+  font-weight: bold;
+  font-size: 1.1rem;
+  padding: 0.4rem;
+}
+
+.infobox th,
+.infobox td {
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.infobox th {
+  width: 40%;
+}
+
+.ambox {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-left: 0.5rem solid var(--notice-border);
+  background: var(--notice-bg);
+  font-size: 0.875rem;
+}
+
+.toc {
+  display: inline-block;
+  min-width: 14rem;
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 0.875rem;
+}
+
+.toc h2 {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: bold;
+  text-align: center;
+  border: 0;
+  margin: 0;
+}
+
+.toc ol {
+  margin: 0.25rem 0 0;
+  padding-left: 1.5rem;
+}
+
+sup.reference {
+  font-size: 0.75em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.references {
+  font-size: 0.875rem;
+}
+
+.references li:target {
+  background: var(--bg-subtle);
+}
+
+.ref-backs {
+  user-select: none;
+}
+
+.last-edited {
+  clear: both;
+  margin-top: 2rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+a.external::after {
+  content: " \2197";
+  font-size: 0.75em;
+}
+
+@media (max-width: 720px) {
+  .infobox {
+    float: none;
+    width: 100%;
+    margin: 0 0 1rem;
+  }
+}

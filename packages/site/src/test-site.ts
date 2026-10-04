@@ -151,3 +151,46 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
 
   return { broken, checked };
 }
+
+const OFFSITE_URL = /^\s*(?:https?:)?\/\//i;
+/** In a srcset, each comma-separated candidate starts with a URL. */
+const OFFSITE_SRCSET = /(?:^|,)\s*(?:https?:)?\/\//i;
+const OFFSITE_CSS = /(?:@import\s*|url\(\s*)["']?\s*(?:https?:)?\/\//gi;
+const URL_ATTRIBUTES = new Set(["src", "srcset", "href", "poster", "data", "action", "xlink:href"]);
+// A tag whose quoted attribute values may contain ">".
+const TAG = /<([a-zA-Z][^\s/>]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
+const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+const STYLE_ELEMENT = /<style\b(?:"[^"]*"|'[^']*'|[^'">])*>([\s\S]*?)<\/style\s*>/gi;
+
+/** Off-site `url(...)` and `@import` targets in CSS text, as the matched fragments. */
+export function offsiteCssUrls(css: string): string[] {
+  return [...css.matchAll(OFFSITE_CSS)].map((match) => match[0]);
+}
+
+/**
+ * Resources an HTML page would load from another origin: URL-valued attributes on every tag
+ * except `<a>` (outbound links are navigation, not loads), plus `url(...)` and `@import` in
+ * `<style>` bodies and `style=` attributes. Returns one description per hit.
+ */
+export function offsiteResources(html: string): string[] {
+  const found: string[] = [];
+  for (const [, name = "", attributes = ""] of html.matchAll(TAG)) {
+    const tag = name.toLowerCase();
+    for (const [, rawName = "", doubleQuoted, singleQuoted, unquoted] of attributes.matchAll(
+      ATTRIBUTE,
+    )) {
+      const attribute = rawName.toLowerCase();
+      const value = doubleQuoted ?? singleQuoted ?? unquoted ?? "";
+      if (attribute === "style") {
+        for (const hit of offsiteCssUrls(value)) found.push(`<${tag} style> ${hit}`);
+      } else if (tag !== "a" && URL_ATTRIBUTES.has(attribute)) {
+        const pattern = attribute === "srcset" ? OFFSITE_SRCSET : OFFSITE_URL;
+        if (pattern.test(value)) found.push(`<${tag} ${attribute}="${value}">`);
+      }
+    }
+  }
+  for (const [, body = ""] of html.matchAll(STYLE_ELEMENT)) {
+    for (const hit of offsiteCssUrls(body)) found.push(`<style> ${hit}`);
+  }
+  return found;
+}
