@@ -42,6 +42,14 @@ async function main(): Promise<void> {
           models,
           ledger,
           runId,
+          batchJournal: {
+            lookup: (key) => store.findBatchRequest(key),
+            record: (batchId, createdAt, items) =>
+              store.recordBatchRequests(batchId, createdAt, items),
+            forget: (batchId, keys) => store.forgetBatchRequests(batchId, keys),
+          },
+          onBatchCreated: (batch) =>
+            console.error(`batch ${batch.id} created (${batch.requests} requests)`),
           onBatchProgress: (p) =>
             console.error(
               `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,

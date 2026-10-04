@@ -6,7 +6,7 @@ import type {
   MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { TokenUsage } from "@repowiki/core";
-import { type BatchProgress, createBatcher } from "./batcher.ts";
+import { type BatchJournal, type BatchProgress, canonicalJson, createBatcher } from "./batcher.ts";
 import type { FetchLike } from "./cassette.ts";
 import type { TokenLedger } from "./ledger.ts";
 import {
@@ -32,6 +32,8 @@ export interface ClaudeProviderOptions {
   onBatchCreated?: (batch: { id: string; requests: number }) => void;
   /** Cancel a batch still running this long after its creation. Default: no deadline. */
   batchDeadlineMs?: number;
+  /** Records which batch holds each request, so a rerun collects answers it already paid for. */
+  batchJournal?: BatchJournal;
   now?: () => Date;
 }
 
@@ -42,15 +44,6 @@ function usageOf(message: Message): TokenUsage {
     cacheRead: message.usage.cache_read_input_tokens ?? 0,
     cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
   };
-}
-
-/** JSON with object keys sorted, so equal schemas hash equal whatever their key order. */
-function stableJson(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v !== null && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : v,
-  );
 }
 
 /**
@@ -69,6 +62,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
     onProgress: options.onBatchProgress,
     onBatchCreated: options.onBatchCreated,
     deadlineMs: options.batchDeadlineMs,
+    journal: options.batchJournal,
   });
   const now = options.now ?? (() => new Date());
   const prefixes = new Map<string, string>();
@@ -80,7 +74,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
       if (request.cacheKey !== undefined) {
         // Everything that breaks the cache: the model, the output format, and the system text.
         const prefix = createHash("sha256")
-          .update(`${model}\0${stableJson(schema)}\0${request.system}`)
+          .update(`${model}\0${canonicalJson(schema)}\0${request.system}`)
           .digest("hex");
         const seen = prefixes.get(request.cacheKey);
         if (seen !== undefined && seen !== prefix) {

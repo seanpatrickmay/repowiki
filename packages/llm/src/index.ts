@@ -1,4 +1,12 @@
-export type { BatchProgress } from "./batcher.ts";
+export {
+  type BatchJournal,
+  type BatchProgress,
+  ITEM_ATTEMPTS,
+  JOURNAL_RESULTS_TTL_MS,
+  type JournalEntry,
+  RESULTS_ATTEMPTS,
+  requestKey,
+} from "./batcher.ts";
 export {
   type CassetteEntry,
   CassetteMissError,

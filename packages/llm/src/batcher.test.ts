@@ -3,10 +3,13 @@ import type { MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk/resource
 import { describe, expect, it } from "vitest";
 import {
   type BatcherOptions,
+  type BatchJournal,
   type BatchProgress,
   createBatcher,
   ITEM_ATTEMPTS,
+  type JournalEntry,
   RESULTS_ATTEMPTS,
+  requestKey,
 } from "./batcher.ts";
 import { cannedBatchApi, succeededLine } from "./canned.ts";
 import type { FetchLike } from "./cassette.ts";
@@ -805,5 +808,334 @@ describe("createBatcher per-item retries", () => {
     });
     await expect(batcher(params("a"))).rejects.toThrow("passed its 1 s deadline and was canceled");
     expect(api.calls.filter((c) => c === "POST /v1/messages/batches")).toHaveLength(1);
+  });
+});
+
+describe("createBatcher journal (resuming a submitted batch)", () => {
+  function memoryJournal(initial: Record<string, JournalEntry> = {}) {
+    const entries = new Map(Object.entries(initial));
+    const recorded: [string, JournalEntry][] = [];
+    const journal: BatchJournal = {
+      lookup: (key) => entries.get(key) ?? null,
+      record: (batchId, createdAt, items) => {
+        for (const { requestKey: key, customId } of items) {
+          entries.set(key, { batchId, customId, createdAt });
+          recorded.push([key, { batchId, customId, createdAt }]);
+        }
+      },
+      forget: (batchId, keys) => {
+        for (const key of keys) if (entries.get(key)?.batchId === batchId) entries.delete(key);
+      },
+    };
+    return { entries, journal, recorded };
+  }
+
+  /**
+   * An API holding one earlier batch, msgbatch_old, whose results are `oldResults`. With
+   * `old.processing` it never ends, with `old.polls` it ends after that many status polls, and
+   * with `old.failResults` its results download answers 503. A new batch answers `old.fresh`.
+   */
+  function apiWithOldBatch(
+    oldResults: unknown[],
+    oldStatus = 200,
+    old: { processing?: boolean; polls?: number; failResults?: boolean; fresh?: unknown[] } = {},
+  ) {
+    const calls: string[] = [];
+    let oldPolls = 0;
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    const fetch: FetchLike = async (input, init) => {
+      const path = new URL(input instanceof Request ? input.url : input).pathname;
+      calls.push(`${init?.method ?? "GET"} ${path}`);
+      if (path.includes("msgbatch_old")) {
+        if (oldStatus !== 200) {
+          const type = oldStatus === 404 ? "not_found_error" : "api_error";
+          return json({ type: "error", error: { type } }, oldStatus);
+        }
+        if (path.endsWith("/results")) {
+          if (old.failResults) return new Response("unavailable", { status: 503 });
+          return new Response(oldResults.map((l) => JSON.stringify(l)).join("\n"), {
+            status: 200,
+            headers: { "content-type": "application/x-jsonl" },
+          });
+        }
+        return json({
+          ...batchResponse(
+            old.processing || oldPolls++ < (old.polls ?? 0) ? "in_progress" : "ended",
+          ),
+          id: "msgbatch_old",
+          results_url: "https://api.anthropic.com/v1/messages/batches/msgbatch_old/results",
+        });
+      }
+      if (path.endsWith("/results")) {
+        const fresh = old.fresh ?? [succeededLine("req-0", "fresh")];
+        return new Response(fresh.map((l) => JSON.stringify(l)).join("\n"), {
+          status: 200,
+          headers: { "content-type": "application/x-jsonl" },
+        });
+      }
+      return json(batchResponse(init?.method === "POST" ? "in_progress" : "ended"));
+    };
+    return { calls, client: new Anthropic({ apiKey: "canned", fetch, maxRetries: 0 }) };
+  }
+
+  const NOW = Date.parse("2026-10-01T12:00:00Z");
+  const old = (customId: string, createdAt = "2026-10-01T11:00:00Z"): JournalEntry => ({
+    batchId: "msgbatch_old",
+    customId,
+    createdAt,
+  });
+  const creates = (calls: string[]) => calls.filter((c) => c === "POST /v1/messages/batches");
+
+  it("records every created batch's requests by request key", async () => {
+    const { client } = apiWithOldBatch([]);
+    const { journal, recorded } = memoryJournal();
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    await batcher(params("a"));
+    expect(recorded).toEqual([
+      [
+        requestKey(params("a")),
+        { batchId: "msgbatch_canned", customId: "req-0", createdAt: "2026-10-01T12:00:00Z" },
+      ],
+    ]);
+  });
+
+  it("gives equal keys to equal requests whatever their key order", () => {
+    const reordered = { messages: params("a").messages, max_tokens: 50, model: "claude-haiku-4-5" };
+    expect(requestKey(reordered)).toBe(requestKey(params("a")));
+    expect(requestKey(params("b"))).not.toBe(requestKey(params("a")));
+  });
+
+  it("gives a different key when any field of the request changes", () => {
+    const base: MessageCreateParamsNonStreaming = {
+      model: "claude-haiku-4-5",
+      max_tokens: 50,
+      system: [{ type: "text", text: "be brief" }],
+      messages: [{ role: "user", content: "a" }],
+      output_config: {
+        format: { type: "json_schema", schema: { type: "object", properties: {} } },
+      },
+    };
+    const reordered: MessageCreateParamsNonStreaming = {
+      output_config: {
+        format: { schema: { properties: {}, type: "object" }, type: "json_schema" },
+      },
+      messages: [{ content: "a", role: "user" }],
+      system: [{ text: "be brief", type: "text" }],
+      max_tokens: 50,
+      model: "claude-haiku-4-5",
+    };
+    expect(requestKey(reordered)).toBe(requestKey(base));
+    const variants: MessageCreateParamsNonStreaming[] = [
+      { ...base, model: "claude-sonnet-4-5" },
+      { ...base, max_tokens: 51 },
+      { ...base, system: [{ type: "text", text: "be long" }] },
+      { ...base, messages: [{ role: "user", content: "b" }] },
+      {
+        ...base,
+        output_config: {
+          format: { type: "json_schema", schema: { type: "object", required: [] } },
+        },
+      },
+    ];
+    for (const variant of variants) expect(requestKey(variant)).not.toBe(requestKey(base));
+  });
+
+  it("collects a journaled request from its old batch instead of sending it again", async () => {
+    const { calls, client } = apiWithOldBatch([succeededLine("req-7", "kept")]);
+    const { journal } = memoryJournal({ [requestKey(params("a"))]: old("req-7") });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "kept" }]);
+    expect(calls.filter((c) => c.startsWith("POST"))).toEqual([]);
+  });
+
+  it("sends a journaled request again when its old batch did not answer it", async () => {
+    const { calls, client } = apiWithOldBatch([
+      { custom_id: "req-7", result: { type: "canceled" } },
+    ]);
+    const { journal } = memoryJournal({ [requestKey(params("a"))]: old("req-7") });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "fresh" }]);
+    expect(calls.filter((c) => c.startsWith("POST"))).toEqual(["POST /v1/messages/batches"]);
+  });
+
+  it.each([
+    ["is older than 28 days", old("req-7", "2026-09-01T12:00:00Z"), 200],
+    ["can no longer be found", old("req-7"), 404],
+  ])("sends a request again when its journaled batch %s", async (_name, entry, status) => {
+    const { client } = apiWithOldBatch([succeededLine("req-7", "kept")], status);
+    const { journal } = memoryJournal({ [requestKey(params("a"))]: entry });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "fresh" }]);
+  });
+
+  it("sends a request normally when the journal lookup throws", async () => {
+    const { calls, client } = apiWithOldBatch([]);
+    const journal: BatchJournal = {
+      lookup: () => {
+        throw new Error("database is locked");
+      },
+      record: () => {},
+      forget: () => {},
+    };
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "fresh" }]);
+    expect(creates(calls)).toHaveLength(1);
+  });
+
+  it("keeps polling and harvesting a created batch when the journal cannot record it", async () => {
+    const { calls, client } = apiWithOldBatch([]);
+    const journal: BatchJournal = {
+      lookup: () => null,
+      record: () => {
+        throw new Error("database is locked");
+      },
+      forget: () => {},
+    };
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "fresh" }]);
+    expect(calls.filter((c) => c.endsWith("/results"))).toHaveLength(1);
+  });
+
+  it("swallows a rejecting async onBatchCreated and journal record", async () => {
+    const { client } = apiWithOldBatch([]);
+    const journal: BatchJournal = {
+      lookup: () => null,
+      record: async () => {
+        throw new Error("database is locked");
+      },
+      forget: async () => {
+        throw new Error("database is locked");
+      },
+    };
+    const batcher = createBatcher(client, {
+      sleep: async () => {},
+      journal,
+      now: () => NOW,
+      onBatchCreated: async () => {
+        throw new Error("hook broke");
+      },
+    });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "fresh" }]);
+    // An unhandled rejection would surface on a later tick and fail the run.
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("cancels a resumed batch that passes its deadline instead of sending it again", async () => {
+    const { calls, client } = apiWithOldBatch([], 200, { processing: true });
+    const { journal } = memoryJournal({ [requestKey(params("a"))]: old("req-7") });
+    let clock = NOW;
+    const batcher = createBatcher(client, {
+      pollIntervalMs: 1000,
+      deadlineMs: 1000,
+      journal,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+    await expect(batcher(params("a"))).rejects.toThrow(
+      "batch msgbatch_old passed its 1 s deadline and was canceled",
+    );
+    expect(calls).toContain("POST /v1/messages/batches/msgbatch_old/cancel");
+    expect(creates(calls)).toEqual([]);
+  });
+
+  it("gives up on a resumed batch's download after RESULTS_ATTEMPTS", async () => {
+    const { calls, client } = apiWithOldBatch([], 200, { failResults: true });
+    const { journal } = memoryJournal({ [requestKey(params("a"))]: old("req-7") });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    await expect(batcher(params("a"))).rejects.toThrow(
+      `batch msgbatch_old failed to retrieve results after ${RESULTS_ATTEMPTS} attempts`,
+    );
+    expect(calls.filter((c) => c.endsWith("msgbatch_old/results"))).toHaveLength(RESULTS_ATTEMPTS);
+    expect(creates(calls)).toEqual([]);
+  });
+
+  it("rejects, and sends nothing, when a journaled batch cannot be retrieved for another reason", async () => {
+    const { calls, client } = apiWithOldBatch([succeededLine("req-7", "kept")], 500);
+    const { journal } = memoryJournal({ [requestKey(params("a"))]: old("req-7") });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    await expect(batcher(params("a"))).rejects.toThrow("batch msgbatch_old could not be retrieved");
+    expect(creates(calls)).toEqual([]);
+  });
+
+  it("forgets a request once its answer is collected, so a rerun sends it afresh", async () => {
+    const { calls, client } = apiWithOldBatch([]);
+    const { entries, journal } = memoryJournal();
+    const first = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    await first(params("a"));
+    expect(journal.lookup(requestKey(params("a")))).toBeNull();
+    const rerun = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await rerun(params("a"))).content).toEqual([{ type: "text", text: "fresh" }]);
+    expect(creates(calls)).toHaveLength(2);
+    expect([...entries]).toEqual([]);
+  });
+
+  it("forgets a request whose answer was a permanent failure", async () => {
+    const { client } = apiWithOldBatch([], 200, {
+      fresh: [errored("req-0", "invalid_request_error")],
+    });
+    const { entries, journal } = memoryJournal();
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    await expect(batcher(params("a"))).rejects.toThrow("invalid_request_error");
+    expect([...entries]).toEqual([]);
+  });
+
+  it("forgets a resumed request once its old batch answers it", async () => {
+    const { client } = apiWithOldBatch([succeededLine("req-7", "kept")]);
+    const { entries, journal } = memoryJournal({ [requestKey(params("a"))]: old("req-7") });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    await batcher(params("a"));
+    expect([...entries]).toEqual([]);
+  });
+
+  it("keeps a newer batch's row when the batch that answered a request is an older one", async () => {
+    const { client } = apiWithOldBatch([succeededLine("req-7", "kept")]);
+    const key = requestKey(params("a"));
+    const { entries, journal } = memoryJournal({ [key]: old("req-7") });
+    const newer: JournalEntry = {
+      batchId: "msgbatch_newer",
+      customId: "req-2",
+      createdAt: "2026-10-01T11:30:00Z",
+    };
+    // Another run sends the same request again while this one is collecting it from msgbatch_old.
+    const lookup = journal.lookup;
+    journal.lookup = (k) => {
+      const entry = lookup(k);
+      entries.set(k, newer);
+      return entry;
+    };
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    expect((await batcher(params("a"))).content).toEqual([{ type: "text", text: "kept" }]);
+    expect([...entries]).toEqual([[key, newer]]);
+  });
+
+  it("settles a resumed request once and sends no second batch when its tick's harvest throws", async () => {
+    // The fresh request's line is malformed (no `error`), so reading it throws and the whole
+    // tick is rejected while the old batch is still being polled; the old batch then answers
+    // "canceled", which would queue the resumed request again were it not already settled.
+    const { calls, client } = apiWithOldBatch(
+      [{ custom_id: "req-7", result: { type: "canceled" } }],
+      200,
+      { polls: 3, fresh: [{ custom_id: "req-0", result: { type: "errored" } }] },
+    );
+    const { journal } = memoryJournal({ [requestKey(params("held"))]: old("req-7") });
+    const batcher = createBatcher(client, { sleep: async () => {}, journal, now: () => NOW });
+    const settled = await Promise.allSettled([batcher(params("fresh")), batcher(params("held"))]);
+    expect(settled.map((s) => (s.status === "rejected" ? String(s.reason) : "ok"))).toEqual([
+      expect.stringContaining("LlmError: batch run failed unexpectedly"),
+      expect.stringContaining("LlmError: batch run failed unexpectedly"),
+    ]);
+    for (let i = 0; i < 20 && !calls.some((c) => c.endsWith("msgbatch_old/results")); i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(calls.some((c) => c.endsWith("msgbatch_old/results"))).toBe(true);
+    expect(creates(calls)).toHaveLength(1);
   });
 });

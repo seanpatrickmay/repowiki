@@ -1,5 +1,7 @@
 import { GitSha, LedgerEntry, Manifest, Revision } from "@repowiki/core";
+import { JOURNAL_RESULTS_TTL_MS } from "@repowiki/llm";
 import Database from "better-sqlite3";
+import { z } from "zod";
 import {
   DroppedFeatureError,
   DuplicateManifestError,
@@ -37,6 +39,22 @@ export interface Store {
   appendLedger(entry: LedgerEntry): void;
   /** Ledger entries in the order they were appended, optionally only those of one run. */
   listLedger(runId?: string): LedgerEntry[];
+  /** Where a Message Batches request (by request key) was submitted, or null. */
+  findBatchRequest(requestKey: string): BatchRequestRow | null;
+  /**
+   * Remembers the requests of one created batch; a request sent again replaces its row. Rows of
+   * batches created more than JOURNAL_RESULTS_TTL_MS before this one are dropped.
+   */
+  recordBatchRequests(
+    batchId: string,
+    createdAt: string,
+    items: readonly { requestKey: string; customId: string }[],
+  ): void;
+  /**
+   * Drops journaled requests whose answers batchId gave; a row a newer batch of the same request
+   * replaced is kept.
+   */
+  forgetBatchRequests(batchId: string, requestKeys: readonly string[]): void;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
@@ -54,6 +72,17 @@ export interface Store {
   /** Current claims with a code citation in path overlapping [startLine, endLine], bounds inclusive. */
   findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
 }
+
+/**
+ * One journaled Message Batches request: which batch holds it and under which custom id. A row
+ * that does not parse as read back is a miss, never an error.
+ */
+const BatchRequestRow = z.object({
+  batchId: z.string().min(1),
+  customId: z.string().min(1),
+  createdAt: z.iso.datetime({ offset: true }),
+});
+export type BatchRequestRow = z.infer<typeof BatchRequestRow>;
 
 export interface PutManifestOptions {
   /** True when an LLM call produced or revised this manifest (build, or a drift revision). */
@@ -134,6 +163,40 @@ export function openStore(path: string): Store {
               .prepare("SELECT body FROM ledger WHERE run_id = ? ORDER BY seq")
               .all(runId)) as BodyRow[]
       ).map((row) => LedgerEntry.parse(JSON.parse(row.body))),
+
+    findBatchRequest(requestKey) {
+      const row = db
+        .prepare(
+          "SELECT batch_id AS batchId, custom_id AS customId, created_at AS createdAt FROM batch_requests WHERE request_key = ?",
+        )
+        .get(requestKey);
+      const parsed = BatchRequestRow.safeParse(row);
+      return parsed.success ? parsed.data : null;
+    },
+
+    recordBatchRequests(batchId, createdAt, items) {
+      const insert = db.prepare(
+        "INSERT OR REPLACE INTO batch_requests (request_key, batch_id, custom_id, created_at) VALUES (?, ?, ?, ?)",
+      );
+      const cutoff = Date.parse(createdAt) - JOURNAL_RESULTS_TTL_MS;
+      db.transaction(() => {
+        if (Number.isFinite(cutoff)) {
+          db.prepare("DELETE FROM batch_requests WHERE julianday(created_at) < julianday(?)").run(
+            new Date(cutoff).toISOString(),
+          );
+        }
+        for (const item of items) insert.run(item.requestKey, batchId, item.customId, createdAt);
+      })();
+    },
+
+    forgetBatchRequests(batchId, requestKeys) {
+      const remove = db.prepare(
+        "DELETE FROM batch_requests WHERE request_key = ? AND batch_id = ?",
+      );
+      db.transaction(() => {
+        for (const key of requestKeys) remove.run(key, batchId);
+      })();
+    },
 
     getManifest: (sha) =>
       readManifest(

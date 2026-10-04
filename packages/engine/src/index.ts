@@ -43,6 +43,7 @@ export {
   renderManifestSummary,
 } from "./manifest/index.ts";
 export {
+  type BatchRequestRow,
   buildExport,
   type CitingClaim,
   DroppedFeatureError,

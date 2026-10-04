@@ -50,6 +50,14 @@ export const MIGRATIONS: readonly Migration[] = [
   CREATE INDEX ledger_run ON ledger(run_id);
   `,
   "ALTER TABLE manifests ADD COLUMN llm_revised INTEGER NOT NULL DEFAULT 0",
+  `
+  CREATE TABLE batch_requests (
+    request_key TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    custom_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 interface StoredFeature {
