@@ -33,6 +33,7 @@ export {
   type PlannedClaim,
   type UpdatePack,
 } from "./update-pack.ts";
+export { type AssembledUpdate, assembleUpdate, type UpdateParts } from "./update-page.ts";
 export { UPDATE_INSTRUCTIONS, updateSystemPrompt } from "./update-prompt.ts";
 export {
   type BuildJournal,
