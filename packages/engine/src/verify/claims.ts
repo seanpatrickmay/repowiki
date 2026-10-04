@@ -187,9 +187,9 @@ function hasHtmlTag(text: string): boolean {
  * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. Code
  * spans and link tokens are blanked first, as the reader tokenizes them, so markup characters
  * inside a code span are fine and `[[ingest]](the stage)` is a link followed by text. A line break
- * is refused by verifyClaim's control-character check, which names it once. The link and tag
- * scans are linear, but blanking READER_TOKEN is quadratic on runs of "[[": verifyClaim calls this
- * only on text within MAX_CLAIM_LENGTH, and that gate is what bounds it.
+ * is refused by claimTextProblems' control-character check, which names it once. The link and tag
+ * scans are linear, but blanking READER_TOKEN is quadratic on runs of "[[": claimTextProblems
+ * calls this only on text within MAX_CLAIM_LENGTH, and that gate is what bounds it.
  */
 function markupProblems(text: string): string[] {
   const plain = text.replace(READER_TOKEN, " ");
@@ -277,15 +277,11 @@ export const LIMITATION_EVIDENCE_PROBLEM =
   "limitation claims must cite evidence: lines with a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit";
 
 /**
- * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's
- * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short,
- * in the reader's markdown subset, and free of citation tokens.
- * The claim keeps the draft's id and supports; the page assembly renumbers them.
+ * Everything wrong with a claim's text alone: empty, too long, a control or line-break
+ * character, markup outside the reader's subset, or a citation-shaped token. `text` is trimmed.
  */
-export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyContext): Verified {
+export function claimTextProblems(text: string, ctx: VerifyContext): string[] {
   const problems: string[] = [];
-  const text = draft.text.trim();
-  if (draft.id === "") problems.push("the claim has no id");
   if (text === "") problems.push("the claim has no text");
   const length = [...text].length;
   if (length > MAX_CLAIM_LENGTH) {
@@ -302,23 +298,62 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
     problems.push(...markupProblems(text));
     problems.push(...citationProblems(text, ctx));
   }
-  const citations: Citation[] = [];
-  let evidence = false;
-  let unresolved = false;
+  return problems;
+}
+
+/** A draft's cite list resolved: distinct citations in order, and the problems of the rest. */
+export interface ResolvedCitations {
+  citations: Citation[];
+  problems: string[];
+  /** True when a reference failed to resolve, so the citation rules cannot be judged yet. */
+  unresolved: boolean;
+  /** True when a citation is limitation evidence (spec §5 rule 3). */
+  evidence: boolean;
+}
+
+/** Resolves every reference of a cite list at ctx.sha (see resolveReference); duplicates collapse. */
+export function resolveCitations(refs: readonly string[], ctx: VerifyContext): ResolvedCitations {
+  const resolved: ResolvedCitations = {
+    citations: [],
+    problems: [],
+    unresolved: false,
+    evidence: false,
+  };
   const seen = new Set<string>();
-  for (const ref of draft.cite) {
-    const resolved = resolveReference(ref, ctx);
-    if ("problem" in resolved) {
-      problems.push(resolved.problem);
-      unresolved = true;
+  for (const ref of refs) {
+    const one = resolveReference(ref, ctx);
+    if ("problem" in one) {
+      resolved.problems.push(one.problem);
+      resolved.unresolved = true;
       continue;
     }
-    const fingerprint = JSON.stringify(resolved.citation);
+    const fingerprint = JSON.stringify(one.citation);
     if (seen.has(fingerprint)) continue;
     seen.add(fingerprint);
-    citations.push(resolved.citation);
-    evidence ||= isLimitationEvidence(resolved.citation, resolved.lines);
+    resolved.citations.push(one.citation);
+    resolved.evidence ||= isLimitationEvidence(one.citation, one.lines);
   }
+  return resolved;
+}
+
+/**
+ * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's
+ * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short,
+ * in the reader's markdown subset, and free of citation tokens.
+ * The claim keeps the draft's id and supports; the page assembly renumbers them.
+ */
+export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyContext): Verified {
+  const problems: string[] = [];
+  const text = draft.text.trim();
+  if (draft.id === "") problems.push("the claim has no id");
+  problems.push(...claimTextProblems(text, ctx));
+  const {
+    citations,
+    problems: unresolvable,
+    unresolved,
+    evidence,
+  } = resolveCitations(draft.cite, ctx);
+  problems.push(...unresolvable);
   const claim: Claim = {
     id: draft.id,
     text: text === "" ? "-" : text,

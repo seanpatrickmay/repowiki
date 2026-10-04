@@ -1,10 +1,22 @@
 export {
+  type ArchitectureContext,
+  ArchitectureDraft,
+  ArchitectureDraftClaim,
+  ArchitectureDraftSection,
+  ArchitectureFixes,
+  type VerifiedArchitectureClaim,
+  verifyArchitectureClaim,
+} from "./architecture.ts";
+export {
   citedLines,
+  claimTextProblems,
   LIMITATION_EVIDENCE_PROBLEM,
   MAX_CITED_LINES,
   MAX_CLAIM_LENGTH,
   quote,
   type Resolved,
+  type ResolvedCitations,
+  resolveCitations,
   resolveReference,
   sourceLines,
   type Verified,

@@ -28,6 +28,7 @@ afterEach(() => store.close());
 
 const ID_1 = "architecture-aaaaaaaaaaaa-1";
 const ID_2 = "architecture-aaaaaaaaaaaa-2";
+const ID_3 = "architecture-aaaaaaaaaaaa-3";
 const first = makeArchitecture();
 const second = makeArchitecture({ id: ID_2, parentId: ID_1, reason: "update" });
 
@@ -47,6 +48,15 @@ describe("Architecture revisions", () => {
     expect(() => store.putArchitecture(makeArchitecture({ id: ID_2 }))).toThrow(
       StaleArchitectureParentError,
     );
+  });
+
+  it("refuses a third revision whose parent is the first, keeping the second current", () => {
+    store.putArchitecture(first);
+    store.putArchitecture(second);
+    const fork = makeArchitecture({ id: ID_3, parentId: ID_1, reason: "update" });
+    expect(() => store.putArchitecture(fork)).toThrow(StaleArchitectureParentError);
+    expect(store.getCurrentArchitecture()).toEqual(second);
+    expect(store.listArchitectureHistory().map((a) => a.id)).toEqual([ID_1, ID_2]);
   });
 
   it("refuses a reused id", () => {
@@ -110,6 +120,28 @@ describe("buildExport with an Architecture article", () => {
     const wiki = buildExport(store, options);
     expect(wiki.architecture.map((a) => a.id)).toEqual([ID_1, ID_2]);
     expect(wiki.wikipedia).toEqual({ "Message queue": queue });
+  });
+
+  it("gives no summary to a title that only an old revision links", () => {
+    store.putRevision(makeRevision());
+    store.putRevision(makeRevision({ id: "rev-d", featureId: "deliverables", seeAlso: [] }));
+    store.setHead(SHA_A);
+    store.putArchitecture(
+      makeArchitecture({
+        sections: [
+          ...first.sections.slice(0, 1),
+          {
+            key: "layers",
+            claims: [architectureClaim({ text: "Signals go through a [[wp:Message queue]]." })],
+          },
+        ],
+      }),
+    );
+    store.putArchitecture(second);
+    store.putWikipediaSummary("Message queue", queue, "2026-10-01T12:00:00Z");
+    const wiki = buildExport(store, options);
+    expect(wiki.architecture.map((a) => a.id)).toEqual([ID_1, ID_2]);
+    expect(wiki.wikipedia).toEqual({});
   });
 
   it("exports none when no article is stored", () => {

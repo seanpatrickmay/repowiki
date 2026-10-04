@@ -70,6 +70,7 @@ export {
   type ExportOptions,
   openStore,
   type PutManifestOptions,
+  StaleArchitectureParentError,
   StaleParentError,
   type Store,
   StoreError,
