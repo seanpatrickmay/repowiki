@@ -88,6 +88,7 @@ describe("scrubbedGitEnv", () => {
       const env = scrubbedGitEnv();
       for (const name of Object.keys(INJECTED)) expect(env[name], name).toBeUndefined();
       expect(env.GIT_NO_LAZY_FETCH).toBe("1");
+      expect([env.LC_ALL, env.LANG]).toEqual(["C", "C"]);
       expect(scrubbedGitEnv({ GIT_CONFIG_GLOBAL: "/dev/null" }).GIT_CONFIG_GLOBAL).toBe(
         "/dev/null",
       );

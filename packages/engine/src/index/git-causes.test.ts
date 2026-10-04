@@ -128,6 +128,28 @@ describe("a git refusal that names its cause", () => {
     expect(message).not.toMatch(/[\p{Cc}\p{Cf}]/u);
   });
 
+  it("quotes the path in the suggested safe.directory command", () => {
+    const message = asAnotherOwner(() => messageOf(() => git(source.dir, ["rev-list", sha])));
+    expect(message).toContain(`safe.directory '${source.dir}'`);
+  });
+
+  it("does not take a word git echoes from the caller for a cause", () => {
+    for (const word of [
+      "promisor",
+      "safe.directory",
+      "lazy fetching disabled",
+      "dubious ownership",
+    ]) {
+      const message = messageOf(() => git(source.dir, ["rev-list", word]));
+      expect(message).toMatch(/^git rev-list failed in .*: fatal: .*ambiguous argument/);
+      expect(message).not.toMatch(/partial clone|unsafe/);
+    }
+    const clone = partialClone();
+    const message = messageOf(() => git(clone, ["grep", "-E", "-e", "promisor(", sha]));
+    expect(message).toMatch(/promisor\(/);
+    expect(message).not.toMatch(/partial clone/);
+  });
+
   it("keeps git's own words for every other failure", () => {
     expect(messageOf(() => git(source.dir, ["rev-list", "no-such-ref"]))).toMatch(
       /^git rev-list failed in .*: fatal: .*no-such-ref/,

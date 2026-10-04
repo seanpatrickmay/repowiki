@@ -46,6 +46,9 @@ export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.Proce
     if (CONFIG_INJECTING_GIT_ENV.test(name)) delete env[name];
   }
   env.GIT_NO_LAZY_FETCH = "1";
+  // English messages, whatever the user's locale: the causes below are read from git's own words.
+  env.LC_ALL = "C";
+  env.LANG = "C";
   return env;
 }
 
@@ -65,10 +68,15 @@ function printable(text: string): string {
   return text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").trim();
 }
 
-/** What git says when the scrubbed environment (no lazy fetch) leaves it without an object. */
-const PARTIAL_CLONE_STDERR = /promisor|lazy fetching disabled/i;
-/** What git says when it refuses a repository another user owns. */
-const UNSAFE_REPOSITORY_STDERR = /dubious ownership|safe\.directory/i;
+/**
+ * What git says when the scrubbed environment (no lazy fetch) leaves it without an object
+ * (promisor-remote.c): a warning line, then `fatal: could not fetch <oid> from promisor remote`.
+ * Anchored to whole lines: git echoes caller text (a pattern, a rev) in other messages.
+ */
+const PARTIAL_CLONE_STDERR =
+  /^warning: lazy fetching disabled; |^fatal: could not fetch [0-9a-f]{40,64} from promisor remote$/m;
+/** What git says when it refuses a repository another user owns (setup.c), a line of its own. */
+const UNSAFE_REPOSITORY_STDERR = /^fatal: detected dubious ownership in repository at /m;
 
 const PARTIAL_CLONE_CAUSE =
   "a partial clone is missing an object, and RepoWiki reads without fetching missing objects; " +
@@ -78,21 +86,25 @@ function unsafeRepositoryCause(repo: string): string {
   return (
     "git treats the repository as unsafe (owned by another user); RepoWiki ignores safe.directory " +
     "given through the environment, so run git config --global --add safe.directory " +
-    printable(repo)
+    `'${printable(repo).replace(/'/g, "'\\''")}'`
   );
 }
-
-/** `git grep` and `git cat-file` words for an object that is not there to read. */
-const UNREADABLE_OBJECT_STDERR = /unable to read [0-9a-f]{40}/i;
 
 /**
  * The cause git's stderr names that RepoWiki's own environment brings about (an unsafe repository,
  * a partial clone's missing object), as one printable clause; undefined when it names neither.
+ * With `unreadableObject`, a partial clone is named whatever git's stderr says.
  */
-export function gitFailureCause(repo: string, stderr: string): string | undefined {
+export function gitFailureCause(
+  repo: string,
+  stderr: string,
+  options: { unreadableObject?: boolean } = {},
+): string | undefined {
   if (UNSAFE_REPOSITORY_STDERR.test(stderr)) return unsafeRepositoryCause(repo);
   if (PARTIAL_CLONE_STDERR.test(stderr)) return PARTIAL_CLONE_CAUSE;
-  if (UNREADABLE_OBJECT_STDERR.test(stderr) && isPartialClone(repo)) return PARTIAL_CLONE_CAUSE;
+  // `unreadableObject`: the caller knows the failure is a read that went wrong (git grep's exit 1
+  // with a message), whatever git's wording; in a partial clone that is a missing blob.
+  if (options.unreadableObject === true && isPartialClone(repo)) return PARTIAL_CLONE_CAUSE;
   return undefined;
 }
 
@@ -329,7 +341,7 @@ export async function* streamBlobs(
     }
     if (code === 0) return null;
     const why = stderr.trim() || (signal === null ? `exit status ${code}` : `signal ${signal}`);
-    const cause = knownCause(repo, stderr);
+    const cause = gitFailureCause(repo, stderr);
     return new GitError(
       cause === undefined
         ? `git cat-file failed in ${repo}: ${why}`
