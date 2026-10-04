@@ -922,6 +922,189 @@
       "labels": ["v1", "type:task", "area:engine"],
       "parent": "F27",
       "body": "**Deliverable:** Architecture.title (the project's name, from the README's first heading or the repo name) and the `purpose` section key, between the lead and the layers.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-02-repowiki-m4-architecture.md Task 5b."
+    },
+    {
+      "key": "M6-1",
+      "title": "[M6] tracker: M6 tickets and ADR-0003",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "closed": true,
+      "body": "**Deliverable:** M6 tickets in seed.json and ADR-0003 (F17's line authorship deferred).\n\n**Done when:** the seed creates M6-2..M6-26 under their features, and docs/decisions/0003 is merged. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 1."
+    },
+    {
+      "key": "M6-2",
+      "title": "[M6] store: drift baseline on every store, citing-claim dedupe, atomic export",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** Migration 8 marks the earliest manifest LLM-revised when none is; findClaimsCitingRange returns one row per claim; writeExport writes atomically; countArchitectureRevisions.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 2."
+    },
+    {
+      "key": "M6-3",
+      "title": "[M6] core: each run's token totals in the export",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** WikiExport.runs: calls and tokens per (runKind, sha), from the ledger.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 3."
+    },
+    {
+      "key": "M6-4",
+      "title": "[M6] index: diff two commits into file changes and hunks",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** diffCommits (renames, hunks, binaries), isAncestor, reachableCommits; createTestRepo.merge.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 4."
+    },
+    {
+      "key": "M6-5",
+      "title": "[M6] freshness: remap a cited line range through hunks",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** remapRange, with a seeded property test and a git-backed check.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 5."
+    },
+    {
+      "key": "M6-6",
+      "title": "[M6] freshness: move a page's citations to the new commit and find its stale claims",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** remapCitation and remapClaims: fresh, stale or stale-kept per claim, leads that support a stale claim marked too.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 6."
+    },
+    {
+      "key": "M6-7",
+      "title": "[M6] freshness: place new files in features and find coverage gaps",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** placeNewFiles, nextMembership, coverageGaps, renamesOf.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 7."
+    },
+    {
+      "key": "M6-8",
+      "title": "[M6] freshness: settle disputed new files with one tie-break call",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** breakTies: one batched tieBreak call, deterministic fallback.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 8."
+    },
+    {
+      "key": "M6-9",
+      "title": "[M6] freshness: apply manifest operations",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** applyOperations: rename, move, create, merge, split, retire under the manifest's rules.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 9."
+    },
+    {
+      "key": "M6-10",
+      "title": "[M6] freshness: measure drift and revise the manifest past the threshold",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** featureChurn, driftedFeatures, reviseManifest (one constrained call, one retry).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 10."
+    },
+    {
+      "key": "M6-11",
+      "title": "[M6] write: the update call's pack and prompt",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** buildUpdatePack, updateSystemPrompt, UpdateDraft/UpdateFixes.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 11."
+    },
+    {
+      "key": "M6-12",
+      "title": "[M6] write: rewrite an update's stale claims in one batched round and one retry",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** rewritePages: one batched round, one retry, give-ups kept stale, max_tokens asks shorter.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 12."
+    },
+    {
+      "key": "M6-13",
+      "title": "[M6] write: assemble an update revision",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** assembleUpdate: unchanged claims verbatim, rewrites in place, new claims appended, give-ups marked staleSince.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 13."
+    },
+    {
+      "key": "M6-14",
+      "title": "[M6] freshness: plan an update with no call",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** planUpdate, measureDrift, planPages, knownFeature, UpdateError; the builtWiki fixture.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 14."
+    },
+    {
+      "key": "M6-15",
+      "title": "[M6] freshness: move the wiki to a new commit in one transaction",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F05",
+      "body": "**Deliverable:** updateWiki: tie-break, drift call, whole pages and rewrites in one batch, one store transaction.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 15."
+    },
+    {
+      "key": "M6-16",
+      "title": "[M6] freshness: rewrite the About article only when its basis changed",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F27",
+      "body": "**Deliverable:** articleDue; the article's round after an update's pages; storeArticle; untagged journal rows grouped (F27 minors 1 and 3).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 16."
+    },
+    {
+      "key": "M6-17",
+      "title": "[M6] link: judge a stored page's links at its own sha and check they still route",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F06",
+      "body": "**Deliverable:** storedLinkViolations; wiki:check uses it for pages, and the article's own-sha manifest.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 17."
+    },
+    {
+      "key": "M6-18",
+      "title": "[M6] cli: lock takeover race, canceled-retry rows, -sis plurals, --verbose causes",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "body": "**Deliverable:** Three M4 minors and the --verbose cause chain.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 18."
+    },
+    {
+      "key": "M6-19",
+      "title": "[M6] cli: estimate an update and render its summary",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F05",
+      "body": "**Deliverable:** parseRunArgs shared by the wiki scripts; parseUpdateArgs, parseReplayArgs, estimateUpdate, renderUpdateSummary.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 19."
+    },
+    {
+      "key": "M6-20",
+      "title": "[M6] cli: pnpm wiki:update",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F05",
+      "body": "**Deliverable:** scripts/wiki-update.ts and update-run.ts: estimate, dry run, lock, live update, export and summary.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 20."
+    },
+    {
+      "key": "M6-21",
+      "title": "[M6] index: the merges a replay moves through, and checkWiki",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F17",
+      "body": "**Deliverable:** replaySteps; checkWiki extracted from wiki:check.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 21."
+    },
+    {
+      "key": "M6-22",
+      "title": "[M6] cli: project and summarize a replay",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F17",
+      "body": "**Deliverable:** projectStep, renderProjection, renderReplaySummary, tokensOf.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 22."
+    },
+    {
+      "key": "M6-23",
+      "title": "[M6] cli: pnpm wiki:replay, resumable and bounded by --limit",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F17",
+      "body": "**Deliverable:** scripts/wiki-replay.ts: resume from the head, --limit, dry-run projection, per-step invariants and summaries.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 23."
+    },
+    {
+      "key": "M6-24",
+      "title": "[M6] write: recorded update call",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** rewrite.claude.test.ts and its cassette sample-update.json, recorded live once (about $0.01).\n\n**Done when:** the cassette replays in CI with no network and the secret scan passes. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 24."
+    },
+    {
+      "key": "M6-25",
+      "title": "[M6] gate: replay a window of next-chief-of-staff",
+      "labels": ["v1", "type:task", "area:freshness"],
+      "parent": "F17",
+      "body": "**Deliverable:** A build of next-chief-of-staff at d041b08 (#88) in its own --out dir, replayed to 7247d28, with spec section 8's invariants recorded.\n\n**Done when:** the replay summary says the invariants hold for every step, wiki:check passes at the end, and the cost is reported against the estimate. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 25."
+    },
+    {
+      "key": "M6-26",
+      "title": "[M6] gate: RepoWiki builds its own wiki",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "body": "**Deliverable:** manifest:build and wiki:build of the RepoWiki repository into --out, never inside it.\n\n**Done when:** wiki:check passes on RepoWiki's own wiki and the cost is reported against the estimate. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 26."
     }
   ]
 }
