@@ -114,10 +114,12 @@ const MIN_CENTRALITY = 0.05;
  * The membership at the index's sha, before any manifest operation: every file and symbol
  * `previous` already held keeps its feature and weight (a renamed file and its symbols move with
  * it); a deleted file and a removed symbol leave; a new symbol of a known file joins as its file
- * does; a new file joins the feature `placed` gives it, weighted by its role (0.5 for a test or a
- * file with no parsed language, else 1) times its centrality (spec §5 rule 8), the share of its
- * edge weight in `graph` that stays in its feature, at least 0.05. Throws for a new file with no
- * place: placeNewFiles and the tie-break leave none.
+ * does; a new file joins the feature `placed` gives it, weighted by its role times its centrality.
+ * A new file has no cluster at update time, so its role is inferred until the next manifest
+ * revision: supporting (0.5) for a test file or a file with no parsed language, core (1)
+ * otherwise. Centrality is spec §5 rule 8's: the share of its edge weight in `graph` that stays
+ * in its feature, at least 0.05. Throws for a new file with no place: placeNewFiles and the
+ * tie-break leave none.
  */
 export function nextMembership(
   previous: Manifest,
@@ -155,6 +157,7 @@ export function nextMembership(
         MIN_CENTRALITY,
         all === 0 ? 0 : (inside.get(file.path) ?? 0) / all,
       );
+      // Inferred: a new file belongs to no cluster, so it has no stored role.
       const role = file.language === null || isTestFile(file.path) ? 0.5 : 1;
       entry = { featureId, weight: Math.round(role * centrality * ROUND) / ROUND };
     }
