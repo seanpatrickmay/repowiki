@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeWikipediaTitle } from "@repowiki/core";
 import { formatDate, formatNumber } from "./format.ts";
 import { escapeHtml, type InlineOptions } from "./inline.ts";
 import { featureLink, finalTarget, hasArticleRoute, type SiteModel } from "./model.ts";
@@ -66,16 +67,6 @@ function articleLink(
 ): { href: string; title: string; preview: boolean } | null {
   const link = featureLink(site, id);
   return link === null ? null : { ...link, preview: previewData(site, id) !== null };
-}
-
-/**
- * Wikipedia's form of a title for comparing: spaces for underscores, whitespace runs collapsed,
- * the first letter upper case. The same rule as the engine's link module, which keys the
- * export's `wikipedia` map; the site depends on core only, so it is repeated here.
- */
-function normalizeWikipediaTitle(title: string): string {
-  const spaced = title.replace(/_/g, " ").replace(/\s+/g, " ").trim();
-  return spaced === "" ? "" : `${spaced[0]?.toUpperCase()}${spaced.slice(1)}`;
 }
 
 /** File name of a title's preview: titles hold any character, so the name is a hash, never the title. */

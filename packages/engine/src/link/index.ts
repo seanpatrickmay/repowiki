@@ -5,7 +5,6 @@ export {
   LINK_TOKEN,
   linkNameKey,
   linkTokensIn,
-  normalizeWikipediaTitle,
   unlinkText,
   wikipediaTitlesIn,
 } from "./links.ts";

@@ -44,6 +44,7 @@ export { Infobox, Revision, RevisionReason, TokenUsage } from "./revision.ts";
 export { claimRuleViolations, Section, SectionKey } from "./section.ts";
 export { SCHEMA_VERSION } from "./version.ts";
 export {
+  normalizeWikipediaTitle,
   WIKIPEDIA_EXTRACT_MAX_LENGTH,
   WikipediaCacheEntry,
   WikipediaSummary,

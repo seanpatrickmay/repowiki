@@ -1,4 +1,4 @@
-import type { Feature, Manifest } from "@repowiki/core";
+import { type Feature, type Manifest, normalizeWikipediaTitle } from "@repowiki/core";
 
 /**
  * A link token as claim text writes it: [[target]] or [[target|label]] (spec §7.3, §5 rule 11).
@@ -27,15 +27,6 @@ export function linkTokensIn(text: string): { target: string; label: string | un
     if (target !== undefined) tokens.push({ target: target.trim(), label: label?.trim() });
   }
   return tokens;
-}
-
-/**
- * Wikipedia's form of a title for comparing and caching: spaces for underscores, runs of
- * whitespace collapsed, the first letter upper case (Wikipedia ignores its case).
- */
-export function normalizeWikipediaTitle(title: string): string {
-  const spaced = title.replace(/_/g, " ").replace(/\s+/g, " ").trim();
-  return spaced === "" ? "" : `${spaced[0]?.toUpperCase()}${spaced.slice(1)}`;
 }
 
 /** Every [[wp:Title]] in a text outside code spans, normalized. */
