@@ -479,6 +479,133 @@
       "labels": ["v1", "type:task", "area:engine"],
       "parent": "F04",
       "body": "**Deliverable:** pnpm manifest:build.\n\n**Done when:** next-chief-of-staff at 7247d28 produces a stored manifest and a saved summary for review. Plan Task 19."
+    },
+    {
+      "key": "M5-1",
+      "title": "[M5] tracker: M5 tickets",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "closed": true,
+      "body": "**Deliverable:** M5 tickets in seed.json.\n\n**Done when:** the seed creates M5-1..M5-18. Plan: docs/superpowers/plans/2026-10-01-repowiki-m5-site.md Task 1."
+    },
+    {
+      "key": "M5-2",
+      "title": "[M5] core: cap feature ids at 64 characters",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F26",
+      "body": "**Deliverable:** FeatureId max length 64 and FEATURE_ID_MAX_LENGTH (issue #53). No store migration: no stored body holds a feature id yet.\n\n**Done when:** the length tests pass. Plan Task 2."
+    },
+    {
+      "key": "M5-3",
+      "title": "[M5] core: export full revision bodies in history",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F06",
+      "body": "**Deliverable:** WikiExport.history holds every Revision body with parent-chain checks; SCHEMA_VERSION 2; buildExport fills it (issue #53).\n\n**Done when:** core and store export tests pass. Plan Task 3."
+    },
+    {
+      "key": "M5-4",
+      "title": "[M5] site: package, export loading and arguments",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F12",
+      "body": "**Deliverable:** packages/site with pinned astro/pagefind/zod, loadExport (fails loudly) and parseSiteArgs.\n\n**Done when:** load and args tests pass. Plan Task 4."
+    },
+    {
+      "key": "M5-5",
+      "title": "[M5] site: Astro build, Pagefind and the site CLI",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F12",
+      "body": "**Deliverable:** buildSite/previewSite, pnpm site:build / site:preview / site:demo, the fixture build helper and the link-integrity check.\n\n**Done when:** the fixture site builds offline and a bad export fails the build. Plan Task 5."
+    },
+    {
+      "key": "M5-6",
+      "title": "[M5] site: page shell and stylesheet",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F12",
+      "body": "**Deliverable:** header, nav, footer, skip link; system fonts, Wikipedia-like scale, dark mode, phone width.\n\n**Done when:** shell tests pass. Plan Task 6."
+    },
+    {
+      "key": "M5-7",
+      "title": "[M5] site: site model and inline renderer",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F02",
+      "body": "**Deliverable:** buildSiteModel (routes, alias slugs) and renderInline (escaping, bold/italic/code, [[id]] and [[wp:Title]] links).\n\n**Done when:** model and inline tests pass. Plan Task 7."
+    },
+    {
+      "key": "M5-8",
+      "title": "[M5] site: references and code citation links",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F03",
+      "body": "**Deliverable:** numbered references with shared numbers and back-links; path:Lstart-end@sha permalinks from --repo-url.\n\n**Done when:** reference tests pass. Plan Task 8."
+    },
+    {
+      "key": "M5-9",
+      "title": "[M5] site: article view",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F04",
+      "body": "**Deliverable:** articleView: lead, TOC, sections, stale banners, See also, references, infobox, commit dates.\n\n**Done when:** article view tests pass. Plan Task 9."
+    },
+    {
+      "key": "M5-10",
+      "title": "[M5] site: article pages",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F04",
+      "body": "**Deliverable:** /wiki/<id>/ article pages with infobox and references; first golden snapshot.\n\n**Done when:** article page tests pass. Plan Task 10."
+    },
+    {
+      "key": "M5-11",
+      "title": "[M5] site: redirect, disambiguation and alias pages",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F01",
+      "body": "**Deliverable:** pages for redirect and disambiguation features and for alias slugs; Redirected-from note.\n\n**Done when:** redirect tests pass. Plan Task 11."
+    },
+    {
+      "key": "M5-12",
+      "title": "[M5] site: revision diff",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F06",
+      "body": "**Deliverable:** diffSequence, wordDiffHtml and revisionDiff over claim text.\n\n**Done when:** diff tests pass. Plan Task 12."
+    },
+    {
+      "key": "M5-13",
+      "title": "[M5] site: revision history and old revisions",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F06",
+      "body": "**Deliverable:** View history pages dated by commitDate, old-revision pages, page tabs.\n\n**Done when:** history tests pass. Plan Task 13."
+    },
+    {
+      "key": "M5-14",
+      "title": "[M5] site: diffs between revisions",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F06",
+      "body": "**Deliverable:** /wiki/<id>/diff/<n>/ pages and prev links in history.\n\n**Done when:** diff page tests pass. Plan Task 14."
+    },
+    {
+      "key": "M5-15",
+      "title": "[M5] site: hover previews",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F12",
+      "body": "**Deliverable:** /api/preview/<id>.json (lead + infobox facts) and the hover/focus preview script.\n\n**Done when:** every data-preview link has a preview file. Plan Task 15."
+    },
+    {
+      "key": "M5-16",
+      "title": "[M5] site: Main Page, Random article and All articles",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F12",
+      "body": "**Deliverable:** featured article, Did you know (hook claims), recently updated, /random/, /special/all-pages/.\n\n**Done when:** Main Page tests pass. Plan Task 16."
+    },
+    {
+      "key": "M5-17",
+      "title": "[M5] site: diagrams and feature map",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F10",
+      "body": "**Deliverable:** bundled Mermaid rendering of Revision.diagram and a clickable Main Page feature map.\n\n**Done when:** diagram tests pass and Mermaid loads only on demand. Plan Task 17."
+    },
+    {
+      "key": "M5-18",
+      "title": "[M5] site: Pagefind search and local browse check",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F12",
+      "body": "**Deliverable:** header search box and /search/ with the Pagefind UI; the M5 exit check.\n\n**Done when:** search tests pass and pnpm site:demo is browsable locally. Plan Task 18."
     }
   ]
 }
