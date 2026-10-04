@@ -87,6 +87,15 @@ describe("runTotals (spec §6.4)", () => {
       at("build", SHA_A, 20),
       at(undefined, undefined, 99),
     ];
+    // The kind is part of the key: an update to a sha a build was at is a run of its own.
+    const both = runTotals([...entries, at("update", SHA_A, 7)]);
+    expect(both.map((r) => [r.kind, r.sha, r.tokens.in])).toEqual([
+      ["build", SHA_A, 30],
+      ["update", SHA_B, 5],
+      ["update", SHA_A, 7],
+    ]);
+    // A row with only one of the two run fields is left out too.
+    expect(runTotals([at("build", undefined, 1), at(undefined, SHA_A, 1)])).toEqual([]);
     expect(runTotals(entries)).toEqual([
       {
         kind: "build",
