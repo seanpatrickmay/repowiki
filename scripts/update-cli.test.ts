@@ -162,6 +162,25 @@ describe("renderUpdateSummary", () => {
     expect(summary.trimEnd().split("\n").at(-1)).toBe("Cost: $0.0061.");
   });
 
+  it("says the estimate counts the first round only, not that it is an upper bound", () => {
+    const estimate = {
+      rewrites: 1,
+      whole: 0,
+      small: 0,
+      inputTokens: 1,
+      outputTokens: 1,
+      usd: 0.005,
+      articleUsd: null,
+    };
+    const lines = renderUpdateSummary("repo", update, estimate, totals).trimEnd().split("\n");
+    expect(lines.slice(-3)).toEqual([
+      "The estimate counts the first round only; retries, cache writes and pages the drift call changes are extra.",
+      "",
+      "Cost: $0.0061 (estimated up front: $0.0050).",
+    ]);
+    expect(lines.join("\n")).not.toContain("upper-side");
+  });
+
   it("gives every failed whole page a row with its failure as a code span", () => {
     const failed = {
       ...update,

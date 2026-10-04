@@ -7,14 +7,12 @@ import {
   StoreError,
   UpdateError,
   WikiBuildError,
-  writeExport,
 } from "@repowiki/engine";
-import { totalsOf } from "@repowiki/llm";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { estimateLine, parseUpdateArgs, renderUpdateSummary } from "./update-cli.ts";
-import { estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
-import { acquireBuildLock, exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
+import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
+import { estimateFor, needsKey, readInput, runUpdate, writeUpdateOutputs } from "./update-run.ts";
+import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:update <repo> <rev>: moves the wiki stored for <repo> from its head to <rev> (spec
@@ -50,19 +48,18 @@ async function main(): Promise<void> {
       // none (nothing cited changed, no article due) needs no key.
       if (needsKey(estimate)) requireApiKey("wiki:update");
       const log = (line: string) => console.error(line);
-      const { update, runId } = await runUpdate(store, input, args, models, repoName, log);
-      const exportPath = join(out, "export.json");
-      writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });
-      const summary = renderUpdateSummary(
+      const ran = await runUpdate(store, input, args, models, repoName, log);
+      // An article that failed after the update was stored still gets the export and summary.
+      const { summary, exportPath, summaryPath } = writeUpdateOutputs(
+        store,
+        out,
         repoName,
-        update,
+        ran,
         estimate,
-        totalsOf(store.listLedger(runId)),
       );
-      const summaryPath = join(out, `update-${sha.slice(0, 7)}.md`);
-      writeFileAtomic(summaryPath, summary);
       console.log(summary);
       console.log(`Wrote ${exportPath} and ${summaryPath}; store: ${db}`);
+      if (ran.articleError !== null) throw ran.articleError;
     } finally {
       store.close();
     }
