@@ -1,4 +1,19 @@
 export {
+  buildFileGraph,
+  type Cluster,
+  type ClusterOptions,
+  type ClusterSummary,
+  clusterFiles,
+  DEFAULT_CLUSTER_OPTIONS,
+  DEFAULT_GRAPH_WEIGHTS,
+  DEFAULT_SUMMARY_LIMITS,
+  type FileGraph,
+  type GraphWeights,
+  type SummaryLimits,
+  summarizeClusters,
+  type WeightedEdge,
+} from "./cluster/index.ts";
+export {
   type CoChange,
   type CoChangePair,
   DEFAULT_MAX_FILE_BYTES,
@@ -17,6 +32,17 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  buildManifest,
+  DEFAULT_MAX_PROMPT_TOKENS,
+  ensureManifest,
+  type ManifestBuild,
+  ManifestBuildError,
+  type ManifestBuildOptions,
+  ManifestProposal,
+  manifestCacheKey,
+  renderManifestSummary,
+} from "./manifest/index.ts";
+export {
   buildExport,
   type CitingClaim,
   DroppedFeatureError,
@@ -24,6 +50,7 @@ export {
   EmptyStoreError,
   type ExportOptions,
   openStore,
+  type PutManifestOptions,
   StaleParentError,
   type Store,
   StoreError,

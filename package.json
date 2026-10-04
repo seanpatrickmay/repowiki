@@ -14,6 +14,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "tracker:seed": "node scripts/tracker/run.ts",
     "index:repo": "node scripts/index-repo.ts",
+    "manifest:build": "node --env-file=.env scripts/manifest-build.ts",
+    "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run",
     "site:build": "node packages/site/src/cli.ts build",
     "site:preview": "node packages/site/src/cli.ts preview",
     "site:demo": "node packages/site/src/demo.ts"
@@ -22,6 +24,7 @@
     "@biomejs/biome": "2.5.15",
     "@repowiki/core": "workspace:*",
     "@repowiki/engine": "workspace:*",
+    "@repowiki/llm": "workspace:*",
     "@types/node": "24.19.0",
     "typescript": "7.0.2",
     "vitest": "5.0.3",
