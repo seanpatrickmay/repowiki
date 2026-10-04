@@ -1,0 +1,27 @@
+{
+  "suite": "smoke",
+  "repo": "sample",
+  "questions": [
+    {
+      "id": "smoke-where",
+      "set": "smoke",
+      "kind": "where",
+      "question": "Which file and function turn an ingested chunk into signals?",
+      "reference": "The function ingest_chunk in src/signals/ingest.py."
+    },
+    {
+      "id": "smoke-how",
+      "set": "smoke",
+      "kind": "how",
+      "question": "What happens to the rest of a chunk once fifty signals have been made from it?",
+      "reference": "It is dropped: ingest_chunk stops at MAX_SIGNALS (50) signals per chunk, and a TODO says long chunks should be paged through instead of truncated."
+    },
+    {
+      "id": "smoke-what-changed",
+      "set": "smoke",
+      "kind": "what-changed",
+      "question": "Which pull request added deliverables?",
+      "reference": "Pull request #7, in the commit \"feat: add deliverables (#7)\"."
+    }
+  ]
+}

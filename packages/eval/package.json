@@ -1,0 +1,15 @@
+{
+  "name": "@repowiki/eval",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repowiki/core": "workspace:*",
+    "@repowiki/engine": "workspace:*",
+    "@repowiki/llm": "workspace:*",
+    "zod": "4.6.5"
+  }
+}
