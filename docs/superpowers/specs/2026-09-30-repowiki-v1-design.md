@@ -81,6 +81,7 @@ a verdict. Each row becomes one GitHub feature issue titled `[Fnn] …`. Rows ma
 | F24 | Opinion → coding agent fixes it or rebuts | v1 caps extremity by allowing only evidence-backed limitations. The rebuttal channel is #7. | v2 (#7) |
 | F25 | *Derived:* token savings | The core value proposition. Measured with per-call token logging and the Q&A eval (§9). | v1 (measured) |
 | F26 | *Derived:* stable page identity | Feature IDs survive regeneration through redirect and disambiguation states (§5). | v1 |
+| F27 | *Raised by the owner after M4's dry run:* the wiki should document the architecture, how the features fit together, not only what each one does | One article about the project itself per build at `/special/about/`, titled with the project's name and written after the feature pages from the manifest, the README and top-level docs, the real cross-feature import and call edges, each page's lead and the entry points' signatures. Its lead says what the application is, who it is for and what problem it solves; it then covers its purpose and features, the layers, the main request and data paths end to end, which features depend on which, and where infrastructure fits. *Amended by the owner (issue #142): the article is the project's own article, not only its architecture.* Every claim cites code or names the feature pages that back it, and goes through verify and link. Its diagram is the feature graph weighted by real calls and imports; the Main Page opens with its lead and draws its feature map from the same edges (§4, §5, §7.3, §7.4). | v1 (M4 addendum) |
 
 ## 4. Architecture
 
@@ -132,7 +133,7 @@ packages/
 
 ### Data flow
 
-- `build <sha>`: index → cluster → manifest → write → verify → link → store revision → export. A store already built at another sha is refused (that is an `update`); one built at the same sha is resumed, writing only the pages it lacks (M4).
+- `build <sha>`: index → cluster → manifest → write → verify → link → store revision → architecture → export. A store already built at another sha is refused (that is an `update`); one built at the same sha is resumed, writing only the pages it lacks (M4). The Architecture article (F27, §7.4) is written after the pages are stored, in a round of its own; a rerun rewrites it only when the set of current pages changed, so a finished rerun makes no call.
 - `update <shaB>`: runs the freshness algorithm (§6) from the last processed sha to `shaB`.
 - `replay <fromSha> <toSha>`: runs `update` once for each merge commit along `main`'s first-parent history.
 - `export`: writes the JSON for the current revisions plus `llms.txt`.
@@ -142,7 +143,8 @@ packages/
 
 - **Commands:** `pnpm site:build --export <file|dir> [--out <dir>] [--repo-url <url>]` validates the export with `WikiExport` (a bad export fails the build, naming the file and field), runs `astro build`, then indexes the output with Pagefind. The default `--out` is `site/` next to the export. `pnpm site:preview` serves the result on `127.0.0.1:4321`, and `pnpm site:demo` does both for a fixture export. The `cli` package's `serve` wraps these.
 - **Static and offline:** the output is plain files. Mermaid and the Pagefind UI ship with the site, Astro telemetry is off, and no page loads anything from another host.
-- **Pages:** `/` (Main Page), `/wiki/<id>/` (an article, a redirect or a disambiguation), `/wiki/<id>/history/`, `/wiki/<id>/history/<n>/` (an old revision; `n` is its 1-based position, oldest first), `/wiki/<id>/diff/<n>/` (revision `n` against `n - 1`), `/wiki/<alias-slug>/`, `/random/`, `/special/all-pages/`, `/search/`, and `/api/preview/<id>.json` (hover-preview data).
+- **Pages:** `/` (Main Page), `/wiki/<id>/` (an article, a redirect or a disambiguation), `/wiki/<id>/history/`, `/wiki/<id>/history/<n>/` (an old revision; `n` is its 1-based position, oldest first), `/wiki/<id>/diff/<n>/` (revision `n` against `n - 1`), `/wiki/<alias-slug>/`, `/random/`, `/special/all-pages/`, `/special/about/` (the project's article, F27), `/search/`, and `/api/preview/<id>.json` (hover-preview data).
+- **About page (F27).** `/special/about/` renders the project's own article (the stored `Architecture`), titled with the project's name: its lead, the engine-drawn feature diagram, the sections, and References. Each claim that names backing pages is followed by links to them. It sits under `/special/`, so no feature id or alias can take its URL, and it is in the search index. The Main Page opens with its lead in an "About <project>" box linking to it, and every page's navigation links it as "About <project>", when the export has one; otherwise the page says the wiki has none.
 - **Code citations** link to `<repo-url>/blob/<sha>/<path>#L<start>-L<end>` (GitHub-style, with each path segment percent-encoded) when `--repo-url` is given; otherwise they are plain text. The export carries no source, so there is no embedded code view.
 - **Dates** shown to readers are the calendar date written in `commitDate` (rule 5), never converted to the build machine's time zone.
 
@@ -179,9 +181,23 @@ Claim     { id, text /* markdown with link tokens */, kind: "fact" | "limitation
 Citation  = { kind: "code", path, startLine, endLine, sha, symbol: string | null, contentHash }
           | { kind: "commit", sha, subject, pr: number | null }
 
-WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
+WikiExport { schemaVersion: 3, repo, head, exportedAt, manifest: Manifest,
              pages: Revision[] /* current revision per feature */,
-             history: Record<FeatureId, Revision[]> /* every revision, oldest first */ }
+             history: Record<FeatureId, Revision[]> /* every revision, oldest first */,
+             wikipedia: Record<Title, WikipediaSummary>,
+             architecture: Architecture[] /* every revision, oldest first; [] when none */ }
+
+Architecture { id, sha, commitDate, generatedAt, parentId: string | null,
+               title: string /* the project's name, §7.4; never the model's */,
+               reason, pr, model, tokens,
+               basis: RevisionId[] /* the feature page revisions it was written from */,
+               edges: FeatureEdge[] /* { from, to, imports, calls }, heaviest first */,
+               diagram: string | null /* Mermaid, drawn by the engine */,
+               sections: { key: "lead" | "purpose" | "layers" | "request-paths"
+                              | "dependencies" | "infrastructure",
+                           claims: ArchitectureClaim[] }[] }
+
+ArchitectureClaim = Claim & { pages: FeatureId[] /* at most 3: pages whose leads back it */ }
 ```
 
 ### Rules
@@ -206,6 +222,7 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
 10. **The export carries full history.** `history[id]` holds every stored revision body, oldest first. Its last entry is the page, and each entry's `parentId` is the previous entry's id. The reader computes diffs from these bodies.
 11. **Claim text** is a small markdown subset: `**bold**`, `*italic*`, `` `code` `` and the link tokens `[[id]]`, `[[id|label]]`, `[[wp:Title]]` and `[[wp:Title|label]]`. Anything else is shown literally, HTML-escaped.
    - **Claim text (M4).** A claim's text is one paragraph of the reader's markdown subset (emphasis, inline code, `[[target]]` and `[[wp:Title]]` tokens), at most 1,000 characters as the write step produces it. Core caps stored claim text at `CLAIM_TEXT_MAX_LENGTH = 2000`; no migration is needed, since no claim was stored before M4.
+12. **The project's article is not a feature (F27).** Stored as `Architecture`, it has no feature id, so it can never collide with a manifest id or alias, and it is stored in its own table (store migration 7) as a chain of revisions; `putArchitecture` checks the parent like `putRevision` and that every feature it names is in the latest manifest. Its claims are `fact` claims. A lead claim cites nothing, names no page and supports body claims, as on a feature page. A body claim cites code or a commit, or names in `pages` one to three features whose page leads back it, or both; a `purpose` claim follows the same rule, and cites the README or a document by line range like code; a `request-paths` claim must cite code or a commit. Its `title` is 1 to 120 code points with no leading or trailing space and no control or invisible character. A page-backed claim is verifiable the way a lead is: the lead it rests on supports cited body claims (rule 2), so the chain ends in code. Verify accepts only pages written in the same build; the export requires every page the current article names, and both ends of every edge, to have a page. `WikiExport.architecture` was added within schema 3 with a default of `[]`, so every earlier schema-3 export still parses and no stored body needs a migration; `title` and the `purpose` key were added before any article was stored or exported, so they need none either.
 
 ## 6. Freshness
 
@@ -271,6 +288,17 @@ prompt-cached prefix for every write call.
 - **Diagrams (F10):** a Mermaid flowchart per page, built from import and call edges among members and to neighbouring features. The LLM chooses at most 12 nodes and labels the edges. Every node must exist in the index, and every node links to its page or its source. The reader draws diagrams in the browser with the bundled Mermaid (`securityLevel: "strict"`), redrawing them when the color scheme changes. A diagram sits at the top of Data flow, or after the lead when the page has no Data flow section.
   - **M4.** The engine draws the diagram from candidates the index proves (member files, and the neighbouring features they import from or call into); the model only picks up to 12 nodes and labels candidate edges. Labels are escaped as the site's `mermaidLabel()` escapes them. Nodes are not clickable: the engine writes no click line. Verify accepts only the four line shapes the engine writes (`flowchart LR`, a box node, a subroutine node, a labelled arrow between declared nodes) with labels in `mermaidLabel()`'s entity-encoded alphabet, so `click`, `href`, `call`, `%%{` directives, `@{` shapes, `<`, `img:` and any URL scheme are refused. This replaces "every node links to its page or its source".
 - **Main Page (F12):** the feature map, a featured article (rotated per export), "Did you know…" (claims with `hook: true`), recently updated pages, and Random article. The rotation is seeded by the head sha, so one export always renders the same page. Did you know… shows up to 5 hooks from active articles as "... that <claim>?". Recently updated lists 5 pages by commit date. The feature map draws one node per active article and one edge per See also pair. Random article picks in the browser.
+  - **F27.** When the export has the project's article, the Main Page opens with its lead in an "About <project>" box, linked to `/special/about/`, and the feature map joins two articles when the article's cross-feature edges join them (real calls and imports, either direction) instead of by See also; without one it keeps See also pairs. Architecture claims are never "Did you know…" hooks.
+
+### 7.4 The project's article (F27)
+
+- **When.** `build` writes it once its pages are stored and at least two active features have a page: one call (`purpose: "write"`, no feature id), batched, in a round of its own. Its system prompt is its own instructions, the style guide and the write calls' feature directory. It carries no `cacheKey`: a single call can only write a cache, never read it, and it runs long after the write prefix's 5-minute TTL. A failed article is reported and never undoes the pages; a rerun at the same sha writes it if it is missing, or as a new revision (parented on the old) if the set of current pages changed.
+- **Title.** The project's name, decided by the engine, never by the model: the first level-1 heading of the top-level README (Markdown first, outside code fences, in its first 200 lines), as plain text (images and tags dropped, links reduced to their words, emphasis and code marks removed, control and invisible characters removed, whitespace collapsed, at most 120 code points); else the repository's name the same way; else `Project`. It heads the pack and the page.
+- **Pack** (50,000 estimated tokens, filled in this order while it fits, with "and N more" for the rest): the project's title; the top-level directories with file counts and languages; the README's first 120 lines and up to three other top-level documents (top-level or `docs/` Markdown, not a licence, changelog or contributing guide; 60 lines each), numbered so a claim can cite them; every covered feature with its file count, main directories and its page's lead claims; the cross-feature edges, heaviest first, each from the feature that imports or calls to the one it uses, with counts and its first two lines as citable `path:line`; the top-level lines (column 1, not comments) of up to 8 infrastructure files (Terraform and HCL, Dockerfiles, Compose files, GitHub Actions workflows, Procfiles), numbered; and the signatures of each feature's first entry point. Every repository- or page-derived string has its control and format characters replaced, as in a page's pack.
+- **Content.** Sections in order: `lead` (what the application is, who it is for and what problem it solves, as the README, a document or a lead states them), `purpose` ("Purpose and features": what a user can do with it, one capability per claim, each backed by a feature page or a README or document citation), `layers` (the layers and the features in each), `request-paths` (the main paths a request or data takes end to end, naming where it crosses features), `dependencies` (from the edges) and `infrastructure` (left out when the pack lists no such file). Claims follow §5 rule 12, the style guide's voice and §7.1's claim rules; the lead names the project in bold, by its title.
+- **Verify and link.** Exactly as for a page: text checks (length, markup subset, no citation-shaped tokens), citations resolved and hashed at the sha, one retry round for an unusable answer or failing claims, a claim failing twice dropped, and the page linker (first mention, unknown or retired targets as plain words, over-cap text unlinked). A named page must be a page of this build.
+- **Diagram.** Drawn by the engine, with no model choice: a subroutine node per feature page labelled with its title through `mermaidLabel`, and one arrow per edge labelled with its weight ("5 calls, 2 imports"); verify's `diagramProblems` must accept it. A repository map has to show the features, so its caps are its own: the 40 features with the most edge weight and the 80 heaviest edges among them, far inside Mermaid's limits (`MAX_DIAGRAM_CHARS`, `MAX_DIAGRAM_EDGES`). No edge means no diagram.
+- **Cost.** `wiki:build` states the article's estimate before any call (the whole pack budget plus the prompt, 5,000 output tokens), adds a row for it to the build summary, and `wiki:check` re-checks its citations, diagram, links and pages.
 
 ## 8. Testing
 
@@ -328,7 +356,7 @@ prompt-cached prefix for every write call.
 | M1 | `core` schemas, `store` (SQLite + JSON export) | Round-trip tests pass |
 | M2 | `index`: tree-sitter (Python/TS/TSX), import graph, co-change | Indexes next-chief-of-staff at a given sha |
 | M3 | `llm` provider + ledger, `cluster`, `manifest` | Produces a reviewed manifest for next-chief-of-staff |
-| M4 | `write`, `verify`, `link` | First full build of next-chief-of-staff |
+| M4 | `write`, `verify`, `link`; the project's article (F27) | First full build of next-chief-of-staff, with its About article |
 | M5 | `site`: article, infobox, references, history, hover previews, Main Page, Pagefind search | The site is browsable locally |
 | M6 | `freshness`, `replay` | Replay invariants hold; RepoWiki builds its own wiki |
 | M7 | `eval` harness | Exit-criteria run is recorded |
