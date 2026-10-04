@@ -78,7 +78,10 @@ export interface WikiUpdate {
   carried: string[];
   /** Claims this update marked out of date. */
   staleClaims: number;
-  /** Whole pages that could not be written (not stored; the update went on), sorted by feature. */
+  /**
+   * Whole pages that could not be written (not stored; the update went on), sorted by feature. A
+   * manifest-change one stays pending in the store, so the next update writes it whole again.
+   */
   failures: { featureId: string; failure: string }[];
   /** Dirty pages whose rewrite stored nothing, with the assembler's reason, sorted by feature. */
   refused: { featureId: string; why: string }[];
@@ -190,7 +193,14 @@ export async function updateWiki(
   const revisedManifest = drift?.manifest ?? measured.manifest;
   const manifest = addAliases(revisedManifest, codeAliases(revisedManifest, sources));
   const affected = new Set(drift?.affected ?? []);
-  const { rewrites, whole, carried, pages } = planPages(plan, store, input, manifest, affected);
+  const { rewrites, whole, pending, carried, pages } = planPages(
+    plan,
+    store,
+    input,
+    manifest,
+    affected,
+  );
+  const changedBefore = new Set(pending);
 
   const wikipedia: WikipediaOptions = {
     cache: {
@@ -295,7 +305,9 @@ export async function updateWiki(
     }
     const parent = pages.get(page.featureId);
     const reason =
-      affected.has(page.featureId) || parent !== undefined ? "manifest-change" : "build";
+      affected.has(page.featureId) || changedBefore.has(page.featureId) || parent !== undefined
+        ? "manifest-change"
+        : "build";
     stored.push({ ...page.revision, parentId: parent?.id ?? null, reason, pr: plan.pr });
   }
   stored.sort((a, b) => (a.featureId < b.featureId ? -1 : a.featureId > b.featureId ? 1 : 0));
@@ -304,6 +316,10 @@ export async function updateWiki(
   store.transaction(() => {
     store.putManifest(manifest, { llmRevised: revised });
     for (const revision of stored) store.putRevision(revision);
+    // A manifest-change page that could not be written is written whole by the next update too.
+    store.setPendingWhole(
+      failures.map((f) => f.featureId).filter((id) => affected.has(id) || changedBefore.has(id)),
+    );
     store.setHead(plan.to);
     options.journal?.flush();
   });

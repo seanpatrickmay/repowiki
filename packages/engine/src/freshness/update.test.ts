@@ -767,6 +767,50 @@ describe("updateWiki", () => {
           ["Both commits shaped it.", [first, branch]],
         ]);
       });
+
+      it("writes a page whose manifest-change write failed whole again on the next update", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { merge } = mergePaging();
+        const parent = store.getCurrentRevision("deliverables");
+        const failed = await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () => {
+            throw unusable();
+          },
+        );
+        expect(failed.failures.map((f) => f.featureId)).toEqual(["deliverables"]);
+        expect(store.getCurrentRevision("deliverables")?.id).toBe(parent?.id);
+
+        // The next update changes nothing of deliverables, and no feature drifts: the page is
+        // still written whole, as the manifest change it is, with its History carried.
+        const later = repo.commit("chore: nothing");
+        const work = () =>
+          wholePage(
+            "Work records",
+            "`complete()` marks a deliverable done.",
+            "src/deliverables/crud.py:4-7",
+          );
+        const { provider: p, requests } = turned((request) => standard(request, work));
+        const retried = await updateWiki(store, await inputAt(repo, later), {
+          ...options,
+          provider: p,
+        });
+        expect(requests.filter((r) => r.schema === PageDraft).map((r) => r.featureId)).toEqual([
+          "deliverables",
+        ]);
+        expect(retried.stored.find((r) => r.featureId === "deliverables")).toMatchObject({
+          reason: "manifest-change",
+          parentId: parent?.id,
+        });
+        expect(historyOf("deliverables")).toEqual([["Deliverables was added first.", [first]]]);
+
+        // Written now, it is planned like any page again: an empty commit makes no call.
+        const last = repo.commit("chore: nothing again");
+        const { provider: none, requests: after } = turned(() => new Error("no call expected"));
+        await updateWiki(store, await inputAt(repo, last), { ...options, provider: none });
+        expect(after).toEqual([]);
+      });
     });
 
     it("does not store a whole page that got two unusable answers, and settles its rows", async () => {

@@ -167,8 +167,13 @@ function filesOf(manifest: Manifest, featureId: string): Set<string> {
 export interface PagePlan {
   /** Dirty pages: a stale claim, a coverage gap or a changed member file. */
   rewrites: PageRewrite[];
-  /** Active features written whole: changed by the manifest's operations, or with no page yet. */
+  /**
+   * Active features written whole: changed by the manifest's operations, pending (a manifest-change
+   * write of theirs failed in an earlier update), or with no page yet.
+   */
   whole: string[];
+  /** The pending ones among them (Store.getPendingWhole), sorted. */
+  pending: string[];
   /** Active features whose page carries forward unchanged, sorted. */
   carried: string[];
   /** The current page of every feature that has one. */
@@ -182,8 +187,9 @@ export interface PagePlan {
  * `remapCitation` asks per citation; a sha git cannot diff aborts the plan with an UpdateError
  * naming it, since its citations cannot be moved), the coverage gaps are
  * found against every fresh citation, and a page is dirty when a claim went stale, it has a gap,
- * or one of its member files (before or after) changed. Features that are not active keep their
- * pages as they are.
+ * or one of its member files (before or after) changed. A feature `affected`, or pending in the
+ * store, is written whole instead, and so is one with no page. Features that are not active keep
+ * their pages as they are.
  */
 export function planPages(
   plan: UpdatePlan,
@@ -218,6 +224,8 @@ export function planPages(
   };
   const active = manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id);
   const pages = new Map(store.listCurrentRevisions().map((r) => [r.featureId, r]));
+  const pending = new Set(store.getPendingWhole().filter((id) => active.includes(id)));
+  const writtenWhole = (id: string) => affected.has(id) || pending.has(id) || !pages.has(id);
   const planned = new Map(
     active.flatMap((id) => {
       const page = pages.get(id);
@@ -242,7 +250,7 @@ export function planPages(
   for (const featureId of active) {
     const revision = pages.get(featureId);
     const claims = planned.get(featureId);
-    if (revision === undefined || claims === undefined || affected.has(featureId)) continue;
+    if (revision === undefined || claims === undefined || writtenWhole(featureId)) continue;
     const current = filesOf(manifest, featureId);
     const before = filesOf(plan.previous, featureId);
     const mine = (path: string | null) => path !== null && (current.has(path) || before.has(path));
@@ -266,8 +274,8 @@ export function planPages(
       membershipChanged: current.size !== before.size || [...current].some((p) => !before.has(p)),
     });
   }
-  const whole = active.filter((id) => affected.has(id) || !pages.has(id));
-  return { rewrites, whole, carried: carried.sort(), pages };
+  const whole = active.filter(writtenWhole);
+  return { rewrites, whole, pending: [...pending].sort(), carried: carried.sort(), pages };
 }
 
 /** The feature of a file that already has one: a member of the previous manifest, or decided. */
