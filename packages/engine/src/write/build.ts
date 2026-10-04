@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  type Claim,
   IsoDateTime,
   type Manifest,
   type Revision,
@@ -51,6 +52,12 @@ export interface WritePagesInput {
   graph?: FileGraph;
   /** Write only these features' pages (default: every active feature). */
   only?: readonly string[];
+  /**
+   * History claims a feature's new page carries forward, as stored, from the pages it continues
+   * (spec §5 rule 4: History is append-only). They go ahead of the page's new History claims;
+   * a new one that cites exactly the commits of a carried one is dropped.
+   */
+  carry?: ReadonlyMap<string, readonly Claim[]>;
 }
 
 export interface WritePagesOptions {
@@ -186,6 +193,55 @@ export async function checkTitles(
   for (const title of wikipedia.failed)
     log(`Wikipedia could not be reached for ${quote(title)}; left as plain text`);
   return wikipedia;
+}
+
+/** The commits a claim cites, as one comparable key. */
+const commitsOf = (claim: Claim): string =>
+  claim.citations
+    .flatMap((c) => (c.kind === "commit" ? [c.sha] : []))
+    .sort()
+    .join(" ");
+
+/**
+ * A page's verified claims with `carried` History claims ahead of its new ones (spec §5 rule 4).
+ * A new History claim citing exactly the commits of a carried one is dropped, and a lead claim
+ * that summarized it summarizes the carried one instead. Carried claims take draft ids no
+ * verified claim uses; the page's own numbering replaces every id anyway.
+ */
+function withCarried(
+  verified: readonly { key: SectionKey; claim: Claim }[],
+  carried: readonly Claim[],
+): { key: SectionKey; claim: Claim }[] {
+  if (carried.length === 0) return [...verified];
+  const used = new Set(verified.map((v) => v.claim.id));
+  let n = 0;
+  const fresh = (): string => {
+    let id: string;
+    do id = `carried-${++n}`;
+    while (used.has(id));
+    return id;
+  };
+  const kept = carried.map((claim) => ({
+    key: "history" as const,
+    claim: { ...claim, id: fresh() },
+  }));
+  const byCommits = new Map(kept.map((k) => [commitsOf(k.claim), k.claim.id]));
+  const replaced = new Map<string, string>();
+  for (const { key, claim } of verified) {
+    const same = key === "history" ? byCommits.get(commitsOf(claim)) : undefined;
+    if (same !== undefined) replaced.set(claim.id, same);
+  }
+  const rest = verified
+    .filter((v) => !(v.key === "history" && replaced.has(v.claim.id)))
+    .map((v) =>
+      v.key === "lead" && replaced.size > 0
+        ? {
+            ...v,
+            claim: { ...v.claim, supports: v.claim.supports.map((s) => replaced.get(s) ?? s) },
+          }
+        : v,
+    );
+  return [...kept, ...rest];
 }
 
 /**
@@ -398,7 +454,7 @@ export async function writePages(
           generatedAt: now().toISOString(),
           model: state.model ?? "unknown",
           tokens: state.tokens,
-          claims: [...state.verified.values()],
+          claims: withCarried([...state.verified.values()], input.carry?.get(featureId) ?? []),
           diagram: state.draft.diagram,
           pack: state.pack,
           neighbours,
