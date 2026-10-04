@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeArchitecture } from "@repowiki/core/test-fixtures";
@@ -415,6 +423,56 @@ describe("acquireBuildLock", () => {
         writeFileSync(lock, `pid ${process.pid} since 2026-10-03T00:00:00.000Z\n`);
       expect(() => acquireBuildLock(dir, rival)).toThrow(WikiBuildError);
       expect(readFileSync(lock, "utf8")).toContain("2026-10-03");
+    });
+  });
+
+  it("leaves exactly one holder when two runs both judge the same lock stale", () => {
+    withDir((dir) => {
+      const lock = join(dir, BUILD_LOCK);
+      writeFileSync(lock, "pid 2147483646 since 2026-10-02T00:00:00.000Z\n");
+      let winner: (() => void) | null = null;
+      // B has judged the old lock stale when A takes it over and starts running.
+      const raced = () => {
+        winner = acquireBuildLock(dir, () => {});
+      };
+      expect(() => acquireBuildLock(dir, () => {}, raced)).toThrow(
+        `another wiki:build, wiki:update or wiki:replay is running on ${dir} (${lock}); if none is, delete the lock file`,
+      );
+      // A's live lock was put back untouched, and nothing else is left in the dir.
+      expect(readFileSync(lock, "utf8")).toContain(`pid ${process.pid} since 2026-1`);
+      expect(readdirSync(dir)).toEqual([BUILD_LOCK]);
+      const release = winner as (() => void) | null;
+      expect(release).not.toBeNull();
+      release?.();
+      expect(existsSync(lock)).toBe(false);
+    });
+  });
+
+  it("never replaces a live lock taken in the gap, and leaves no temp files behind", () => {
+    withDir((dir) => {
+      const lock = join(dir, BUILD_LOCK);
+      writeFileSync(lock, "pid 2147483646 since 2026-10-02T00:00:00.000Z\n");
+      const rival = () => writeFileSync(lock, "pid 1 since 2026-10-03T00:00:00.000Z\n");
+      expect(() => acquireBuildLock(dir, rival)).toThrow(WikiBuildError);
+      expect(readFileSync(lock, "utf8")).toBe("pid 1 since 2026-10-03T00:00:00.000Z\n");
+      expect(readdirSync(dir)).toEqual([BUILD_LOCK]);
+    });
+  });
+
+  it("does not delete another run's lock when a displaced run releases", () => {
+    withDir((dir) => {
+      const lock = join(dir, BUILD_LOCK);
+      const displaced = acquireBuildLock(dir, () => {});
+      // The lock was deleted by hand and another run took it.
+      rmSync(lock);
+      const owner = acquireBuildLock(dir, () => {});
+      const ownerLine = readFileSync(lock, "utf8");
+      displaced();
+      expect(readFileSync(lock, "utf8")).toBe(ownerLine);
+      displaced();
+      owner();
+      expect(existsSync(lock)).toBe(false);
+      expect(readdirSync(dir)).toEqual([]);
     });
   });
 

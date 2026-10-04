@@ -1,4 +1,5 @@
-import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -147,9 +148,9 @@ export const BUILD_LOCK = "wiki-build.lock";
 /** A lock older than this is left over from a killed build, never a running one (a batch ends in 24 h). */
 const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 
-/** True unless the lock names a pid no process has: a build killed hard leaves such a lock. */
-function holderAlive(path: string): boolean {
-  const pid = Number(/^pid (\d+) /.exec(readFileSync(path, "utf8"))?.[1]);
+/** True unless the lock text names a pid no process has: a build killed hard leaves such a lock. */
+function holderAlive(text: string): boolean {
+  const pid = Number(/^pid (\d+) /.exec(text)?.[1]);
   if (!Number.isSafeInteger(pid) || pid <= 0) return true;
   try {
     process.kill(pid, 0);
@@ -160,68 +161,128 @@ function holderAlive(path: string): boolean {
   }
 }
 
-/** Opens the lock file only if no other process has it; null when one does. */
-function openNew(path: string): number | null {
+const codeOf = (err: unknown) => (err as NodeJS.ErrnoException).code;
+
+/** Publishes `tmp` as `path` only if nothing is there: link fails with EEXIST, never replaces. */
+function linkNew(tmp: string, path: string): boolean {
   try {
-    return openSync(path, "wx");
+    linkSync(tmp, path);
+    return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return null;
+    if (codeOf(err) === "EEXIST") return false;
+    throw err;
+  }
+}
+
+/** A lock judged takeable: why, and which file (inode and content) was judged. */
+interface JudgedLock {
+  reason: string;
+  ino: number;
+  text: string;
+}
+
+/**
+ * Judges a lock someone holds: null while its holder runs, "freed" when it vanished while being
+ * looked at, otherwise why it can be taken over and exactly which file that judgment is about.
+ */
+function judgeLock(path: string): JudgedLock | "freed" | null {
+  try {
+    const { mtimeMs, ino } = statSync(path);
+    const text = readFileSync(path, "utf8");
+    if (Date.now() - mtimeMs >= STALE_LOCK_MS) {
+      return { reason: `ignoring a stale lock older than 24 hours: ${path}`, ino, text };
+    }
+    return holderAlive(text)
+      ? null
+      : { reason: `ignoring the lock of a build that is no longer running: ${path}`, ino, text };
+  } catch (err) {
+    if (codeOf(err) === "ENOENT") return "freed";
     throw err;
   }
 }
 
 /**
- * Why a lock someone holds can be taken over, or null while its holder runs. A lock that vanished
- * while being looked at was freed: it can be taken too.
+ * Moves a lock judged stale out of the way, and only that lock. Renaming is the one step that
+ * takes whatever is at the path, so the moved file is checked to be the one judged: if another
+ * run took the lock after the judgment, a live lock was moved, and it is put back (link, which
+ * never replaces) before refusing. Returns false when the lock vanished first.
  */
-function takeOverReason(path: string): string | null {
+function moveStaleAside(path: string, judged: JudgedLock, busy: () => Error): boolean {
+  const aside = `${path}.${process.pid}.${randomUUID()}.stale`;
   try {
-    if (Date.now() - statSync(path).mtimeMs >= STALE_LOCK_MS) {
-      return `ignoring a stale lock older than 24 hours: ${path}`;
-    }
-    return holderAlive(path)
-      ? null
-      : `ignoring the lock of a build that is no longer running: ${path}`;
+    renameSync(path, aside);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return `the lock was freed: ${path}`;
+    if (codeOf(err) === "ENOENT") return false;
     throw err;
+  }
+  try {
+    const moved = statSync(aside);
+    if (moved.ino === judged.ino && readFileSync(aside, "utf8") === judged.text) return true;
+    try {
+      linkSync(aside, path);
+    } catch (err) {
+      // Another run has since taken the path; the moved lock cannot be put back.
+      if (codeOf(err) !== "EEXIST") throw err;
+    }
+    throw busy();
+  } finally {
+    rmSync(aside, { force: true });
   }
 }
 
 /**
  * Takes the out dir's build lock, so two runs (wiki:build, wiki:update or wiki:replay) never send
- * the same batches twice, and returns the function that frees it. The lock holds this process's
- * pid and is freed on exit, SIGINT and SIGTERM too. A lock another live run holds is a
- * WikiBuildError; one older than 24 hours, or whose pid no process has, is taken over with a line
- * to `log`. Two runs taking over the same lock at once race to create it again, and the loser
- * gets the same WikiBuildError, never a raw fs error. Advisory: it guards these scripts against
- * each other only.
+ * the same batches twice, and returns the function that frees it. The lock holds this run's
+ * "pid … since …" line, published atomically: the line is written to a temp file and linked to
+ * the lock path, which fails if any lock exists, so a lock is never seen half-written and never
+ * replaced. A lock another live run holds is a WikiBuildError. A lock older than 24 hours, or
+ * whose pid no process has, is taken over with a line to `log`: it is renamed aside, checked to be
+ * the file that was judged stale (a lock taken in the meantime is put back and respected), and
+ * then the lock is created as above, so of any runs racing for it exactly one holds it and the
+ * rest get the same WikiBuildError. No POSIX call compares and swaps a path, so a third run
+ * landing between the check and the put-back can still go unnoticed; the window is microseconds.
+ * The lock is freed on exit, SIGINT and SIGTERM too, and only while it still holds this run's own
+ * line. Advisory: it guards these scripts against each other only. `afterJudging` is a test seam
+ * that runs between judging a lock stale and taking it over.
  */
-export function acquireBuildLock(out: string, log: (line: string) => void): () => void {
+export function acquireBuildLock(
+  out: string,
+  log: (line: string) => void,
+  afterJudging?: () => void,
+): () => void {
   const path = join(out, BUILD_LOCK);
   const busy = () =>
     new WikiBuildError(
       `another wiki:build, wiki:update or wiki:replay is running on ${out} (${path}); if none is, delete the lock file`,
     );
-  let fd = openNew(path);
-  if (fd === null) {
-    const reason = takeOverReason(path);
-    if (reason === null) throw busy();
-    rmSync(path, { force: true });
-    log(reason);
-    fd = openNew(path);
-    if (fd === null) throw busy();
-  }
+  const line = `pid ${process.pid} since ${new Date().toISOString()} id ${randomUUID()}\n`;
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(tmp, line, { flag: "wx" });
   try {
-    writeSync(fd, `pid ${process.pid} since ${new Date().toISOString()}\n`);
+    if (!linkNew(tmp, path)) {
+      const judged = judgeLock(path);
+      if (judged === null) throw busy();
+      afterJudging?.();
+      if (judged === "freed") {
+        log(`the lock was freed: ${path}`);
+      } else if (moveStaleAside(path, judged, busy)) {
+        log(judged.reason);
+      }
+      if (!linkNew(tmp, path)) throw busy();
+    }
   } finally {
-    closeSync(fd);
+    rmSync(tmp, { force: true });
   }
   const release = () => {
     process.off("exit", release);
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
-    rmSync(path, { force: true });
+    try {
+      // Another run may hold the lock by now (this one was displaced): leave it be.
+      if (readFileSync(path, "utf8") === line) rmSync(path, { force: true });
+    } catch (err) {
+      if (codeOf(err) !== "ENOENT") throw err;
+    }
   };
   // Free the lock, then let the signal end the process as it would have.
   const onSignal = (signal: NodeJS.Signals) => {
