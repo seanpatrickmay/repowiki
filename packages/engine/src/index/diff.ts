@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { assertSha, GitError, git, scrubbedGitEnv } from "./git.ts";
+import { pullRequestOf } from "./history.ts";
 
 /**
  * One hunk of a zero-context diff, as git writes it: `oldCount` lines from `oldStart` became
@@ -182,14 +183,15 @@ export function reachableCommits(repo: string, sha: string): Set<string> {
 export interface ReplayStep {
   sha: string;
   subject: string;
-  /** False only for `to` itself when it is not a merge. */
+  /** True for a merge commit; false for a squash-merged pull request's commit, or `to`. */
   merge: boolean;
 }
 
 /**
  * The commits a replay from `from` to `to` moves the wiki through (spec §6.2): every merge on
- * `to`'s first-parent line after `from`, oldest first, then `to` itself when it is not a merge,
- * so the replay ends where it was asked to. `from` must be an ancestor of `to`.
+ * `to`'s first-parent line after `from`, and every commit there whose subject names a pull
+ * request (a squash merge's trailing "(#N)", see pullRequestOf), oldest first, then `to` itself
+ * when it is neither, so the replay ends where it was asked to. `from` must be an ancestor of `to`.
  */
 export function replaySteps(repo: string, from: string, to: string): ReplayStep[] {
   assertSha(from);
@@ -205,13 +207,18 @@ export function replaySteps(repo: string, from: string, to: string): ReplayStep[
     "--end-of-options",
     `${from}..${to}`,
   ]).toString("utf8");
-  const steps: ReplayStep[] = [];
-  for (const line of out.split("\n")) {
-    if (line === "" || line.startsWith("commit ")) continue;
-    const [shas = "", subject = ""] = line.split("\0");
-    const [sha = "", ...parents] = shas.trim().split(" ");
-    const merge = parents.length > 1;
-    if (merge || sha === to) steps.push({ sha, subject, merge });
-  }
+  const commits = out
+    .split("\n")
+    .filter((line) => line !== "" && !line.startsWith("commit "))
+    .map((line) => {
+      const [shas = "", subject = ""] = line.split("\0");
+      const [sha = "", ...parents] = shas.trim().split(" ");
+      return { sha, subject, merge: parents.length > 1 };
+    });
+  // The last commit listed is `to`'s commit: compared by position, not by sha, since `to` may
+  // be an annotated tag's own id, which git peels to the commit it lists.
+  const steps = commits.filter(
+    (c, i) => c.merge || i === commits.length - 1 || pullRequestOf(c.subject) !== null,
+  );
   return steps;
 }

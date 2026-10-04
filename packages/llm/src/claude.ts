@@ -13,6 +13,7 @@ import {
   canonicalJson,
   createBatcher,
   requestKey,
+  wasCollected,
 } from "./batcher.ts";
 import type { FetchLike } from "./cassette.ts";
 import type { TokenLedger } from "./ledger.ts";
@@ -159,6 +160,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         cacheKey: request.cacheKey ?? null,
         tokens: usage,
         ...(options.run === undefined ? {} : { runKind: options.run.kind, sha: options.run.sha }),
+        ...(batch ? { requestKey: requestKey(params) } : {}),
+        ...(batch && wasCollected(message) ? { collected: true } : {}),
       });
       // The ledger row is written: an unusable answer below carries the same numbers.
       const answered = { usage, model: message.model };

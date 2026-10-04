@@ -46,9 +46,13 @@ describe("WikiExport", () => {
     expect(WikiExport.parse(makeExport({ runs })).runs).toEqual(runs);
     const { runs: _omitted, ...without } = makeExport();
     expect(WikiExport.parse(without).runs).toEqual([]);
-    expect(messages(makeExport({ runs: [{ ...runs[0], kind: "replay" }] as never }))).not.toEqual(
-      [],
-    );
+    const pathsOf = (bad: Record<string, unknown>): string[] => {
+      const result = WikiExport.safeParse({ ...makeExport(), runs: [{ ...runs[0], ...bad }] });
+      return result.success ? [] : result.error.issues.map((issue) => issue.path.join("."));
+    };
+    expect(pathsOf({ kind: "replay" })).toEqual(["runs.0.kind"]);
+    expect(pathsOf({ sha: "not-a-sha" })).toEqual(["runs.0.sha"]);
+    expect(pathsOf({ calls: -1 })).toEqual(["runs.0.calls"]);
   });
 
   it("carries the Architecture article's revisions, and defaults them to none", () => {
