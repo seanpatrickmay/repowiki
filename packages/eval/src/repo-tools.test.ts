@@ -347,4 +347,18 @@ describe("createRepoTools against hostile config and content", () => {
       isError: true,
     });
   });
+
+  it("refuses a grep that outlives its timeout, and keeps the default timeout generous", () => {
+    // git cannot start, search and answer within a millisecond, so the kill is certain.
+    const slow = createRepoTools(big.dir, bigSha, { grepTimeoutMs: 1 });
+    expect(slow.run("grep", { pattern: "export const" })).toEqual({
+      text: "grep took too long; narrow the pattern or the path",
+      isError: true,
+    });
+    // The other tools do not use the grep timeout, and the default one lets an ordinary grep finish.
+    expect(slow.run("list_files", { path: "docs" }).isError).toBe(false);
+    expect(createRepoTools(big.dir, bigSha).run("grep", { pattern: "export const" }).isError).toBe(
+      false,
+    );
+  });
 });
