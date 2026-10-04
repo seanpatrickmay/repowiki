@@ -2,6 +2,9 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
+  architectureLinksWithoutPage,
+  architectureLinkViolations,
+  architectureProblems,
   commitCitationProblems,
   DEFAULT_MAX_FILE_BYTES,
   GitError,
@@ -19,8 +22,10 @@ import {
  * citation names a commit in the history of the wiki's sha (read-only git), every diagram is
  * safe, and every link and See also entry names an active feature (a link may name a
  * disambiguation page). It also counts, for information only, the links and See also entries
- * that name an active feature with no stored page. Read-only; exits 1 on any problem, and 2 for
- * a usage error: bad arguments, or a repository that is missing or does not hold the wiki's sha.
+ * that name an active feature with no stored page. The project's article (the About page) is
+ * checked the same way, and its links and named pages count with the pages' own when they name an
+ * active feature with no stored page. Read-only; exits 1 on any problem, and 2 for a usage error:
+ * bad arguments, or a repository that is missing or does not hold the wiki's sha.
  *
  * openStore migrates and switches the file to WAL, so the check opens a throwaway copy of the
  * store (with its write-ahead log) and the wiki's own files are never opened for writing.
@@ -93,22 +98,35 @@ try {
         }
         return sources;
       };
-      const problems = pages.flatMap((page) => [
-        ...revisionProblems(page, sourcesAt),
-        ...commitCitationProblems(page, history),
-        ...linkViolations(page, manifest),
-      ]);
-      const citations = pages.flatMap((p) =>
+      const article = store.getCurrentArchitecture();
+      const withPage = new Set(pages.map((page) => page.featureId));
+      const problems = [
+        ...pages.flatMap((page) => [
+          ...revisionProblems(page, sourcesAt),
+          ...commitCitationProblems(page, history),
+          ...linkViolations(page, manifest),
+        ]),
+        ...(article === null
+          ? []
+          : [
+              ...architectureProblems(article, sourcesAt, history),
+              ...architectureLinkViolations(article, manifest),
+            ]),
+      ];
+      const citations = [...pages, ...(article === null ? [] : [article])].flatMap((p) =>
         p.sections.flatMap((s) => s.claims.flatMap((c) => c.citations)),
       );
       const code = citations.filter((c) => c.kind === "code").length;
       for (const problem of problems) console.error(printable(problem));
       console.log(
-        `${pages.length} pages: ${code} code citations re-hashed and ${citations.length - code} commit citations resolved; ${problems.length === 0 ? "no problems" : `${problems.length} problems`}`,
+        `${pages.length} pages${article === null ? "" : " and the About article"}: ${code} code citations re-hashed and ${citations.length - code} commit citations resolved; ${problems.length === 0 ? "no problems" : `${problems.length} problems`}`,
       );
       // Informational only: the site shows a link to a feature without a page as plain text.
+      const pageless =
+        linksWithoutPage(pages, manifest) +
+        (article === null ? 0 : architectureLinksWithoutPage(article, manifest, withPage));
       console.log(
-        `${linksWithoutPage(pages, manifest)} links name an active feature with no stored page (the site shows them as plain text)`,
+        `${pageless} links name an active feature with no stored page (the site shows them as plain text)`,
       );
       if (problems.length > 0) process.exitCode = 1;
     }

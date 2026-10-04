@@ -5,6 +5,7 @@ import {
   commitCitation,
   INGEST_PY,
   leadClaim,
+  makeArchitecture,
   makeRevision,
   SHA_A,
   SHA_B,
@@ -12,7 +13,7 @@ import {
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import type { CommitInfo } from "../index/index.ts";
-import { commitCitationProblems, revisionProblems } from "./revision.ts";
+import { architectureProblems, commitCitationProblems, revisionProblems } from "./revision.ts";
 
 const at = (files: Record<string, string>) => (sha: string) =>
   new Map(sha === SHA_A ? Object.entries(files) : []);
@@ -197,5 +198,41 @@ describe("commitCitationProblems", () => {
       "signals h-2 commit:bbbbbbb: the commit's subject is not the one cited",
       "signals h-3 commit:ccccccc: no such commit in the history of the wiki's sha",
     ]);
+  });
+});
+
+describe("architectureProblems", () => {
+  const ingest = at({ "src/signals/ingest.py": INGEST_PY });
+
+  it("passes an article whose citations still hash to their lines", () => {
+    expect(architectureProblems(makeArchitecture(), ingest, [])).toEqual([]);
+  });
+
+  it("labels a changed citation, an unknown commit and an unsafe diagram as the article's", () => {
+    const [lead, layers] = makeArchitecture().sections;
+    const article = makeArchitecture({
+      diagram: 'flowchart LR\n  click n1 "https://evil.example"',
+      sections: [
+        ...(lead === undefined ? [] : [lead]),
+        ...(layers === undefined
+          ? []
+          : [
+              {
+                ...layers,
+                claims: layers.claims.map((c) => ({
+                  ...c,
+                  citations: [...c.citations, commitCitation()],
+                })),
+              },
+            ]),
+      ],
+    });
+    expect(architectureProblems(article, at({ "src/signals/ingest.py": "changed\n" }), [])).toEqual(
+      [
+        "architecture a-1 src/signals/ingest.py:10-24: the cited lines changed",
+        "architecture: diagram line 2 is not a node or a labelled arrow",
+        "architecture a-1 commit:aaaaaaa: no such commit in the history of the wiki's sha",
+      ],
+    );
   });
 });

@@ -1,4 +1,4 @@
-import type { Manifest, Revision } from "@repowiki/core";
+import type { Architecture, Manifest, Revision } from "@repowiki/core";
 import { quote } from "../verify/index.ts";
 import { linkTokensIn } from "./links.ts";
 
@@ -65,6 +65,58 @@ export function linksWithoutPage(revisions: readonly Revision[], manifest: Manif
       for (const claim of section.claims) {
         count += linkTokensIn(claim.text).filter(({ target }) => missing(target)).length;
       }
+    }
+  }
+  return count;
+}
+
+/**
+ * linkViolations for the project's article (the Architecture article, F27): every [[id]] token
+ * must name an active page, and every page a claim names as its support must be an active
+ * feature. An active feature with no stored page is not a violation; it is counted by
+ * architectureLinksWithoutPage, as the pages' own are by linksWithoutPage.
+ */
+export function architectureLinkViolations(article: Architecture, manifest: Manifest): string[] {
+  const active = new Set(
+    manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id),
+  );
+  const problems: string[] = [];
+  for (const section of article.sections) {
+    for (const claim of section.claims) {
+      for (const problem of textLinkViolations(claim.text, manifest)) {
+        problems.push(`architecture ${quote(claim.id)}: ${problem}`);
+      }
+      for (const id of claim.pages) {
+        if (!active.has(id)) {
+          problems.push(
+            `architecture ${quote(claim.id)}: names ${quote(id)}, which is not an active feature`,
+          );
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * linksWithoutPage for the project's article: how many [[id]] links and named pages of its claims
+ * name an active feature that is not in `pages`, the features with a current page. Not a
+ * violation: the site shows such a link as plain text (reported only).
+ */
+export function architectureLinksWithoutPage(
+  article: Architecture,
+  manifest: Manifest,
+  pages: ReadonlySet<string>,
+): number {
+  const active = new Set(
+    manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id),
+  );
+  const missing = (id: string) => active.has(id) && !pages.has(id);
+  let count = 0;
+  for (const section of article.sections) {
+    for (const claim of section.claims) {
+      count += linkTokensIn(claim.text).filter(({ target }) => missing(target)).length;
+      count += claim.pages.filter(missing).length;
     }
   }
   return count;

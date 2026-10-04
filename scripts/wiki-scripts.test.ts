@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contentHash } from "@repowiki/core";
 import {
+  architectureClaim,
   bodyClaim,
   codeCitation,
   commitCitation,
   leadClaim,
+  makeArchitecture,
   makeManifest,
   makeRevision,
   SHA_A,
@@ -192,5 +194,66 @@ describe("wiki-check.ts as a process (no network)", () => {
       "signals h-1 commit:bbbbbbb: no such commit in the history of the wiki's sha\n",
     );
     expect(result.stdout).toContain("1 problems");
+  });
+
+  /** pageOf's store plus the project's article at the same sha, backed by `pages`. */
+  function withArticle(
+    repo: string,
+    sha: string,
+    pages: string[],
+    text = "Signals feed deliverables.",
+  ): string {
+    const out = pageOf(repo, sha, sha);
+    const store = openStore(join(out, "wiki.db"));
+    const code = codeCitation({
+      path: "src/app.ts",
+      startLine: 1,
+      endLine: 1,
+      sha,
+      symbol: null,
+      contentHash: contentHash("export const app = 1;\n"),
+    });
+    const [lead] = makeArchitecture().sections;
+    store.putArchitecture(
+      makeArchitecture({
+        id: `architecture-${sha.slice(0, 12)}-1`,
+        sha,
+        edges: [],
+        sections: [
+          ...(lead === undefined ? [] : [lead]),
+          { key: "purpose", claims: [architectureClaim({ text, citations: [code], pages })] },
+        ],
+      }),
+    );
+    store.close();
+    return out;
+  }
+
+  it("checks the project's article with the pages", () => {
+    const { repo, sha } = gitRepo();
+    const result = run("scripts/wiki-check.ts", repo, "--out", withArticle(repo, sha, ["signals"]));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout.split("\n")[0]).toBe(
+      "1 pages and the About article: 2 code citations re-hashed and 1 commit citations resolved; no problems",
+    );
+  });
+
+  it("counts a page the article names that has none, as the pages' own links are", () => {
+    const { repo, sha } = gitRepo();
+    const out = withArticle(repo, sha, ["deliverables"]);
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    // The page's See also names deliverables once, and the article names it once.
+    expect(result.stdout).toContain("2 links name an active feature with no stored page");
+  });
+
+  it("reports a link in the article to an id that is not a feature", () => {
+    const { repo, sha } = gitRepo();
+    const out = withArticle(repo, sha, [], "Signals feed [[nowhere]].");
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('architecture "a-1": a link to "nowhere" is not a feature id\n');
   });
 });

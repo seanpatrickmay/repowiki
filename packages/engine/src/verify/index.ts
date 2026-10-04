@@ -27,4 +27,4 @@ export { diagramProblems, MAX_DIAGRAM_CHARS, MAX_DIAGRAM_EDGES } from "./diagram
 export { ClaimFixes, DraftClaim, DraftDiagram, DraftSection, PageDraft } from "./draft.ts";
 export { isLimitationEvidence, REVERT_SUBJECT, SKIPPED_TEST, TODO_MARKER } from "./evidence.ts";
 export { mermaidLabel } from "./mermaid-label.ts";
-export { commitCitationProblems, revisionProblems } from "./revision.ts";
+export { architectureProblems, commitCitationProblems, revisionProblems } from "./revision.ts";

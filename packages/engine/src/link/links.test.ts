@@ -1,4 +1,9 @@
-import { makeFeature, makeRevision } from "@repowiki/core/test-fixtures";
+import {
+  architectureClaim,
+  makeArchitecture,
+  makeFeature,
+  makeRevision,
+} from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   createPageLinker,
@@ -9,7 +14,12 @@ import {
   wikipediaTitlesIn,
 } from "./links.ts";
 import { linkManifest } from "./test-manifest.ts";
-import { linksWithoutPage, linkViolations } from "./violations.ts";
+import {
+  architectureLinksWithoutPage,
+  architectureLinkViolations,
+  linksWithoutPage,
+  linkViolations,
+} from "./violations.ts";
 
 const NO_WP = new Map<string, string | null>();
 
@@ -347,5 +357,79 @@ describe("linksWithoutPage", () => {
     // deliverables has no page: once in See also, once as a link. A Wikipedia link is not counted.
     expect(linksWithoutPage([signals, billing], linkManifest())).toBe(2);
     expect(linksWithoutPage([signals], linkManifest())).toBe(4);
+  });
+});
+
+describe("architectureLinkViolations", () => {
+  const article = (text: string, claimPages: string[]) =>
+    makeArchitecture({
+      sections: [
+        ...makeArchitecture().sections.slice(0, 2),
+        {
+          key: "dependencies",
+          claims: [architectureClaim({ id: "a-2", text, citations: [], pages: claimPages })],
+        },
+      ],
+    });
+
+  it("passes links and pages that all name active features, with a page or not", () => {
+    expect(
+      architectureLinkViolations(
+        article("[[deliverables]] uses [[signals]] and [[billing]].", ["signals", "billing"]),
+        linkManifest(),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports a link to nowhere or a retired feature, and a page that is not active", () => {
+    expect(
+      architectureLinkViolations(
+        article("Uses [[retired-thing]] and [[nowhere]].", ["retired-thing", "nowhere"]),
+        linkManifest(),
+      ),
+    ).toEqual([
+      'architecture "a-2": a link to "retired-thing" is not an active feature id',
+      'architecture "a-2": a link to "nowhere" is not a feature id',
+      'architecture "a-2": names "retired-thing", which is not an active feature',
+      'architecture "a-2": names "nowhere", which is not an active feature',
+    ]);
+  });
+});
+
+describe("architectureLinksWithoutPage", () => {
+  const article = (text: string, claimPages: string[]) =>
+    makeArchitecture({
+      sections: [
+        {
+          key: "dependencies",
+          claims: [architectureClaim({ id: "a-2", text, citations: [], pages: claimPages })],
+        },
+      ],
+    });
+
+  it("counts links and named pages of active features that have no page", () => {
+    const pages = new Set(["signals"]);
+    // billing: once as a link, once as a named page. A Wikipedia link and a page are not counted.
+    const text = "[[signals]], [[billing]] and [[wp:Cron]].";
+    expect(
+      architectureLinksWithoutPage(article(text, ["signals", "billing"]), linkManifest(), pages),
+    ).toBe(2);
+    expect(
+      architectureLinksWithoutPage(
+        article(text, []),
+        linkManifest(),
+        new Set(["signals", "billing"]),
+      ),
+    ).toBe(0);
+  });
+
+  it("leaves unknown and retired ids to the violations", () => {
+    expect(
+      architectureLinksWithoutPage(
+        article("[[retired-thing]] and [[nowhere]].", ["nowhere"]),
+        linkManifest(),
+        new Set(),
+      ),
+    ).toBe(0);
   });
 });
