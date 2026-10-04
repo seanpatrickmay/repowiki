@@ -21,7 +21,7 @@ import {
   writeArchitecture,
   writePages,
 } from "../write/index.ts";
-import { type ArticleDue, articleDue } from "./article.ts";
+import { type ArticleDue, articleDue, articleSkipped } from "./article.ts";
 import { DEFAULT_DRIFT_THRESHOLD } from "./drift.ts";
 import { type DriftOutcome, reviseManifest } from "./drift-call.ts";
 import {
@@ -79,8 +79,12 @@ export interface WikiUpdate {
   staleClaims: number;
   /** Whole pages that could not be written (not stored; the update went on), sorted by feature. */
   failures: { featureId: string; failure: string }[];
+  /** Dirty pages whose rewrite stored nothing, with the assembler's reason, sorted by feature. */
+  refused: { featureId: string; why: string }[];
   /** Why the project's article was rewritten, or null when it carried forward. */
   articleDue: ArticleDue | null;
+  /** Why it carried forward: "too few pages" for an article, or "current"; null when rewritten. */
+  architectureSkipped: "too few pages" | "current" | null;
   /** The article's round, or null when it carried forward. */
   architecture: ArchitectureOutcome | null;
 }
@@ -211,6 +215,7 @@ export async function updateWiki(
   const neighbours = featureNeighbours(plan.graph, manifest);
   const stored: Revision[] = [];
   const kept = [...carried];
+  const refused: { featureId: string; why: string }[] = [];
   let staleClaims = 0;
   for (const outcome of outcomes) {
     const assembled = assembleUpdate({
@@ -229,6 +234,7 @@ export async function updateWiki(
     if (assembled.revision === null) {
       if (assembled.why !== "nothing changed")
         log(`${outcome.featureId}: not updated: ${assembled.why}`);
+      refused.push({ featureId: outcome.featureId, why: assembled.why });
       kept.push(outcome.featureId);
       continue;
     }
@@ -308,7 +314,11 @@ export async function updateWiki(
     failures: failures.sort((a, b) =>
       a.featureId < b.featureId ? -1 : a.featureId > b.featureId ? 1 : 0,
     ),
+    refused: refused.sort((a, b) =>
+      a.featureId < b.featureId ? -1 : a.featureId > b.featureId ? 1 : 0,
+    ),
     articleDue: due,
+    architectureSkipped: articleSkipped(due, current.length),
     architecture,
   };
 }

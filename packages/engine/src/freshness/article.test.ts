@@ -8,7 +8,7 @@ import {
   makeRevision,
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { articleDue } from "./article.ts";
+import { articleDue, articleSkipped } from "./article.ts";
 
 const signals = makeRevision({ id: "signals-1", featureId: "signals" });
 const deliverables = makeRevision({ id: "deliverables-1", featureId: "deliverables" });
@@ -74,5 +74,15 @@ describe("articleDue", () => {
 
   it("keeps the stored article as it is when fewer than two pages are left", () => {
     expect(articleDue(article, [signals], manifest, revisionOf)).toBeNull();
+  });
+});
+
+describe("articleSkipped", () => {
+  it("tells too few pages from a current article, and is null when the article is due", () => {
+    expect(articleSkipped(null, 1)).toBe("too few pages");
+    expect(articleSkipped(null, 0)).toBe("too few pages");
+    expect(articleSkipped(null, 2)).toBe("current");
+    expect(articleSkipped("a lead changed", 2)).toBeNull();
+    expect(articleSkipped("no article", 5)).toBeNull();
   });
 });

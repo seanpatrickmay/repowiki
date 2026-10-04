@@ -93,7 +93,7 @@ export function estimateFor(
             }
           : null,
     },
-    models.write,
+    models,
     flags.batch,
   );
 }

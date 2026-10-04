@@ -1,5 +1,5 @@
 import { estimateTokens, markdownCodeSpan, type WikiUpdate } from "@repowiki/engine";
-import type { LedgerTotals } from "@repowiki/llm";
+import type { LedgerTotals, ModelConfig } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 import {
   ASSUMED_PAGE_OUTPUT_TOKENS,
@@ -89,39 +89,51 @@ export interface UpdateEstimateInput {
   article: { system: string; budgetTokens: number } | null;
 }
 
+/** The roles an update's calls run under: update, whole-page and article calls are `write`. */
+export type UpdateModels = Pick<ModelConfig, "tieBreak" | "manifest" | "write">;
+
 /**
  * An update's cost, stated before any call (owner directive), the way wiki:build states a
- * build's: every call's prefix and pack priced at the model's rates, halved when batched, with
- * assumed answer sizes. Pages the drift call's operations change are not known yet: they are
+ * build's: every call's prefix and pack priced at the rates of the model its role runs on
+ * (`tieBreak`, `manifest`, `write`), halved when batched, with assumed answer sizes. A role's
+ * model is priced only when a call of that role will be made. Pages the drift call's operations change are not known yet: they are
  * written whole at about a build page's cost each.
  */
 export function estimateUpdate(
   input: UpdateEstimateInput,
-  model: string,
+  models: UpdateModels,
   batch: boolean,
 ): UpdateEstimate {
   const updatePrefix = estimateTokens(input.updateSystem);
   const writePrefix = estimateTokens(input.writeSystem);
   const small = (input.disputed ? 1 : 0) + (input.drifted ? 1 : 0);
-  const inputTokens =
+  const writeIn =
     input.rewrites.reduce((n, p) => n + p.tokens + updatePrefix, 0) +
-    input.whole.reduce((n, p) => n + p.tokens + writePrefix, 0) +
-    small * ASSUMED_SMALL_CALL.input;
-  const outputTokens =
+    input.whole.reduce((n, p) => n + p.tokens + writePrefix, 0);
+  const writeOut =
     input.rewrites.length * ASSUMED_UPDATE_OUTPUT_TOKENS +
-    input.whole.length * ASSUMED_PAGE_OUTPUT_TOKENS +
-    small * ASSUMED_SMALL_CALL.output;
+    input.whole.length * ASSUMED_PAGE_OUTPUT_TOKENS;
+  const inputTokens = writeIn + small * ASSUMED_SMALL_CALL.input;
+  const outputTokens = writeOut + small * ASSUMED_SMALL_CALL.output;
+  const usd =
+    (writeIn > 0 || writeOut > 0 ? priced(models.write, writeIn, writeOut, batch) : 0) +
+    (input.disputed
+      ? priced(models.tieBreak, ASSUMED_SMALL_CALL.input, ASSUMED_SMALL_CALL.output, batch)
+      : 0) +
+    (input.drifted
+      ? priced(models.manifest, ASSUMED_SMALL_CALL.input, ASSUMED_SMALL_CALL.output, batch)
+      : 0);
   const article =
     input.article === null
       ? null
-      : estimateArchitecture(input.article.system, input.article.budgetTokens, model, batch);
+      : estimateArchitecture(input.article.system, input.article.budgetTokens, models.write, batch);
   return {
     rewrites: input.rewrites.length,
     whole: input.whole.length,
     small,
     inputTokens,
     outputTokens,
-    usd: priced(model, inputTokens, outputTokens, batch),
+    usd,
     articleUsd: article?.usd ?? null,
   };
 }
@@ -178,11 +190,16 @@ export function renderUpdateSummary(
     }),
     ...update.rewrites
       .filter((o) => !update.stored.some((r) => r.featureId === o.featureId))
-      .map((o) => `| ${cell(o.featureId)} | update | 0 | 0 | ${cell(o.failure ?? "unchanged")} |`),
+      .map((o) => {
+        const why = update.refused.find((r) => r.featureId === o.featureId)?.why;
+        const result =
+          o.failure ?? (why === undefined || why === "nothing changed" ? "unchanged" : why);
+        return `| ${cell(o.featureId)} | update | 0 | ${o.keptStale.length} | ${cell(result)} |`;
+      }),
     ...update.failures.map((f) => `| ${cell(f.featureId)} | whole | 0 | 0 | ${cell(f.failure)} |`),
     architectureRow({
       outcome: update.architecture,
-      skipped: update.architecture === null ? "current" : null,
+      skipped: update.architectureSkipped,
     }),
     "",
     ...costLines(totals, upFront, estimate !== null),
