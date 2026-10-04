@@ -184,11 +184,15 @@ describe("createRepoTools against hostile config and content", () => {
     rmSync(scratch, { recursive: true, force: true });
   });
   const withEnv = (env: Record<string, string>, fn: () => void) => {
+    const saved = Object.fromEntries(Object.keys(env).map((name) => [name, process.env[name]]));
     Object.assign(process.env, env);
     try {
       fn();
     } finally {
-      for (const name of Object.keys(env)) delete process.env[name];
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
   };
 
@@ -229,6 +233,66 @@ describe("createRepoTools against hostile config and content", () => {
     });
   });
 
+  it("ignores config set through the environment, which the grep flags alone would not undo", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write(".gitattributes", "*.md diff=foo\n");
+      repo.write("docs/a.md", "hello secret\n");
+      repo.write("notes/b.txt", "hello note\n");
+      const at = repo.commit("init");
+      const found = "2 matching lines:\ndocs/a.md:1: hello secret\nnotes/b.txt:1: hello note\n";
+      withEnv({ GIT_CONFIG_PARAMETERS: "'diff.foo.binary=true'" }, () => {
+        expect(createRepoTools(repo.dir, at).run("grep", { pattern: "hello" }).text).toBe(found);
+      });
+      const env = {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "diff.foo.binary",
+        GIT_CONFIG_VALUE_0: "true",
+      };
+      withEnv(env, () => {
+        expect(createRepoTools(repo.dir, at).run("grep", { pattern: "hello" }).text).toBe(found);
+      });
+      // A core.attributesFile outside the commit does not decide what is binary either.
+      writeFileSync(join(scratch, "attributes"), "*.txt binary\n");
+      repo.git("config", "core.attributesFile", join(scratch, "attributes"));
+      expect(createRepoTools(repo.dir, at).run("grep", { pattern: "hello" }).text).toBe(found);
+    } finally {
+      repo.remove();
+    }
+  });
+
+  it("counts the matches past the cap by line, though a matching line holds a NUL", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write("data.txt", `${"x\n".repeat(4001)}${"hit\0tail\n".repeat(150)}`);
+      const text = createRepoTools(repo.dir, repo.commit("init")).run("grep", {
+        pattern: "^hit",
+      }).text;
+      expect(text.split("\n")[0]).toBe("150 matching lines:");
+      expect(text).toContain("\u2026 and 50 more matches; narrow the pattern or the path");
+    } finally {
+      repo.remove();
+    }
+  });
+
+  it("reads the whole repository when given a directory inside it", () => {
+    const tools = createRepoTools(join(sample.repo.dir, "src"), sample.sha);
+    expect(tools.run("grep", { pattern: "def ingest_chunk" }).text).toMatch(
+      /^1 matching line:\nsrc\/signals\/ingest\.py:\d+: def ingest_chunk/,
+    );
+    expect(tools.run("read_file", { path: "README.md" }).isError).toBe(false);
+  });
+
+  it("takes a pattern or a path that looks like an option or pathspec magic as text", () => {
+    const tools = createRepoTools(hostile.dir, sha);
+    expect(tools.run("grep", { pattern: "-n" }).text).toBe("No matches.\n");
+    expect(tools.run("grep", { pattern: "hello", path: ":(top)" }).text).toBe("No matches.\n");
+    expect(tools.run("list_files", { path: "sm" })).toEqual({
+      text: 'no files under "sm"',
+      isError: true,
+    });
+  });
+
   it("ignores an uncommitted .gitattributes when deciding what is binary", () => {
     hostile.write(".gitattributes", "*.md binary\n");
     try {
@@ -250,6 +314,20 @@ describe("createRepoTools against hostile config and content", () => {
     expect(lines.at(-2)).toBe(
       "… lines 6-10 not shown; call read_file with start_line 6 to read on",
     );
+  });
+
+  it("never splits an astral character where it cuts a line", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write("src/astral.txt", `${"w".repeat(1998)}\u{1F680}tail\n`);
+      const text = createRepoTools(repo.dir, repo.commit("init")).run("read_file", {
+        path: "src/astral.txt",
+      }).text;
+      expect(text.isWellFormed()).toBe(true);
+      expect(text).toContain(`1\t${"w".repeat(1998)}\u{1F680}\u2026\n`);
+    } finally {
+      repo.remove();
+    }
   });
 
   it("refuses to read a blob over 2 MB, by its size from the tree", () => {

@@ -8,7 +8,7 @@ import type { JudgeVerdict } from "./judge.ts";
 import { loadQuestions, selectQuestions } from "./questions.ts";
 import { EvalRunError, RESULTS_FILE, RUN_INFO_FILE, type RunInfo, readRecords } from "./records.ts";
 import { createRepoTools } from "./repo-tools.ts";
-import { type EvalRunOptions, runEval, UnpricedModelError } from "./run.ts";
+import { type EvalRunOptions, MAX_DIRECT_JUDGE_CALLS, runEval, UnpricedModelError } from "./run.ts";
 import { scriptedToolProvider } from "./test-provider.ts";
 import { type SampleWiki, SMOKE_QUESTIONS, sampleWiki } from "./test-wiki.ts";
 import { createWikiTools } from "./wiki-tools.ts";
@@ -174,6 +174,57 @@ describe("runEval", () => {
     const result = await runEval(options({ judge: grading.provider }));
     // Six agent answers, three graded judgments, and three failed ones of two attempts each.
     expect(result.spentUsd).toBeCloseTo(6 * 0.0015 + 3 * 0.0005 + 3 * 0.001, 10);
+    // What the failed judgments spent is recorded, so the report's cost line counts it too.
+    const failures = readRecords(dir).filter((r) => r.kind === "judge-failure");
+    expect(failures.map((r) => r.agent)).toEqual(["repo", "repo", "repo"]);
+    expect(failures[0]).toMatchObject({
+      questionId: "smoke-where",
+      reason: "the judge's answer for smoke-where was unusable twice",
+      usage: { in: 1000, out: 200, cacheRead: 0, cacheWrite: 0 },
+      usd: 0.001,
+      batch: true,
+    });
+    // A rerun judges those answers again: a failure is not a judgment.
+    const rerun = await runEval(options());
+    expect(rerun.unjudged).toBe(0);
+    expect(rerun.records.filter((r) => r.kind === "judgment")).toHaveLength(6);
+  });
+
+  it("sends at most four judge calls at a time with --no-batch", async () => {
+    let open = 0;
+    let most = 0;
+    const provider: Provider = {
+      async generate<T>(request: GenerateRequest<T>) {
+        open++;
+        most = Math.max(most, open);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        open--;
+        return {
+          output: request.schema.parse(VERDICT),
+          usage: { in: 500, out: 100, cacheRead: 0, cacheWrite: 0 },
+          model: "claude-haiku-4-5-20251001",
+        };
+      },
+    };
+    const result = await runEval(options({ judge: provider, batchJudge: false }));
+    expect(result.records.filter((r) => r.kind === "judgment")).toHaveLength(6);
+    expect(most).toBe(MAX_DIRECT_JUDGE_CALLS);
+    expect(MAX_DIRECT_JUDGE_CALLS).toBe(4);
+  });
+
+  it("refuses to go on when a recorded call's model still has no price", async () => {
+    await runEval(options());
+    const lines = readFileSync(join(dir, RESULTS_FILE), "utf8").trimEnd().split("\n");
+    const first = { ...JSON.parse(lines[0] ?? ""), usd: null, model: "claude-unknown-9" };
+    writeFileSync(
+      join(dir, RESULTS_FILE),
+      `${[JSON.stringify(first), ...lines.slice(1, 2)].join("\n")}\n`,
+    );
+    const agents = scriptedToolProvider([]);
+    await expect(runEval(options({ agents: agents.provider }))).rejects.toThrow(
+      new UnpricedModelError("claude-unknown-9"),
+    );
+    expect(agents.requests).toHaveLength(0);
   });
 
   it("records the answer of an agent that finished when the other one fails, and a rerun asks only the failed agent", async () => {

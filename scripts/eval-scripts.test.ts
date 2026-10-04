@@ -81,6 +81,17 @@ describe("eval-run.ts as a process (no network)", () => {
     expect(existsSync(join(out, "eval"))).toBe(false);
   });
 
+  it("says on a dry run when the export records no build run, so the break-even would be unknown", () => {
+    writeFileSync(join(out, "export.json"), JSON.stringify({ ...sample.wiki, runs: [] }));
+    const result = evalRun("--questions", smoke, "--set", "smoke", "--dry-run");
+    expect(result.status).toBe(0);
+    const lines = result.stderr.trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe(
+      "export.json records no build run, so the report cannot state a break-even; re-run pnpm wiki:export to include build tokens first",
+    );
+  });
+
   it("names the pnpm command and --env-file when the key is missing, after the estimate", () => {
     const result = evalRun("--questions", smoke, "--set", "smoke");
     expect(result.status).toBe(1);
@@ -105,6 +116,27 @@ describe("eval-run.ts as a process (no network)", () => {
     } finally {
       rmSync(inside);
     }
+  });
+
+  it("refuses a --run-dir inside the documented repository before the estimate", () => {
+    const inside = join(sample.repo.dir, "eval-run");
+    const result = evalRun("--questions", smoke, "--set", "smoke", "--run-dir", inside);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe(
+      "refusing to write inside the documented repository; choose a --run-dir path elsewhere\n",
+    );
+    expect(existsSync(inside)).toBe(false);
+  });
+
+  it("keeps every set but held-out out of the held-out set's directory", () => {
+    const file = exitFile();
+    const heldOut = join(out, "eval", "held-out");
+    const result = evalRun("--questions", file, "--set", "dev", "--run-dir", heldOut, "--dry-run");
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe(
+      `${heldOut} is the held-out set's run directory; choose another --run-dir for the dev set\n`,
+    );
+    expect(existsSync(join(out, "eval"))).toBe(false);
   });
 
   it("never runs the smoke file as an eval set, nor a file about another repository", () => {

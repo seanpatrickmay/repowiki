@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type AnswerRecord,
   appendRecord,
+  checkRecords,
+  createOnce,
   EvalRunError,
   openRun,
   RESULTS_FILE,
@@ -67,8 +69,22 @@ describe("openRun", () => {
   });
 
   it("leaves only run.json in the directory, with no temporary file", () => {
+    writeFileSync(join(dir, `${RUN_INFO_FILE}.12345.tmp`), "{");
+    writeFileSync(join(dir, "notes.123.tmp"), "the owner's own file");
     openRun(dir, info);
-    expect(readdirSync(dir)).toEqual([RUN_INFO_FILE]);
+    expect(readdirSync(dir).sort()).toEqual(["notes.123.tmp", RUN_INFO_FILE]);
+  });
+
+  it("creates a file once, also where the file system has no hard links", () => {
+    const path = join(dir, "once.json");
+    const noLinks = () => {
+      throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+    };
+    expect(createOnce(path, "first\n", noLinks)).toBe(true);
+    expect(createOnce(path, "second\n", noLinks)).toBe(false);
+    expect(createOnce(path, "third\n")).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe("first\n");
+    expect(readdirSync(dir)).toEqual(["once.json"]);
   });
 
   it.each([
@@ -76,6 +92,8 @@ describe("openRun", () => {
     ["head", { head: "b".repeat(40) }],
     ["turnLimit", { turnLimit: 5 }],
     ["set", { set: "dev" as const }],
+    ["questionsHash", { questionsHash: "0".repeat(64) }],
+    ["repo", { repo: "other" }],
   ])("refuses to resume a run whose %s differs", (field, change) => {
     openRun(dir, info);
     expect(() => openRun(dir, { ...info, ...change })).toThrow(
@@ -88,9 +106,45 @@ describe("openRun", () => {
     expect(() => openRun(dir, { ...info, models: { ...info.models, evalJudge: "x" } })).toThrow(
       /its models differ/,
     );
+    expect(() => openRun(dir, { ...info, models: { ...info.models, evalAgent: "x" } })).toThrow(
+      /its models differ/,
+    );
     writeFileSync(join(dir, RUN_INFO_FILE), "{");
     expect(() => readRunInfo(dir)).toThrow(
       new EvalRunError(`cannot read ${join(dir, RUN_INFO_FILE)}`),
+    );
+  });
+});
+
+describe("checkRecords", () => {
+  const judgment = {
+    kind: "judgment" as const,
+    questionId: "smoke-where",
+    agent: "wiki" as const,
+    score: 1 as const,
+    verdict: null,
+    reason: "r",
+    usage: { in: 1, out: 1, cacheRead: 0, cacheWrite: 0 },
+    usd: 0,
+    model: "m",
+    batch: true,
+    at: "2026-10-04T12:02:00.000Z",
+  };
+
+  it("accepts a run's records, and refuses an unknown question or a second answer or judgment", () => {
+    expect(() => checkRecords(dir, info, [answer, judgment])).not.toThrow();
+    expect(() => checkRecords(dir, info, [{ ...answer, questionId: "q9" }])).toThrow(
+      new EvalRunError(
+        `${join(dir, RESULTS_FILE)} holds a record of "q9", which is not one of this run's questions`,
+      ),
+    );
+    expect(() => checkRecords(dir, info, [answer, answer])).toThrow(
+      new EvalRunError(`${join(dir, RESULTS_FILE)} holds a second answer of "smoke-where" (wiki)`),
+    );
+    expect(() => checkRecords(dir, info, [answer, judgment, judgment])).toThrow(
+      new EvalRunError(
+        `${join(dir, RESULTS_FILE)} holds a second judgment of "smoke-where" (wiki)`,
+      ),
     );
   });
 });

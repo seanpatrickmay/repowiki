@@ -53,10 +53,12 @@ export function llmsTxtLine(text: string, max: number): string {
  * A line of llms.txt that sits after a block prefix (`> `), with a leading block marker escaped so
  * the text cannot become a heading, list item or rule there: `#`, `-`, `+`, `*` or `12.` / `12)`
  * followed by a space or nothing, and a line that is only a run of `-`, `*` or `_`. Emphasis
- * (`**bold**`) and `#tag` are not markers and stay as they are. A leading `>` is already escaped.
+ * (`**bold**`) and `#tag` are not markers and stay as they are. A leading `>` is already escaped,
+ * and so is a backtick fence; a tilde fence (`~~~`) is escaped here.
  */
 function noBlockMarker(line: string): string {
   return line
+    .replace(/^(?=~{3})/, "\\")
     .replace(/^(#{1,6}|[-+*])(?=\s|$)/, "\\$1")
     .replace(/^(\d{1,9})([.)])(?=\s|$)/, "$1\\$2")
     .replace(/^(?=([-*_])(?:\s*\1){2,}$)/, "\\");

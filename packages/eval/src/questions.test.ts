@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,6 +74,23 @@ describe("loadQuestions", () => {
       "a smoke question",
       (q: Record<string, unknown>[]) => Object.assign(q[4] ?? {}, { set: "smoke" }),
     ],
+    [
+      "a zero-width space",
+      (q: Record<string, unknown>[]) => Object.assign(q[5] ?? {}, { question: "Where\u200B?" }),
+    ],
+    [
+      "a tag character in a reference",
+      (q: Record<string, unknown>[]) =>
+        Object.assign(q[6] ?? {}, { reference: "PLACEHOLDER-REFERENCE\u{E0041}" }),
+    ],
+    [
+      "a held-out question that repeats a dev one",
+      (q: Record<string, unknown>[]) =>
+        Object.assign(q[25] ?? {}, {
+          question: " placeholder QUESTION 1 about the  sample fixture? ",
+        }),
+    ],
+    ["a 21/9 split", (q: Record<string, unknown>[]) => Object.assign(q[29] ?? {}, { set: "dev" })],
   ])("refuses %s, naming paths but never a reference answer", (_name, edit) => {
     const path = write(exitFile(edit));
     expect(() => loadQuestions(path)).toThrow(QuestionFileError);
@@ -85,9 +103,44 @@ describe("loadQuestions", () => {
     expect(loadQuestions(path).file.questions[0]?.reference).toBe("One.\nTwo.");
   });
 
-  it("refuses a file it cannot read or parse", () => {
+  it("refuses a file it cannot read or parse, in words that tell the two apart", () => {
     expect(() => loadQuestions(join(dir, "missing.json"))).toThrow(/^cannot read question file /);
-    expect(() => loadQuestions(write("{"))).toThrow(QuestionFileError);
+    expect(() => loadQuestions(dir)).toThrow(`cannot read question file ${dir}: not a file`);
+    const bad = write('{"HELDOUT ANSWER text": 1,');
+    expect(() => loadQuestions(bad)).toThrow(
+      new QuestionFileError(`question file ${bad} is not JSON`),
+    );
+    try {
+      loadQuestions(bad);
+    } catch (error) {
+      // No cause: JSON.parse's message quotes the file's text.
+      expect((error as Error).cause).toBeUndefined();
+    }
+    const big = write(" ".repeat(1024 * 1024 + 1));
+    expect(() => loadQuestions(big)).toThrow(`question file ${big} is over the 1 MiB limit`);
+  });
+
+  it("names an unknown key only as a short printable quote", () => {
+    const path = write({ ...exitFile(), [`\u001b[31m${"k".repeat(200)}`]: 1 });
+    const message = (() => {
+      try {
+        loadQuestions(path);
+        return "";
+      } catch (error) {
+        return (error as Error).message;
+      }
+    })();
+    expect(message).toContain('unrecognized key "\uFFFD[31mkkk');
+    expect(message).not.toContain("\u001b");
+    expect(message.length).toBeLessThan(path.length + 150);
+  });
+
+  it("refuses a repo name that is not one, and hashes the file's exact bytes", () => {
+    for (const repo of ["../../etc", "a\nb", "x".repeat(101), ""]) {
+      expect(() => loadQuestions(write({ ...exitFile(), repo })), repo).toThrow(/repo: /);
+    }
+    const text = JSON.stringify(exitFile());
+    expect(loadQuestions(write(text)).hash).toBe(createHash("sha256").update(text).digest("hex"));
   });
 });
 

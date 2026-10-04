@@ -7,6 +7,7 @@ import {
   AGENTS,
   type AnswerRecord,
   appendRecord,
+  checkRecords,
   EvalRunError,
   openRun,
   type RunInfo,
@@ -54,14 +55,39 @@ const requirePrice = (model: string) => {
   if (priceFor(model) === null) throw new UnpricedModelError(model);
 };
 
+/** With --no-batch, the most judge calls in flight at once, so a low rate limit is not flooded. */
+export const MAX_DIRECT_JUDGE_CALLS = 4;
+
+/** Runs `tasks` with at most `limit` in flight, and settles them all, in order. */
+async function settleAll<T>(
+  tasks: readonly (() => Promise<T>)[],
+  limit: number,
+): Promise<PromiseSettledResult<T>[]> {
+  const settled: PromiseSettledResult<T>[] = new Array(tasks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const i = next++;
+      try {
+        settled[i] = { status: "fulfilled", value: await (tasks[i] as () => Promise<T>)() };
+      } catch (reason) {
+        settled[i] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return settled;
+}
+
 const key = (r: { questionId: string; agent: AgentKind }) => `${r.questionId}\0${r.agent}`;
 
 /**
  * Runs a set (spec §9): each question to both agents (side by side, the same model and turn
  * limit), each answer recorded as soon as it exists, then every unjudged answer judged, the
- * judge calls together so they can go as one batch. A rerun with the same run directory resumes:
- * it asks only questions an agent has not answered and judges only unjudged answers, so no
- * question of a held-out set is asked twice.
+ * judge calls together so they can go as one batch (with --no-batch, at most
+ * MAX_DIRECT_JUDGE_CALLS at a time). A rerun with the same run directory resumes: it asks only
+ * questions an agent has not answered and judges only unjudged answers, so no question of a
+ * held-out set is asked twice. A judgment that fails is recorded with what it cost.
  */
 export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   const { runDir, wikiTools, repoTools, agents, judge } = options;
@@ -69,6 +95,7 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   const log = options.log ?? (() => {});
   const info = openRun(runDir, options.info);
   const records = readRecords(runDir);
+  checkRecords(runDir, info, records);
   const append = (record: RunRecord) => {
     appendRecord(runDir, record);
     records.push(record);
@@ -82,7 +109,11 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
     const judged = new Set(records.flatMap((r) => (r.kind === "judgment" ? [key(r)] : [])));
     return records.flatMap((r) => (r.kind === "answer" && !judged.has(key(r)) ? [r] : []));
   };
-  // Refuse an unpriced model before the first paid call, so no spend ever goes uncounted.
+  // Refuse an unpriced model before the first paid call, so no spend ever goes uncounted: the one
+  // a recorded call reported too, so an unpriced stop holds on a rerun until the model has a price.
+  for (const r of records) {
+    if (r.usd === null) requirePrice(r.model ?? info.models.evalAgent);
+  }
   if (unaskedQuestions()) requirePrice(info.models.evalAgent);
   if (unaskedQuestions() || unjudgedAnswers().length > 0) requirePrice(info.models.evalJudge);
   let spent = 0;
@@ -138,11 +169,20 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   const questions = new Map(info.questions.map((q) => [q.id, q]));
   const unjudged = unjudgedAnswers();
   if (unjudged.length > 0)
-    log(`judging ${unjudged.length} answers${options.batchJudge ? " in one batch" : ""}`);
-  const settled = await Promise.allSettled(
-    unjudged.map((r) =>
-      judgeAnswer(judge, questions.get(r.questionId) as EvalQuestion, r.answer, options.batchJudge),
+    log(
+      `judging ${unjudged.length} answer${unjudged.length === 1 ? "" : "s"}${options.batchJudge ? " in one batch" : ""}`,
+    );
+  const settled = await settleAll(
+    unjudged.map(
+      (r) => () =>
+        judgeAnswer(
+          judge,
+          questions.get(r.questionId) as EvalQuestion,
+          r.answer,
+          options.batchJudge,
+        ),
     ),
+    options.batchJudge ? unjudged.length : MAX_DIRECT_JUDGE_CALLS,
   );
   let failed = 0;
   let firstError: unknown = null;
@@ -151,10 +191,21 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
     if (outcome.status === "rejected") {
       failed++;
       if (outcome.reason instanceof JudgeError) {
-        // The unusable attempts were paid for, though no judgment is recorded.
+        // The unusable attempts were paid for, though no judgment is recorded: record the cost.
         const cost = callCostUsd(info.models.evalJudge, outcome.reason.usage, options.batchJudge);
         if (cost === null) firstError ??= new UnpricedModelError(info.models.evalJudge);
         else spent += cost;
+        append({
+          kind: "judge-failure",
+          questionId: r.questionId,
+          agent: r.agent,
+          reason: outcome.reason.message,
+          usage: outcome.reason.usage,
+          usd: cost,
+          model: info.models.evalJudge,
+          batch: options.batchJudge,
+          at: now().toISOString(),
+        });
         log(`${r.questionId} (${r.agent}): ${outcome.reason.message}; a rerun judges it`);
       } else firstError ??= outcome.reason;
       return;

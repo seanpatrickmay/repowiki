@@ -43,7 +43,7 @@ describe("site build", () => {
     expect(site.read("llms.txt")).toContain("- [JSON export](export.json): ");
     expect(JSON.parse(site.read("export.json"))).toEqual(JSON.parse(JSON.stringify(wiki)));
     for (const line of site.read("llms.txt").split("\n")) {
-      const page = /\]\((wiki\/[^)]+)\)/.exec(line)?.[1];
+      const page = /\]\(((?:wiki|special)\/[^)]+)\)/.exec(line)?.[1];
       if (page !== undefined) expect(existsSync(join(site.outDir, page, "index.html"))).toBe(true);
     }
   });

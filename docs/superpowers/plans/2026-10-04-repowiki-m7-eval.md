@@ -128,7 +128,7 @@ Prices from `packages/llm/src/pricing.ts`; real tokens at about 3.6 characters a
 - **A dev run (20 questions × 2 agents + 40 judgments): about $1.2-1.5** with the cache, about $2.6 without. The CLI's up-front estimate for 20 questions of the smoke set's length is about $2.40 for the agents plus $0.08 for judging (upper-side: 2.5 characters a token, no cache). The ceiling, every question taking all 15 turns with full 12,000-character results and no cache, is about $28; `--max-usd` (default $5) stops a run long before that.
 - **The held-out run (10 questions × 2 agents + 20 judgments): about $0.6-0.8**, about $1.3 without the cache; the CLI estimates about $1.20 plus $0.04; ceiling about $14.
 - **Task 21's recordings: about $0.06.** The smoke run on the 4-file fixture (3 questions × 2 agents, turn limit 8, 6 unbatched judge calls) costs about $0.03-0.06 (the CLI's upper-side estimate for it is at most $0.38); the judge cassette's 3 calls about $0.005. No other task makes a live call.
-- **The owner's exit-criteria runs** (Task 22): one dev run or several (about $1.5 each), then the held-out run once (about $0.8).
+- **The owner's exit-criteria runs** (Task 22): one dev run or several, then the held-out run once; each costs the estimate eval:run prints (about $2.4 dev, $1.2 held-out).
 
 ---
 
@@ -8168,9 +8168,9 @@ Exactly 30 questions: 20 with `"set": "dev"` and 10 with `"set": "held-out"`; `k
 
 **3. Check the file, free.** `pnpm eval:run ../next-chief-of-staff --questions ~/.repowiki/next-chief-of-staff/eval/questions.json --set dev --dry-run` prints the estimate, or names each schema problem by its path (never the text).
 
-**4. Run the dev set (about $1.5, 20-40 minutes).** The same command without `--dry-run`. It writes `~/.repowiki/next-chief-of-staff/eval/dev-<time>/report.md`. Dev runs can repeat, each in its own directory; a killed one resumes with `--run-dir <that directory>`. `--max-usd` (default $5) stops a run between questions; rerun to go on. Read the dev reports as often as you like; the held-out questions stay unasked.
+**4. Run the dev set (the estimate eval:run prints, about $2.4; 20-40 minutes).** The same command without `--dry-run`. It writes `~/.repowiki/next-chief-of-staff/eval/dev-<time>/report.md`. Dev runs can repeat, each in its own directory; a killed one resumes with `--run-dir <that directory>`. `--max-usd` (default $5) stops a run between questions; rerun to go on. Read the dev reports as often as you like; the held-out questions stay unasked.
 
-**5. Run the held-out set once, at v1 sign-off (about $0.8).** `--set held-out` instead of `--set dev`. It runs in `~/.repowiki/next-chief-of-staff/eval/held-out/`; if it stops, the same command resumes without asking any question twice; once complete, it refuses to run again, and it refuses a changed question file, wiki, turn limit or model.
+**5. Run the held-out set once, at v1 sign-off (the estimate eval:run prints, about $1.2).** `--set held-out` instead of `--set dev`. It runs in `~/.repowiki/next-chief-of-staff/eval/held-out/`; if it stops, the same command resumes without asking any question twice; once complete, it refuses to run again, and it refuses a changed question file, wiki, turn limit or model.
 
 **6. Spot-check 10 judgments.** Open `eval/held-out/spot-check.json`, read each answer against its reference, and set `"owner"` to 1 or 0. Then `pnpm eval:report ~/.repowiki/next-chief-of-staff/eval/held-out` rewrites `report.md` with your agreement count.
 
@@ -8180,7 +8180,7 @@ Exactly 30 questions: 20 with `"set": "dev"` and 10 with `"set": "held-out"`; `k
 
 **9. Rabbit-hole test (criterion 3, no cost).** `pnpm site:build --export ~/.repowiki/next-chief-of-staff` then `pnpm site:preview --out ~/.repowiki/next-chief-of-staff/site`; three sessions, each from Random article and at least five hops, each recorded with the "Rabbit-hole session" issue template.
 
-**Cost in all:** about $1.5 for each dev run and about $0.8 for the held-out run; the review and the sessions make no call.
+**Cost in all:** the estimate eval:run prints (about $2.4 dev, $1.2 held-out); the review and the sessions make no call.
 ````
 
 ```bash

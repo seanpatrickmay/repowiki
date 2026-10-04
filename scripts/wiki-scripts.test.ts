@@ -1271,19 +1271,48 @@ describe("wiki-export.ts as a process (no network)", () => {
       /^# repo wiki\n[\s\S]*- \[Signal ingestion\]\(wiki\/signals\/\): /,
     );
     expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    // Flags in any order, and --verbose.
+    const again = run("scripts/wiki-export.ts", "--verbose", "--out", out, repo);
+    expect(again.status).toBe(0);
   });
 
-  it("is a usage error, exit 2, for missing or extra arguments", () => {
+  it("is a usage error, exit 2, for missing, extra, empty or repeated arguments", () => {
     for (const args of [
       [],
       ["repo", "--out"],
       ["repo", "--outdir", "x"],
       ["a", "--out", "o", "b"],
+      ["repo", "--out", ""],
+      ["repo", "--out", "a", "--out", "b"],
     ]) {
       const result = run("scripts/wiki-export.ts", ...args);
-      expect(result.status).toBe(2);
-      expect(result.stderr).toBe("usage: pnpm wiki:export <repo-path> [--out dir]\n");
+      expect(result.status, args.join(" ")).toBe(2);
+      expect(result.stderr).toMatch(
+        /(^|; )usage: pnpm wiki:export <repo-path> \[--out dir\] \[--verbose\]\n$/,
+      );
     }
+  });
+
+  it("refuses while another run holds the lock, and a store with nothing to export", () => {
+    const { repo } = gitRepo();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    openStore(join(out, "wiki.db")).close();
+    writeFileSync(join(out, BUILD_LOCK), "pid 1 since 2026-10-01T00:00:00.000Z\n");
+    const held = run("scripts/wiki-export.ts", repo, "--out", out);
+    expect(held.status).toBe(1);
+    expect(held.stderr).toBe(
+      `another wiki:build, wiki:update or wiki:replay is running on ${out} (${join(out, BUILD_LOCK)}); if none is, delete the lock file\n`,
+    );
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(true);
+    rmSync(join(out, BUILD_LOCK));
+    const empty = run("scripts/wiki-export.ts", repo, "--out", out);
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toBe(
+      "nothing to export: the store has no head sha or manifest yet; run pnpm wiki:build first\n",
+    );
+    expect(existsSync(join(out, "export.json"))).toBe(false);
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
   });
 
   it("refuses an out dir inside the repository, and a store with no wiki", () => {

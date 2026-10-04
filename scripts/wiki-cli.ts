@@ -48,8 +48,20 @@ export interface WikiArgs {
 const flagError = (flag: string, problem: string, usage: string): CliError =>
   new CliError(`${flag} ${problem}; ${usage}`);
 
+/**
+ * The usage error for an argument parseArgs refused. node's message quotes the whole argument,
+ * `--flag=secret` included: only the flag is kept, cut short and printable.
+ */
+export function badOption(err: unknown, usage: string): CliError {
+  const flag = /'(-[^'=\s]*)/.exec((err as Error).message)?.[1];
+  const shown = flag?.slice(0, MAX_ECHOED_FLAG).replace(/[^\x21-\x7e]/g, "?");
+  return new CliError(`${shown === undefined ? "bad option" : `bad option ${shown}`}; ${usage}`, {
+    cause: err,
+  });
+}
+
 /** The one value of a flag given at most once; an empty or repeated one is a usage error. */
-function once<T extends string | boolean>(
+export function once<T extends string | boolean>(
   flag: string,
   values: T[] | undefined,
   usage: string,
@@ -101,12 +113,7 @@ export function parseRunArgs(
   try {
     parsed = parse(argv, limit);
   } catch (err) {
-    // node's message quotes the whole argument, `--flag=secret` included: keep the flag, cut short
-    const flag = /'(-[^'=\s]*)/.exec((err as Error).message)?.[1];
-    const shown = flag?.slice(0, MAX_ECHOED_FLAG).replace(/[^\x21-\x7e]/g, "?");
-    throw new CliError(`${shown === undefined ? "bad option" : `bad option ${shown}`}; ${usage}`, {
-      cause: err,
-    });
+    throw badOption(err, usage);
   }
   const v = parsed.values;
   return {
@@ -122,6 +129,41 @@ export function parseRunArgs(
     },
     limit: positive("--limit", once("--limit", v.limit as string[] | undefined, usage), usage),
   };
+}
+
+export const EXPORT_USAGE = "usage: pnpm wiki:export <repo-path> [--out dir] [--verbose]";
+
+/** wiki:export's `<repo> [--out dir] [--verbose]`, flags in any order; a CliError otherwise. */
+export function parseExportArgs(argv: readonly string[]): {
+  repo: string;
+  out: string | null;
+  verbose: boolean;
+} {
+  let parsed: ReturnType<typeof parseExport>;
+  try {
+    parsed = parseExport(argv);
+  } catch (err) {
+    throw badOption(err, EXPORT_USAGE);
+  }
+  const [repo, ...extra] = parsed.positionals;
+  if (repo === undefined || extra.length > 0) throw new CliError(EXPORT_USAGE);
+  if (repo === "") throw new CliError(`<repo-path> must not be empty; ${EXPORT_USAGE}`);
+  return {
+    repo,
+    out: once("--out", parsed.values.out, EXPORT_USAGE) ?? null,
+    verbose: once("--verbose", parsed.values.verbose, EXPORT_USAGE) ?? false,
+  };
+}
+
+function parseExport(argv: readonly string[]) {
+  return parseArgs({
+    args: [...argv],
+    allowPositionals: true,
+    options: {
+      out: { type: "string", multiple: true },
+      verbose: { type: "boolean", multiple: true },
+    },
+  });
 }
 
 /** `<repo> [rev]` plus flags in any order; throws a CliError for any other usage. */

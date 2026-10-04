@@ -33,6 +33,20 @@ const request = {
 };
 
 describe("createClaudeProvider", () => {
+  it("sends the system and every message well formed: a lone surrogate becomes U+FFFD", async () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    const { provider } = setup(fetch);
+    await provider.generate({
+      ...request,
+      system: "sys \uD83D",
+      messages: [{ role: "user", content: "user \uDE80 turn" }],
+    });
+    expect(bodies[0]).toMatchObject({
+      system: [{ type: "text", text: "sys \uFFFD" }],
+      messages: [{ role: "user", content: "user \uFFFD turn" }],
+    });
+  });
+
   it("sends a temperature only when the request gives one", async () => {
     const { bodies, fetch } = cannedMessagesApi(PARIS);
     const { provider } = setup(fetch);

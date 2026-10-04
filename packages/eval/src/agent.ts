@@ -5,7 +5,7 @@ import {
   type ToolResultBlock,
   type TurnMessage,
 } from "@repowiki/llm";
-import { questionTurn } from "./prompts.ts";
+import { LAST_TURN_NOTE, questionTurn } from "./prompts.ts";
 import type { ToolSet } from "./tools.ts";
 
 /** The output cap of one agent turn: a tool call, or an answer of ANSWER_WORDS words. */
@@ -38,7 +38,7 @@ export interface AgentAnswer {
   usage: TokenUsage;
   /** The cost of every turn at its model's price, or null when a model has no price. */
   usd: number | null;
-  /** The model id the API reported, or null when no turn answered. */
+  /** The model id the API reported for the last turn (a run always takes at least one turn). */
   model: string | null;
 }
 
@@ -57,13 +57,21 @@ const sum = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
   cacheWrite: a.cacheWrite + b.cacheWrite,
 });
 
+/** The conversation with LAST_TURN_NOTE after the last user turn's blocks (a copy). */
+function withLastTurnNote(messages: readonly TurnMessage[]): TurnMessage[] {
+  const final = messages.at(-1) as TurnMessage;
+  const note = { type: "text" as const, text: LAST_TURN_NOTE };
+  return [...messages.slice(0, -1), { role: final.role, content: [...final.content, note] }];
+}
+
 /**
  * Runs one agent on one question: a tool-use loop of at most `turnLimit` model turns, each with
  * at most one tool call. The last turn forbids tools, so every run ends with an answer. Each
  * turn but the last puts a cache breakpoint at the end of the conversation, so the next turn
  * reads what came before from the cache once it passes the model's minimum. The last turn sets
  * no breakpoint: changing tool_choice invalidates the message cache, so a write there would
- * cost something no later turn reads.
+ * cost something no later turn reads. The last turn also ends with LAST_TURN_NOTE, telling the
+ * agent to answer now.
  */
 export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
   const { provider, system, tools, turnLimit } = options;
@@ -81,7 +89,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
       purpose: "evalAgent",
       system,
       tools: tools.definitions,
-      messages,
+      messages: last ? withLastTurnNote(messages) : messages,
       maxTokens: MAX_TURN_OUTPUT_TOKENS,
       toolChoice: last ? "none" : "auto",
       cache: !last,
@@ -97,17 +105,21 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
       .join("")
       .trim();
     if (result.stopReason === "max_tokens" || uses.length === 0 || last) {
+      // A last turn that ended normally is "turn-limit"; a refusal there keeps its own label. A
+      // model that called a tool anyway on the last turn answered with its text: no tool runs.
       const stop: AgentStop =
         result.stopReason === "max_tokens"
           ? "max-tokens"
-          : last
-            ? "turn-limit"
-            : result.stopReason === "end_turn"
-              ? "answered"
-              : "other";
+          : result.stopReason === "end_turn" || (last && result.stopReason === "tool_use")
+            ? last
+              ? "turn-limit"
+              : "answered"
+            : "other";
       return { answer: text, stop, turns: turn, calls, usage, usd, model };
     }
-    messages.push({ role: "assistant", content: result.content });
+    // The API refuses a whitespace-only text block, which a model may write before a tool call.
+    const echoed = result.content.filter((b) => b.type !== "text" || b.text.trim() !== "");
+    messages.push({ role: "assistant", content: echoed });
     const results = uses.map((use, i): ToolResultBlock => {
       if (i > 0) {
         const content = "Not run: call one tool per turn.";

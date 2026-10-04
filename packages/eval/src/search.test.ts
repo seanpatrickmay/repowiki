@@ -44,5 +44,8 @@ describe("searchIndex", () => {
     expect(index.search("how is the", 8)).toEqual([]);
     expect(index.search("kubernetes", 8)).toEqual([]);
     expect(searchIndex([]).search("signals", 8)).toEqual([]);
+    expect(index.search("signals", 0)).toEqual([]);
+    expect(index.search("signals", -1)).toEqual([]);
+    expect(index.search("signals", 1.5)).toEqual(["signals"]);
   });
 });

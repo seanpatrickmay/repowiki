@@ -20,7 +20,14 @@ export {
   reachableCommits,
   replaySteps,
 } from "./diff.ts";
-export { GitError, resolveCommit, scrubbedGitEnv } from "./git.ts";
+export {
+  assertSha,
+  GitError,
+  listBlobs,
+  resolveCommit,
+  scrubbedGitEnv,
+  type TreeBlob,
+} from "./git.ts";
 export { type CommitInfo, pullRequestOf, readHistory, readSources } from "./history.ts";
 export type { SourceLanguage } from "./languages.ts";
 export type { SymbolDef, SymbolKind } from "./symbols.ts";

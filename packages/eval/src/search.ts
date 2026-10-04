@@ -13,7 +13,7 @@ export function terms(text: string): string[] {
   return text
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036F]/g, "")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word.length > 1 && !STOP_WORDS.has(word))
@@ -88,7 +88,7 @@ export function searchIndex(docs: readonly SearchDoc[]): SearchIndex {
         return score > 0 ? [{ id: doc.id, score }] : [];
       });
       scored.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      return scored.slice(0, limit).map((s) => s.id);
+      return scored.slice(0, Math.max(0, Math.trunc(limit))).map((s) => s.id);
     },
   };
 }

@@ -104,12 +104,14 @@ describe("writeExport", () => {
     expect(readdirSync(dir)).toEqual(["taken"]);
   });
 
-  it("leaves the previous export in place when the store cannot be exported", () => {
+  it("leaves the previous export and llms.txt in place when the store cannot be exported", () => {
     const out = join(dir, "export.json");
     writeFileSync(out, "old");
+    writeFileSync(join(dir, "llms.txt"), "old llms");
     expect(() => writeExport(store, out, options)).toThrow(EmptyStoreError);
     expect(readFileSync(out, "utf8")).toBe("old");
-    expect(readdirSync(dir)).toEqual(["export.json"]);
+    expect(readFileSync(join(dir, "llms.txt"), "utf8")).toBe("old llms");
+    expect(readdirSync(dir).sort()).toEqual(["export.json", "llms.txt"]);
   });
 });
 

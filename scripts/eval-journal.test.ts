@@ -1,12 +1,22 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildJournal, openStore } from "@repowiki/engine";
 import {
   createRepoTools,
   createWikiTools,
+  EvalRunError,
   type EvalRunOptions,
+  judgeAnswer,
   loadQuestions,
   type RunInfo,
   readRecords,
@@ -22,7 +32,7 @@ import {
   type ToolProvider,
 } from "@repowiki/llm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createJudgeProvider, logLine, runEvalJournaled } from "./eval-cli.ts";
+import { createJudgeProvider, logLine, requireSameExport, runEvalJournaled } from "./eval-cli.ts";
 import { exitWithError } from "./wiki-cli.ts";
 
 let sample: SampleWiki;
@@ -172,6 +182,82 @@ function endedApi(customIds: string[]) {
   return { fetch, calls };
 }
 
+/**
+ * A Batches API that ends every batch at once: batch n answers each of its requests with
+ * `answers[n - 1]` (500 in, 100 out). Keeps the posted batches and the calls.
+ */
+function sequentialApi(answers: string[]) {
+  const posts: { requests: { custom_id: string; params: { messages: unknown[] } }[] }[] = [];
+  const calls: string[] = [];
+  const ended = (n: number) => ({
+    ...batchBody("ended"),
+    id: `msgbatch_${n}`,
+    results_url: `https://api.anthropic.com/v1/messages/batches/msgbatch_${n}/results`,
+  });
+  const fetch: FetchLike = async (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : input).pathname;
+    calls.push(`${init?.method ?? "GET"} ${path}`);
+    if (init?.method === "POST") {
+      posts.push(JSON.parse(String(init.body)));
+      return reply(200, ended(posts.length));
+    }
+    const n = Number(/msgbatch_(\d+)/.exec(path)?.[1]);
+    if (!path.endsWith("/results")) return reply(200, ended(n));
+    const lines = (posts[n - 1]?.requests ?? []).map(({ custom_id }) =>
+      JSON.stringify({
+        custom_id,
+        result: {
+          type: "succeeded",
+          message: {
+            id: `msg_${n}`,
+            type: "message",
+            role: "assistant",
+            model: "claude-haiku-4-5-20251001",
+            content: [{ type: "text", text: answers[n - 1] }],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 500, output_tokens: 100 },
+          },
+        },
+      }),
+    );
+    return reply(200, lines.join("\n"), "application/x-jsonl");
+  };
+  return { fetch, posts, calls };
+}
+
+describe("the judge's retry with the batch journal", () => {
+  it("asks again with a new request after an unusable verdict, and counts each call once", async () => {
+    const store = openStore(join(dir, "wiki.db"));
+    try {
+      const journal = buildJournal(store);
+      const tooMany = { ...VERDICT, facts: Array.from({ length: 13 }, () => VERDICT.facts[0]) };
+      const api = sequentialApi([JSON.stringify(tooMany), JSON.stringify(VERDICT)]);
+      const judge = createJudgeProvider({
+        models: DEFAULT_MODELS,
+        ledger: createLedger(),
+        runId: "eval-smoke-test",
+        journal,
+        log: () => {},
+        client: { apiKey: "canned", fetch: api.fetch, pollIntervalMs: 0 },
+      });
+      const question = questions[0];
+      if (question === undefined) throw new Error("the smoke file has questions");
+      const judgment = await judgeAnswer(judge, question, "an answer", true);
+      expect(judgment).toMatchObject({ score: 1, usage: { in: 1000, out: 200 } });
+      expect(api.calls.filter((c) => c === "POST /v1/messages/batches")).toHaveLength(2);
+      const [first, second] = api.posts.map((p) => p.requests[0]?.params);
+      expect(first?.messages).toHaveLength(1);
+      expect(second?.messages).toHaveLength(2);
+      expect(JSON.stringify(second?.messages[1])).toContain("not a usable verdict");
+      expect(requestKey(second as never)).not.toBe(requestKey(first as never));
+      journal.flush();
+    } finally {
+      store.close();
+    }
+  });
+});
+
 describe("the judge batch journal", () => {
   it("collects a judge batch a killed run left in flight instead of submitting another", async () => {
     const storePath = join(dir, "wiki.db");
@@ -220,6 +306,21 @@ describe("the judge batch journal", () => {
   });
 });
 
+describe("the export under the lock", () => {
+  it("refuses a run whose export.json changed after it was read, before the lock was taken", () => {
+    const path = join(dir, "export.json");
+    writeFileSync(path, "first");
+    const bytes = readFileSync(path);
+    expect(() => requireSameExport(path, bytes)).not.toThrow();
+    writeFileSync(path, "second");
+    expect(() => requireSameExport(path, bytes)).toThrow(
+      new EvalRunError(
+        `${path} changed while eval:run started (a wiki:build or wiki:update ran); run it again`,
+      ),
+    );
+  });
+});
+
 describe("errors that reach the terminal", () => {
   const exitSpy = () =>
     vi.spyOn(process, "exit").mockImplementation((code) => {
@@ -262,6 +363,7 @@ describe("errors that reach the terminal", () => {
     const printed = vi.spyOn(console, "error").mockImplementation(() => {});
     exitSpy();
     expect(() => exitWithError(err)).toThrow("exit 1");
+    expect(printed).toHaveBeenCalledTimes(1);
     expect(String(printed.mock.calls[0]?.[0])).toBe("judge rejected the key [redacted]");
     // eval-run.ts hands runEval `logLine`, so a message a judge or an id carries is cleaned too.
     printed.mockClear();
@@ -321,8 +423,11 @@ describe("eval-run.ts as a process: store and error output", () => {
     );
     expect(result.status).toBe(1);
     const lines = result.stderr.trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toBe(
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(
+      /^run directory: .*\/wiki\/eval\/smoke-[0-9TZ-]+ \(rerun with --run-dir .*\/wiki\/eval\/smoke-[0-9TZ-]+ to resume\)$/,
+    );
+    expect(lines[2]).toBe(
       `no wiki store at ${join(out, "wiki.db")}; run pnpm wiki:build first (eval:run keeps its batch journal there)`,
     );
     expect(result.stderr).not.toContain(FAKE_KEY);

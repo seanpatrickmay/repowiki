@@ -31,6 +31,7 @@ export {
   type WikiUpdate,
 } from "./freshness/index.ts";
 export {
+  assertSha,
   type CallEdge,
   type CoChange,
   type CoChangePair,
@@ -45,6 +46,7 @@ export {
   type IndexOptions,
   indexRepo,
   isAncestor,
+  listBlobs,
   pullRequestOf,
   type ReplayStep,
   type RepoIndex,
@@ -57,6 +59,7 @@ export {
   type SymbolDef,
   type SymbolKind,
   scrubbedGitEnv,
+  type TreeBlob,
   type UnresolvedImport,
 } from "./index/index.ts";
 export {

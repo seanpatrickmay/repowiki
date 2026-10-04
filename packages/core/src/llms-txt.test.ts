@@ -231,6 +231,9 @@ describe("renderLlmsTxt hostile input", () => {
     ["#hashtag stays", "> #hashtag stays"],
     ["**bold** stays", "> **bold** stays"],
     ["2026 stays", "> 2026 stays"],
+    ["~~~ fence", "> \\~~~ fence"],
+    ["~~~~", "> \\~~~~"],
+    ["~~strike~~ stays", "> ~~strike~~ stays"],
   ])("neutralises a leading block marker in the About lead: %s", (lead, line) => {
     const text = renderLlmsTxt(wiki({ architecture: [aboutWith("demo", lead)] }));
     expect(text.split("\n")[2]).toBe(line);

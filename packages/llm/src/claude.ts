@@ -109,10 +109,13 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
     async generate<T>(request: GenerateRequest<T>) {
       const model = options.models[request.purpose];
       const { type, schema } = zodOutputFormat(request.schema);
+      // Every text sent is well formed: a lone surrogate (half of an astral character, left by a
+      // cut that counted UTF-16 units) becomes U+FFFD, as the API refuses it.
+      const system = request.system.toWellFormed();
       if (request.cacheKey !== undefined) {
         // Everything that breaks the cache: the model, the output format, and the system text.
         const prefix = createHash("sha256")
-          .update(`${model}\0${canonicalJson(schema)}\0${request.system}`)
+          .update(`${model}\0${canonicalJson(schema)}\0${system}`)
           .digest("hex");
         const seen = prefixes.get(request.cacheKey);
         if (seen !== undefined && seen !== prefix) {
@@ -126,11 +129,14 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         system: [
           {
             type: "text",
-            text: request.system,
+            text: system,
             ...(request.cacheKey === undefined ? {} : { cache_control: { type: "ephemeral" } }),
           },
         ],
-        messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: request.messages.map((m) => ({
+          role: m.role,
+          content: m.content.toWellFormed(),
+        })),
         output_config: { format: { type, schema } },
         ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       };

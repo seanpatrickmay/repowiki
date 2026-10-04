@@ -42,5 +42,13 @@ export function agentSystemPrompt(kind: AgentKind, repoName: string, turnLimit: 
   ].join("\n");
 }
 
+/**
+ * Added after the tool results of an agent's last turn, for both agents: the model cannot count
+ * its turns, and tool_choice none is not shown to it, so without this it may write its next step
+ * instead of its answer.
+ */
+export const LAST_TURN_NOTE =
+  "This is your last turn: answer the question now with what you have found.";
+
 /** The agent's first user turn. */
 export const questionTurn = (question: string): string => `Question: ${question}`;

@@ -63,6 +63,35 @@ const request: TurnRequest = {
 };
 
 describe("createClaudeToolProvider", () => {
+  it("sends every text well formed: a lone surrogate becomes U+FFFD", async () => {
+    const { bodies, fetch } = cannedTurns([{ type: "text", text: "ok" }], "end_turn");
+    const { provider } = setup(fetch);
+    const lone = "cut \uD83D";
+    await provider.turn({
+      ...request,
+      system: lone,
+      tools: [{ ...search, description: lone }],
+      messages: [
+        { role: "user", content: [{ type: "text", text: lone }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: lone },
+            { type: "tool_use", id: "tu_1", name: "search", input: { query: "q" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolUseId: "tu_1", content: lone, isError: false }],
+        },
+      ],
+    });
+    // JSON.stringify writes a lone surrogate as a \uD8xx escape, which the API refuses.
+    const body = JSON.stringify(bodies[0]);
+    expect(body).not.toMatch(/\\ud[89ab]/i);
+    expect(body.split("cut \uFFFD")).toHaveLength(6);
+  });
+
   it("sends the tools, one tool call per turn and a cache breakpoint on the last block", async () => {
     const { bodies, fetch } = cannedTurns([
       { type: "text", text: "Reading the page." },
@@ -153,15 +182,76 @@ describe("createClaudeToolProvider", () => {
     ]);
   });
 
-  it("refuses a message left with no content, and a missing key, before any request", async () => {
-    const { bodies, fetch } = cannedTurns([]);
+  it("never sends an empty or whitespace-only text block, which the API refuses", async () => {
+    const { bodies, fetch } = cannedTurns([{ type: "text", text: "ok" }], "end_turn");
     const { provider } = setup(fetch);
+    await provider.turn({
+      ...request,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Where are signals made?" },
+            { type: "text", text: " \n\t" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "\n\n" },
+            { type: "tool_use", id: "tu_1", name: "search", input: { query: "signals" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolUseId: "tu_1", content: "x", isError: false }],
+        },
+      ],
+    });
+    const messages = bodies[0]?.messages as { content: { type: string }[] }[];
+    expect(messages.map((m) => m.content.map((b) => b.type))).toEqual([
+      ["text"],
+      ["tool_use"],
+      ["tool_result"],
+    ]);
+    const { bodies: none, fetch: noFetch } = cannedTurns([]);
     await expect(
-      provider.turn({
+      setup(noFetch).provider.turn({
         ...request,
-        messages: [{ role: "user", content: [{ type: "text", text: "" }] }],
+        messages: [{ role: "user", content: [{ type: "text", text: "  \n" }] }],
       }),
     ).rejects.toThrow(new LlmError("message 0 has no content"));
+    expect(none).toEqual([]);
+  });
+
+  it("passes a max_tokens or refusal stop through, and drops a block it does not know", async () => {
+    for (const reason of ["max_tokens", "refusal"]) {
+      const { fetch } = cannedTurns([], reason);
+      const result = await setup(fetch).provider.turn(request);
+      expect(result).toMatchObject({ content: [], stopReason: reason });
+    }
+    const { fetch } = cannedTurns([
+      { type: "thinking", thinking: "hmm", signature: "s" },
+      { type: "text", text: "Answer." },
+      { type: "server_tool_use", id: "x", name: "web_search", input: {} },
+    ]);
+    expect((await setup(fetch).provider.turn(request)).content).toEqual([
+      { type: "text", text: "Answer." },
+    ]);
+  });
+
+  it("refuses a message left with no content, no messages, and a missing key, before any request", async () => {
+    const { bodies, fetch } = cannedTurns([]);
+    const { provider } = setup(fetch);
+    const emptied = provider.turn({
+      ...request,
+      messages: [{ role: "user", content: [{ type: "text", text: "" }] }],
+    });
+    await expect(emptied).rejects.toBeInstanceOf(LlmError);
+    await expect(emptied).rejects.toThrow("message 0 has no content");
+    const none = provider.turn({ ...request, messages: [] });
+    await expect(none).rejects.toBeInstanceOf(LlmError);
+    await expect(none).rejects.toThrow("a turn needs at least one message");
     expect(bodies).toEqual([]);
     const saved = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;

@@ -179,6 +179,11 @@ describe("WikiView.resolve, ids as an agent gives them", () => {
     expect(from).toBe(`old ingest\uFFFD ${"!".repeat(67)}\u2026`);
     expect([...from]).toHaveLength(80);
 
+    const astral = view.resolve(`old ingest${"!".repeat(68)}\u{1F680}${"!".repeat(10)}`);
+    const astralFrom = astral.kind === "page" ? (astral.from ?? "") : "";
+    expect(astralFrom).toBe(`old ingest${"!".repeat(68)}\u{1F680}\u2026`);
+    expect(astralFrom.isWellFormed()).toBe(true);
+
     for (const id of ["__proto__", "constructor", "\u202Efoo", `${"x".repeat(5000)}`, ""]) {
       expect(() => view.resolve(id), id.slice(0, 20)).toThrow(ToolError);
     }
@@ -193,7 +198,44 @@ describe("WikiView.resolve, ids as an agent gives them", () => {
   });
 });
 
+describe("WikiView with page-less targets", () => {
+  it("offers only the choices that have a page, and no choices at all as no page", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const records = wiki.manifest.features.find((f) => f.id === "records");
+    if (records === undefined) throw new Error("the fixture has records");
+    wiki.manifest.features.push(
+      makeFeature({ id: "ghost", title: "Ghost", aliases: [], status: { kind: "active" } }),
+      makeFeature({ id: "ghost-two", title: "Ghost two", aliases: [], status: { kind: "active" } }),
+      {
+        ...records,
+        id: "haunted",
+        title: "Haunted",
+        status: { kind: "disambiguation", to: ["ghost", "ghost-two"] },
+      },
+    );
+    records.status = { kind: "disambiguation", to: ["signals", "ghost"] };
+    const view = new WikiView(wiki);
+    expect(view.resolve("records")).toEqual({
+      kind: "choices",
+      from: "records",
+      targets: ["signals"],
+    });
+    expect(() => view.resolve("haunted")).toThrow(ToolError);
+  });
+});
+
 describe("WikiView.text", () => {
+  it("neutralises text in a claim that imitates a reference mark or a page link", () => {
+    expect(
+      view.text(
+        "True [1][2] and [page: signals] and [pages: a, b] and [[deliverables|[page: x]]].",
+      ),
+    ).toBe("True (1)(2) and (page: signals] and (pages: a, b] and (page: x [page: deliverables]].");
+    expect(view.text("Keeps `a[1]` and `[page: x]` in code, and array[i].")).toBe(
+      "Keeps `a[1]` and `[page: x]` in code, and array[i].",
+    );
+  });
+
   it("names a linked page's id so the agent can read it, and keeps everything on one line", () => {
     expect(
       view.text(
@@ -209,6 +251,18 @@ describe("WikiView.text", () => {
       "**Deliverables** are the records sample builds from Signal ingestion [page: signals].",
     );
     expect(view.summary("nope")).toBe("");
+  });
+
+  it("cuts a long summary by code point, so an astral character at the cut is never split", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const lead = wiki.pages
+      .find((p) => p.featureId === "deliverables")
+      ?.sections.find((s) => s.key === "lead")?.claims[0];
+    if (lead === undefined) throw new Error("the fixture has a lead");
+    lead.text = `${"d".repeat(198)}\u{1F680}${"e".repeat(50)}`;
+    const summary = new WikiView(wiki).summary("deliverables");
+    expect(summary).toBe(`${"d".repeat(198)}\u{1F680}\u2026`);
+    expect(summary.isWellFormed()).toBe(true);
   });
 });
 

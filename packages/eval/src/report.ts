@@ -1,24 +1,41 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import type { QuestionKind } from "./questions.ts";
-import { AGENTS, EvalRunError, type RunRecord, readRecords, readRunInfo } from "./records.ts";
-import { SPOT_CHECK_FILE, SPOT_CHECK_SIZE, SpotCheck, spotCheckSample } from "./spot-check.ts";
 import {
+  AGENTS,
+  checkRecords,
+  createOnce,
+  EvalRunError,
+  type RunRecord,
+  readRecords,
+  readRunInfo,
+} from "./records.ts";
+import {
+  SPOT_CHECK_FILE,
+  SPOT_CHECK_SIZE,
+  SpotCheck,
+  spotCheckEntry,
+  spotCheckSample,
+} from "./spot-check.ts";
+import {
+  ACCURACY_PERCENT,
   ACCURACY_SHARE,
   type EvalSummary,
   latestRecords,
   summarize,
+  TOKEN_PERCENT,
   TOKEN_SHARE,
   tokensOf,
 } from "./summary.ts";
-import { cut, oneLine } from "./text.ts";
+import { markdownText, oneLine } from "./text.ts";
 
 const count = (n: number) => Math.round(n).toLocaleString("en-US");
 const percent = (x: number) => `${Math.round(x * 1000) / 10}%`;
 const usd = (x: number) => `$${x.toFixed(4)}`;
-/** Model or author text in a table cell: one line, cut short, no pipe to split the row. */
-const cell = (text: string, max = 120) => cut(oneLine(text), max).replace(/\|/g, "\\|");
+/** Model or author text in the report: one line of plain text, cut short (markdownText). */
+const cell = (text: string, max = 120) => markdownText(text, max);
 const KINDS: readonly QuestionKind[] = ["where", "how", "why", "what-changed"];
 
 /** The run's report for the owner (spec §9): accuracy, tokens, the pass test and the break-even point. */
@@ -43,7 +60,7 @@ export function renderReport(
     );
   } else if (info.set === "dev") {
     lines.push(
-      "This is the dev set: its figures track progress. Spec §9's pass test binds only on the held-out set.",
+      "This is the dev set: its figures track progress. Spec \u00A79's pass test binds only on the held-out set.",
       "",
     );
   }
@@ -64,17 +81,24 @@ export function renderReport(
     }),
     "",
   );
-  if (summary.pass !== null) {
+  if (complete && agents.repo.correct === 0) {
+    lines.push(
+      "## Pass test (spec \u00A79)",
+      "",
+      `Not meaningful on this run: the repo agent answered no question correctly, so ${ACCURACY_PERCENT}% of its accuracy is 0 and any wiki accuracy would meet it.`,
+      "",
+    );
+  } else if (summary.pass !== null) {
     const { wiki, repo } = agents;
     const wAcc = wiki.accuracy ?? 0;
     const rAcc = repo.accuracy ?? 0;
     const wTok = wiki.tokensPerQuestion ?? 0;
     const rTok = repo.tokensPerQuestion ?? 0;
     lines.push(
-      "## Pass test (spec §9)",
+      "## Pass test (spec \u00A79)",
       "",
-      `- Accuracy: the wiki agent's ${percent(wAcc)} against at least ${percent(ACCURACY_SHARE * rAcc)} (90% of the repo agent's ${percent(rAcc)}): ${summary.pass.accuracy ? "met" : "not met"}.`,
-      `- Tokens: the wiki agent's ${count(wTok)} per question against at most ${count(TOKEN_SHARE * rTok)} (40% of the repo agent's ${count(rTok)}): ${summary.pass.tokens ? "met" : "not met"}.`,
+      `- Accuracy: the wiki agent's ${percent(wAcc)} against at least ${percent(ACCURACY_SHARE * rAcc)} (${ACCURACY_PERCENT}% of the repo agent's ${percent(rAcc)}): ${summary.pass.accuracy ? "met" : "not met"}.`,
+      `- Tokens: the wiki agent's ${count(wTok)} per question against at most ${count(TOKEN_SHARE * rTok)} (${TOKEN_PERCENT}% of the repo agent's ${count(rTok)}): ${summary.pass.tokens ? "met" : "not met"}.`,
       "",
       `Result on this set: ${summary.pass.accuracy && summary.pass.tokens ? "pass" : "fail"}.`,
       "",
@@ -83,9 +107,11 @@ export function renderReport(
   lines.push("## Break-even", "");
   if (info.buildTokens === null) {
     lines.push(
-      "Unknown: the export records no build run, so the build's tokens are not known.",
+      "Unknown: the export this run read records no build run. Re-run pnpm wiki:export to include build tokens before the next run.",
       "",
     );
+  } else if (!complete) {
+    lines.push("Not known until every answer is judged.", "");
   } else if (summary.breakEven === "never") {
     lines.push(
       `Never: the wiki agent used no fewer tokens per question than the repo agent, so the build's ${count(info.buildTokens)} tokens are never paid back.`,
@@ -94,7 +120,7 @@ export function renderReport(
   } else if (summary.breakEven !== null) {
     const saved = (agents.repo.tokensPerQuestion ?? 0) - (agents.wiki.tokensPerQuestion ?? 0);
     lines.push(
-      `The build cost ${count(info.buildTokens)} tokens. Each question answered from the wiki instead of the code saves ${count(saved)} tokens, so the build pays for itself after ${Math.ceil(summary.breakEven).toLocaleString("en-US")} questions (${count(info.buildTokens)} / ${count(saved)}).`,
+      `The build cost ${count(info.buildTokens)} tokens. Each question answered from the wiki instead of the code saves ${count(saved)} tokens, so the build pays for itself after ${Math.ceil(summary.breakEven).toLocaleString("en-US")} questions (${count(info.buildTokens)} / ${count(saved)}). The build's tokens are its build run's in export.json; manifest tokens are not included.`,
       "",
     );
   }
@@ -147,11 +173,22 @@ export function renderReport(
       "",
     );
   } else {
-    // The judge's grade is read from results.jsonl; the copy in spot-check.json is never used.
-    const entries = spotCheck.judgments.map((j) => ({
-      ...j,
-      judge: judgments.get(`${j.questionId}\0${j.agent}`)?.score ?? null,
-    }));
+    // The file is blind: each entry's key is joined back to its agent and judgment here.
+    const byEntry = new Map(
+      [...judgments.values()].map((j) => [
+        spotCheckEntry(info.startedAt, j.questionId, j.agent),
+        j,
+      ]),
+    );
+    const entries = spotCheck.answers.map((a) => {
+      const j = byEntry.get(a.entry);
+      return {
+        ...a,
+        agent: j?.agent,
+        judge: j?.score ?? null,
+        reason: j === undefined ? "" : visibleText(j.reason),
+      };
+    });
     const marked = entries.filter((j) => j.owner !== null);
     const compared = marked.filter((j) => j.judge !== null);
     const unmatched = marked.length - compared.length;
@@ -169,22 +206,28 @@ export function renderReport(
       );
     }
     if (entries.length < SPOT_CHECK_SIZE) {
-      lines.push(`Spec §9 asks for ${SPOT_CHECK_SIZE}; this spot-check has ${entries.length}.`);
+      lines.push(
+        `Spec \u00A79 asks for ${SPOT_CHECK_SIZE}; this spot-check has ${entries.length}.`,
+      );
     }
     lines.push(
       ...compared
         .filter((j) => j.owner !== j.judge)
         .map(
           (j) =>
-            `- Disagrees on ${cell(j.questionId)} (${j.agent}): the judge gave ${j.judge}, the owner ${j.owner}.`,
+            `- Disagrees on ${cell(j.questionId)} (${j.agent}): the judge gave ${j.judge}, the owner ${j.owner}. The judge's reason: ${cell(j.reason, 500)}`,
         ),
       "",
     );
   }
+  const { agentUsd, judgeUsd } = summary;
+  const failed = records.some((r) => r.kind === "judge-failure");
+  const money = (x: number | null) => (x === null ? "unknown" : usd(x));
+  const all = agentUsd === null || judgeUsd === null ? null : agentUsd + judgeUsd;
   lines.push(
     "## Cost",
     "",
-    `Agents ${usd(summary.agentUsd)}, judge ${usd(summary.judgeUsd)}: ${usd(summary.agentUsd + summary.judgeUsd)} in all, at the models' list prices.`,
+    `Agents ${money(agentUsd)}, judge ${money(judgeUsd)}${failed ? " (failed judgments included)" : ""}: ${money(all)} in all${all === null ? ": a call's model has no price." : ", at the models' list prices."}`,
   );
   return `${lines.join("\n")}\n`;
 }
@@ -199,24 +242,50 @@ export const REPORT_FILE = "report.md";
 export function writeReport(runDir: string): { summary: EvalSummary; reportPath: string } {
   const info = readRunInfo(runDir);
   const records = readRecords(runDir);
+  checkRecords(runDir, info, records);
   const summary = summarize(info, records);
   const spotPath = join(runDir, SPOT_CHECK_FILE);
   if (summary.complete && !existsSync(spotPath)) {
-    const sample = spotCheckSample(info, records);
-    writeFileSync(spotPath, `${JSON.stringify(sample, null, 2)}\n`, { flag: "wx" });
+    createOnce(spotPath, `${JSON.stringify(spotCheckSample(info, records), null, 2)}\n`);
   }
   let spotCheck: SpotCheck | null = null;
   if (existsSync(spotPath)) {
+    let json: unknown;
     try {
-      spotCheck = SpotCheck.parse(JSON.parse(readFileSync(spotPath, "utf8")));
+      json = JSON.parse(readFileSync(spotPath, "utf8"));
     } catch (error) {
-      throw new EvalRunError(`${spotPath} is not a valid spot-check file`, { cause: error });
+      throw new EvalRunError(
+        `${spotPath} is not a valid spot-check file: it is not JSON; move it aside to draw a new sample`,
+        { cause: error },
+      );
+    }
+    const parsed = SpotCheck.safeParse(json);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue?.path.map(String).join(".") || "the file";
+      throw new EvalRunError(
+        `${spotPath} is not a valid spot-check file: ${oneLine(`${where}: ${issue?.message ?? "invalid"}`).slice(0, 200)}; set "owner" to the number 0 or 1, or move the file aside to draw a new sample`,
+        { cause: parsed.error },
+      );
+    }
+    spotCheck = parsed.data;
+    const { run } = spotCheck;
+    if (
+      run.startedAt !== info.startedAt ||
+      run.set !== info.set ||
+      run.repo !== info.repo ||
+      run.head !== info.head
+    ) {
+      throw new EvalRunError(
+        `${spotPath} is from another run (begun ${oneLine(run.startedAt)}), not this one (begun ${info.startedAt}); move it aside to draw a new sample`,
+      );
     }
   }
   const reportPath = join(runDir, REPORT_FILE);
   const temporary = `${reportPath}.${process.pid}.tmp`;
   try {
-    writeFileSync(temporary, renderReport(summary, records, spotCheck), { flag: "wx" });
+    // The temporary name is this process's own, so a stale one a killed run left is written over.
+    writeFileSync(temporary, renderReport(summary, records, spotCheck));
     renameSync(temporary, reportPath);
   } catch (error) {
     rmSync(temporary, { force: true });

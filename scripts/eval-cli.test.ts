@@ -53,6 +53,20 @@ describe("parseEvalArgs", () => {
       batch: false,
       dryRun: true,
     });
+    expect(
+      parseEvalArgs([
+        "r",
+        "--questions",
+        "q",
+        "--set",
+        "dev",
+        "--config",
+        "c.json",
+        "--verbose",
+        "--max-usd",
+        "100",
+      ]),
+    ).toMatchObject({ config: "c.json", verbose: true, maxUsd: 100 });
   });
 
   it.each([
@@ -66,6 +80,25 @@ describe("parseEvalArgs", () => {
     [["r", "--questions", "q", "--set", "dev", "--max-usd=-1"], "--max-usd must be a number"],
     [["r", "--questions", "q", "--set", "dev", "--secret=sk-ant-x"], "bad option --secret"],
     [["r", "s", "--questions", "q", "--set", "dev"], "usage: pnpm eval:run"],
+    [["r", "--questions", "q", "--set", "dev", "--turns", "51"], "--turns must be a whole number"],
+    [["r", "--questions", "q", "--set", "dev", "--max-usd", "abc"], "--max-usd must be a number"],
+    [["r", "--questions", "q", "--set", "dev", "--max-usd", "1e3"], "--max-usd must be a number"],
+    [
+      ["r", "--questions", "q", "--set", "dev", "--max-usd", "100.01"],
+      "--max-usd must be a number",
+    ],
+    [["r", "--questions", "q", "--set", "dev", "--out", ""], "--out must not be empty"],
+    [["r", "--questions", "q", "--set", "dev", "--run-dir="], "--run-dir must not be empty"],
+    [["r", "--questions", "q", "--set", "dev", "--config", ""], "--config must not be empty"],
+    [["r", "--questions", "", "--set", "dev"], "--questions must not be empty"],
+    [
+      ["r", "--questions", "q", "--set", "dev", "--set", "held-out"],
+      "--set was given more than once",
+    ],
+    [
+      ["r", "--questions", "q", "--set", "dev", "--dry-run", "--dry-run"],
+      "--dry-run was given more than once",
+    ],
   ])("refuses %j", (argv, message) => {
     expect(() => parseEvalArgs(argv)).toThrow(CliError);
     expect(() => parseEvalArgs(argv)).toThrow(message);
@@ -122,6 +155,8 @@ describe("estimateEval", () => {
       10,
     );
     expect(estimateEval(input({ turnLimit: 2 })).agentsUsd).toBeLessThan(estimate.agentsUsd);
+    // The judge's ceiling: every judgment retried, each answer at the judge's cut.
+    expect(estimate.judgeCeilingUsd).toBeGreaterThan(2 * estimate.judgeUsd);
   });
 
   it("refuses a model with no price before any call", () => {
@@ -141,7 +176,14 @@ describe("estimateEval", () => {
   it("prints one line", () => {
     const line = estimateLine(estimateEval(input()), { turnLimit: 15, maxUsd: 5, batch: true });
     expect(line).toMatch(
-      /^3 questions to both agents: about \$\d+\.\d\d \(assuming 4 wiki and 8 repo turns a question, no cache hits\), at most \$\d+\.\d\d if every question takes all 15 turns with full tool results; judging about \$\d+\.\d\d \(batched\); no question is asked once the run has spent \$5\.00 \(--max-usd\)$/,
+      /^3 questions to both agents: about \$\d+\.\d\d \(assuming 4 wiki and 8 repo turns a question, no cache hits\), at most \$\d+\.\d\d if every question takes all 15 turns with full tool results; judging about \$\d+\.\d\d \(batched\), at most \$\d+\.\d\d if every judgment is retried; no question is asked once the run has spent \$5\.00 \(--max-usd\)$/,
     );
+    const short = estimateLine(estimateEval(input({ turnLimit: 3, batchJudge: false })), {
+      turnLimit: 3,
+      maxUsd: 5,
+      batch: false,
+    });
+    expect(short).toContain("(assuming 3 wiki and 3 repo turns a question, no cache hits)");
+    expect(short).not.toContain("(batched)");
   });
 });
