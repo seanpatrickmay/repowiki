@@ -114,6 +114,7 @@ function blockParam(block: TurnBlock): ContentBlockParam {
  * API refuses them ("text content blocks must contain non-whitespace text").
  */
 function messageParams(request: TurnRequest): MessageParam[] {
+  if (request.messages.length === 0) throw new LlmError("a turn needs at least one message");
   const messages = request.messages.map((message, index) => {
     const content = message.content
       .filter((block) => block.type !== "text" || block.text.trim() !== "")

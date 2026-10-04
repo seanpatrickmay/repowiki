@@ -224,15 +224,34 @@ describe("createClaudeToolProvider", () => {
     expect(none).toEqual([]);
   });
 
-  it("refuses a message left with no content, and a missing key, before any request", async () => {
+  it("passes a max_tokens or refusal stop through, and drops a block it does not know", async () => {
+    for (const reason of ["max_tokens", "refusal"]) {
+      const { fetch } = cannedTurns([], reason);
+      const result = await setup(fetch).provider.turn(request);
+      expect(result).toMatchObject({ content: [], stopReason: reason });
+    }
+    const { fetch } = cannedTurns([
+      { type: "thinking", thinking: "hmm", signature: "s" },
+      { type: "text", text: "Answer." },
+      { type: "server_tool_use", id: "x", name: "web_search", input: {} },
+    ]);
+    expect((await setup(fetch).provider.turn(request)).content).toEqual([
+      { type: "text", text: "Answer." },
+    ]);
+  });
+
+  it("refuses a message left with no content, no messages, and a missing key, before any request", async () => {
     const { bodies, fetch } = cannedTurns([]);
     const { provider } = setup(fetch);
-    await expect(
-      provider.turn({
-        ...request,
-        messages: [{ role: "user", content: [{ type: "text", text: "" }] }],
-      }),
-    ).rejects.toThrow(new LlmError("message 0 has no content"));
+    const emptied = provider.turn({
+      ...request,
+      messages: [{ role: "user", content: [{ type: "text", text: "" }] }],
+    });
+    await expect(emptied).rejects.toBeInstanceOf(LlmError);
+    await expect(emptied).rejects.toThrow("message 0 has no content");
+    const none = provider.turn({ ...request, messages: [] });
+    await expect(none).rejects.toBeInstanceOf(LlmError);
+    await expect(none).rejects.toThrow("a turn needs at least one message");
     expect(bodies).toEqual([]);
     const saved = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
