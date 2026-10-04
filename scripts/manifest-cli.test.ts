@@ -206,6 +206,15 @@ describe("manifest-build.ts as a process (no network)", () => {
     expect(result.stderr).toBe(`no such repository: ${missing}\n`);
   });
 
+  it("redacts a key-shaped string in what it prints, JSON-escaped dashes included", () => {
+    for (const name of ["sk-ant-api03-FAKEPATHKEY_x-y", "sk\\u002dant\\u002dapi03\\u002dFAKEESC"]) {
+      const missing = join(dir, name);
+      const result = run(missing);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toBe(`no such repository: ${join(dir, "[redacted]")}\n`);
+    }
+  });
+
   it("reports a bad --config file in one line", () => {
     mkdirSync(join(dir, "repo"));
     const result = run(

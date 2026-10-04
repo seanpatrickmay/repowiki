@@ -1,6 +1,7 @@
 import {
   Architecture,
   aliasProblem,
+  FeatureId,
   GitSha,
   LedgerEntry,
   Manifest,
@@ -92,6 +93,14 @@ export interface Store {
   setHead(sha: string): void;
   getHead(): string | null;
   /**
+   * Features an update must write whole although nothing changes them now: their manifest-change
+   * write failed, so their page still predates the operations that changed them (spec §6.1
+   * step 5). Sorted; empty when none.
+   */
+  getPendingWhole(): string[];
+  /** Replaces that list; every entry must be a feature id. */
+  setPendingWhole(featureIds: readonly string[]): void;
+  /**
    * Stores a revision and makes it current. parentId must equal the feature's current revision id,
    * and the feature must be in the latest stored manifest.
    */
@@ -121,6 +130,9 @@ export interface Store {
   /** How many revisions of the Architecture article are stored. */
   countArchitectureRevisions(): number;
 }
+
+/** The features an update must write whole again (Store.getPendingWhole). */
+const PendingWhole = z.array(FeatureId);
 
 /**
  * One journaled Message Batches request: which batch holds it and under which custom id. A row
@@ -361,6 +373,29 @@ export function openStore(path: string): Store {
         | { value: string }
         | undefined;
       return row?.value ?? null;
+    },
+
+    getPendingWhole() {
+      const row = db.prepare("SELECT value FROM meta WHERE key = 'pending-whole'").get() as
+        | { value: string }
+        | undefined;
+      if (row === undefined) return [];
+      let json: unknown;
+      try {
+        json = JSON.parse(row.value);
+      } catch {
+        json = null;
+      }
+      const parsed = PendingWhole.safeParse(json);
+      if (!parsed.success) throw new StoreError("the store's pending whole pages are unreadable");
+      return parsed.data;
+    },
+
+    setPendingWhole(featureIds) {
+      const ids = [...new Set(PendingWhole.parse(featureIds))].sort();
+      db.prepare(
+        "INSERT INTO meta (key, value) VALUES ('pending-whole', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      ).run(JSON.stringify(ids));
     },
 
     putRevision(revision) {
