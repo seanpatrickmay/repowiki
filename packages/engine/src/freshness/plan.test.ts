@@ -97,6 +97,25 @@ describe("planPages", () => {
     expect(signals?.membershipChanged).toBe(true);
   });
 
+  it("refuses, as an UpdateError, to measure drift while a new file has no feature", async () => {
+    ({ repo, store, first } = await builtWiki());
+    // A root-level file no import, co-change or directory signal places: it is disputed.
+    repo.write("notes.py", "def note():\n    return 1\n");
+    const added = repo.commit("feat: add notes");
+    const input = await inputAt(repo, added);
+    const plan = planUpdate(store, input);
+    expect(plan.placement.disputed.map((d) => d.path)).toEqual(["notes.py"]);
+    // Placement is not complete: the decided files alone leave notes.py without a feature.
+    expect(() => measureDrift(plan, input.index, plan.placement.decided, 0.2)).toThrow(UpdateError);
+    expect(() => measureDrift(plan, input.index, plan.placement.decided, 0.2)).toThrow(
+      /no feature for the new file notes\.py/,
+    );
+    expect(
+      measureDrift(plan, input.index, new Map([["notes.py", "deliverables"]]), 0.2).manifest
+        .membership["notes.py"]?.featureId,
+    ).toBe("deliverables");
+  });
+
   it("aborts with an UpdateError naming a citation sha git does not know", async () => {
     ({ repo, store, first } = await builtWiki());
     const page = store.listCurrentRevisions().find((r) => r.featureId === "signals");

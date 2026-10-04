@@ -14,7 +14,7 @@ import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { estimateLine, parseUpdateArgs, renderUpdateSummary } from "./update-cli.ts";
 import { estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
-import { acquireBuildLock, describeError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
+import { acquireBuildLock, exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:update <repo> <rev>: moves the wiki stored for <repo> from its head to <rev> (spec
@@ -74,10 +74,5 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  const known = err instanceof UpdateError || err instanceof WikiBuildError;
-  const code = known || err instanceof StoreError ? 1 : exitCodeFor(err);
-  if (code === null) throw err;
-  // The flag is read raw: a usage error must still print, verbose or not.
-  console.error(describeError(err, process.argv.includes("--verbose")));
-  process.exit(code);
+  exitWithError(err);
 }

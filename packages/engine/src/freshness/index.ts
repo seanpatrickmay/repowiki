@@ -43,7 +43,9 @@ export {
 } from "./stale.ts";
 export {
   breakTies,
+  fallbackFeature,
   MAX_TIE_BREAK_FILES,
+  provisionalPlacement,
   TIE_BREAK_INSTRUCTIONS,
   type TieBreak,
   TieBreakAnswer,

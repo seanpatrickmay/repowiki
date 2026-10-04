@@ -128,6 +128,16 @@ describe("projectStep and renderProjection", () => {
       DEFAULT_MODELS.write,
       true,
     );
+    // A step that adds files may need one tie-break call, even when no page is touched.
+    const adds = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 0, addsFiles: true },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    expect(adds.usd).toBeGreaterThan(0);
+    expect(adds.usd).toBeLessThan(due.usd);
     // The article is priced once, never twice.
     expect(dirtyDue.usd).toBe(dirty.usd);
     const table = renderProjection([quiet, loud], 3);
@@ -135,7 +145,7 @@ describe("projectStep and renderProjection", () => {
     expect(table).toMatch(/2 steps estimated at about \$\d+\.\d{4}; 3 more steps after them/);
     expect(table).not.toContain("at most");
     expect(table.trimEnd().split("\n").at(-1)).toBe(
-      "Upper-side for the update calls only: tie-break, drift, whole-page and retry calls are not counted.",
+      "Upper-side for the update and tie-break calls only: drift, whole-page and retry calls are not counted.",
     );
   });
 });

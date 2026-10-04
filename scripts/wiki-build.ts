@@ -28,9 +28,9 @@ import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
   acquireBuildLock,
-  describeError,
   estimateArchitecture,
   estimateBuild,
+  exitWithError,
   lazyClaudeProvider,
   parseWikiArgs,
   renderBuildSummary,
@@ -192,9 +192,5 @@ async function runBuild(
 try {
   await main();
 } catch (err) {
-  const code = err instanceof WikiBuildError || err instanceof StoreError ? 1 : exitCodeFor(err);
-  if (code === null) throw err;
-  // The flag is read raw: a usage error must still print, verbose or not.
-  console.error(describeError(err, process.argv.includes("--verbose")));
-  process.exit(code);
+  exitWithError(err);
 }

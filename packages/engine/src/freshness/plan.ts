@@ -20,7 +20,13 @@ import {
 import type { Store } from "../store/index.ts";
 import type { PageRewrite } from "../write/index.ts";
 import { driftedFeatures, featureChurn } from "./drift.ts";
-import { coverageGaps, nextMembership, type Placement, placeNewFiles } from "./membership.ts";
+import {
+  coverageGaps,
+  nextMembership,
+  type Placement,
+  placeNewFiles,
+  renamesOf,
+} from "./membership.ts";
 import type { LineRange } from "./remap.ts";
 import { type RemapContext, remapClaims } from "./stale.ts";
 
@@ -115,7 +121,8 @@ export function planUpdate(
 /**
  * The membership at `to` once every new file has a feature (`placed`: the decided ones and the
  * tie-break's), as the previous manifest moved to `to`, and each feature's churn against the
- * baseline, with the active features over `threshold` (spec §6.1 step 4).
+ * baseline, with the active features over `threshold` (spec §6.1 step 4). Throws an UpdateError
+ * for a new file `placed` does not give a feature.
  */
 export function measureDrift(
   plan: UpdatePlan,
@@ -128,6 +135,17 @@ export function measureDrift(
   churn: Map<string, number>;
   drifted: string[];
 } {
+  // Every file must have a feature by now; nextMembership would throw a bare Error for one that
+  // has none (a disputed file the tie-break has not placed yet), so say it as an UpdateError.
+  const renames = renamesOf(plan.changes);
+  for (const file of index.files) {
+    const old = renames.get(file.path) ?? file.path;
+    if (plan.previous.membership[memberId(old)] === undefined && !placed.has(file.path)) {
+      throw new UpdateError(
+        `no feature for the new file ${file.path}: it is not placed yet, so drift cannot be measured`,
+      );
+    }
+  }
   const membership = nextMembership(plan.previous, index, plan.changes, plan.graph, placed);
   const manifest = Manifest.parse({ ...plan.previous, sha: plan.to, membership });
   const churn = featureChurn(plan.baseline, membership);
