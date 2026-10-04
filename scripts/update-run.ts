@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { Manifest } from "@repowiki/core";
 import {
   addAliases,
@@ -21,15 +22,22 @@ import {
   readHistory,
   readSources,
   type Store,
+  UpdateArticleError,
   type UpdateInput,
   updateSystemPrompt,
   updateWiki,
   type WikiUpdate,
+  writeExport,
   writeSystemPrompt,
 } from "@repowiki/engine";
-import { createLedger, type ModelConfig } from "@repowiki/llm";
-import { estimateUpdate, type UpdateEstimate } from "./update-cli.ts";
-import { type LiveCommand, lazyClaudeProvider, type RunFlags } from "./wiki-cli.ts";
+import { createLedger, type ModelConfig, type Provider, totalsOf } from "@repowiki/llm";
+import { estimateUpdate, renderUpdateSummary, type UpdateEstimate } from "./update-cli.ts";
+import {
+  type LiveCommand,
+  lazyClaudeProvider,
+  type RunFlags,
+  writeFileAtomic,
+} from "./wiki-cli.ts";
 
 /** The repository read at `sha`, as an update takes it. No call. */
 export async function readInput(repo: string, sha: string): Promise<UpdateInput> {
@@ -128,11 +136,22 @@ export const needsKey = (estimate: UpdateEstimate): boolean =>
   estimate.rewrites + estimate.whole + estimate.small > 0 || estimate.articleUsd !== null;
 
 /**
+ * What runUpdate did: the update, its ledger run, and the error its About article round threw
+ * after the update was stored (null when it threw none). With an `articleError` the store has
+ * moved, so the caller writes the export and the summary as for any update, then fails.
+ */
+export interface RanUpdate {
+  update: WikiUpdate;
+  runId: string;
+  articleError: UpdateArticleError | null;
+}
+
+/**
  * Moves the store's wiki to input.index.sha with live calls: one ledger run of kind "update" at
  * that sha, and the store's batch journal, so a killed update's batches are collected by the
  * next run instead of paid for again. The Claude provider is built on the first call, so an
  * update that needs none (nothing cited changed) needs no API key; with none set, the keyless
- * error names `command`.
+ * error names `command`. `provider` replaces Claude (tests).
  */
 export async function runUpdate(
   store: Store,
@@ -142,28 +161,61 @@ export async function runUpdate(
   repoName: string,
   log: (line: string) => void,
   command: LiveCommand = "wiki:update",
-): Promise<{ update: WikiUpdate; runId: string }> {
+  provider?: Provider,
+): Promise<RanUpdate> {
   const sha = input.index.sha;
   const runId = `wiki-update-${sha}-${new Date().toISOString()}`;
   const ledger = createLedger((entry) => store.appendLedger(entry));
   const journal = buildJournal(store);
-  const provider = lazyClaudeProvider({
-    command,
-    models,
-    ledger,
-    runId,
-    run: { kind: "update", sha },
-    journal,
-    deadlineMinutes: flags.deadlineMinutes,
-    log,
-  });
-  const update = await updateWiki(store, input, {
-    provider,
+  const options = {
+    provider:
+      provider ??
+      lazyClaudeProvider({
+        command,
+        models,
+        ledger,
+        runId,
+        run: { kind: "update", sha },
+        journal,
+        deadlineMinutes: flags.deadlineMinutes,
+        log,
+      }),
     journal,
     repoName,
     batch: flags.batch,
     budgetTokens: flags.budgetTokens,
     log,
-  });
-  return { update, runId };
+  };
+  try {
+    return { update: await updateWiki(store, input, options), runId, articleError: null };
+  } catch (error) {
+    if (error instanceof UpdateArticleError)
+      return { update: error.update, runId, articleError: error };
+    throw error;
+  }
+}
+
+/**
+ * Writes an update's export.json and update-<sha7>.md in `out`, once the store has moved: after
+ * a finished update, and after one whose About article failed once its pages were stored, so the
+ * export is never behind the store. Returns the summary and both paths.
+ */
+export function writeUpdateOutputs(
+  store: Store,
+  out: string,
+  repoName: string,
+  ran: RanUpdate,
+  estimate: UpdateEstimate | null,
+): { summary: string; exportPath: string; summaryPath: string } {
+  const exportPath = join(out, "export.json");
+  writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });
+  const summary = renderUpdateSummary(
+    repoName,
+    ran.update,
+    estimate,
+    totalsOf(store.listLedger(ran.runId)),
+  );
+  const summaryPath = join(out, `update-${ran.update.to.slice(0, 7)}.md`);
+  writeFileAtomic(summaryPath, summary);
+  return { summary, exportPath, summaryPath };
 }

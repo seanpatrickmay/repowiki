@@ -52,4 +52,9 @@ export {
   type TieBreakInput,
   type TieBreakOptions,
 } from "./tiebreak.ts";
-export { type UpdateOptions, updateWiki, type WikiUpdate } from "./update.ts";
+export {
+  UpdateArticleError,
+  type UpdateOptions,
+  updateWiki,
+  type WikiUpdate,
+} from "./update.ts";

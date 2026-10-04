@@ -31,6 +31,13 @@ export const LedgerEntry = z.object({
   runKind: RunKind.optional(),
   /** The commit the run built or updated to; absent on rows written before M4. */
   sha: GitSha.optional(),
+  /**
+   * A batched call's request key (the batch journal's): a later run that collects the same answer
+   * through the journal records the same key. Absent on unbatched calls and older rows.
+   */
+  requestKey: z.string().min(1).optional(),
+  /** True when the answer was collected from an earlier run's batch: that run paid for it. */
+  collected: z.boolean().optional(),
 });
 export type LedgerEntry = z.infer<typeof LedgerEntry>;
 
