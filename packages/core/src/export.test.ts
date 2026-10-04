@@ -23,6 +23,7 @@ function makeExport(overrides: Partial<WikiExport> = {}): WikiExport {
     history: { signals: [first, second] },
     wikipedia: {},
     architecture: [],
+    runs: [],
     ...overrides,
   };
 }
@@ -33,6 +34,23 @@ function messages(wiki: unknown): string[] {
 }
 
 describe("WikiExport", () => {
+  it("carries each run's token totals, and defaults them to none", () => {
+    const runs = [
+      {
+        kind: "build" as const,
+        sha: SHA_B,
+        calls: 3,
+        tokens: { in: 9, out: 3, cacheRead: 1, cacheWrite: 0 },
+      },
+    ];
+    expect(WikiExport.parse(makeExport({ runs })).runs).toEqual(runs);
+    const { runs: _omitted, ...without } = makeExport();
+    expect(WikiExport.parse(without).runs).toEqual([]);
+    expect(messages(makeExport({ runs: [{ ...runs[0], kind: "replay" }] as never }))).not.toEqual(
+      [],
+    );
+  });
+
   it("carries the Architecture article's revisions, and defaults them to none", () => {
     const architecture = [makeArchitecture({ basis: [second.id], edges: [] })];
     expect(WikiExport.parse(makeExport({ architecture })).architecture).toEqual(architecture);

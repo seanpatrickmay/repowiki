@@ -5,6 +5,7 @@ import { WikiExport } from "@repowiki/core";
 import {
   bodyClaim,
   leadClaim,
+  makeLedgerEntry,
   makeManifest,
   makeRevision,
   SHA_A,
@@ -186,5 +187,32 @@ describe("buildExport Wikipedia titles are read as the site reads link tokens", 
   it("exports no summaries when nothing was cached", () => {
     seedPages("Uses [[wp:Cron]].", "Plain.");
     expect(buildExport(store, options).wikipedia).toEqual({});
+  });
+});
+
+describe("buildExport run totals (spec §6.4)", () => {
+  it("exports each run's calls and tokens from the ledger", () => {
+    seed();
+    store.appendLedger(
+      makeLedgerEntry({ runId: "b", runKind: "build", sha: SHA_A, purpose: "write" }),
+    );
+    store.appendLedger(makeLedgerEntry({ runId: "m" }));
+    store.appendLedger(
+      makeLedgerEntry({ runId: "u", runKind: "update", sha: SHA_B, purpose: "write" }),
+    );
+    expect(buildExport(store, options).runs).toEqual([
+      {
+        kind: "build",
+        sha: SHA_A,
+        calls: 1,
+        tokens: { in: 1000, out: 200, cacheRead: 0, cacheWrite: 0 },
+      },
+      {
+        kind: "update",
+        sha: SHA_B,
+        calls: 1,
+        tokens: { in: 1000, out: 200, cacheRead: 0, cacheWrite: 0 },
+      },
+    ]);
   });
 });

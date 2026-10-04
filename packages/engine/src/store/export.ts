@@ -7,6 +7,7 @@ import {
   WikiExport,
   type WikipediaSummary,
 } from "@repowiki/core";
+import { runTotals } from "@repowiki/llm";
 import { wikipediaTitlesIn } from "../link/index.ts";
 import { EmptyStoreError } from "./errors.ts";
 import type { Store } from "./store.ts";
@@ -59,6 +60,7 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     history,
     wikipedia,
     architecture,
+    runs: runTotals(store.listLedger()),
   });
 }
 
