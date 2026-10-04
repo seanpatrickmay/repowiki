@@ -48,7 +48,7 @@ const MAX_DOCSTRING_LINES = 6;
 const MAX_JSDOC_LINES = 12;
 
 /** estimateTokens counts a token per 2.5 characters, so a budget is this many characters. */
-const CHARS_PER_TOKEN = 2.5;
+export const CHARS_PER_TOKEN = 2.5;
 const SOURCE_HEADING = "## Source";
 const OTHER_FILES_HEADING = "## Other member files (not shown)";
 const moreFiles = (count: number) => `- and ${count} more files`;
@@ -63,10 +63,10 @@ const OTHER_FILES_RESERVE = 2 + OTHER_FILES_HEADING.length + 1 + moreFiles(9_999
 const UNSAFE = new RegExp(`(?!\\t)${INVISIBLE_CHARACTERS.source}`, "gu");
 
 /** A repository- or model-derived string, safe to put in the prompt: unsafe characters become U+FFFD. */
-const clean = (text: string): string => text.replace(UNSAFE, "\uFFFD");
+export const clean = (text: string): string => text.replace(UNSAFE, "\uFFFD");
 
 /** The first `max` UTF-16 units of `text`, without half of a surrogate pair at the end. */
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   const cut = text.slice(0, max);
   return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
@@ -77,7 +77,11 @@ function clip(text: string, max: number): string {
  * and the "\r" of a CRLF line dropped. `lines` is verify's `sourceLines`, so a number is the line
  * a citation of it resolves.
  */
-function numbered(lines: readonly string[], numbers: readonly number[], width: number): string {
+export function numbered(
+  lines: readonly string[],
+  numbers: readonly number[],
+  width: number,
+): string {
   return numbers
     .map((n) => {
       const raw = (lines[n - 1] ?? "").replace(/\r$/, "");
