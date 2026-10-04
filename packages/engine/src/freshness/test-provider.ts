@@ -3,6 +3,8 @@ import type { GenerateRequest, Provider } from "@repowiki/llm";
 /**
  * A provider that answers each call with `answer(request, n)` (n counts calls from 1): the
  * output, parsed with the request's schema, or an Error to throw. Remembers every request.
+ * Unlike the Claude provider, which throws an LlmOutputError for an answer of the wrong shape,
+ * it throws the schema's ZodError: a test of the unusable-answer route returns an LlmOutputError.
  * Test-only.
  */
 export function scriptedProvider(
