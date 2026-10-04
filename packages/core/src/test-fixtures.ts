@@ -2,6 +2,7 @@ import type { CodeCitation, CommitCitation } from "./citation.ts";
 import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
 import type { Feature } from "./feature.ts";
+import type { LedgerEntry } from "./llm.ts";
 import type { Manifest } from "./manifest.ts";
 import type { Revision } from "./revision.ts";
 
@@ -80,6 +81,20 @@ export function makeManifest(overrides: Partial<Manifest> = {}): Manifest {
       "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 },
       "src/deliverables/crud.py": { featureId: "deliverables", weight: 0.7 },
     },
+    ...overrides,
+  };
+}
+
+export function makeLedgerEntry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
+  return {
+    runId: "run-1",
+    at: "2026-10-01T12:00:00.000Z",
+    purpose: "manifest",
+    model: "claude-haiku-4-5-20251001",
+    featureId: null,
+    batch: false,
+    cacheKey: null,
+    tokens: { in: 1000, out: 200, cacheRead: 0, cacheWrite: 0 },
     ...overrides,
   };
 }
