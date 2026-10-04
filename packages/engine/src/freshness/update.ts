@@ -9,15 +9,19 @@ import {
 } from "../link/index.ts";
 import { addAliases, type Store } from "../store/index.ts";
 import {
+  type ArchitectureOutcome,
   assembleUpdate,
   type BuildJournal,
   checkTitles,
   type PageRewrite,
   type RewriteOutcome,
   rewritePages,
+  storeArticle,
   type WrittenPages,
+  writeArchitecture,
   writePages,
 } from "../write/index.ts";
+import { type ArticleDue, articleDue } from "./article.ts";
 import { DEFAULT_DRIFT_THRESHOLD } from "./drift.ts";
 import { type DriftOutcome, reviseManifest } from "./drift-call.ts";
 import {
@@ -73,6 +77,10 @@ export interface WikiUpdate {
   carried: string[];
   /** Claims this update marked out of date. */
   staleClaims: number;
+  /** Why the project's article was rewritten, or null when it carried forward. */
+  articleDue: ArticleDue | null;
+  /** The article's round, or null when it carried forward. */
+  architecture: ArchitectureOutcome | null;
 }
 
 /** Only a call that failed, never a page the model could not support, stops an update. */
@@ -248,6 +256,32 @@ export async function updateWiki(
     store.setHead(plan.to);
     options.journal?.flush();
   });
+
+  // The project's article, in its own round once the pages are stored: a failed article is
+  // reported and never undoes them (as in buildWiki).
+  const active = manifest.features.filter((f) => f.status.kind === "active");
+  const current = active.flatMap((f) => store.getCurrentRevision(f.id) ?? []);
+  const article = store.getCurrentArchitecture();
+  const due = articleDue(article, current, manifest, (id) => store.getRevision(id));
+  let architecture: ArchitectureOutcome | null = null;
+  if (due !== null) {
+    log(`architecture: rewritten: ${due}`);
+    architecture = await writeArchitecture(
+      {
+        index,
+        manifest,
+        sources,
+        history,
+        pages: current,
+        parent: article,
+        number: store.countArchitectureRevisions() + 1,
+        reason: article === null ? "build" : "update",
+        pr: plan.pr,
+      },
+      { provider: options.provider, repoName: options.repoName, batch, wikipedia, now, log },
+    );
+    storeArticle(store, architecture, options.journal);
+  }
   return {
     from: plan.from,
     to: plan.to,
@@ -263,5 +297,7 @@ export async function updateWiki(
     stored,
     carried: kept.sort(),
     staleClaims,
+    articleDue: due,
+    architecture,
   };
 }

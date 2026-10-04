@@ -363,4 +363,54 @@ describe("buildWiki", () => {
     expect(store.findBatchRequest("architecture")).toBeNull();
     expect(store.getCurrentArchitecture()?.title).toBe("Sample Ops");
   });
+
+  it("forgets the article's journal row even when the store refuses the article", async () => {
+    const { store, input, options } = setup();
+    const journal = buildJournal(store);
+    journal.record("msgbatch_2", new Date().toISOString(), [
+      { requestKey: "architecture", customId: "req-a" },
+    ]);
+    const refusing = {
+      ...store,
+      putArchitecture() {
+        throw new Error("disk full");
+      },
+    };
+    const provider: Provider = {
+      generate(request) {
+        if (request.featureId === undefined) journal.forget("msgbatch_2", ["architecture"]);
+        return options.provider.generate(request);
+      },
+    };
+    await expect(buildWiki(refusing, input, { ...options, provider, journal })).rejects.toThrow(
+      "disk full",
+    );
+    // A rerun pays for one new article call instead of replaying the answer the store refused.
+    expect(store.findBatchRequest("architecture")).toBeNull();
+    expect(store.listCurrentRevisions()).toHaveLength(2);
+  });
+});
+
+describe("buildJournal", () => {
+  it("keeps every untagged row while one untagged request is still unanswered", () => {
+    const store = openStore(":memory:");
+    const journal = buildJournal(store);
+    const at = new Date().toISOString();
+    // Round 1 of the article was answered; its retry batch failed as a whole.
+    journal.record("msgbatch_1", at, [{ requestKey: "round-1", customId: "req-1" }]);
+    journal.record("msgbatch_2", at, [{ requestKey: "retry", customId: "req-2" }]);
+    journal.tag("round-1", null);
+    journal.tag("retry", null);
+    journal.forget("msgbatch_1", ["round-1"]);
+    store.transaction(() => journal.flush());
+    expect(store.findBatchRequest("round-1")?.batchId).toBe("msgbatch_1");
+    // Once the retry is answered too, both are forgotten.
+    journal.forget("msgbatch_2", ["retry"]);
+    store.transaction(() => journal.flush());
+    expect([store.findBatchRequest("round-1"), store.findBatchRequest("retry")]).toEqual([
+      null,
+      null,
+    ]);
+    store.close();
+  });
 });

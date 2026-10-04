@@ -45,6 +45,10 @@ export interface ArchitectureInput {
   parent: Architecture | null;
   /** The new revision's 1-based position in the article's history. */
   number: number;
+  /** "update" when an update rewrites the article (default "build"). */
+  reason?: "build" | "update";
+  /** The PR the update's commit merged (default null). */
+  pr?: number | null;
 }
 
 export interface ArchitectureOptions {
@@ -268,8 +272,8 @@ export async function writeArchitecture(
       commitDate: commitDate ?? now().toISOString(),
       generatedAt: now().toISOString(),
       parentId: input.parent?.id ?? null,
-      reason: "build",
-      pr: null,
+      reason: input.reason ?? "build",
+      pr: input.pr ?? null,
       model: state.model ?? "unknown",
       tokens: state.tokens,
       basis: input.pages.map((p) => p.id).sort(),
