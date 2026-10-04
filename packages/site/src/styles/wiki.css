@@ -522,3 +522,41 @@ ins {
 .mp-map {
   margin-top: 1rem;
 }
+
+/* Search */
+.site-search {
+  display: flex;
+  flex: 1 1 16rem;
+  max-width: 28rem;
+  gap: 0.25rem;
+}
+
+.site-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.site-search button {
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+#search {
+  --pagefind-ui-font: var(--font-sans);
+  --pagefind-ui-text: var(--text);
+  --pagefind-ui-background: var(--bg);
+  --pagefind-ui-border: var(--border);
+  --pagefind-ui-primary: var(--link);
+  --pagefind-ui-tag: var(--bg-subtle);
+}

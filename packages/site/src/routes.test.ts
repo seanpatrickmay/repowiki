@@ -74,6 +74,17 @@ describe("pageFor", () => {
     expect(page.kind === "article" && page.view.title).toBe("Signal ingestion");
   });
 
+  it("indexes active articles for search and leaves retired ones out", () => {
+    const flag = (slug: string) => {
+      const page = pageFor(site, route(slug));
+      return page.kind === "article" ? page.indexed : null;
+    };
+    expect(flag("signals")).toBe(true);
+    expect(flag("deliverables")).toBe(true);
+    expect(flag("hostile-title")).toBe(true);
+    expect(flag("exporter")).toBe(false);
+  });
+
   it("sends a redirect to its target with the old title in the query", () => {
     expect(pageFor(site, route("legacy-signals"))).toEqual({
       kind: "redirect",

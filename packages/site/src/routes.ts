@@ -48,7 +48,12 @@ export function articleFor(site: SiteModel, route: ArticleRoute): Revision {
 
 /** Everything a /wiki/<slug>/ template prints. Same plain-text / trusted-HTML rule as ArticleView. */
 export type PageView =
-  | { kind: "article"; view: ArticleView }
+  | {
+      kind: "article";
+      view: ArticleView;
+      /** True for an active feature's current article; retired articles stay out of search. */
+      indexed: boolean;
+    }
   | {
       kind: "redirect";
       /** Plain text. */
@@ -75,7 +80,11 @@ export function pageFor(site: SiteModel, route: WikiRoute): PageView {
   const titleOf = (id: string) => site.features.get(id)?.title ?? id;
   switch (route.kind) {
     case "article":
-      return { kind: "article", view: articleView(site, articleFor(site, route)) };
+      return {
+        kind: "article",
+        view: articleView(site, articleFor(site, route)),
+        indexed: site.features.get(route.featureId)?.status.kind === "active",
+      };
     case "redirect": {
       const link = featureLink(site, route.target);
       // A lone surrogate would make encodeURIComponent throw.
