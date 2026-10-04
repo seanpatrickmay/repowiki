@@ -43,15 +43,25 @@ export const JUDGE_SYSTEM = [
 
 /**
  * Text as the judge reads it, which is text the owner can read too: format characters (zero-width,
- * bidi, tag characters, the byte-order mark) are dropped, line and paragraph separators and NEL
+ * bidi, tag characters, the byte-order mark) and the other characters that show as nothing
+ * (SHOWN_AS_NOTHING) are dropped, line and paragraph separators and NEL
  * become spaces, and any other control character becomes U+FFFD (`toolText`). The spot-check shows
  * the owner this text, so nothing can be said to the judge that the owner cannot see.
  */
 export function visibleText(text: string): string {
   return toolText(
-    text.replace(/[\p{Cf}\u{E0000}-\u{E007F}]/gu, "").replace(/[\u2028\u2029\u0085]/g, " "),
+    text
+      .replace(/[\p{Cf}\u{E0000}-\u{E007F}]/gu, "")
+      .replace(SHOWN_AS_NOTHING, "")
+      .replace(/[\u2028\u2029\u0085]/g, " "),
   );
 }
+
+/**
+ * Characters that are not format characters but still show as nothing: variation selectors, the
+ * combining grapheme joiner, the Hangul fillers and the Braille blank.
+ */
+const SHOWN_AS_NOTHING = /[\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u034F\u115F\u1160\u3164\uFFA0\u2800]/gu;
 
 /**
  * An answer as the judge reads it: `visibleText`, then cut at MAX_JUDGED_ANSWER_CHARS code points,

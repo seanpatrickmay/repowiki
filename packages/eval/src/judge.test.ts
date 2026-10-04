@@ -13,6 +13,7 @@ import {
   MAX_RETRY_PROBLEM_CHARS,
   retryTurn,
   scoreOf,
+  visibleText,
 } from "./judge.ts";
 import type { EvalQuestion } from "./questions.ts";
 
@@ -55,6 +56,13 @@ function scriptedJudge(answers: (JudgeVerdict | Error)[]) {
   };
   return { provider, requests };
 }
+
+describe("visibleText", () => {
+  it("drops the characters that show as nothing: variation selectors, fillers and blanks", () => {
+    const hidden = "a\uFE0Fb\u{E0100}c\u034Fd\u115Fe\u1160f\u3164g\uFFA0h\u2800i";
+    expect(visibleText(hidden)).toBe("abcdefghi");
+  });
+});
 
 describe("judgedAnswer", () => {
   it("cuts by code point, so an astral character at the cut is never split", () => {
