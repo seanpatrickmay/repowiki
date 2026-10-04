@@ -38,10 +38,8 @@ function renderSections(
       const pages =
         (claim.pages ?? []).length > 0 ? ` [pages: ${(claim.pages ?? []).join(", ")}]` : "";
       const stale = claim.staleSince === null ? "" : " (may be out of date)";
-      const bullet = section.key === "lead" ? "" : "- ";
-      lines.push(
-        `${bullet}${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}`,
-      );
+      // Every claim, the lead's too, is a bullet: claim text never starts a line of its own.
+      lines.push(`- ${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}`);
     }
   }
   if (refs.length > 0) lines.push("", "References", ...refs.map((r, i) => `[${i + 1}] ${r}`));
