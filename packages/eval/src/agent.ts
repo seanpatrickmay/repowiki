@@ -107,7 +107,9 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
               : "other";
       return { answer: text, stop, turns: turn, calls, usage, usd, model };
     }
-    messages.push({ role: "assistant", content: result.content });
+    // The API refuses a whitespace-only text block, which a model may write before a tool call.
+    const echoed = result.content.filter((b) => b.type !== "text" || b.text.trim() !== "");
+    messages.push({ role: "assistant", content: echoed });
     const results = uses.map((use, i): ToolResultBlock => {
       if (i > 0) {
         const content = "Not run: call one tool per turn.";

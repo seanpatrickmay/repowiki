@@ -109,11 +109,14 @@ function blockParam(block: TurnBlock): ContentBlockParam {
   }
 }
 
-/** The request's messages as API params; empty text blocks are left out, as the API refuses them. */
+/**
+ * The request's messages as API params; empty and whitespace-only text blocks are left out, as the
+ * API refuses them ("text content blocks must contain non-whitespace text").
+ */
 function messageParams(request: TurnRequest): MessageParam[] {
   const messages = request.messages.map((message, index) => {
     const content = message.content
-      .filter((block) => block.type !== "text" || block.text !== "")
+      .filter((block) => block.type !== "text" || block.text.trim() !== "")
       .map(blockParam);
     if (content.length === 0) throw new LlmError(`message ${index} has no content`);
     return { role: message.role, content };

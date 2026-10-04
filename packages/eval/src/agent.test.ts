@@ -64,6 +64,19 @@ describe("runAgent", () => {
     ]);
   });
 
+  it("echoes no whitespace-only text back to the model, which the API would refuse", async () => {
+    const { provider, requests } = scriptedToolProvider([
+      { tool: "lookup", input: { word: "widget" }, text: "\n  \t" },
+      { answer: "A widget is a thing." },
+    ]);
+    const answer = await runAgent({ ...base, provider });
+    expect(answer).toMatchObject({ answer: "A widget is a thing.", stop: "answered", turns: 2 });
+    expect(requests[1]?.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "tu_1", name: "lookup", input: { word: "widget" } }],
+    });
+  });
+
   it("forbids tools on the last turn, so the run always ends with an answer", async () => {
     const { provider, requests } = scriptedToolProvider([
       { tool: "lookup", input: { word: "a" } },

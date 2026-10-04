@@ -182,6 +182,48 @@ describe("createClaudeToolProvider", () => {
     ]);
   });
 
+  it("never sends an empty or whitespace-only text block, which the API refuses", async () => {
+    const { bodies, fetch } = cannedTurns([{ type: "text", text: "ok" }], "end_turn");
+    const { provider } = setup(fetch);
+    await provider.turn({
+      ...request,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Where are signals made?" },
+            { type: "text", text: " \n\t" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "\n\n" },
+            { type: "tool_use", id: "tu_1", name: "search", input: { query: "signals" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolUseId: "tu_1", content: "x", isError: false }],
+        },
+      ],
+    });
+    const messages = bodies[0]?.messages as { content: { type: string }[] }[];
+    expect(messages.map((m) => m.content.map((b) => b.type))).toEqual([
+      ["text"],
+      ["tool_use"],
+      ["tool_result"],
+    ]);
+    const { bodies: none, fetch: noFetch } = cannedTurns([]);
+    await expect(
+      setup(noFetch).provider.turn({
+        ...request,
+        messages: [{ role: "user", content: [{ type: "text", text: "  \n" }] }],
+      }),
+    ).rejects.toThrow(new LlmError("message 0 has no content"));
+    expect(none).toEqual([]);
+  });
+
   it("refuses a message left with no content, and a missing key, before any request", async () => {
     const { bodies, fetch } = cannedTurns([]);
     const { provider } = setup(fetch);
