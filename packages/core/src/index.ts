@@ -1,3 +1,4 @@
+export { ALIAS_MAX_LENGTH, aliasProblem, CONTROL_CHARACTERS, controlCharacters } from "./alias.ts";
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
 export { Claim, ClaimId, ClaimKind } from "./claim.ts";
 export { contentHash } from "./content-hash.ts";

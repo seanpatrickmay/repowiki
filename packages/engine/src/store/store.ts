@@ -1,4 +1,5 @@
 import {
+  aliasProblem,
   GitSha,
   LedgerEntry,
   Manifest,
@@ -16,6 +17,7 @@ import {
   StaleParentError,
   StoreError,
   UnknownFeatureError,
+  UnknownManifestError,
 } from "./errors.ts";
 import { migrate } from "./migrations.ts";
 
@@ -38,6 +40,19 @@ export interface Store {
    */
   putManifest(manifest: Manifest, options?: PutManifestOptions): void;
   getManifest(sha: string): Manifest | null;
+  /**
+   * Adds aliases to the features of the stored manifest for `sha` and returns it, in one
+   * transaction. Additive only: an alias already present (case-insensitively, or equal to the
+   * title) is skipped, and nothing else about the manifest changes, so ids, membership,
+   * llm_revised and the drift baseline's identity are untouched. Throws UnknownManifestError for
+   * a sha with no manifest, and a StoreError for an alias that fails core's aliasProblem (blank
+   * ones are skipped), in which case nothing is written. The Manifest schema is parsed before
+   * writing.
+   */
+  amendManifestAliases(
+    sha: string,
+    additions: Readonly<Record<string, readonly string[]>>,
+  ): Manifest;
   getLatestManifest(): Manifest | null;
   /**
    * The most recent manifest stored with llmRevised: true. Manifest drift (spec §6.1 step 4) is
@@ -254,6 +269,41 @@ export function openStore(path: string): Store {
       readManifest(
         db.prepare("SELECT body FROM manifests WHERE sha = ?").get(sha) as BodyRow | undefined,
       ),
+
+    amendManifestAliases(sha, additions) {
+      return db.transaction(() => {
+        const stored = readManifest(
+          db.prepare("SELECT body FROM manifests WHERE sha = ?").get(sha) as BodyRow | undefined,
+        );
+        if (stored === null) throw new UnknownManifestError(sha);
+        const features = stored.features.map((feature) => {
+          // hasOwn: a feature id such as "constructor" must not read Object.prototype.
+          const wanted = Object.hasOwn(additions, feature.id) ? (additions[feature.id] ?? []) : [];
+          const names = new Set([feature.title, ...feature.aliases].map((n) => n.toLowerCase()));
+          const added: string[] = [];
+          for (const alias of wanted) {
+            const trimmed = alias.trim();
+            if (trimmed === "") continue;
+            const problem = aliasProblem(trimmed);
+            if (problem !== null) {
+              const shown = [...trimmed].slice(0, 40).join("");
+              throw new StoreError(
+                `alias ${JSON.stringify(trimmed === shown ? shown : `${shown}…`)} for feature ${feature.id} ${problem}`,
+              );
+            }
+            if (names.has(trimmed.toLowerCase())) continue;
+            names.add(trimmed.toLowerCase());
+            added.push(trimmed);
+          }
+          return added.length === 0
+            ? feature
+            : { ...feature, aliases: [...feature.aliases, ...added] };
+        });
+        const amended = Manifest.parse({ ...stored, features });
+        db.prepare("UPDATE manifests SET body = ? WHERE sha = ?").run(JSON.stringify(amended), sha);
+        return amended;
+      })();
+    },
 
     getLatestManifest: latestManifest,
 
