@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FEATURE_ID_MAX_LENGTH, Feature, FeatureId } from "./feature.ts";
+import { FEATURE_ID_MAX_LENGTH, Feature, FeatureId, LineageEvent } from "./feature.ts";
 import { makeFeature, SHA_A, SHA_B } from "./test-fixtures.ts";
 
 describe("FeatureId", () => {
@@ -125,5 +125,111 @@ describe("Feature", () => {
     expect(result.error?.issues.some((i) => i.message.includes("requires a matching split"))).toBe(
       true,
     );
+  });
+});
+
+describe("lineage variants", () => {
+  it.each([
+    { kind: "create", sha: SHA_A },
+    { kind: "rename", sha: SHA_B, fromTitle: "Signals" },
+    { kind: "merge", sha: SHA_B, into: "deliverables" },
+    { kind: "split", sha: SHA_B, into: ["signal-ingest", "signal-scoring"] },
+    { kind: "retire", sha: SHA_B },
+  ])("parses a $kind event", (event) => {
+    expect(LineageEvent.parse(event)).toEqual(event);
+  });
+
+  it.each([
+    { kind: "rename", sha: SHA_B },
+    { kind: "merge", sha: SHA_B },
+    { kind: "retire", sha: "abc" },
+  ])("rejects a malformed $kind event", (event) => {
+    expect(LineageEvent.safeParse(event).success).toBe(false);
+  });
+});
+
+describe("Feature lineage and status agree both ways (issue #53)", () => {
+  const create = { kind: "create" as const, sha: SHA_A };
+  const issues = (feature: Feature) =>
+    Feature.safeParse(feature).error?.issues.map((issue) => issue.message) ?? [];
+
+  it("accepts a merged feature that redirects to its merge target", () => {
+    const merged = makeFeature({
+      lineage: [create, { kind: "merge", sha: SHA_B, into: "deliverables" }],
+      status: { kind: "redirect", to: "deliverables" },
+    });
+    expect(Feature.parse(merged)).toEqual(merged);
+  });
+
+  it("rejects a merge event on an active feature", () => {
+    const feature = makeFeature({
+      lineage: [create, { kind: "merge", sha: SHA_B, into: "deliverables" }],
+    });
+    expect(issues(feature)).toContain("a merge lineage event requires redirect status");
+  });
+
+  it("rejects a redirect to a feature other than the merge target", () => {
+    const feature = makeFeature({
+      lineage: [create, { kind: "merge", sha: SHA_B, into: "deliverables" }],
+      status: { kind: "redirect", to: "billing" },
+    });
+    expect(issues(feature)).toContain(
+      "redirect status requires a merge lineage event into its target",
+    );
+  });
+
+  it("rejects a split event on an active feature", () => {
+    const feature = makeFeature({
+      lineage: [create, { kind: "split", sha: SHA_B, into: ["signal-ingest", "signal-scoring"] }],
+    });
+    expect(issues(feature)).toContain("a split lineage event requires disambiguation status");
+  });
+
+  it("accepts a renamed feature that keeps its old title as an alias", () => {
+    const renamed = makeFeature({
+      aliases: ["signal pipeline", "Signals"],
+      lineage: [create, { kind: "rename", sha: SHA_B, fromTitle: "Signals" }],
+    });
+    expect(Feature.parse(renamed)).toEqual(renamed);
+  });
+
+  it("rejects a rename whose old title is not an alias", () => {
+    const feature = makeFeature({
+      lineage: [create, { kind: "rename", sha: SHA_B, fromTitle: "Signals" }],
+    });
+    expect(issues(feature)).toContain('rename lineage requires "Signals" in aliases');
+  });
+
+  it("accepts a retired feature with a retire event", () => {
+    const retired = makeFeature({
+      lineage: [create, { kind: "retire", sha: SHA_B }],
+      status: { kind: "retired" },
+    });
+    expect(Feature.parse(retired)).toEqual(retired);
+  });
+
+  it("rejects a retire event on an active feature", () => {
+    const feature = makeFeature({ lineage: [create, { kind: "retire", sha: SHA_B }] });
+    expect(issues(feature)).toContain("a retire lineage event requires retired status");
+  });
+
+  it("rejects retired status without a retire event", () => {
+    const feature = makeFeature({ status: { kind: "retired" } });
+    expect(issues(feature)).toContain("retired status requires a retire lineage event");
+  });
+
+  it("rejects more than one ending event", () => {
+    const feature = makeFeature({
+      lineage: [create, { kind: "retire", sha: SHA_B }, { kind: "retire", sha: SHA_B }],
+      status: { kind: "retired" },
+    });
+    expect(issues(feature)).toContain(
+      "lineage may contain at most one merge, split, or retire event",
+    );
+  });
+
+  it("rejects a second create event", () => {
+    const feature = makeFeature({ lineage: [create, create] });
+    expect(issues(feature)).toContain("create may only be the first lineage event");
   });
 });
