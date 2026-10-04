@@ -5,13 +5,13 @@ import { ensureManifest, indexRepo, openStore, renderManifestSummary } from "@re
 import { createClaudeProvider, createLedger, type Provider, totalsOf } from "@repowiki/llm";
 import {
   CliError,
-  exitCodeFor,
   loadModels,
   manifestLedgerRows,
   manifestRunId,
   parseManifestArgs,
 } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
+import { exitWithError } from "./wiki-cli.ts";
 
 async function main(): Promise<void> {
   const args = parseManifestArgs(process.argv.slice(2));
@@ -91,8 +91,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  const code = exitCodeFor(err);
-  if (code === null) throw err;
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(code);
+  // One redacted line (an error may quote the key) and the usage or failure exit code.
+  exitWithError(err);
 }
