@@ -67,7 +67,7 @@ export interface StepProjection {
  * each step's own estimate from the real plan before its calls.
  */
 export function projectStep(
-  input: { step: ReplayStep; files: number; pages: number },
+  input: { step: ReplayStep; files: number; pages: number; articleDue?: boolean },
   prompts: { update: string; article: string },
   budgetTokens: number,
   model: string,
@@ -83,12 +83,21 @@ export function projectStep(
       writeSystem: "",
       disputed: false,
       drifted: false,
-      article: input.pages > 0 ? { system: prompts.article, budgetTokens } : null,
+      // The article is rewritten when a page may change, or already due as the store stands.
+      article:
+        input.pages > 0 || input.articleDue === true
+          ? { system: prompts.article, budgetTokens }
+          : null,
     },
     models,
     batch,
   );
-  return { ...input, usd: estimate.usd + (estimate.articleUsd ?? 0) };
+  return {
+    step: input.step,
+    files: input.files,
+    pages: input.pages,
+    usd: estimate.usd + (estimate.articleUsd ?? 0),
+  };
 }
 
 /** The dry run's table: one row per planned step, then the total. */

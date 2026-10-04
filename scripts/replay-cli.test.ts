@@ -102,6 +102,31 @@ describe("projectStep and renderProjection", () => {
       true,
     );
     expect(loud.usd).toBeGreaterThan(0);
+    // An About article already due is a call even when no page is touched.
+    const due = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 0, articleDue: true },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    expect(due.usd).toBeGreaterThan(0);
+    const dirty = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 1 },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    const dirtyDue = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 1, articleDue: true },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    // The article is priced once, never twice.
+    expect(dirtyDue.usd).toBe(dirty.usd);
     const table = renderProjection([quiet, loud], 3);
     expect(table).toContain("| 2 | ccccccc | 9 | `Merge pull request #9 from me/y` | 5 | 2 |");
     expect(table).toMatch(/2 steps estimated at about \$\d+\.\d{4}; 3 more steps after them/);

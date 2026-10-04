@@ -34,7 +34,7 @@ import {
   type ReplayArgs,
   renderUpdateSummary,
 } from "./update-cli.ts";
-import { estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
+import { articleDueAsStored, estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
 import {
   acquireBuildLock,
   describeError,
@@ -135,14 +135,22 @@ async function replay(
             article: architectureSystemPrompt(repoName, manifest),
           };
     let previous = head;
-    const projections = todo.map((step) => {
+    // Only the first step can find the article already due; after it, the article is a call of
+    // whichever step writes it, which the projection counts for a step that touches a page.
+    const dueNow = manifest !== null && articleDueAsStored(store, manifest);
+    const projections = todo.map((step, i) => {
       const changes = diffCommits(repo, previous, step.sha);
       previous = step.sha;
       const paths = changes.flatMap((c) =>
         [c.oldPath, c.newPath].filter((p): p is string => p !== null),
       );
       return projectStep(
-        { step, files: changes.length, pages: touchedPages(store, paths) },
+        {
+          step,
+          files: changes.length,
+          pages: touchedPages(store, paths),
+          articleDue: i === 0 && dueNow,
+        },
         prompts,
         args.budgetTokens,
         models.write,

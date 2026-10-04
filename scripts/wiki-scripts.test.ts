@@ -938,6 +938,16 @@ describe("wiki-replay.ts as a process (no network)", () => {
     expect(problems.join("\n")).toContain("c-?1?");
   });
 
+  it("prices the About article on a dry run when it is already due and no page is touched", () => {
+    const { repo, out, first, quiet } = replayable(null, { paged: true });
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out, "--dry-run");
+    expect(result.status).toBe(0);
+    const [row] = result.stdout.split("\n").filter((line) => /^\| \d/.test(line));
+    expect(row?.split(" | ")[5]).toBe("0");
+    expect(row).not.toMatch(/\$0\.0000 \|$/);
+    expect(result.stdout).toMatch(/1 steps estimated at about \$(?!0\.0000)\d+\.\d{4}\./);
+  });
+
   it("refuses up front, with the head unmoved, a step whose only call is the due About article", () => {
     // Two pages and no article: the About article is due, and it is the step's only call.
     const { repo, out, first, quiet } = replayable(null, { paged: true });

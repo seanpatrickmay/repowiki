@@ -1,3 +1,4 @@
+import type { Manifest } from "@repowiki/core";
 import {
   addAliases,
   architectureSystemPrompt,
@@ -40,6 +41,17 @@ export async function readInput(repo: string, sha: string): Promise<UpdateInput>
   };
 }
 
+/** Whether the About article is due as the store stands against `manifest`, with no page changed. */
+export function articleDueAsStored(store: Store, manifest: Manifest): boolean {
+  const stored = manifest.features.flatMap((f) =>
+    f.status.kind === "active" ? (store.getCurrentRevision(f.id) ?? []) : [],
+  );
+  return (
+    articleDue(store.getCurrentArchitecture(), stored, manifest, (id) => store.getRevision(id)) !==
+    null
+  );
+}
+
 /**
  * What moving the store's wiki to input.index.sha would cost, from the plan the update makes
  * before its calls: the dirty pages' update packs, the whole pages of features with none, one
@@ -63,12 +75,7 @@ export function estimateFor(
   const budgetTokens = flags.budgetTokens;
   // The article is rewritten when a page may change (its lead may), and also when it is due as
   // the store stands: none yet, or one that no longer matches the pages and the manifest.
-  const stored = manifest.features.flatMap((f) =>
-    f.status.kind === "active" ? (store.getCurrentRevision(f.id) ?? []) : [],
-  );
-  const dueNow =
-    articleDue(store.getCurrentArchitecture(), stored, manifest, (id) => store.getRevision(id)) !==
-    null;
+  const dueNow = articleDueAsStored(store, manifest);
   const articleMayBeDue = pages.rewrites.length + pages.whole.length > 0 || dueNow;
   return estimateUpdate(
     {
