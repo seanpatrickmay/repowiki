@@ -2,11 +2,12 @@ import { parseMemberId } from "@repowiki/core";
 import { INGEST_PY } from "@repowiki/core/test-fixtures";
 import { type GenerateRequest, LlmError, LlmOutputError, type Provider } from "@repowiki/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildFileGraph, clusterFiles } from "../cluster/index.ts";
 import type { TestRepo } from "../index/index.ts";
 import { buildExport, type Store } from "../store/index.ts";
 import { ArchitectureDraft, PageDraft, UpdateDraft, UpdateFixes } from "../verify/index.ts";
 import { type BuildJournal, buildJournal } from "../write/index.ts";
-import { ManifestOperations } from "./ops.ts";
+import { type ManifestOperation, ManifestOperations } from "./ops.ts";
 import { UpdateError } from "./plan.ts";
 import { scriptedProvider } from "./test-provider.ts";
 import { articleAnswer, builtWiki, inputAt } from "./test-wiki-repo.ts";
@@ -611,6 +612,161 @@ describe("updateWiki", () => {
         sha: merge,
       });
       expect(store.getCurrentRevision("deliverables")?.id).toBe(page?.id);
+    });
+
+    describe("keeps the History of the pages a whole write continues (spec §5 rule 4)", () => {
+      /** wholePage with History claims, each citing the commits it names. */
+      const withHistory = (page: PageDraft, ...history: [string, string[]][]): PageDraft => ({
+        ...page,
+        sections: [
+          ...page.sections,
+          {
+            key: "history",
+            claims: history.map(([text, shas], i) => ({
+              id: `h${i + 1}`,
+              text,
+              cite: shas.map((sha) => `commit:${sha.slice(0, 7)}`),
+              supports: [],
+              hook: false,
+            })),
+          },
+        ],
+      });
+      const op = (o: Partial<ManifestOperation> & Pick<ManifestOperation, "kind" | "feature">) => ({
+        title: "",
+        aliases: [],
+        clusters: [],
+        into: "",
+        targets: [],
+        ...o,
+      });
+      /** The History section of a stored page: each claim's text and the commits it cites. */
+      const historyOf = (featureId: string) =>
+        store
+          .getCurrentRevision(featureId)
+          ?.sections.find((s) => s.key === "history")
+          ?.claims.map((c) => [
+            c.text,
+            c.citations.flatMap((x) => (x.kind === "commit" ? [x.sha] : [])),
+          ]);
+      const clusterOptions = { resolution: 5, minClusterSize: 1 };
+      /** Runs the update to `to` with the drift call answering `operations`. */
+      async function updateWith(
+        to: string,
+        operations: unknown[],
+        page: (featureId: string) => PageDraft,
+      ) {
+        const { provider: p } = turned((request) =>
+          request.schema === ManifestOperations
+            ? { operations }
+            : request.schema === PageDraft
+              ? page(request.featureId ?? "")
+              : standard(request),
+        );
+        return updateWiki(store, await inputAt(repo, to), {
+          ...options,
+          driftThreshold: 0,
+          clusterOptions,
+          provider: p,
+        });
+      }
+
+      it("carries every History claim of a renamed page ahead of the new ones", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { branch, merge } = mergePaging();
+        const result = await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () =>
+            withHistory(
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Paging arrived in PR 7.", [branch]],
+            ),
+        );
+        expect(result.stored.find((r) => r.featureId === "deliverables")?.reason).toBe(
+          "manifest-change",
+        );
+        expect(historyOf("deliverables")).toEqual([
+          ["Deliverables was added first.", [first]],
+          ["Paging arrived in PR 7.", [branch]],
+        ]);
+      });
+
+      it("carries the History of both pages an operation that moves files writes whole", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { merge } = mergePaging();
+        const index = (await inputAt(repo, merge)).index;
+        const storeCluster = clusterFiles(buildFileGraph(index), clusterOptions).find((c) =>
+          c.files.includes("src/signals/store.py"),
+        );
+        expect(storeCluster?.files).toEqual(["src/signals/store.py"]);
+        const result = await updateWith(
+          merge,
+          [op({ kind: "move", feature: "deliverables", clusters: [storeCluster?.id ?? ""] })],
+          (featureId) =>
+            featureId === "signals"
+              ? wholePage(
+                  "Signal ingestion",
+                  "`ingest_chunk()` skips blank sentences.",
+                  "src/signals/ingest.py:10-24",
+                )
+              : wholePage(
+                  "Deliverables",
+                  "`save_signal()` returns its signal.",
+                  "src/signals/store.py:1-2",
+                ),
+        );
+        expect(result.drift?.affected).toEqual(["deliverables", "signals"]);
+        expect(historyOf("signals")).toEqual([["Signal ingestion was added first.", [first]]]);
+        expect(historyOf("deliverables")).toEqual([["Deliverables was added first.", [first]]]);
+      });
+
+      it("carries the History of every page a merge folds into its target", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "merge", feature: "deliverables", into: "signals" })],
+          () =>
+            wholePage(
+              "Signal ingestion",
+              "`complete()` marks a deliverable done.",
+              "src/deliverables/crud.py:4-7",
+            ),
+        );
+        expect(store.getCurrentRevision("signals")?.reason).toBe("manifest-change");
+        expect(historyOf("signals")).toEqual([
+          ["Signal ingestion was added first.", [first]],
+          ["Deliverables was added first.", [first]],
+        ]);
+      });
+
+      it("drops a new History claim that cites exactly the commits a carried one cites", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { branch, merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () =>
+            withHistory(
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Work records began with the first commit.", [first]],
+              ["Both commits shaped it.", [first, branch]],
+            ),
+        );
+        expect(historyOf("deliverables")).toEqual([
+          ["Deliverables was added first.", [first]],
+          ["Both commits shaped it.", [first, branch]],
+        ]);
+      });
     });
 
     it("does not store a whole page that got two unusable answers, and settles its rows", async () => {
