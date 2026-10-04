@@ -1,5 +1,10 @@
 import type { LedgerEntry, TokenUsage } from "@repowiki/core";
-import { markdownCodeSpan, pullRequestOf, type ReplayStep } from "@repowiki/engine";
+import {
+  DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
+  markdownCodeSpan,
+  pullRequestOf,
+  type ReplayStep,
+} from "@repowiki/engine";
 import { z } from "zod";
 import { estimateUpdate } from "./update-cli.ts";
 import { architectureSkipWhy, problemLine, WIKI_BUILD_RUN_PREFIX } from "./wiki-cli.ts";
@@ -125,7 +130,8 @@ export interface StepProjection {
 /**
  * A step's cost before any call, from its diff alone (the store cannot be moved by a dry run):
  * every active feature with a changed member file is taken as one update call with a full pack
- * (`budgetTokens`), plus the About article when any page may change, and one tie-break call when
+ * (`budgetTokens`), plus the About article at its own budget when any page may change, and one
+ * tie-break call when
  * the step adds files. Upper-side for those calls only: it omits a drift call, whole pages and the
  * retry round. The live run states
  * each step's own estimate from the real plan before its calls.
@@ -157,9 +163,10 @@ export function projectStep(
       disputed: input.addsFiles === true,
       drifted: false,
       // The article is rewritten when a page may change, or already due as the store stands.
+      // The article's pack has its own budget, as wiki:update's article call does.
       article:
         input.pages > 0 || input.articleDue === true
-          ? { system: prompts.article, budgetTokens }
+          ? { system: prompts.article, budgetTokens: DEFAULT_ARCHITECTURE_BUDGET_TOKENS }
           : null,
     },
     models,

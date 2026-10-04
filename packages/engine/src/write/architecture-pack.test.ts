@@ -2,7 +2,12 @@ import { memberId } from "@repowiki/core";
 import { leadClaim, makeFeature, makeRevision } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { estimateTokens } from "../manifest/index.ts";
-import { buildArchitecturePack, INFRA_FILE, projectTitle } from "./architecture-pack.ts";
+import {
+  buildArchitecturePack,
+  EDGE_WINDOW_SHARE,
+  INFRA_FILE,
+  projectTitle,
+} from "./architecture-pack.ts";
 import { testArchitectureInput } from "./test-architecture.ts";
 
 const pack = (input = testArchitectureInput(), budgetTokens = 50_000) =>
@@ -108,6 +113,14 @@ describe("buildArchitecturePack", () => {
         "- deliverables -> signals: 1 call, 1 import",
         "  - src/deliverables/crud.py:1 (import)",
         "  - src/deliverables/crud.py:7 (call)",
+        "#### src/deliverables/crud.py (around its sites; 7 lines)",
+        "1| from src.signals.ingest import ingest_chunk",
+        "2| ",
+        "3| ",
+        "4| def complete(deliverable):",
+        '5|     """Marks a deliverable completed."""',
+        "6|     deliverable.done = True",
+        "7|     return ingest_chunk(deliverable.notes)",
         "",
         "## Infrastructure and configuration files",
         "(none)",
@@ -130,13 +143,14 @@ describe("buildArchitecturePack", () => {
 
   it("maps every file line it prints, and every edge site it gives, to `shown`, and nothing else", () => {
     const built = pack(withTerraform());
-    // What the text prints: numbered lines under a file's heading, and each edge's sites.
+    // What the text prints: numbered lines under a file's heading (an edge site's included), and
+    // each edge's sites; a line printed twice is shown once.
     const printed = new Map<string, number[]>();
     const add = (path: string, line: number) =>
       printed.set(path, [...(printed.get(path) ?? []), line]);
     let file: string | undefined;
     for (const line of built.text.split("\n")) {
-      const heading = /^### (\S+) \(/.exec(line);
+      const heading = /^#{3,4} (\S+) \(/.exec(line);
       if (heading !== null || line.startsWith("#")) file = heading?.[1];
       const numbered = /^ *(\d+)\|/.exec(line);
       if (file !== undefined && numbered !== null) add(file, Number(numbered[1]));
@@ -144,12 +158,14 @@ describe("buildArchitecturePack", () => {
         add(site[1] ?? "", Number(site[2]));
     }
     const asLists = (map: ReadonlyMap<string, Iterable<number>>) =>
-      Object.fromEntries([...map].map(([path, lines]) => [path, [...lines].sort((a, b) => a - b)]));
+      Object.fromEntries(
+        [...map].map(([path, lines]) => [path, [...new Set(lines)].sort((a, b) => a - b)]),
+      );
     expect(asLists(built.shown)).toEqual(asLists(printed));
     expect(asLists(built.shown)).toMatchObject({
       "README.md": [1, 2, 3, 4, 5],
       "docs/signals.md": [1, 2, 3],
-      "src/deliverables/crud.py": [1, 4, 5, 7],
+      "src/deliverables/crud.py": [1, 2, 3, 4, 5, 6, 7],
       "infra/main.tf": [2, 6],
     });
   });
@@ -182,6 +198,73 @@ describe("buildArchitecturePack", () => {
     expect(text).toContain("- and 1 more documents\n");
     for (const hidden of ["LICENSE.md", "CHANGELOG.md", "docs/deep/x.md"])
       expect(text).not.toContain(hidden);
+  });
+
+  it("numbers the lines around each edge site, at most three on each side, merged per file", () => {
+    const input = testArchitectureInput();
+    const long = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+    addFiles(input, { "src/deliverables/long.py": long });
+    input.edges = [
+      {
+        ...(input.edges[0] as (typeof input.edges)[number]),
+        sites: [
+          { path: "src/deliverables/long.py", line: 2, kind: "import" },
+          { path: "src/deliverables/long.py", line: 20, kind: "call" },
+        ],
+      },
+    ];
+    const built = pack(input);
+    expect(built.text).toContain(
+      [
+        "  - src/deliverables/long.py:20 (call)",
+        "#### src/deliverables/long.py (around its sites; 40 lines)",
+        " 1| line 1",
+        " 2| line 2",
+        " 3| line 3",
+        " 4| line 4",
+        " 5| line 5",
+        "17| line 17",
+      ].join("\n"),
+    );
+    expect(built.text).toContain("23| line 23\n\n## Infrastructure");
+    expect([...(built.shown.get("src/deliverables/long.py") ?? [])].sort((a, b) => a - b)).toEqual([
+      1, 2, 3, 4, 5, 17, 18, 19, 20, 21, 22, 23,
+    ]);
+  });
+
+  it("stops numbering lines around edge sites once they fill their share of the budget", () => {
+    const input = testArchitectureInput();
+    const files: Record<string, string> = {};
+    const template = input.edges[0] as (typeof input.edges)[number];
+    input.edges = [];
+    for (let i = 0; i < 60; i++) {
+      const path = `src/deliverables/f${i}.py`;
+      files[path] = Array.from({ length: 30 }, (_, n) => `${"x".repeat(150)} ${i}.${n + 1}`).join(
+        "\n",
+      );
+      input.edges.push({
+        ...template,
+        sites: [
+          { path, line: 5, kind: "import" },
+          { path, line: 20, kind: "call" },
+        ],
+      });
+    }
+    addFiles(input, files);
+    const built = pack(input);
+    const windows = built.text.split("\n").filter((l) => /^#### /.test(l)).length;
+    const windowText = built.text
+      .split("\n## ")
+      .find((s) => s.startsWith("Cross-feature edges"))
+      ?.split("\n")
+      .filter((l) => /^ *\d+\| /.test(l) || /^#### /.test(l))
+      .join("\n");
+    expect(windows).toBeGreaterThan(0);
+    expect(windows).toBeLessThan(60);
+    expect(windowText?.length).toBeLessThanOrEqual(50_000 * 2.5 * EDGE_WINDOW_SHARE);
+    // Every edge that fits still gives its sites, and a site with no window shows its own line.
+    expect(built.text).toContain("  - src/deliverables/f59.py:20 (call)");
+    expect([...(built.shown.get("src/deliverables/f59.py") ?? [])]).toEqual([5, 20]);
   });
 
   it("says so when no edge joins two features", () => {

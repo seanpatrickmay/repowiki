@@ -1,5 +1,6 @@
 import type { LedgerEntry } from "@repowiki/core";
 import { SHA_A, SHA_B, SHA_C } from "@repowiki/core/test-fixtures";
+import { DEFAULT_ARCHITECTURE_BUDGET_TOKENS } from "@repowiki/engine";
 import { DEFAULT_MODELS } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import {
@@ -13,6 +14,7 @@ import {
   type StepRecord,
   tokensOf,
 } from "./replay-cli.ts";
+import { estimateArchitecture } from "./wiki-cli.ts";
 
 const step = (sha: string, subject: string) => ({ sha, subject, merge: true });
 const record = (overrides: Partial<StepRecord> = {}): StepRecord => ({
@@ -87,6 +89,25 @@ describe("tokensOf", () => {
 
 describe("projectStep and renderProjection", () => {
   const prompts = { update: "u".repeat(2500), article: "a".repeat(2500) };
+
+  it("prices the About article at the article's own budget, whatever --budget says", () => {
+    const due = (budget: number) =>
+      projectStep(
+        { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 0, articleDue: true },
+        prompts,
+        budget,
+        DEFAULT_MODELS.write,
+        true,
+      ).usd;
+    const article = estimateArchitecture(
+      prompts.article,
+      DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
+      DEFAULT_MODELS.write,
+      true,
+    ).usd;
+    expect(due(30_000)).toBeCloseTo(article, 12);
+    expect(due(5_000)).toBeCloseTo(article, 12);
+  });
 
   it("costs nothing for a step that touches no page, and adds the article otherwise", () => {
     const quiet = projectStep(
