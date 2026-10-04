@@ -11,6 +11,12 @@ export const MAX_READ_LINES = 400;
 /** The most matching lines one grep call returns, each cut to MAX_GREP_LINE characters. */
 export const MAX_GREP_MATCHES = 100;
 const MAX_GREP_LINE = 300;
+/** The most code points of one line read_file shows; a longer line is cut, so it cannot fill a page. */
+const MAX_READ_LINE = 2000;
+/** The largest blob read_file loads; a bigger file is refused by the size ls-tree reported. */
+export const MAX_READ_BYTES = 2 * 1024 * 1024;
+/** The most output grep reads from git; more is "too much output", not a stalled search. */
+const GREP_MAX_BUFFER = 32 * 1024 * 1024;
 /** A pattern that takes git longer than this is refused, so one call cannot stall the run. */
 const GREP_TIMEOUT_MS = 10_000;
 /** Room left under MAX_TOOL_RESULT_CHARS for a tool's own last line. */
@@ -21,16 +27,23 @@ interface Blob {
   size: number;
 }
 
+/** The environment for git: none of it can redirect git to another repository or inject config. */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = scrubbedGitEnv();
+  for (const name of Object.keys(env)) {
+    if (/^GIT_CONFIG_(KEY|VALUE)_/.test(name)) delete env[name];
+  }
+  delete env.GIT_CONFIG_COUNT;
+  delete env.GIT_CONFIG_PARAMETERS;
+  return env;
+}
+
 /**
- * Runs read-only git in `repo`; the environment cannot point it at another repository. A git that
- * cannot start is a GitError; a timeout is left for the caller to read from `signal`.
+ * Runs read-only git in `repo`. A git that cannot start is a GitError; a timeout or an output
+ * overflow is left for the caller to read from `signal` and `error`.
  */
-function git(repo: string, args: readonly string[], timeout?: number) {
-  const result = spawnSync("git", ["-C", repo, ...args], {
-    env: scrubbedGitEnv(),
-    maxBuffer: 1 << 30,
-    timeout,
-  });
+function git(repo: string, args: readonly string[], timeout?: number, maxBuffer = 1 << 30) {
+  const result = spawnSync("git", ["-C", repo, ...args], { env: gitEnv(), maxBuffer, timeout });
   if (result.error !== undefined && result.signal === null) {
     throw new GitError(`could not run git: ${result.error.message}`);
   }
@@ -118,6 +131,11 @@ function readFile(repo: string, blobs: ReadonlyMap<string, Blob>, input: ReadInp
   if (blob === undefined) {
     throw new ToolError(`no file ${shown(input.path)} at this commit; list_files shows the paths`);
   }
+  if (blob.size > MAX_READ_BYTES) {
+    throw new ToolError(
+      `${shown(path)} is ${blob.size} bytes, over the ${MAX_READ_BYTES}-byte limit for read_file; grep it instead`,
+    );
+  }
   const result = git(repo, ["cat-file", "blob", blob.oid]);
   if (result.status !== 0) throw new GitError(`git cat-file failed for ${blob.oid} in ${repo}`);
   const bytes = result.stdout;
@@ -135,7 +153,7 @@ function readFile(repo: string, blobs: ReadonlyMap<string, Blob>, input: ReadInp
   let body = "";
   let end = start - 1;
   for (let n = start; n <= last; n++) {
-    const line = `${n}\t${lines[n - 1] ?? ""}\n`;
+    const line = `${n}\t${cut(lines[n - 1] ?? "", MAX_READ_LINE)}\n`;
     if (body.length + line.length > BUDGET && n > start) break;
     body += line;
     end = n;
@@ -155,11 +173,29 @@ interface GrepInput {
 
 function grep(repo: string, sha: string, input: GrepInput): string {
   const path = repoPath(input.path ?? "");
-  // A git option, so before the command: the path is a path, never a pathspec like ":(glob)*".
-  const args = ["--literal-pathspecs", "grep", "-n", "-I", "-z", "--no-color", "-E"];
+  // Pinned like the engine's diff calls. Global options come before the command: the path is a path,
+  // never a pathspec like ":(glob)*"; attributes come from the commit, not the working tree; and no
+  // config (grep.column, submodule.recurse, core.fsmonitor) can reshape the output or run a hook.
+  const args = [
+    "-c",
+    "core.fsmonitor=false",
+    "--literal-pathspecs",
+    `--attr-source=${sha}`,
+    "grep",
+    "-n",
+    "-I",
+    "-z",
+    "--no-color",
+    "--no-column",
+    "--no-recurse-submodules",
+    "-E",
+  ];
   if (input.ignore_case === true) args.push("-i");
   args.push("-e", input.pattern, sha, "--", path === "" ? "." : path);
-  const result = git(repo, args, GREP_TIMEOUT_MS);
+  const result = git(repo, args, GREP_TIMEOUT_MS, GREP_MAX_BUFFER);
+  if (result.error !== undefined && "code" in result.error && result.error.code === "ENOBUFS") {
+    throw new ToolError("grep produced too much output; narrow the pattern or the path");
+  }
   if (result.signal !== null) {
     throw new ToolError("grep took too long; narrow the pattern or the path");
   }
@@ -172,7 +208,7 @@ function grep(repo: string, sha: string, input: GrepInput): string {
   const out = result.stdout.toString("utf8");
   const matches: string[] = [];
   let at = 0;
-  while (at < out.length) {
+  while (at < out.length && matches.length < MAX_GREP_MATCHES) {
     const pathEnd = out.indexOf("\0", at);
     const lineEnd = out.indexOf("\0", pathEnd + 1);
     const textEnd = out.indexOf("\n", lineEnd + 1);
@@ -184,18 +220,21 @@ function grep(repo: string, sha: string, input: GrepInput): string {
     );
     at = textEnd === -1 ? out.length : textEnd + 1;
   }
+  // Parsing stopped at the cap. A path and a line number each end in a NUL and a match's text has
+  // none (-I skips files that do), so the matches left over are the remaining NULs, halved.
+  let rest = 0;
+  for (let nul = out.indexOf("\0", at); nul !== -1; nul = out.indexOf("\0", nul + 1)) rest++;
+  const total = matches.length + rest / 2;
   let body = "";
   let listed = 0;
-  for (const match of matches.slice(0, MAX_GREP_MATCHES)) {
+  for (const match of matches) {
     if (body.length + match.length > BUDGET) break;
     body += `${match}\n`;
     listed++;
   }
   const more =
-    listed < matches.length
-      ? `… and ${matches.length - listed} more matches; narrow the pattern or the path\n`
-      : "";
-  return `${count(matches.length, "matching line")}:\n${body}${more}`;
+    listed < total ? `… and ${total - listed} more matches; narrow the pattern or the path\n` : "";
+  return `${count(total, "matching line")}:\n${body}${more}`;
 }
 
 /**

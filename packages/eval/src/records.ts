@@ -1,0 +1,208 @@
+import {
+  appendFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { GitSha, IsoDateTime, Sha256Hex, TokenUsage } from "@repowiki/core";
+import { z } from "zod";
+import { JudgeVerdict } from "./judge.ts";
+import type { AgentKind } from "./prompts.ts";
+import { EvalQuestion, QuestionSet } from "./questions.ts";
+
+export const AGENTS: readonly AgentKind[] = ["wiki", "repo"];
+const Agent = z.enum(["wiki", "repo"]);
+
+/** What a run is: the questions, the wiki and repository, and the settings both agents share. */
+export const RunInfo = z.object({
+  set: QuestionSet,
+  repo: z.string().min(1),
+  /** The wiki's sha: the repo agent reads the repository at this commit. */
+  head: GitSha,
+  /** SHA-256 of export.json, and of the question file, when the run began. */
+  exportHash: Sha256Hex,
+  questionsHash: Sha256Hex,
+  /** The author's statement of when he wrote the questions; null for the smoke set. */
+  writtenOn: z.iso.date().nullable(),
+  turnLimit: z.int().positive(),
+  models: z.object({ evalAgent: z.string().min(1), evalJudge: z.string().min(1) }),
+  /** The build's tokens from the export's runs (all four classes), or null when it has none. */
+  buildTokens: z.int().nonnegative().nullable(),
+  questions: z.array(EvalQuestion).min(1),
+  startedAt: IsoDateTime,
+});
+export type RunInfo = z.infer<typeof RunInfo>;
+
+export const AnswerRecord = z.object({
+  kind: z.literal("answer"),
+  questionId: z.string().min(1),
+  agent: Agent,
+  answer: z.string(),
+  stop: z.enum(["answered", "turn-limit", "max-tokens", "other"]),
+  turns: z.int().positive(),
+  calls: z.array(
+    z.object({
+      turn: z.int().positive(),
+      name: z.string(),
+      input: z.unknown(),
+      isError: z.boolean(),
+    }),
+  ),
+  usage: TokenUsage,
+  usd: z.number().nonnegative().nullable(),
+  model: z.string().nullable(),
+  at: IsoDateTime,
+});
+export type AnswerRecord = z.infer<typeof AnswerRecord>;
+
+export const JudgmentRecord = z.object({
+  kind: z.literal("judgment"),
+  questionId: z.string().min(1),
+  agent: Agent,
+  score: z.union([z.literal(0), z.literal(1)]),
+  verdict: JudgeVerdict.nullable(),
+  reason: z.string(),
+  usage: TokenUsage,
+  usd: z.number().nonnegative().nullable(),
+  model: z.string().nullable(),
+  batch: z.boolean(),
+  at: IsoDateTime,
+});
+export type JudgmentRecord = z.infer<typeof JudgmentRecord>;
+
+export const RunRecord = z.discriminatedUnion("kind", [AnswerRecord, JudgmentRecord]);
+export type RunRecord = z.infer<typeof RunRecord>;
+
+export const RUN_INFO_FILE = "run.json";
+export const RESULTS_FILE = "results.jsonl";
+
+/** A run directory that cannot be used: another run's, or unreadable. */
+export class EvalRunError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+
+/** The fields that make two runs the same run; a resumed run must match on every one. */
+const IDENTITY = ["set", "repo", "head", "exportHash", "questionsHash", "turnLimit"] as const;
+
+/**
+ * Opens `runDir` for `info`: a new directory gets run.json; an existing one must hold the same
+ * run (same set, wiki, question file, turn limit and models), so a resume never mixes two runs
+ * and a held-out run cannot be repeated against a changed question file or wiki.
+ */
+export function openRun(runDir: string, info: RunInfo): RunInfo {
+  if (!existsSync(join(runDir, RUN_INFO_FILE)) && createRunInfo(runDir, info)) return info;
+  const stored = readRunInfo(runDir);
+  for (const field of IDENTITY) {
+    if (stored[field] !== info[field]) {
+      throw new EvalRunError(`${runDir} holds another run: its ${field} differs from this one's`);
+    }
+  }
+  if (
+    stored.models.evalAgent !== info.models.evalAgent ||
+    stored.models.evalJudge !== info.models.evalJudge
+  ) {
+    throw new EvalRunError(`${runDir} holds another run: its models differ from this one's`);
+  }
+  return stored;
+}
+
+/**
+ * Writes run.json atomically: to a temporary file, linked to its name (which fails when another
+ * process created it first) and then removed, so a kill never leaves a half-written run.json.
+ * Returns false when run.json already exists.
+ */
+function createRunInfo(runDir: string, info: RunInfo): boolean {
+  mkdirSync(runDir, { recursive: true });
+  const path = join(runDir, RUN_INFO_FILE);
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(info, null, 2)}\n`);
+    linkSync(temporary, path);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
+    throw error;
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+/** The run.json of an existing run directory. */
+export function readRunInfo(runDir: string): RunInfo {
+  const path = join(runDir, RUN_INFO_FILE);
+  try {
+    return RunInfo.parse(JSON.parse(readFileSync(path, "utf8")));
+  } catch (error) {
+    throw new EvalRunError(`cannot read ${path}`, { cause: error });
+  }
+}
+
+function parseRecordLine(path: string, lineNumber: number, line: string): RunRecord {
+  try {
+    return RunRecord.parse(JSON.parse(line));
+  } catch (error) {
+    throw new EvalRunError(`${path} line ${lineNumber} is not a run record`, { cause: error });
+  }
+}
+
+/** Whether `line` is not JSON at all: the mark of a write a kill cut short. */
+function isCutShort(line: string): boolean {
+  try {
+    JSON.parse(line);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The run's records so far. Only a last line with no newline after it that is not even JSON,
+ * the mark of a write a killed run left half done, is dropped (it is redone). Any other line that
+ * is not a run record, the last included, is an error: it is a paid result, never silently lost.
+ */
+export function readRecords(runDir: string): RunRecord[] {
+  const path = join(runDir, RESULTS_FILE);
+  if (!existsSync(path)) return [];
+  const lines = readFileSync(path, "utf8").split("\n");
+  const records: RunRecord[] = [];
+  lines.forEach((line, i) => {
+    if (line === "") return;
+    if (i === lines.length - 1 && isCutShort(line)) return;
+    records.push(parseRecordLine(path, i + 1, line));
+  });
+  return records;
+}
+
+/**
+ * Appends `record` to the run's results as one line. A file a kill left without a final newline
+ * is repaired first: a half-written last line is cut off, so the new record never joins it, and a
+ * whole record that only lacks its newline is kept. A last line that is whole but not a run
+ * record is refused, as `readRecords` does.
+ */
+export function appendRecord(runDir: string, record: RunRecord): void {
+  const path = join(runDir, RESULTS_FILE);
+  const line = `${JSON.stringify(RunRecord.parse(record))}\n`;
+  mkdirSync(runDir, { recursive: true });
+  if (existsSync(path)) {
+    const text = readFileSync(path, "utf8");
+    if (text !== "" && !text.endsWith("\n")) {
+      const cut = text.lastIndexOf("\n") + 1;
+      const tail = text.slice(cut);
+      if (isCutShort(tail)) {
+        truncateSync(path, Buffer.byteLength(text.slice(0, cut)));
+      } else {
+        parseRecordLine(path, text.slice(0, cut).split("\n").length, tail);
+        appendFileSync(path, "\n");
+      }
+    }
+  }
+  appendFileSync(path, line);
+}

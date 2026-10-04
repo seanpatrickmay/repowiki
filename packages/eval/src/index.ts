@@ -13,3 +13,17 @@ export {
   SmokeQuestions,
   selectQuestions,
 } from "./questions.ts";
+export {
+  AGENTS,
+  AnswerRecord,
+  appendRecord,
+  EvalRunError,
+  JudgmentRecord,
+  openRun,
+  RESULTS_FILE,
+  RUN_INFO_FILE,
+  RunInfo,
+  RunRecord,
+  readRecords,
+  readRunInfo,
+} from "./records.ts";

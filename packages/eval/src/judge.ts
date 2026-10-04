@@ -2,6 +2,7 @@ import type { TokenUsage } from "@repowiki/core";
 import { LlmOutputError, type Provider } from "@repowiki/llm";
 import { z } from "zod";
 import type { EvalQuestion } from "./questions.ts";
+import { toolText } from "./text.ts";
 
 /** The most characters of an answer the judge reads; the agents are asked for 200 words. */
 export const MAX_JUDGED_ANSWER_CHARS = 4000;
@@ -35,19 +36,36 @@ export const JUDGE_SYSTEM = [
   "1. List the facts of the reference answer, at most 12, each in a few words. Mark a fact essential when a correct answer must state it (the file, function, setting, commit or behaviour the question asks for), and not essential when it is supporting detail.",
   '2. For each fact, set present to true only if the candidate states it, in any wording. A fact the candidate offers only as one guess among others ("it may be X or Y") is not present.',
   "3. Set contradicts to true if the candidate states something about the repository that the reference contradicts, such as a different file or a different behaviour.",
-  "4. Give a reason of one or two sentences.",
+  "4. Give a reason of one or two sentences, at most 500 characters.",
   "",
   "You do not give the grade: it is computed from your fields.",
 ].join("\n");
 
+/**
+ * Text as the judge reads it, which is text the owner can read too: format characters (zero-width,
+ * bidi, tag characters, the byte-order mark) are dropped, line and paragraph separators and NEL
+ * become spaces, and any other control character becomes U+FFFD (`toolText`). The spot-check shows
+ * the owner this text, so nothing can be said to the judge that the owner cannot see.
+ */
+function visibleText(text: string): string {
+  return toolText(
+    text.replace(/[\p{Cf}\u{E0000}-\u{E007F}]/gu, "").replace(/[\u2028\u2029\u0085]/g, " "),
+  );
+}
+
 /** The judge's user turn: the three texts as JSON strings, so no answer can leave its string. */
 export function judgeTurn(question: EvalQuestion, answer: string): string {
+  const seen = visibleText(answer);
   const candidate =
-    answer.length <= MAX_JUDGED_ANSWER_CHARS
-      ? answer
-      : `${answer.slice(0, MAX_JUDGED_ANSWER_CHARS)} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`;
+    seen.length <= MAX_JUDGED_ANSWER_CHARS
+      ? seen
+      : `${seen.slice(0, MAX_JUDGED_ANSWER_CHARS)} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`;
   return JSON.stringify(
-    { question: question.question, reference: question.reference, candidate },
+    {
+      question: visibleText(question.question),
+      reference: visibleText(question.reference),
+      candidate,
+    },
     null,
     2,
   );
@@ -55,12 +73,13 @@ export function judgeTurn(question: EvalQuestion, answer: string): string {
 
 /**
  * Spec §9's 0/1 score: 1 when the candidate states every essential fact of the reference (every
- * fact, when the judge marked none essential) and contradicts none of it.
+ * fact, when the judge marked none essential) and contradicts none of it. No facts is never a 1,
+ * whatever the schema allows.
  */
 export function scoreOf(verdict: JudgeVerdict): 0 | 1 {
   const essential = verdict.facts.filter((f) => f.essential);
   const needed = essential.length > 0 ? essential : verdict.facts;
-  return !verdict.contradicts && needed.every((f) => f.present) ? 1 : 0;
+  return !verdict.contradicts && needed.length > 0 && needed.every((f) => f.present) ? 1 : 0;
 }
 
 export interface Judgment {
@@ -76,9 +95,13 @@ export interface Judgment {
 
 /** The judge answered twice with output that was not a verdict. */
 export class JudgeError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  /** The tokens both attempts used, so a failed judgment is still counted. */
+  readonly usage: TokenUsage;
+
+  constructor(message: string, usage: TokenUsage, options?: ErrorOptions) {
     super(message, options);
     this.name = new.target.name;
+    this.usage = usage;
   }
 }
 
@@ -124,7 +147,7 @@ export async function judgeAnswer(
       if (!(error instanceof LlmOutputError)) throw error;
       if (error.usage !== undefined) usage = add(usage, error.usage);
       if (attempt === 2) {
-        throw new JudgeError(`the judge's answer for ${question.id} was unusable twice`, {
+        throw new JudgeError(`the judge's answer for ${question.id} was unusable twice`, usage, {
           cause: error,
         });
       }
