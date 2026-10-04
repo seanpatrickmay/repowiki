@@ -64,6 +64,12 @@ export interface BatchJournal {
   forget(batchId: string, requestKeys: readonly string[]): void;
 }
 
+/** Messages a batcher collected from a journaled batch, which an earlier run created and paid for. */
+const collectedMessages = new WeakSet<Message>();
+
+/** Whether a batcher's message was collected from an earlier run's batch through the journal. */
+export const wasCollected = (message: Message): boolean => collectedMessages.has(message);
+
 /** Sends one request through the Message Batches API and resolves with its message. */
 export type Batcher = (params: MessageCreateParamsNonStreaming) => Promise<Message>;
 
@@ -350,6 +356,7 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
     for (const { item, customId } of held) {
       const result = results.get(customId);
       if (result?.type === "succeeded") {
+        collectedMessages.add(result.message);
         item.resolve(result.message);
         collected.push(item);
       } else enqueue(item);

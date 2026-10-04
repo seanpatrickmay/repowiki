@@ -56,6 +56,64 @@ describe("migration 8: a drift baseline for every store with a manifest", () => 
     store.close();
   });
 
+  /** A store at `version` (3 to 7) holding manifests at `shas`; from 4 on, with llm_revised. */
+  function storeAt(version: number, rows: [string, 0 | 1][]): string {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-baseline-"));
+    dirs.push(dir);
+    const path = join(dir, "wiki.db");
+    const db = new Database(path);
+    runMigrations(db, MIGRATIONS.slice(0, version));
+    rows.forEach(([sha, revised], i) => {
+      const body = JSON.stringify(makeManifest({ sha }));
+      if (version < 4) {
+        db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, ?, ?)").run(sha, i + 1, body);
+      } else {
+        db.prepare("INSERT INTO manifests (sha, seq, body, llm_revised) VALUES (?, ?, ?, ?)").run(
+          sha,
+          i + 1,
+          body,
+          revised,
+        );
+      }
+    });
+    db.close();
+    return path;
+  }
+  const versionOf = (path: string): number => {
+    const db = new Database(path, { readonly: true });
+    try {
+      return db.pragma("user_version", { simple: true }) as number;
+    } finally {
+      db.close();
+    }
+  };
+
+  it("makes the first manifest of a store from before the llm_revised column the baseline", () => {
+    const path = storeAt(3, [
+      [SHA_A, 0],
+      [SHA_B, 0],
+    ]);
+    const store = openStore(path);
+    expect(store.getDriftBaseline()?.sha).toBe(SHA_A);
+    store.close();
+    expect(versionOf(path)).toBe(MIGRATIONS.length);
+  });
+
+  it.each([4, 5, 6])(
+    "leaves the flagged baseline of a store at schema %i where it is",
+    (version) => {
+      const path = storeAt(version, [
+        [SHA_A, 0],
+        [SHA_B, 1],
+        [SHA_C, 0],
+      ]);
+      const store = openStore(path);
+      expect(store.getDriftBaseline()?.sha).toBe(SHA_B);
+      store.close();
+      expect(versionOf(path)).toBe(MIGRATIONS.length);
+    },
+  );
+
   it("does nothing to a store with no manifest", () => {
     const store = openStore(storeAtSchema7([]));
     expect(store.getDriftBaseline()).toBeNull();

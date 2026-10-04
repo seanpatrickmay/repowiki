@@ -10,7 +10,7 @@ import {
   summarizeClusters,
 } from "../cluster/index.ts";
 import type { RepoIndex } from "../index/index.ts";
-import { plain, retryMessages } from "../manifest/index.ts";
+import { plain, quote, retryMessages } from "../manifest/index.ts";
 import { applyOperations, ManifestOperations } from "./ops.ts";
 
 /** Instructions for the drift call. Frozen text: a change re-records its cassette. */
@@ -121,6 +121,23 @@ function clusterBlock(summary: ClusterSummary, cluster: Cluster, input: DriftInp
   ].join("\n");
 }
 
+/**
+ * Why `manifest` cannot stand: a drifted feature that is still active with no file left (every
+ * file of it was deleted or moved). The operations must merge or retire it, an empty list too;
+ * applyOperations leaves features they did not touch to the caller.
+ */
+function emptiedFeatures(manifest: Manifest, input: DriftInput): string[] {
+  const owners = new Set(
+    Object.entries(manifest.membership).flatMap(([member, entry]) =>
+      parseMemberId(member)?.symbol === null ? [entry.featureId] : [],
+    ),
+  );
+  return input.drifted
+    .filter((id) => manifest.features.some((f) => f.id === id && f.status.kind === "active"))
+    .filter((id) => !owners.has(id))
+    .map((id) => `${quote(id)} would have no files; merge or retire it`);
+}
+
 /** The drift call's system prompt: the instructions, then the features and the clusters. */
 export function driftSystemPrompt(input: DriftInput, clusters: readonly Cluster[]): string {
   const summaries = summarizeClusters(input.index, input.graph, clusters, DRIFT_SUMMARY_LIMITS);
@@ -136,7 +153,8 @@ export function driftSystemPrompt(input: DriftInput, clusters: readonly Cluster[
  * One constrained call (spec §6.1 step 4), made only when a feature drifted: `purpose:
  * "manifest"`, batched by default, no cacheKey (a single call cannot read a cache). Its operations
  * apply to the update's manifest over the file clusters at the new sha. An answer that does not
- * apply, or is unusable, is sent back once with its problems (§6.3); a second refusal leaves the
+ * apply, leaves a drifted feature active with no file, or is unusable, is sent back once with its
+ * problems (§6.3); a second refusal leaves the
  * manifest as it is and unrevised, so the next update asks again. A provider failure throws.
  */
 export async function reviseManifest(
@@ -162,7 +180,8 @@ export async function reviseManifest(
       });
       calls++;
       const applied = applyOperations(input.manifest, output.operations, clusters, input.index.sha);
-      if (applied.manifest !== null) {
+      const emptied = applied.manifest === null ? [] : emptiedFeatures(applied.manifest, input);
+      if (applied.manifest !== null && emptied.length === 0) {
         return {
           revised: true,
           manifest: applied.manifest,
@@ -171,7 +190,7 @@ export async function reviseManifest(
           calls,
         };
       }
-      problems = applied.problems;
+      problems = applied.manifest === null ? applied.problems : emptied;
       answer = JSON.stringify(output);
     } catch (error) {
       if (!(error instanceof LlmOutputError)) throw error;
