@@ -1,10 +1,45 @@
+import type { FeatureEdge } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
-import { featureMapCaption, featureMapSource, mermaidLabel } from "./feature-map.ts";
+import {
+  featureMapCaption,
+  featureMapSource,
+  MAX_ARCHITECTURE_EDGES,
+  mermaidLabel,
+} from "./feature-map.ts";
 import { buildSiteModel } from "./model.ts";
-import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
+import { ARCHITECTURE, fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
 
 /** The fixture export without its project article, so the map draws See also pairs. */
 const seeAlsoOnly = () => ({ ...fixtureExport(), architecture: [] });
+
+/** The map's edge lines. */
+const edgeLines = (source: string | null) =>
+  (source ?? "").split("\n").filter((l) => l.includes(" --- "));
+
+/** The fixture export with the project article's edges replaced. */
+function withEdges(edges: FeatureEdge[]) {
+  const wiki = fixtureExport();
+  return { ...wiki, architecture: wiki.architecture.map((a) => ({ ...a, edges })) };
+}
+
+/**
+ * An export with `count` active features f000, f001, … (node n<i> is f<i>), each with a page and
+ * no See also, and a project article with the given edges.
+ */
+function denseExport(count: number, edges: FeatureEdge[]) {
+  const wiki = fixtureExport();
+  const feature = wiki.manifest.features.find((f) => f.id === "signals");
+  const page = wiki.pages.find((p) => p.featureId === "signals");
+  if (feature === undefined || page === undefined) throw new Error("fixture changed");
+  const ids = Array.from({ length: count }, (_, i) => `f${String(i).padStart(3, "0")}`);
+  return {
+    ...wiki,
+    manifest: { ...wiki.manifest, features: ids.map((id) => ({ ...feature, id, aliases: [] })) },
+    pages: ids.map((featureId) => ({ ...page, featureId, seeAlso: [] })),
+    history: {},
+    architecture: [{ ...ARCHITECTURE, edges }],
+  };
+}
 
 /** The fixture export with one feature's title replaced. */
 function withTitle(id: string, title: string) {
@@ -24,12 +59,44 @@ describe("featureMapSource", () => {
     expect(featureMapCaption(site)).toContain("calls or imports");
   });
 
-  it("joins no pair when the Architecture article has no edge", () => {
-    const wiki = fixtureExport();
-    const architecture = wiki.architecture.map((a) => ({ ...a, edges: [] }));
-    const source = featureMapSource(buildSiteModel({ ...wiki, architecture }, null)) ?? "";
-    expect(source).not.toContain(" --- ");
-    expect(source.split("\n").filter((l) => l.startsWith("  click"))).toHaveLength(3);
+  it("draws only the heaviest article pairs, at most MAX_ARCHITECTURE_EDGES of them", () => {
+    // 100 features, every pair joined, weights with many ties (broken by pair id).
+    const weight = (i: number, j: number) => ((i * 31 + j * 17) % 50) + 1;
+    const edges: FeatureEdge[] = [];
+    const expected: { line: string; weight: number; pair: string }[] = [];
+    for (let i = 0; i < 100; i++) {
+      for (let j = i + 1; j < 100; j++) {
+        const [from, to] = [`f${String(i).padStart(3, "0")}`, `f${String(j).padStart(3, "0")}`];
+        edges.push({ from, to, imports: 0, calls: weight(i, j) });
+        expected.push({ line: `  n${i} --- n${j}`, weight: weight(i, j), pair: `${from} ${to}` });
+      }
+    }
+    expected.sort((a, b) => b.weight - a.weight || (a.pair < b.pair ? -1 : 1));
+    const heaviest = expected.slice(0, 80).map((e) => e.line);
+    const lines = edgeLines(featureMapSource(buildSiteModel(denseExport(100, edges), null)));
+    expect(lines).toHaveLength(80);
+    expect(MAX_ARCHITECTURE_EDGES).toBe(80);
+    expect(lines).toEqual([...heaviest].sort());
+  });
+
+  it("falls back to See also pairs and caption when the article has no edge", () => {
+    const site = buildSiteModel(withEdges([]), null);
+    expect(edgeLines(featureMapSource(site))).toEqual(["  n0 --- n1", "  n0 --- n2"]);
+    expect(featureMapCaption(site)).toContain("See also");
+  });
+
+  it("falls back to See also pairs and caption when no article edge joins two map nodes", () => {
+    // scheduler has no page, exporter is retired, and legacy-signals redirects to signals.
+    const site = buildSiteModel(
+      withEdges([
+        { from: "signals", to: "scheduler", imports: 3, calls: 0 },
+        { from: "exporter", to: "deliverables", imports: 0, calls: 2 },
+        { from: "legacy-signals", to: "signals", imports: 1, calls: 0 },
+      ]),
+      null,
+    );
+    expect(edgeLines(featureMapSource(site))).toEqual(["  n0 --- n1", "  n0 --- n2"]);
+    expect(featureMapCaption(site)).toContain("See also");
   });
 
   it("draws one clickable node per active article and one edge per See also pair without one", () => {
@@ -138,5 +205,69 @@ describe("mermaidLabel", () => {
 
   it("falls back to an empty string for a label with nothing printable", () => {
     expect(mermaidLabel("\uE000\n\t")).toBe("");
+  });
+});
+
+describe("featureMapSource article-edge rules", () => {
+  // Map nodes: n0 deliverables, n1 hostile-title, n2 signals.
+  const linesFor = (edges: FeatureEdge[]) =>
+    edgeLines(featureMapSource(buildSiteModel(withEdges(edges), null)));
+  const edge = (from: string, to: string, calls = 1): FeatureEdge => ({
+    from,
+    to,
+    imports: 0,
+    calls,
+  });
+
+  it("joins a pair once whichever direction its edges run", () => {
+    expect(linesFor([edge("deliverables", "signals"), edge("signals", "deliverables")])).toEqual([
+      "  n0 --- n2",
+    ]);
+  });
+
+  it("adds both directions' weights before keeping the heaviest pairs", () => {
+    // 80 pairs of weight 10 with f000, and f082/f083 joined 6 + 6 = 12 across two edges.
+    const edges = Array.from({ length: 80 }, (_, i) =>
+      edge("f000", `f${String(i + 1).padStart(3, "0")}`, 10),
+    );
+    edges.push(edge("f082", "f083", 6), edge("f083", "f082", 6));
+    const lines = edgeLines(featureMapSource(buildSiteModel(denseExport(84, edges), null)));
+    expect(lines).toHaveLength(MAX_ARCHITECTURE_EDGES);
+    expect(lines).toContain("  n82 --- n83");
+    // The lightest pair by id among the weight-10 ones is the one left out.
+    expect(lines).not.toContain("  n0 --- n80");
+    expect(lines).toContain("  n0 --- n79");
+  });
+
+  it("joins the final article when an edge runs through a redirect", () => {
+    expect(linesFor([edge("hostile-title", "legacy-signals")])).toEqual(["  n1 --- n2"]);
+  });
+
+  it("drops an edge that joins an article to itself through a redirect", () => {
+    expect(linesFor([edge("legacy-signals", "signals"), edge("deliverables", "signals")])).toEqual([
+      "  n0 --- n2",
+    ]);
+  });
+
+  it("drops an edge to a feature without a page or that is not active", () => {
+    // scheduler is active without a page, exporter retired, reports a disambiguation.
+    expect(
+      linesFor([
+        edge("signals", "scheduler", 9),
+        edge("exporter", "deliverables", 9),
+        edge("reports", "signals", 9),
+        edge("deliverables", "hostile-title"),
+      ]),
+    ).toEqual(["  n0 --- n1"]);
+  });
+
+  it("draws a pair named twice, directly and through a redirect, once", () => {
+    expect(
+      linesFor([
+        edge("hostile-title", "signals"),
+        edge("hostile-title", "legacy-signals"),
+        edge("hostile-title", "signals"),
+      ]),
+    ).toEqual(["  n1 --- n2"]);
   });
 });

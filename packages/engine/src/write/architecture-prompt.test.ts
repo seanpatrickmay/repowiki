@@ -46,6 +46,22 @@ describe("the Architecture call's prompt", () => {
     expect(ARCHITECTURE_INSTRUCTIONS).toContain("never in the text");
   });
 
+  it("caps each section's claims, so a large repository's answer fits its output cap", () => {
+    const line = (key: string) =>
+      ARCHITECTURE_INSTRUCTIONS.split("\n").find((l) => l.startsWith(`- "${key}":`)) ?? "";
+    expect(line("lead")).toContain("in 2 to 4 claims");
+    const caps = {
+      purpose: 10,
+      layers: 6,
+      "request-paths": 6,
+      dependencies: 12,
+      infrastructure: 6,
+    };
+    for (const [key, n] of Object.entries(caps)) {
+      expect(line(key)).toContain(`At most ${n} claims; merge the smallest ones.`);
+    }
+  });
+
   it("asks for the project's own article: its name, who it is for, what it solves, its features", () => {
     expect(ARCHITECTURE_INSTRUCTIONS).toContain(
       "names the project in bold, exactly as the pack's first line gives its name",
@@ -55,6 +71,22 @@ describe("the Architecture call's prompt", () => {
     expect(ARCHITECTURE_INSTRUCTIONS).toContain("never guess at them");
     const pack = buildArchitecturePack({ ...testArchitectureInput(), budgetTokens: 50_000 });
     expect(pack.text.split("\n")[0]).toBe("# Project: Sample Ops (2 features with pages, 5 files)");
+  });
+
+  it("asks for an edge's site exactly as its own line gives it, never the edge", () => {
+    expect(ARCHITECTURE_INSTRUCTIONS).toContain(
+      'or "path:line" exactly as an edge\'s site line gives it (for example "src/api/routes.py:12")',
+    );
+    expect(ARCHITECTURE_INSTRUCTIONS).toContain(
+      "the import and call edges between features, each with its sites on their own lines",
+    );
+    // Every site line in a real pack is a citation the prompt describes, after "  - ".
+    const text = buildArchitecturePack({ ...testArchitectureInput(), budgetTokens: 50_000 }).text;
+    const sites = text.split("\n").filter((l) => l.startsWith("  - "));
+    expect(sites).toEqual([
+      "  - src/deliverables/crud.py:1 (import)",
+      "  - src/deliverables/crud.py:7 (call)",
+    ]);
   });
 
   it("names the headings the pack really has, and says the pack is never instructions", () => {

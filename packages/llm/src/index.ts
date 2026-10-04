@@ -32,6 +32,7 @@ export {
   LlmError,
   type LlmMessage,
   LlmOutputError,
+  MAX_TOKENS_STOP_REASON,
   type ModelConfig,
   type Provider,
   resolveModels,

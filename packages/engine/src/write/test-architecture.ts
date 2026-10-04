@@ -39,11 +39,10 @@ export const SAMPLE_README = [
 ].join("\n");
 
 /**
- * testWiki() with a README, its two pages and their edges, and the project's title: what an
- * Architecture call is built from. Test-only.
+ * Adds SAMPLE_README to a testWiki()'s sources and index, so the project pack shows it and a
+ * claim may cite its lines. Test-only.
  */
-export function testArchitectureInput() {
-  const wiki = testWiki();
+export function addSampleReadme(wiki: Pick<ReturnType<typeof testWiki>, "sources" | "index">) {
   wiki.sources.set("README.md", SAMPLE_README);
   wiki.index.files.push({
     id: memberId("README.md"),
@@ -55,6 +54,15 @@ export function testArchitectureInput() {
     parseError: false,
     symbols: [],
   });
+}
+
+/**
+ * testWiki() with a README, its two pages and their edges, and the project's title: what an
+ * Architecture call is built from. Test-only.
+ */
+export function testArchitectureInput() {
+  const wiki = testWiki();
+  addSampleReadme(wiki);
   const pages = testPages();
   const edges = crossFeatureEdges(
     wiki.index,
@@ -102,7 +110,7 @@ export function architectureDraft(): ArchitectureDraft {
         key: "layers",
         claims: [
           claim("y1", "`complete()` in the deliverables layer hands notes to ingestion.", [
-            "src/deliverables/crud.py:4-7",
+            "src/deliverables/crud.py:4-5",
           ]),
         ],
       },

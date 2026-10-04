@@ -105,7 +105,9 @@ describe("buildArchitecturePack", () => {
         "- **Signal ingestion** turns chunks into signals.",
         "",
         "## Cross-feature edges (heaviest first; from the feature that imports or calls)",
-        "- deliverables -> signals: 1 call, 1 import; at src/deliverables/crud.py:1 (import), src/deliverables/crud.py:7 (call)",
+        "- deliverables -> signals: 1 call, 1 import",
+        "  - src/deliverables/crud.py:1 (import)",
+        "  - src/deliverables/crud.py:7 (call)",
         "",
         "## Infrastructure and configuration files",
         "(none)",
@@ -124,6 +126,32 @@ describe("buildArchitecturePack", () => {
       ].join("\n"),
     );
     expect(built.tokens).toBe(estimateTokens(built.text));
+  });
+
+  it("maps every file line it prints, and every edge site it gives, to `shown`, and nothing else", () => {
+    const built = pack(withTerraform());
+    // What the text prints: numbered lines under a file's heading, and each edge's sites.
+    const printed = new Map<string, number[]>();
+    const add = (path: string, line: number) =>
+      printed.set(path, [...(printed.get(path) ?? []), line]);
+    let file: string | undefined;
+    for (const line of built.text.split("\n")) {
+      const heading = /^### (\S+) \(/.exec(line);
+      if (heading !== null || line.startsWith("#")) file = heading?.[1];
+      const numbered = /^ *(\d+)\|/.exec(line);
+      if (file !== undefined && numbered !== null) add(file, Number(numbered[1]));
+      for (const site of line.matchAll(/(\S+):(\d+) \((?:import|call)\)/g))
+        add(site[1] ?? "", Number(site[2]));
+    }
+    const asLists = (map: ReadonlyMap<string, Iterable<number>>) =>
+      Object.fromEntries([...map].map(([path, lines]) => [path, [...lines].sort((a, b) => a - b)]));
+    expect(asLists(built.shown)).toEqual(asLists(printed));
+    expect(asLists(built.shown)).toMatchObject({
+      "README.md": [1, 2, 3, 4, 5],
+      "docs/signals.md": [1, 2, 3],
+      "src/deliverables/crud.py": [1, 4, 5, 7],
+      "infra/main.tf": [2, 6],
+    });
   });
 
   it("shows the README's first 120 lines and three other documents, never a licence", () => {
@@ -266,6 +294,31 @@ describe("buildArchitecturePack", () => {
     expect(text).toContain("### security-model.md (2 lines)");
   });
 
+  it("shows docs/ design documents first, then other docs/ files, then top-level ones, never project lists", () => {
+    const input = testArchitectureInput();
+    const excluded = ["AUTHORS", "ADOPTERS", "MAINTAINERS", "GOVERNANCE", "SUPPORT", "HISTORY"];
+    excluded.push("CHANGES", "NOTICE", "docs/authors");
+    addFiles(input, {
+      ...Object.fromEntries(excluded.map((name) => [`${name}.md`, `# ${name}\n`])),
+      "BUILDING.md": "# Building\n",
+      "docs/architecture.md": "# Architecture\n",
+      "docs/zeta.md": "# Zeta\n",
+    });
+    const headings = pack(input)
+      .text.split("\n")
+      .filter((l) => l.startsWith("### ") && l.includes(".md"));
+    expect(headings).toEqual([
+      expect.stringMatching(/^### README\.md /),
+      "### docs/architecture.md (1 lines)",
+      "### docs/signals.md (3 lines)",
+      "### docs/zeta.md (1 lines)",
+    ]);
+    const text = pack(input).text;
+    // BUILDING.md ranks last, past the limit of three.
+    expect(text).toContain("\n- and 1 more documents\n");
+    for (const name of excluded) expect(text).not.toContain(`${name}.md`);
+  });
+
   it("skips a document that does not fit and still shows the later ones, counting every hidden one", () => {
     const input = testArchitectureInput();
     const big = (n: number) =>
@@ -282,6 +335,9 @@ describe("buildArchitecturePack", () => {
     expect(built.tokens).toBeLessThanOrEqual(3_000);
     expect(built.text).not.toContain("### README.md");
     expect(built.text).not.toContain("### docs/a.md");
+    expect(built.shown.has("README.md")).toBe(false);
+    expect(built.shown.has("docs/a.md")).toBe(false);
+    expect(built.shown.get("docs/b.md")).toEqual(new Set([1]));
     expect(built.text).toContain("### docs/b.md (1 lines)");
     expect(built.text).toContain("### docs/c.md (1 lines)");
     // README and docs/a.md did not fit; docs/d.md, docs/e.md and docs/signals.md are past the limit of three.

@@ -157,7 +157,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
       const answered = { usage, model: message.model };
       const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
       if (message.stop_reason !== "end_turn") {
-        throw new LlmOutputError(`model stopped with ${message.stop_reason}`, text, answered);
+        const reason = message.stop_reason;
+        throw new LlmOutputError(`model stopped with ${reason}`, text, answered, reason);
       }
       let json: unknown;
       try {

@@ -1,5 +1,13 @@
 import { Architecture } from "@repowiki/core";
-import { LlmError, LlmOutputError } from "@repowiki/llm";
+import {
+  createClaudeProvider,
+  createLedger,
+  DEFAULT_MODELS,
+  type FetchLike,
+  LlmError,
+  LlmOutputError,
+  MAX_TOKENS_STOP_REASON,
+} from "@repowiki/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArchitectureDraft, ArchitectureFixes } from "../verify/index.ts";
 import { writeArchitecture } from "./architecture.ts";
@@ -67,7 +75,7 @@ describe("writeArchitecture", () => {
     const article = outcome.architecture as Architecture;
     expect(Architecture.parse(article)).toEqual(article);
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ purpose: "write", batch: true, maxTokens: 8000 });
+    expect(requests[0]).toMatchObject({ purpose: "write", batch: true, maxTokens: 16000 });
     expect(requests[0]?.cacheKey).toBeUndefined();
     expect(requests[0]?.featureId).toBeUndefined();
     expect(requests[0]?.system).toBe(architectureSystemPrompt("sample", input.manifest));
@@ -124,7 +132,7 @@ describe("writeArchitecture", () => {
       (call) =>
         call === 1
           ? architectureDraft()
-          : { claims: [{ ...ghost, cite: ["src/signals/store.py:1-2"], pages: [] }] },
+          : { claims: [{ ...ghost, cite: ["src/signals/ingest.py:10-11"], pages: [] }] },
       withClaim("layers", ghost),
     );
     const outcome = await result;
@@ -137,6 +145,49 @@ describe("writeArchitecture", () => {
     expect(requests[1]?.maxTokens).toBe(4000);
     const layers = outcome.architecture?.sections.find((s) => s.key === "layers");
     expect(layers?.claims.map((c) => c.text)).toContain("Ghosts haunt it.");
+  });
+
+  it("sends a claim citing lines the pack did not show to the retry round", async () => {
+    // The pack shows crud.py's lines 4-5 (signatures) and 1 and 7 (edge sites), not line 6.
+    const y1 = { id: "y1", text: "`complete()` hands notes on.", pages: [], supports: [] };
+    const { result, requests } = run(
+      (call) =>
+        call === 1
+          ? architectureDraft()
+          : { claims: [{ ...y1, cite: ["src/deliverables/crud.py:4-5"] }] },
+      (draft) => {
+        const layers = draft.sections.find((s) => s.key === "layers");
+        if (layers !== undefined)
+          layers.claims = [{ ...y1, cite: ["src/deliverables/crud.py:4-7"] }];
+      },
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ failure: null, dropped: [], calls: 2 });
+    expect(String(requests[1]?.messages.at(-1)?.content)).toContain(
+      '- "y1": the claim cites "src/deliverables/crud.py" lines 4-7, which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead',
+    );
+    const layers = outcome.architecture?.sections.find((s) => s.key === "layers");
+    expect(layers?.claims[0]?.citations).toMatchObject([{ startLine: 4, endLine: 5 }]);
+  });
+
+  it("keeps a lead claim that carries citations or pages, without them, in one call", async () => {
+    const { result, requests } = run(
+      () => architectureDraft(),
+      (draft) => {
+        const lead = draft.sections[0]?.claims[0];
+        if (lead === undefined) return;
+        lead.cite = ["README.md:3-5"];
+        lead.pages = ["signals"];
+      },
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ failure: null, dropped: [], calls: 1 });
+    expect(requests).toHaveLength(1);
+    const lead = outcome.architecture?.sections[0];
+    expect(lead?.key).toBe("lead");
+    expect(lead?.claims).toHaveLength(1);
+    expect(lead?.claims[0]).toMatchObject({ citations: [], pages: [] });
+    expect(lead?.claims[0]?.supports.length).toBeGreaterThan(0);
   });
 
   it("drops a claim given up or failing twice, and logs it", async () => {
@@ -201,6 +252,9 @@ describe("writeArchitecture", () => {
       const draft = architectureDraft();
       const layer = draft.sections[1]?.claims[0];
       if (layer !== undefined) layer.text = "It calls [[ghost]] and [[javascript:alert(1)|x]].";
+      // Without edges the pack gives no edge site to cite, so the request path cites a signature.
+      const path = draft.sections.find((s) => s.key === "request-paths")?.claims[0];
+      if (path !== undefined) path.cite = ["src/deliverables/crud.py:4"];
       return draft;
     });
     const input = testArchitectureInput();
@@ -292,6 +346,83 @@ describe("writeArchitecture", () => {
       "not json",
       "That answer was rejected: the answer is not JSON\nReturn the corrected JSON object.",
     ]);
+  });
+
+  it("asks for a shorter answer, with the same cap, when the first one stopped at max_tokens", async () => {
+    const usage = { in: 7, out: 16000, cacheRead: 0, cacheWrite: 0 };
+    const { result, requests } = run((call) =>
+      call === 1
+        ? new LlmOutputError(
+            "model stopped with max_tokens",
+            '{"sections":[',
+            { usage, model: "m-1" },
+            MAX_TOKENS_STOP_REASON,
+          )
+        : architectureDraft(),
+    );
+    const outcome = await result;
+    expect(outcome).toMatchObject({ failure: null, calls: 2, dropped: [] });
+    expect(requests.map((r) => r.maxTokens)).toEqual([16000, 16000]);
+    expect(requests[1]?.messages.at(-1)?.content).toBe(
+      "That answer was rejected: model stopped with max_tokens; it was too long, so answer shorter, with fewer and shorter claims\nReturn the corrected JSON object.",
+    );
+  });
+
+  it("asks for nothing shorter when an unusable answer was not cut off", async () => {
+    const { result, requests } = run((call) =>
+      call === 1
+        ? new LlmOutputError("model stopped with max_tokens", "{", undefined, null)
+        : architectureDraft(),
+    );
+    await result;
+    expect(String(requests[1]?.messages.at(-1)?.content)).not.toContain("shorter");
+  });
+
+  it("asks for a shorter answer when the Claude provider's answer stopped at max_tokens", async () => {
+    // The real provider over a fake Messages API: the first answer is cut off, the retry is whole.
+    const bodies: { messages: { content: unknown }[]; max_tokens: number }[] = [];
+    const fetch: FetchLike = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      const [text, stop] =
+        bodies.length === 1
+          ? ['{"sections":[', "max_tokens"]
+          : [JSON.stringify(architectureDraft()), "end_turn"];
+      const message = {
+        id: `msg_${bodies.length}`,
+        type: "message",
+        role: "assistant",
+        model: "claude-haiku-4-5-20251001",
+        content: [{ type: "text", text }],
+        stop_reason: stop,
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      };
+      return new Response(JSON.stringify(message), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const provider = createClaudeProvider({
+      models: DEFAULT_MODELS,
+      ledger: createLedger(),
+      runId: "test-run",
+      apiKey: "canned",
+      fetch,
+    });
+    const outcome = await writeArchitecture(
+      { ...testArchitectureInput(), parent: null, number: 1 },
+      {
+        provider,
+        repoName: "sample",
+        batch: false,
+        wikipedia: { cache: memoryWikipediaCache(), fetch: fakeWikipedia },
+      },
+    );
+    expect(outcome).toMatchObject({ failure: null, calls: 2 });
+    expect(bodies.map((b) => b.max_tokens)).toEqual([16000, 16000]);
+    expect(bodies[1]?.messages.at(-1)?.content).toBe(
+      "That answer was rejected: model stopped with max_tokens; it was too long, so answer shorter, with fewer and shorter claims\nReturn the corrected JSON object.",
+    );
   });
 
   it("fails the article, not the build, when verifying a claim throws", async () => {

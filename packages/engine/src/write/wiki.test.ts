@@ -3,7 +3,7 @@ import { makeFeature, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import { LlmError, type Provider } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import { openStore } from "../store/index.ts";
-import { architectureDraft, SAMPLE_README } from "./test-architecture.ts";
+import { addSampleReadme, architectureDraft } from "./test-architecture.ts";
 import { deliverablesDraft, fakeWikipedia, pageProvider, signalsDraft } from "./test-provider.ts";
 import { testWiki } from "./test-wiki.ts";
 import { buildJournal, buildWiki, WikiBuildError } from "./wiki.ts";
@@ -13,7 +13,7 @@ function setup(fail: string[] = [], extraFeatures: Feature[] = []) {
   wiki.manifest.features.push(...extraFeatures);
   wiki.sources.set("src/signals/store.py", 'URL = os.getenv("SIGNALS_URL")\n');
   // The project article's purpose claim cites the README.
-  wiki.sources.set("README.md", SAMPLE_README);
+  addSampleReadme(wiki);
   const store = openStore(":memory:");
   store.putManifest(wiki.manifest, { llmRevised: true });
   // The Architecture call has no feature id, so the provider sees "" for it.

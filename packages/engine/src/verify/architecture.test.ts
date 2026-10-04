@@ -7,7 +7,17 @@ import {
 } from "./architecture.ts";
 import { testContext } from "./test-context.ts";
 
-const ctx: ArchitectureContext = { ...testContext(), pages: new Set(["signals", "deliverables"]) };
+/** The pack showed lines 10-24 of ingest.py and nothing else. */
+const shown = new Map([
+  ["src/signals/ingest.py", new Set(Array.from({ length: 15 }, (_, i) => i + 10))],
+]);
+const ctx: ArchitectureContext = {
+  ...testContext(),
+  pages: new Set(["signals", "deliverables"]),
+  shown,
+};
+const NOT_SHOWN =
+  "which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead";
 
 const draft = (overrides: Partial<ArchitectureDraftClaim> = {}): ArchitectureDraftClaim => ({
   id: "y1",
@@ -33,6 +43,46 @@ describe("verifyArchitectureClaim", () => {
       },
       problems: [],
     });
+  });
+
+  it("refuses a code citation of a line the pack did not show, in a file it showed or not", () => {
+    expect(
+      verifyArchitectureClaim("layers", draft({ cite: ["src/signals/ingest.py:20-25"] }), ctx),
+    ).toEqual({
+      claim: null,
+      problems: [`the claim cites "src/signals/ingest.py" lines 20-25, ${NOT_SHOWN}`],
+    });
+    expect(
+      verifyArchitectureClaim("layers", draft(), { ...ctx, shown: new Map() }).problems,
+    ).toEqual([`the claim cites "src/signals/ingest.py" lines 10-24, ${NOT_SHOWN}`]);
+  });
+
+  it("names an edge copied into a citation, showing the path and line to cite instead", () => {
+    const problem = (cite: string, example: string) =>
+      `citation ${JSON.stringify(cite)} names an edge, not a line; cite only the path and line, e.g. ${JSON.stringify(example)}`;
+    const cases: [string, string][] = [
+      ["signals -> deliverables:src/signals/ingest.py:12", "src/signals/ingest.py:12"],
+      ["deliverables:src/signals/ingest.py:12", "src/signals/ingest.py:12"],
+      ["signals -> deliverables: src/signals/ingest.py:12-14", "src/signals/ingest.py:12-14"],
+      ["signals -> deliverables", "src/app.py:12"],
+    ];
+    for (const [cite, example] of cases) {
+      expect(verifyArchitectureClaim("dependencies", draft({ cite: [cite] }), ctx), cite).toEqual({
+        claim: null,
+        problems: [problem(cite, example)],
+      });
+    }
+  });
+
+  it("still resolves a top-level file whose name is a feature id", () => {
+    const sources = new Map([...ctx.sources, ["signals", "a\nb\n"]]);
+    const seen = new Map([...shown, ["signals", new Set([1, 2])]]);
+    const result = verifyArchitectureClaim("layers", draft({ cite: ["signals:1-2"] }), {
+      ...ctx,
+      sources,
+      shown: seen,
+    });
+    expect(result.problems).toEqual([]);
   });
 
   it("accepts a claim backed by pages of this build alone, trimmed and named once", () => {
@@ -95,12 +145,19 @@ describe("verifyArchitectureClaim", () => {
     ]);
   });
 
-  it("keeps a lead's supports, and refuses a lead that cites or names a page", () => {
+  it("keeps a lead's supports, and strips the citations and pages a lead carries", () => {
     const lead = draft({ id: "l1", cite: [], supports: ["y1"] });
     expect(verifyArchitectureClaim("lead", lead, ctx).claim?.supports).toEqual(["y1"]);
-    expect(verifyArchitectureClaim("lead", { ...lead, pages: ["signals"] }, ctx).problems).toEqual([
-      "lead claims carry no citations or pages; list the body claims they support",
-    ]);
+    // Even references that would not resolve, or lines the pack never showed: they are dropped.
+    const carrying = {
+      ...lead,
+      cite: ["src/signals/ingest.py:1-2", "nope.py:1"],
+      pages: ["ghost"],
+    };
+    expect(verifyArchitectureClaim("lead", carrying, ctx)).toEqual({
+      claim: expect.objectContaining({ id: "l1", citations: [], pages: [], supports: ["y1"] }),
+      problems: [],
+    });
     expect(verifyArchitectureClaim("layers", draft({ supports: ["y2"] }), ctx).problems).toEqual([
       "only lead claims may support other claims",
     ]);
@@ -115,23 +172,9 @@ describe("verifyArchitectureClaim", () => {
       "request-path claims need a code or commit citation",
     ]);
     expect(
-      verifyArchitectureClaim("lead", draft({ id: "l1", cite: [], pages: ["ghost"] }), ctx)
+      verifyArchitectureClaim("lead", draft({ id: "l1", pages: ["ghost", "signals"] }), ctx)
         .problems,
-    ).toEqual([
-      'the claim names "ghost", which is not a feature page of this wiki',
-      "lead claims must support at least one body claim",
-    ]);
-    expect(
-      verifyArchitectureClaim(
-        "lead",
-        draft({ id: "l1", cite: [], pages: ["ghost", "signals"] }),
-        ctx,
-      ).problems,
-    ).toEqual([
-      'the claim names "ghost", which is not a feature page of this wiki',
-      "lead claims carry no citations or pages; list the body claims they support",
-      "lead claims must support at least one body claim",
-    ]);
+    ).toEqual(["lead claims must support at least one body claim"]);
   });
 
   it("refuses a page that is not a feature id even when the context lists it", () => {

@@ -308,12 +308,16 @@ describe("wiki-check.ts as a process (no network)", () => {
     expect(result.stdout).toContain("1 problems");
   });
 
-  /** pageOf's store plus the project's article at the same sha, backed by `pages`. */
+  /**
+   * pageOf's store plus the project's article at the same sha, backed by `pages`, whose purpose
+   * claim cites src/app.ts:1 with `hash`.
+   */
   function withArticle(
     repo: string,
     sha: string,
     pages: string[],
     text = "Signals feed deliverables.",
+    hash = contentHash("export const app = 1;\n"),
   ): string {
     const out = pageOf(repo, sha, sha);
     const store = openStore(join(out, "wiki.db"));
@@ -323,7 +327,7 @@ describe("wiki-check.ts as a process (no network)", () => {
       endLine: 1,
       sha,
       symbol: null,
-      contentHash: contentHash("export const app = 1;\n"),
+      contentHash: hash,
     });
     const [lead] = makeArchitecture().sections;
     store.putArchitecture(
@@ -367,5 +371,17 @@ describe("wiki-check.ts as a process (no network)", () => {
     const result = run("scripts/wiki-check.ts", repo, "--out", out);
     expect(result.status).toBe(1);
     expect(result.stderr).toBe('architecture "a-1": a link to "nowhere" is not a feature id\n');
+  });
+
+  it("reports an article citation whose lines no longer hash the same, labelled architecture", () => {
+    const { repo, sha } = gitRepo();
+    const stale = contentHash("export const app = 2;\n");
+    const out = withArticle(repo, sha, ["signals"], undefined, stale);
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe("architecture a-1 src/app.ts:1-1: the cited lines changed\n");
+    expect(result.stdout).toContain(
+      "2 code citations re-hashed and 1 commit citations resolved; 1 problems",
+    );
   });
 });

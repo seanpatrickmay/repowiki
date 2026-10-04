@@ -2,7 +2,7 @@ import { createClaudeProvider, createLedger, DEFAULT_MODELS, type FetchLike } fr
 import { describe, expect, it } from "vitest";
 import { openStore } from "../store/index.ts";
 import { writePages } from "./build.ts";
-import { architectureDraft, SAMPLE_README } from "./test-architecture.ts";
+import { addSampleReadme, architectureDraft } from "./test-architecture.ts";
 import { memoryWikipediaCache } from "./test-cache.ts";
 import { deliverablesDraft, fakeWikipedia, signalsDraft } from "./test-provider.ts";
 import { testWiki } from "./test-wiki.ts";
@@ -162,7 +162,7 @@ describe("buildWiki through the real batcher and the store's journal", () => {
       },
     );
     const { manifest, ...input } = testWiki();
-    input.sources.set("README.md", SAMPLE_README);
+    addSampleReadme(input);
     const store = openStore(":memory:");
     store.putManifest(manifest, { llmRevised: true });
     const journaled: string[] = [];
@@ -226,7 +226,7 @@ describe("buildWiki through the real batcher and the store's journal", () => {
       },
     );
     const { manifest, ...input } = testWiki();
-    input.sources.set("README.md", SAMPLE_README);
+    addSampleReadme(input);
     const store = openStore(":memory:");
     store.putManifest(manifest, { llmRevised: true });
     const journaled: string[] = [];
@@ -295,7 +295,7 @@ describe("buildWiki through the real batcher and the store's journal", () => {
       (n) => first && n === 2,
     );
     const { manifest, ...input } = testWiki();
-    input.sources.set("README.md", SAMPLE_README);
+    addSampleReadme(input);
     const store = openStore(":memory:");
     store.putManifest(manifest, { llmRevised: true });
     const build = (deadline?: number) => {
