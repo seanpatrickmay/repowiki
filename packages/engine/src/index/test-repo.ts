@@ -11,6 +11,11 @@ export interface TestRepo {
   write(path: string, content: string | Buffer): void;
   /** Stages everything and commits; returns the new sha. Dates advance one day per commit, in `tz`. */
   commit(message: string, tz?: string): string;
+  /**
+   * Merges `branch` into the current branch with a merge commit (never a fast-forward), dated
+   * like a commit; returns the merge's sha.
+   */
+  merge(branch: string, message: string): string;
   remove(): void;
 }
 
@@ -47,6 +52,15 @@ export function createTestRepo(): TestRepo {
       const date = `@${1_767_225_600 + day * 86_400} ${tz}`;
       run(["add", "-A"]);
       run(["commit", "-q", "--allow-empty", "--allow-empty-message", "-m", message], {
+        GIT_AUTHOR_DATE: date,
+        GIT_COMMITTER_DATE: date,
+      });
+      return run(["rev-parse", "HEAD"]);
+    },
+    merge(branch, message) {
+      day++;
+      const date = `@${1_767_225_600 + day * 86_400} +0000`;
+      run(["merge", "-q", "--no-ff", "-m", message, branch], {
         GIT_AUTHOR_DATE: date,
         GIT_COMMITTER_DATE: date,
       });
