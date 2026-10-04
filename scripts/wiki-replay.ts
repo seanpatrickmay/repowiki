@@ -8,6 +8,7 @@ import {
   isAncestor,
   openStore,
   type ReplayStep,
+  reachableCommits,
   readHistory,
   replaySteps,
   resolveCommit,
@@ -48,18 +49,20 @@ import {
   requireApiKey,
   writeFileAtomic,
 } from "./wiki-cli.ts";
-import { checkWiki } from "./wiki-problems.ts";
+import { checkStoredAt, checkWiki } from "./wiki-problems.ts";
 
 /**
  * pnpm wiki:replay <repo> <from> <to> [--limit N]: moves the wiki stored for <repo> through the
- * first-parent merges between <from> and <to> (spec §6.2), one wiki:update per merge, so each
- * page's history is dated by the merges that changed it. The wiki must be built at <from> (or be
+ * first-parent merges (and squash-merged pull requests) between <from> and <to> (spec §6.2), one
+ * wiki:update per step, so each page's history is dated by the merges that changed it. The wiki must be built at <from> (or be
  * part-way along, from an earlier replay: it resumes from its head). --limit N replays the next N
  * steps only; --dry-run lists them with an upper-side estimate. After every step it records
  * spec §8's invariants in replay-<from7>-<to7>.md, rendered from the step records saved beside it
  * (replay-<from7>-<to7>.json), so a resumed run keeps every earlier run's rows; the summary says
- * where a run stopped. A step stored by a killed run but never recorded is checked and recorded on
- * resume. Exits 1 when any step's invariant failed. Holds the out dir's lock while it runs.
+ * where a run stopped. Every step stored but never recorded (by a killed run, or moved to by
+ * wiki:update) is checked and recorded on resume, and the records of the steps the wiki's head
+ * descends from are kept even when the head is between two steps. Exits 1 when any step's
+ * invariant failed. Holds the out dir's lock while it runs.
  */
 async function main(): Promise<void> {
   const args = parseReplayArgs(process.argv.slice(2));
@@ -161,15 +164,15 @@ async function replay(
   const base = join(out, `replay-${args.from.slice(0, 7)}-${args.to.slice(0, 7)}`);
   const summaryPath = `${base}.md`;
   const recordsPath = `${base}.json`;
-  const headIndex = full.findIndex((step) => step.sha === head);
   const positionOf = (sha: string): number => full.findIndex((step) => step.sha === sha) + 1;
-  // The records of the steps the wiki has moved through (an earlier run's, or a run before a
-  // kill), by position. A wiki back at `from` starts the record again.
+  // The steps the wiki has moved through: its head and the steps it descends from, whether or
+  // not the head is a step itself (a wiki:update may have moved it between two).
+  const reached = reachableCommits(repo, head);
+  const passed = new Set(full.filter((step) => reached.has(step.sha)).map((step) => step.sha));
+  // Their records (an earlier run's, or a run before a kill), by position. A wiki back at `from`
+  // starts the record again.
   const records = loadRecords(recordsPath)
-    .filter((r) => {
-      const index = full.findIndex((step) => step.sha === r.step.sha);
-      return index >= 0 && index <= headIndex;
-    })
+    .filter((r) => passed.has(r.step.sha))
     .map((r) => ({ ...r, position: positionOf(r.step.sha) }))
     .sort((a, b) => a.position - b.position);
   const buildTokens = newestBuildTokens(store.listLedger());
@@ -190,33 +193,42 @@ async function replay(
       ),
     );
   };
-  // A run killed after it stored a step but before it recorded it left the head on a step with no
-  // record: check it now (no call) and record it, so no step goes unchecked.
-  const headStep = headIndex >= 0 ? full[headIndex] : undefined;
+  // A run killed after it stored a step but before it recorded it (or a wiki:update that moved the
+  // wiki to a step) left a stored step with no record: check each now (no call) and record it, so
+  // no step goes unchecked. The head's step is checked as a step's wiki is; an earlier one by what
+  // it stored, since its pages may have changed since.
   let recovered = false;
-  if (headStep !== undefined && !records.some((r) => r.step.sha === head)) {
-    log(`${head.slice(0, 7)}: stored by a run that stopped before recording it; checking it now`);
+  for (const [index, step] of full.entries()) {
+    if (!passed.has(step.sha) || records.some((r) => r.step.sha === step.sha)) continue;
+    if (store.getManifest(step.sha) === null) continue;
+    const short = step.sha.slice(0, 7);
+    log(`${short}: stored by a run that stopped before recording it; checking it now`);
     const used = totalsOf(
-      store.listLedger().filter((e) => e.runKind === "update" && e.sha === head),
+      store.listLedger().filter((e) => e.runKind === "update" && e.sha === step.sha),
     );
-    const check = checkWiki(store, repo, readHistory(repo, head));
-    for (const problem of check.problems) log(problemLine(`${head.slice(0, 7)}: ${problem}`));
+    const history = readHistory(repo, step.sha);
+    const problems =
+      step.sha === head
+        ? checkWiki(store, repo, history).problems
+        : checkStoredAt(store, repo, step.sha, history);
+    for (const problem of problems) log(problemLine(`${short}: ${problem}`));
     records.push({
-      step: headStep,
-      position: headIndex + 1,
+      step,
+      position: index + 1,
       recovered: true,
       stored: 0,
       carried: 0,
       staleClaims: 0,
       tokens: tokensOf(used.tokens),
       usd: used.usd,
-      problems: check.problems.length,
+      problems: problems.length,
       failures: [],
       refused: [],
       architectureSkipped: null,
     });
     recovered = true;
   }
+  records.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const exportPath = join(out, "export.json");
   const writeExports = () =>
     writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });
@@ -241,7 +253,7 @@ async function replay(
       // commits anything; a step that makes none (nothing cited changed, no article due) needs no
       // key.
       if (needsKey(estimate)) requireApiKey("wiki:replay");
-      const { update, runId } = await runUpdate(
+      const { update, runId, articleError } = await runUpdate(
         store,
         input,
         args,
@@ -273,6 +285,8 @@ async function replay(
       });
       done++;
       save(null);
+      // The step is stored and recorded; its article's failure still stops the run.
+      if (articleError !== null) throw articleError;
     } catch (err) {
       // Say where the run stopped and why, so the record is never read as a finished replay; the
       // original error still ends the run.
@@ -284,6 +298,14 @@ async function replay(
         });
       } catch {
         // The stop is already being reported by the original error.
+      }
+      // The steps this run stored are in the store: the export must not stay behind them.
+      if (done > 0 || store.getHead() !== head) {
+        try {
+          writeExports();
+        } catch {
+          // The stop is already being reported by the original error.
+        }
       }
       throw err;
     }
