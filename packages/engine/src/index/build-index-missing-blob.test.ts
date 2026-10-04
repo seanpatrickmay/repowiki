@@ -6,8 +6,8 @@ vi.mock("./git.ts", async (importOriginal) => {
   const real: typeof import("./git.ts") = await importOriginal();
   return {
     ...real,
-    readBlobs: (repo: string, oids: readonly string[]) =>
-      dropBlobs.on ? new Map<string, Buffer>() : real.readBlobs(repo, oids),
+    streamBlobs: (repo: string, oids: readonly string[], holdLimit: number) =>
+      dropBlobs.on ? (async function* () {})() : real.streamBlobs(repo, oids, holdLimit),
   };
 });
 

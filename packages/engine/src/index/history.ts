@@ -1,4 +1,12 @@
-import { assertSha, GitError, git, isSha, listBlobs, readBlobs } from "./git.ts";
+import {
+  assertSha,
+  BINARY_SNIFF_BYTES,
+  GitError,
+  git,
+  isSha,
+  listBlobs,
+  readBlobs,
+} from "./git.ts";
 
 /** One commit reachable from the indexed sha. */
 export interface CommitInfo {
@@ -123,7 +131,7 @@ export function readSources(repo: string, sha: string, maxBytes: number): Map<st
   const sources = new Map<string, string>();
   for (const blob of blobs) {
     const content = contents.get(blob.oid);
-    if (content === undefined || content.subarray(0, 8000).includes(0)) continue;
+    if (content === undefined || content.subarray(0, BINARY_SNIFF_BYTES).includes(0)) continue;
     sources.set(blob.path, content.toString("utf8"));
   }
   return sources;

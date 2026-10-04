@@ -13,8 +13,9 @@ import {
   commitFiles,
   GitError,
   listBlobs,
-  readBlobs,
   resolveCommit,
+  type StreamedBlob,
+  streamBlobs,
   type TreeBlob,
 } from "./git.ts";
 import { extractImports, type RawImport } from "./imports.ts";
@@ -75,11 +76,25 @@ export interface IndexOptions {
 
 export const DEFAULT_MAX_FILE_BYTES = 1_000_000;
 
-function countLines(content: Buffer): number {
-  if (content.length === 0) return 0;
-  let lines = 0;
-  for (const byte of content) if (byte === 0x0a) lines++;
-  return content[content.length - 1] === 0x0a ? lines : lines + 1;
+/** The blobs paired with their streamed contents, in order; a blob git did not return is an error. */
+async function* withContents(
+  repo: string,
+  blobs: readonly TreeBlob[],
+  holdLimit: number,
+): AsyncGenerator<[TreeBlob, StreamedBlob], void, undefined> {
+  let next = 0;
+  for await (const data of streamBlobs(
+    repo,
+    blobs.map((blob) => blob.oid),
+    holdLimit,
+  )) {
+    const blob = blobs[next++] as TreeBlob;
+    yield [blob, data];
+  }
+  const missing = blobs[next];
+  if (missing !== undefined) {
+    throw new GitError(`missing content for ${missing.path} (${missing.oid})`);
+  }
 }
 
 function specifierOf(raw: RawImport): string {
@@ -101,19 +116,17 @@ export async function indexRepo(
     .filter((blob) => !isValid(blob))
     .map((blob) => blob.path)
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const contents = readBlobs(
-    repo,
-    blobs.map((blob) => blob.oid),
-  );
-  const read = (blob: TreeBlob): Buffer => {
-    const content = contents.get(blob.oid);
-    if (content === undefined) throw new GitError(`missing content for ${blob.path} (${blob.oid})`);
-    return content;
-  };
 
-  const packages: WorkspacePackage[] = blobs
-    .filter((blob) => blob.path === "package.json" || blob.path.endsWith("/package.json"))
-    .flatMap((blob) => parseWorkspacePackage(blob.path, read(blob).toString("utf8")) ?? []);
+  // Pass 1: the manifests alone, parsed whole (they are read in full whatever their size), because
+  // the resolver needs every workspace package before any file is resolved.
+  const manifests = blobs.filter(
+    (blob) => blob.path === "package.json" || blob.path.endsWith("/package.json"),
+  );
+  const packages: WorkspacePackage[] = [];
+  for await (const [blob, data] of withContents(repo, manifests, Number.POSITIVE_INFINITY)) {
+    const parsed = parseWorkspacePackage(blob.path, data.content?.toString("utf8") ?? "");
+    if (parsed !== null) packages.push(parsed);
+  }
   const resolver = createResolver(
     blobs.map((blob) => blob.path),
     packages,
@@ -125,22 +138,23 @@ export async function indexRepo(
   const unresolved: UnresolvedImport[] = [];
   const callSites: { file: IndexedFile; calls: CallSite[]; bindings: ResolvedBinding[] }[] = [];
 
-  for (const blob of blobs) {
-    const content = read(blob);
-    const binary = content.subarray(0, 8000).includes(0);
+  // Pass 2: one blob at a time; a blob over maxFileBytes is only counted and sniffed in transit.
+  for await (const [blob, data] of withContents(repo, blobs, maxFileBytes)) {
+    const content = data.content;
+    const binary = data.head.includes(0);
     const language = languageForPath(blob.path);
     const file: IndexedFile = {
       id: memberId(blob.path),
       path: blob.path,
       language,
       bytes: blob.size,
-      loc: binary ? 0 : countLines(content),
+      loc: binary ? 0 : data.lines,
       skipped: binary ? "binary" : blob.size > maxFileBytes ? "too-large" : null,
       parseError: false,
       symbols: [],
     };
     files.push(file);
-    if (language === null || file.skipped !== null) continue;
+    if (language === null || file.skipped !== null || content === null) continue;
 
     const parsed = parser.parse(language, content.toString("utf8"));
     try {
