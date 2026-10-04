@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { GitSha, IsoDateTime, Sha256Hex, TokenUsage } from "@repowiki/core";
 import { z } from "zod";
@@ -89,12 +98,7 @@ const IDENTITY = ["set", "repo", "head", "exportHash", "questionsHash", "turnLim
  * and a held-out run cannot be repeated against a changed question file or wiki.
  */
 export function openRun(runDir: string, info: RunInfo): RunInfo {
-  const path = join(runDir, RUN_INFO_FILE);
-  if (!existsSync(path)) {
-    mkdirSync(runDir, { recursive: true });
-    writeFileSync(path, `${JSON.stringify(info, null, 2)}\n`, { flag: "wx" });
-    return info;
-  }
+  if (!existsSync(join(runDir, RUN_INFO_FILE)) && createRunInfo(runDir, info)) return info;
   const stored = readRunInfo(runDir);
   for (const field of IDENTITY) {
     if (stored[field] !== info[field]) {
@@ -110,6 +114,27 @@ export function openRun(runDir: string, info: RunInfo): RunInfo {
   return stored;
 }
 
+/**
+ * Writes run.json atomically: to a temporary file, linked to its name (which fails when another
+ * process created it first) and then removed, so a kill never leaves a half-written run.json.
+ * Returns false when run.json already exists.
+ */
+function createRunInfo(runDir: string, info: RunInfo): boolean {
+  mkdirSync(runDir, { recursive: true });
+  const path = join(runDir, RUN_INFO_FILE);
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(info, null, 2)}\n`);
+    linkSync(temporary, path);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
+    throw error;
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
 /** The run.json of an existing run directory. */
 export function readRunInfo(runDir: string): RunInfo {
   const path = join(runDir, RUN_INFO_FILE);
@@ -120,7 +145,29 @@ export function readRunInfo(runDir: string): RunInfo {
   }
 }
 
-/** The run's records so far. A last line cut short by a killed run is dropped; it is redone. */
+function parseRecordLine(path: string, lineNumber: number, line: string): RunRecord {
+  try {
+    return RunRecord.parse(JSON.parse(line));
+  } catch (error) {
+    throw new EvalRunError(`${path} line ${lineNumber} is not a run record`, { cause: error });
+  }
+}
+
+/** Whether `line` is not JSON at all: the mark of a write a kill cut short. */
+function isCutShort(line: string): boolean {
+  try {
+    JSON.parse(line);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The run's records so far. Only a last line with no newline after it that is not even JSON,
+ * the mark of a write a killed run left half done, is dropped (it is redone). Any other line that
+ * is not a run record, the last included, is an error: it is a paid result, never silently lost.
+ */
 export function readRecords(runDir: string): RunRecord[] {
   const path = join(runDir, RESULTS_FILE);
   if (!existsSync(path)) return [];
@@ -128,13 +175,34 @@ export function readRecords(runDir: string): RunRecord[] {
   const records: RunRecord[] = [];
   lines.forEach((line, i) => {
     if (line === "") return;
-    try {
-      records.push(RunRecord.parse(JSON.parse(line)));
-    } catch (error) {
-      const last = lines.slice(i + 1).every((rest) => rest === "");
-      if (!last)
-        throw new EvalRunError(`${path} line ${i + 1} is not a run record`, { cause: error });
-    }
+    if (i === lines.length - 1 && isCutShort(line)) return;
+    records.push(parseRecordLine(path, i + 1, line));
   });
   return records;
+}
+
+/**
+ * Appends `record` to the run's results as one line. A file a kill left without a final newline
+ * is repaired first: a half-written last line is cut off, so the new record never joins it, and a
+ * whole record that only lacks its newline is kept. A last line that is whole but not a run
+ * record is refused, as `readRecords` does.
+ */
+export function appendRecord(runDir: string, record: RunRecord): void {
+  const path = join(runDir, RESULTS_FILE);
+  const line = `${JSON.stringify(RunRecord.parse(record))}\n`;
+  mkdirSync(runDir, { recursive: true });
+  if (existsSync(path)) {
+    const text = readFileSync(path, "utf8");
+    if (text !== "" && !text.endsWith("\n")) {
+      const cut = text.lastIndexOf("\n") + 1;
+      const tail = text.slice(cut);
+      if (isCutShort(tail)) {
+        truncateSync(path, Buffer.byteLength(text.slice(0, cut)));
+      } else {
+        parseRecordLine(path, text.slice(0, cut).split("\n").length, tail);
+        appendFileSync(path, "\n");
+      }
+    }
+  }
+  appendFileSync(path, line);
 }

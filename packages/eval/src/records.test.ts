@@ -1,9 +1,17 @@
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type AnswerRecord,
+  appendRecord,
   EvalRunError,
   openRun,
   RESULTS_FILE,
@@ -58,6 +66,11 @@ describe("openRun", () => {
     expect(readRunInfo(runDir)).toEqual(info);
   });
 
+  it("leaves only run.json in the directory, with no temporary file", () => {
+    openRun(dir, info);
+    expect(readdirSync(dir)).toEqual([RUN_INFO_FILE]);
+  });
+
   it.each([
     ["exportHash", { exportHash: "0".repeat(64) }],
     ["head", { head: "b".repeat(40) }],
@@ -95,5 +108,58 @@ describe("readRecords", () => {
     expect(readRecords(dir)).toEqual([answer]);
     writeFileSync(join(dir, RESULTS_FILE), `not json\n${JSON.stringify(answer)}\n`);
     expect(() => readRecords(dir)).toThrow(/line 1 is not a run record/);
+  });
+});
+
+describe("appendRecord", () => {
+  const second: AnswerRecord = { ...answer, questionId: "smoke-why", agent: "repo" };
+
+  it("creates the file, and appends one line per record", () => {
+    appendRecord(dir, answer);
+    appendRecord(dir, second);
+    expect(readFileSync(join(dir, RESULTS_FILE), "utf8")).toBe(
+      `${JSON.stringify(answer)}\n${JSON.stringify(second)}\n`,
+    );
+    expect(readRecords(dir)).toEqual([answer, second]);
+  });
+
+  it("cuts a line a kill left half-written before it appends, and keeps every whole record", () => {
+    writeFileSync(join(dir, RESULTS_FILE), `${JSON.stringify(answer)}\n`);
+    appendFileSync(join(dir, RESULTS_FILE), '{"kind":"answer","questionId":"smo');
+    expect(readRecords(dir)).toEqual([answer]);
+    appendRecord(dir, second);
+    expect(readRecords(dir)).toEqual([answer, second]);
+    appendRecord(dir, answer);
+    appendRecord(dir, second);
+    expect(readRecords(dir)).toEqual([answer, second, answer, second]);
+  });
+
+  it("cuts a file that holds only a half-written line", () => {
+    writeFileSync(join(dir, RESULTS_FILE), '{"kind":"ans');
+    appendRecord(dir, answer);
+    expect(readRecords(dir)).toEqual([answer]);
+  });
+
+  it("keeps a whole record that only lacks its newline", () => {
+    writeFileSync(join(dir, RESULTS_FILE), JSON.stringify(answer));
+    appendRecord(dir, second);
+    expect(readRecords(dir)).toEqual([answer, second]);
+  });
+
+  it("refuses to append after a final line that is complete but not a run record", () => {
+    writeFileSync(join(dir, RESULTS_FILE), '{"kind":"answer"}');
+    expect(() => appendRecord(dir, second)).toThrow(/line 1 is not a run record/);
+    expect(readFileSync(join(dir, RESULTS_FILE), "utf8")).toBe('{"kind":"answer"}');
+  });
+});
+
+describe("a final line that is whole but invalid", () => {
+  it("is reported, not dropped, and so is a terminated line that is not JSON", () => {
+    writeFileSync(join(dir, RESULTS_FILE), `${JSON.stringify(answer)}\n{"kind":"answer"}\n`);
+    expect(() => readRecords(dir)).toThrow(/line 2 is not a run record/);
+    writeFileSync(join(dir, RESULTS_FILE), `${JSON.stringify(answer)}\nnot json\n`);
+    expect(() => readRecords(dir)).toThrow(/line 2 is not a run record/);
+    writeFileSync(join(dir, RESULTS_FILE), `${JSON.stringify(answer)}\n{"kind":"answer"}`);
+    expect(() => readRecords(dir)).toThrow(/line 2 is not a run record/);
   });
 });
