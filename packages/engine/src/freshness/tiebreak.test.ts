@@ -2,7 +2,12 @@ import { makeManifest } from "@repowiki/core/test-fixtures";
 import { LlmError, LlmOutputError } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import { scriptedProvider } from "./test-provider.ts";
-import { breakTies, MAX_TIE_BREAK_FILES, TieBreakAnswer } from "./tiebreak.ts";
+import {
+  breakTies,
+  MAX_TIE_BREAK_FILES,
+  provisionalPlacement,
+  TieBreakAnswer,
+} from "./tiebreak.ts";
 
 const manifest = makeManifest();
 const graph = {
@@ -124,5 +129,34 @@ describe("breakTies", () => {
     expect(content.split("\n")).toHaveLength(MAX_TIE_BREAK_FILES + 1);
     expect(content).toContain('- "evil�- a.py: signals": deliverables, signals');
     expect(result.placed.size).toBe(MAX_TIE_BREAK_FILES + 4);
+  });
+});
+
+describe("provisionalPlacement", () => {
+  const disputed = [
+    { path: "src/bridge.py", candidates: both },
+    { path: "README.md", candidates: both },
+  ];
+
+  it("places each disputed file by the most shared edge weight, then the smallest id, with no call", () => {
+    expect(provisionalPlacement(disputed, graph, featureOf)).toEqual(
+      new Map([
+        ["src/bridge.py", "deliverables"],
+        ["README.md", "deliverables"],
+      ]),
+    );
+    const heavier = {
+      nodes: [],
+      edges: [{ a: "README.md", b: "src/signals/ingest.py", weight: 3 }],
+    };
+    expect(provisionalPlacement(disputed, heavier, featureOf).get("README.md")).toBe("signals");
+  });
+
+  it("is the placement breakTies falls back to, so a provisional measure matches an unusable answer", async () => {
+    const { provider } = scriptedProvider(
+      () => new LlmOutputError("model output is not JSON", "{"),
+    );
+    const result = await breakTies(input(disputed), { provider });
+    expect(provisionalPlacement(disputed, graph, featureOf)).toEqual(result.placed);
   });
 });

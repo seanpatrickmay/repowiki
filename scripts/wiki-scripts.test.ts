@@ -664,6 +664,23 @@ describe("wiki-update.ts as a process (no network)", () => {
     store.close();
   });
 
+  it("estimates a merge that adds a file its signals cannot place, counting the tie-break call", () => {
+    const { repo, out, sha: first, git } = storedWiki("paged");
+    // lib/new.ts has no import, co-change or directory signal: it is disputed between both features.
+    mkdirSync(join(repo, "lib"));
+    writeFileSync(join(repo, "lib", "new.ts"), "export const fresh = 1;\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "Merge pull request #3 from me/lib");
+    const second = git("rev-parse", "HEAD").trim();
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out, "--dry-run");
+    expect(result.stderr).not.toContain("no feature for the new file");
+    expect(result.status).toBe(0);
+    expect(result.stderr).toMatch(/, 1 small calls: about [\d,]+ input tokens/);
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(first);
+    store.close();
+  });
+
   it("states the About article's cost when no page is dirty but the article is due", () => {
     const { repo, out, second } = untouched("paged");
     const result = run("scripts/wiki-update.ts", repo, second, "--out", out, "--dry-run");
@@ -883,7 +900,7 @@ describe("wiki-replay.ts as a process (no network)", () => {
     ]);
     expect(rows.map((row) => row.split(" | ")[5])).toEqual(["0", "1"]);
     expect(all.stdout).toMatch(
-      /2 steps estimated at about \$\d+\.\d{4}\.\nUpper-side for the update calls only: [^\n]+\n$/,
+      /2 steps estimated at about \$\d+\.\d{4}\.\nUpper-side for the update and tie-break calls only: [^\n]+\n$/,
     );
     const one = run(
       "scripts/wiki-replay.ts",
@@ -947,6 +964,23 @@ describe("wiki-replay.ts as a process (no network)", () => {
     expect(row?.split(" | ")[5]).toBe("0");
     expect(row).not.toMatch(/\$0\.0000 \|$/);
     expect(result.stdout).toMatch(/1 steps estimated at about \$(?!0\.0000)\d+\.\d{4}\./);
+  });
+
+  it("projects a merge that adds a file its signals cannot place, with a tie-break call priced", () => {
+    const { repo, out, first, git } = replayable(null, { paged: true });
+    mkdirSync(join(repo, "lib"));
+    writeFileSync(join(repo, "lib", "new.ts"), "export const fresh = 1;\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "Merge pull request #7 from me/lib");
+    const added = git("rev-parse", "HEAD").trim();
+    const result = run("scripts/wiki-replay.ts", repo, first, added, "--out", out, "--dry-run");
+    expect(result.status).toBe(0);
+    const rows = result.stdout.split("\n").filter((line) => /^\| \d/.test(line));
+    expect(rows).toHaveLength(3);
+    // The last step touches no page and the article is priced only on the first, so its cost is
+    // the tie-break call alone.
+    expect(rows[2]).toMatch(/\| 1 \| 0 \| \$(?!0\.0000)\d+\.\d{4} \|$/);
+    expect(rows[1]).toMatch(/\| 1 \| 1 \| \$\d+\.\d{4} \|$/);
   });
 
   it("refuses up front, with the head unmoved, a step whose only call is the due About article", () => {

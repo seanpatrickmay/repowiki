@@ -13,9 +13,11 @@ import {
   DEFAULT_MAX_FILE_BYTES,
   featureNeighbours,
   indexRepo,
+  knownFeature,
   measureDrift,
   planPages,
   planUpdate,
+  provisionalPlacement,
   readHistory,
   readSources,
   type Store,
@@ -68,7 +70,15 @@ export function estimateFor(
 ): UpdateEstimate {
   const { index, sources, history } = input;
   const plan = planUpdate(store, input);
-  const measured = measureDrift(plan, index, plan.placement.decided, DEFAULT_DRIFT_THRESHOLD);
+  // The tie-break has not run, so a disputed file takes its deterministic fallback feature (R16)
+  // for now: drift is measured as if every file were placed, with no call. The tie-break call
+  // itself is counted below (`disputed`); the model may place a file elsewhere, so which features
+  // drift, and the packs, are an estimate.
+  const placed = new Map([
+    ...plan.placement.decided,
+    ...provisionalPlacement(plan.placement.disputed, plan.graph, knownFeature(plan)),
+  ]);
+  const measured = measureDrift(plan, index, placed, DEFAULT_DRIFT_THRESHOLD);
   const manifest = addAliases(measured.manifest, codeAliases(measured.manifest, sources));
   const pages = planPages(plan, store, input, manifest, new Set());
   const neighbours = featureNeighbours(plan.graph, manifest);

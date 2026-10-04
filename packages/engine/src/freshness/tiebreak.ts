@@ -72,6 +72,41 @@ export interface TieBreak {
 }
 
 /**
+ * The deterministic placement of one disputed file (R16): the candidate it shares the most edge
+ * weight with in `graph`, among the files `featureOf` gives a feature, then the smallest id.
+ */
+export function fallbackFeature(
+  path: string,
+  candidates: readonly string[],
+  graph: FileGraph,
+  featureOf: (path: string) => string | undefined,
+): string {
+  const weight = new Map(candidates.map((c) => [c, 0]));
+  for (const { a, b, weight: w } of graph.edges) {
+    const other = a === path ? b : b === path ? a : null;
+    const feature = other === null ? undefined : featureOf(other);
+    if (feature !== undefined && weight.has(feature))
+      weight.set(feature, (weight.get(feature) ?? 0) + w);
+  }
+  return [...weight].sort(([x, m], [y, n]) => n - m || (x < y ? -1 : 1))[0]?.[0] as string;
+}
+
+/**
+ * Where every disputed file goes if the tie-break call is not made: each takes its fallback
+ * feature. An estimate uses it to measure drift before the call, with no call; the update itself
+ * asks the model (breakTies) and uses the fallback only for an answer it cannot use.
+ */
+export function provisionalPlacement(
+  disputed: readonly { path: string; candidates: readonly string[] }[],
+  graph: FileGraph,
+  featureOf: (path: string) => string | undefined,
+): Map<string, string> {
+  return new Map(
+    disputed.map((d) => [d.path, fallbackFeature(d.path, d.candidates, graph, featureOf)]),
+  );
+}
+
+/**
  * Settles the disputed files of an update (spec §6.1 step 3: the tie-break model is called only
  * when the signals disagree): one call for up to MAX_TIE_BREAK_FILES files, `purpose:
  * "tieBreak"`, batched by default. A file the answer leaves out, or puts in a feature that is not
@@ -83,16 +118,6 @@ export async function breakTies(input: TieBreakInput, options: TieBreakOptions):
   const log = options.log ?? (() => {});
   const placed = new Map<string, string>();
   if (input.disputed.length === 0) return { placed, calls: 0, fallback: 0 };
-  const fallbackOf = (path: string, candidates: readonly string[]): string => {
-    const weight = new Map(candidates.map((c) => [c, 0]));
-    for (const { a, b, weight: w } of input.graph.edges) {
-      const other = a === path ? b : b === path ? a : null;
-      const feature = other === null ? undefined : input.featureOf(other);
-      if (feature !== undefined && weight.has(feature))
-        weight.set(feature, (weight.get(feature) ?? 0) + w);
-    }
-    return [...weight].sort(([x, m], [y, n]) => n - m || (x < y ? -1 : 1))[0]?.[0] as string;
-  };
   const asked = input.disputed.slice(0, MAX_TIE_BREAK_FILES);
   let answer: TieBreakAnswer = { files: [] };
   let calls = 0;
@@ -125,7 +150,7 @@ export async function breakTies(input: TieBreakInput, options: TieBreakOptions):
     const pick = i < asked.length ? chosen.get(plain(d.path)) : undefined;
     if (pick !== undefined && d.candidates.includes(pick)) placed.set(d.path, pick);
     else {
-      placed.set(d.path, fallbackOf(d.path, d.candidates));
+      placed.set(d.path, fallbackFeature(d.path, d.candidates, input.graph, input.featureOf));
       fallback++;
     }
   });

@@ -328,6 +328,7 @@ function dryRun(
         files: changes.length,
         pages: touchedPages(store, paths),
         articleDue: i === 0 && dueNow,
+        addsFiles: changes.some((c) => c.status === "added"),
       },
       prompts,
       args.budgetTokens,

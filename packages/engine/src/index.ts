@@ -16,10 +16,12 @@ export {
 export {
   articleDue,
   DEFAULT_DRIFT_THRESHOLD,
+  knownFeature,
   measureDrift,
   type PagePlan,
   planPages,
   planUpdate,
+  provisionalPlacement,
   UpdateError,
   type UpdateInput,
   type UpdateOptions,

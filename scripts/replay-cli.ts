@@ -125,18 +125,28 @@ export interface StepProjection {
 /**
  * A step's cost before any call, from its diff alone (the store cannot be moved by a dry run):
  * every active feature with a changed member file is taken as one update call with a full pack
- * (`budgetTokens`), plus the About article when any page may change. Upper-side for those calls
- * only: it omits a tie-break or drift call, whole pages and the retry round. The live run states
+ * (`budgetTokens`), plus the About article when any page may change, and one tie-break call when
+ * the step adds files. Upper-side for those calls only: it omits a drift call, whole pages and the
+ * retry round. The live run states
  * each step's own estimate from the real plan before its calls.
  */
 export function projectStep(
-  input: { step: ReplayStep; files: number; pages: number; articleDue?: boolean },
+  input: {
+    step: ReplayStep;
+    files: number;
+    pages: number;
+    articleDue?: boolean;
+    /** The step adds files, any of which may need a tie-break call. */
+    addsFiles?: boolean;
+  },
   prompts: { update: string; article: string },
   budgetTokens: number,
   model: string,
   batch: boolean,
 ): StepProjection {
-  // Only the write role is called: a projected step makes no tie-break or drift call.
+  // The write role is called for pages, and the tie-break role for a step that adds files (one
+  // call, whether or not their signals disagree: the dry run does not index the step); a
+  // projected step makes no drift call.
   const models = { tieBreak: model, manifest: model, write: model };
   const estimate = estimateUpdate(
     {
@@ -144,7 +154,7 @@ export function projectStep(
       updateSystem: prompts.update,
       whole: [],
       writeSystem: "",
-      disputed: false,
+      disputed: input.addsFiles === true,
       drifted: false,
       // The article is rewritten when a page may change, or already due as the store stands.
       article:
@@ -175,7 +185,7 @@ export function renderProjection(projections: readonly StepProjection[], left: n
     ),
     "",
     `${projections.length} steps estimated at about $${total.toFixed(4)}${left > 0 ? `; ${left} more steps after them are left for a later run` : ""}.`,
-    "Upper-side for the update calls only: tie-break, drift, whole-page and retry calls are not counted.",
+    "Upper-side for the update and tie-break calls only: drift, whole-page and retry calls are not counted.",
   ].join("\n");
 }
 
