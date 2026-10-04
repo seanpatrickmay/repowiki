@@ -55,7 +55,7 @@ export interface WritePagesInput {
   /**
    * History claims a feature's new page carries forward, as stored, from the pages it continues
    * (spec §5 rule 4: History is append-only). They go ahead of the page's new History claims;
-   * a new one whose commits a carried one already cites, all of them, is dropped.
+   * a new one citing only commits that one carried claim already cites, all of them, is dropped.
    */
   carry?: ReadonlyMap<string, readonly Claim[]>;
 }
@@ -201,9 +201,10 @@ const commitsOf = (claim: Claim): Set<string> =>
 
 /**
  * A page's verified claims with `carried` History claims ahead of its new ones (spec §5 rule 4).
- * A new History claim whose commits one carried claim already cites, all of them, is dropped, and
- * a lead claim that summarized it summarizes that carried claim (the first such) instead. Carried
- * claims take draft ids no verified claim uses; the page's own numbering replaces every id anyway.
+ * A new History claim that cites only commits, all of which one carried claim already cites, is
+ * dropped: the first such carried claim takes its hook flag, and a lead claim that summarized it
+ * summarizes that carried claim instead. Carried claims take draft ids no verified claim uses;
+ * the page's own numbering replaces every id anyway.
  */
 function withCarried(
   verified: readonly { key: SectionKey; claim: Claim }[],
@@ -224,13 +225,19 @@ function withCarried(
   }));
   const cited = kept.map((k) => ({ id: k.claim.id, commits: commitsOf(k.claim) }));
   const replaced = new Map<string, string>();
+  const hooked = new Set<string>();
   for (const { key, claim } of verified) {
-    if (key !== "history") continue;
+    if (key !== "history" || claim.citations.some((c) => c.kind !== "commit")) continue;
     const commits = [...commitsOf(claim)];
     if (commits.length === 0) continue;
     const covering = cited.find((c) => commits.every((sha) => c.commits.has(sha)));
-    if (covering !== undefined) replaced.set(claim.id, covering.id);
+    if (covering === undefined) continue;
+    replaced.set(claim.id, covering.id);
+    if (claim.hook) hooked.add(covering.id);
   }
+  const carriedClaims = kept.map((k) =>
+    hooked.has(k.claim.id) ? { ...k, claim: { ...k.claim, hook: true } } : k,
+  );
   const rest = verified
     .filter((v) => !(v.key === "history" && replaced.has(v.claim.id)))
     .map((v) =>
@@ -244,7 +251,7 @@ function withCarried(
           }
         : v,
     );
-  return [...kept, ...rest];
+  return [...carriedClaims, ...rest];
 }
 
 /**

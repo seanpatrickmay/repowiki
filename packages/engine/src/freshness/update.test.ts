@@ -48,6 +48,10 @@ const claim = (
   hook: false,
 });
 const options = { repoName: "sample", driftThreshold: Number.POSITIVE_INFINITY };
+/** A Wikipedia fetch that always fails: a title the store has not cached is left plain. */
+const unreachable = async (): Promise<Response> => {
+  throw new TypeError("no network in tests");
+};
 
 /** A journal whose flush is observable; it holds no rows. */
 function spyJournal() {
@@ -347,9 +351,6 @@ describe("updateWiki", () => {
         ],
         diagram: { nodes: [], edges: [] },
       }));
-      const unreachable = async (): Promise<Response> => {
-        throw new TypeError("no network in tests");
-      };
       const result = await updateWiki(store, await inputAt(repo, merge), {
         ...options,
         provider: p,
@@ -695,10 +696,6 @@ describe("updateWiki", () => {
               ? page(request.featureId ?? "")
               : standard(request),
         );
-        // A Wikipedia title the store has not cached is left plain, never fetched.
-        const unreachable = async (): Promise<Response> => {
-          throw new TypeError("no network in tests");
-        };
         return updateWiki(store, await inputAt(repo, to), {
           ...options,
           driftThreshold: 0,
@@ -898,6 +895,48 @@ describe("updateWiki", () => {
           ?.claims.find((c) => c.text === "Both commits shaped it.");
         const lead = page?.sections.find((s) => s.key === "lead")?.claims;
         expect(lead?.map((c) => c.supports)).toEqual([[both?.id]]);
+      });
+
+      it("gives a dropped duplicate's hook to the carried claim, and keeps one citing more than commits", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () => {
+            const page = withHistory(
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Work records began with the first commit.", [first]],
+              ["The first commit added complete().", [first]],
+            );
+            return {
+              ...page,
+              sections: page.sections.map((s) =>
+                s.key === "history"
+                  ? {
+                      ...s,
+                      claims: s.claims.map((c) =>
+                        c.id === "h1"
+                          ? { ...c, hook: true }
+                          : { ...c, cite: [...c.cite, "src/deliverables/crud.py:4-7"] },
+                      ),
+                    }
+                  : s,
+              ),
+            };
+          },
+        );
+        const history = store
+          .getCurrentRevision("deliverables")
+          ?.sections.find((s) => s.key === "history")?.claims;
+        expect(history?.map((c) => [c.text, c.hook, c.citations.map((x) => x.kind)])).toEqual([
+          ["Deliverables was added first.", true, ["commit"]],
+          ["The first commit added complete().", false, ["commit", "code"]],
+        ]);
       });
 
       it("writes a page whose manifest-change write failed whole again on the next update", async () => {
