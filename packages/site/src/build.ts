@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LLMS_TXT_EXPORT_PATH, LLMS_TXT_FILE, renderLlmsTxt } from "@repowiki/core";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
 import * as pagefind from "pagefind";
 import { UsageError } from "./args.ts";
-import { loadExport, resolveExportFile } from "./load.ts";
+import { loadExport } from "./load.ts";
+import { writeSiteRoot } from "./site-root.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -119,8 +119,7 @@ export async function buildSite(
 
   // Write marker file to allow rebuilds
   writeFileSync(`${outDir}/.repowiki-site`, "");
-  copyFileSync(resolveExportFile(exportFile), join(outDir, LLMS_TXT_EXPORT_PATH));
-  writeFileSync(join(outDir, LLMS_TXT_FILE), renderLlmsTxt(wiki));
+  writeSiteRoot(outDir, wiki);
 
   const { index, errors } = await pagefind.createIndex({ forceLanguage: "en" });
   try {
