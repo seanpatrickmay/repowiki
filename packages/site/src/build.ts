@@ -79,7 +79,9 @@ function astroConfig(outDir: string): AstroInlineConfig {
     devToolbar: { enabled: false },
     server: { host: "127.0.0.1", port: 4321 },
     // Emit every script as a file, so pages (and their snapshots) only reference hashed assets.
-    vite: { build: { assetsInlineLimit: 0 } },
+    // Mermaid's ELK layout chunk is ~1.46 MB and only loads for a diagram that needs it, so the
+    // default 500 kB chunk warning is noise; 2000 kB still warns if a chunk grows past that.
+    vite: { build: { assetsInlineLimit: 0, chunkSizeWarningLimit: 2000 } },
   };
 }
 
