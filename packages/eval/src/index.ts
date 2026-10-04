@@ -1,3 +1,9 @@
+export {
+  type AccuracyTally,
+  accuracySheet,
+  CLAIMS_PER_FALSE_CLAIM,
+  tallySheet,
+} from "./accuracy.ts";
 export { AGENT_TEMPERATURE, type AgentAnswer, MAX_TURN_OUTPUT_TOKENS, runAgent } from "./agent.ts";
 export { JUDGE_SYSTEM, judgeTurn, MAX_JUDGED_ANSWER_CHARS } from "./judge.ts";
 export { type AgentKind, ANSWER_WORDS, agentSystemPrompt, questionTurn } from "./prompts.ts";
