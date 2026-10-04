@@ -1,3 +1,5 @@
+import { WikiExport } from "@repowiki/core";
+import { makeFeature } from "@repowiki/core/test-fixtures";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extendedWiki, type SampleWiki, sampleWiki } from "./test-wiki.ts";
 import { ToolError } from "./tools.ts";
@@ -47,6 +49,147 @@ describe("WikiView.resolve", () => {
       new ToolError('no page "kafka now"; use search to find a page\'s id'),
     );
     expect(() => new WikiView(sample.wiki).resolve(ABOUT_PAGE_ID)).toThrow(ToolError);
+  });
+});
+
+describe("WikiView.resolve, ids as an agent gives them", () => {
+  let routed: WikiView;
+  beforeAll(() => {
+    const base = extendedWiki(sample);
+    const sha = sample.sha;
+    const create = { kind: "create" as const, sha };
+    routed = new WikiView(
+      WikiExport.parse({
+        ...base,
+        manifest: {
+          ...base.manifest,
+          features: [
+            ...base.manifest.features,
+            makeFeature({
+              id: "ledger",
+              title: "Ledger",
+              aliases: ["storage"],
+              status: { kind: "redirect", to: "signals" },
+              lineage: [create, { kind: "merge", sha, into: "signals" }],
+            }),
+            makeFeature({
+              id: "vault",
+              title: "Vault",
+              aliases: ["storage"],
+              status: { kind: "redirect", to: "deliverables" },
+              lineage: [create, { kind: "merge", sha, into: "deliverables" }],
+            }),
+            makeFeature({
+              id: "merged-records",
+              title: "Merged records",
+              aliases: ["records archive"],
+              status: { kind: "redirect", to: "records" },
+              lineage: [create, { kind: "merge", sha, into: "records" }],
+            }),
+            makeFeature({
+              id: "mixed",
+              title: "Mixed",
+              aliases: [],
+              status: { kind: "disambiguation", to: ["legacy-signals", "signals", "deliverables"] },
+              lineage: [
+                create,
+                { kind: "split", sha, into: ["legacy-signals", "signals", "deliverables"] },
+              ],
+            }),
+          ],
+        },
+      }),
+    );
+  });
+
+  it("takes a title, any case or spelling, whose slug is the feature id", () => {
+    for (const id of ["Signals", "SIGNALS", "signals ", " Signal-ingestion"]) {
+      expect(view.resolve(id)).toMatchObject({ kind: "page", featureId: "signals" });
+    }
+    expect(view.resolve("Signals")).toEqual({ kind: "page", featureId: "signals", from: null });
+    expect(view.resolve("Deliverables")).toEqual({
+      kind: "page",
+      featureId: "deliverables",
+      from: null,
+    });
+    expect(view.resolve("Records")).toEqual({
+      kind: "choices",
+      from: "Records",
+      targets: ["signals", "deliverables"],
+    });
+  });
+
+  it("resolves a retired feature that has a stored page, by id or title", () => {
+    const retired = { kind: "page", featureId: "old-reports", from: null };
+    expect(view.resolve("old-reports")).toEqual(retired);
+    expect(view.resolve("Old reports")).toEqual(retired);
+    expect(view.resolve("old_reports")).toEqual(retired);
+  });
+
+  it("follows a redirect by a differently spelled id, and says from where", () => {
+    expect(view.resolve("Legacy-Signals")).toEqual({
+      kind: "page",
+      featureId: "signals",
+      from: "Legacy-Signals",
+    });
+    expect(view.resolve("Legacy signal store")).toMatchObject({ featureId: "signals" });
+  });
+
+  it("offers every target of an alias that several routes share", () => {
+    expect(routed.resolve("Storage")).toEqual({
+      kind: "choices",
+      from: "Storage",
+      targets: ["signals", "deliverables"],
+    });
+  });
+
+  it("lists a disambiguation's targets at their final articles, once each", () => {
+    expect(routed.resolve("mixed")).toEqual({
+      kind: "choices",
+      from: "mixed",
+      targets: ["signals", "deliverables"],
+    });
+  });
+
+  it("offers the choices when a redirect or an alias leads to a disambiguation", () => {
+    const choices = ["signals", "deliverables"];
+    expect(routed.resolve("merged-records")).toEqual({
+      kind: "choices",
+      from: "merged-records",
+      targets: choices,
+    });
+    expect(routed.resolve("records archive")).toEqual({
+      kind: "choices",
+      from: "records archive",
+      targets: choices,
+    });
+  });
+
+  it("takes the About article as the site and the agent spell it, in any case", () => {
+    for (const id of ["Special:About", "SPECIAL:ABOUT", "/special/about/", "wiki/Special/About"]) {
+      expect(view.resolve(id)).toEqual({ kind: "about" });
+    }
+    expect(() => new WikiView(sample.wiki).resolve("/special/about/")).toThrow(ToolError);
+  });
+
+  it("echoes a hostile id only as one capped printable line", () => {
+    const resolved = view.resolve(`old ingest\u202E\n${"!".repeat(5000)}`);
+    expect(resolved).toMatchObject({ kind: "page", featureId: "signals" });
+    const from = resolved.kind === "page" ? (resolved.from ?? "") : "";
+    expect(from).toBe(`old ingest\uFFFD ${"!".repeat(67)}\u2026`);
+    expect([...from]).toHaveLength(80);
+
+    for (const id of ["__proto__", "constructor", "\u202Efoo", `${"x".repeat(5000)}`, ""]) {
+      expect(() => view.resolve(id), id.slice(0, 20)).toThrow(ToolError);
+    }
+    try {
+      view.resolve(`a\u202E\n${"b".repeat(5000)}`);
+      expect.unreachable();
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toMatch(/^no page "a\uFFFD b+\u2026"; use search/);
+      expect([...message].length).toBeLessThan(140);
+    }
   });
 });
 
