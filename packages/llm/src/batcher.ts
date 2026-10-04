@@ -43,10 +43,30 @@ interface Queued {
   params: MessageCreateParamsNonStreaming;
   resolve: (message: Message) => void;
   reject: (error: unknown) => void;
+  /** Batches this request has been sent in so far. */
+  attempts: number;
+  /** Set once the request's promise is settled, so a queued-again request is not sent after that. */
+  settled: boolean;
 }
 
 /** Downloads of a finished batch's results are tried this many times before giving up. */
 export const RESULTS_ATTEMPTS = 3;
+
+/**
+ * A request whose batch item errored, expired or went missing is sent again in a later batch, up
+ * to this many batches in all: the batch counterpart of the SDK's 3 attempts (spec §6.3).
+ */
+export const ITEM_ATTEMPTS = 3;
+
+/** Item errors that sending the same request again cannot fix. */
+const PERMANENT_ERRORS = new Set([
+  "invalid_request_error",
+  "authentication_error",
+  "permission_error",
+  "not_found_error",
+  "request_too_large",
+  "billing_error",
+]);
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -65,8 +85,9 @@ function observe(hook: () => void): void {
 
 /**
  * Requests made in the same tick of the event loop go out together as one Message Batch (half
- * price). Each request settles on its own: an errored, expired, or missing item rejects only its
- * own promise; a failure of the batch itself rejects them all.
+ * price). Each request settles on its own: an item that errored, expired or went missing is sent
+ * again in a later batch (see `ITEM_ATTEMPTS`) and rejects only its own promise once it runs out
+ * of attempts; a failure of the batch itself rejects them all and is not retried.
  */
 export function createBatcher(client: Anthropic, options: BatcherOptions): Batcher {
   let queue: Queued[] = [];
@@ -190,26 +211,58 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
         result?.type === "errored"
           ? `${result.error.error.type}: ${result.error.error.message}`
           : (result?.type ?? "missing");
-      item.reject(new LlmError(`batch ${batch.id} request req-${i} did not succeed: ${why}`));
+      const permanent =
+        result?.type === "canceled" ||
+        (result?.type === "errored" && PERMANENT_ERRORS.has(result.error.error.type));
+      if (!permanent && item.attempts < ITEM_ATTEMPTS) {
+        enqueue(item);
+        return;
+      }
+      const tries = item.attempts === 1 ? "" : ` (attempt ${item.attempts} of ${ITEM_ATTEMPTS})`;
+      item.reject(
+        new LlmError(`batch ${batch.id} request req-${i} did not succeed${tries}: ${why}`),
+      );
     });
+  };
+
+  /** Queues a request for the batch that goes out at the end of this tick. */
+  const enqueue = (item: Queued): void => {
+    if (queue.length === 0) {
+      setImmediate(() => {
+        // An item can be settled while queued: a failure of `run` rejects every item of its batch,
+        // including those already queued again.
+        const items = queue.filter((item) => !item.settled);
+        queue = [];
+        if (items.length === 0) return;
+        // `run` settles every item itself; this catch only keeps a bug in it from leaking as an
+        // unhandled rejection that would leave the callers pending forever.
+        run(items).catch((error: unknown) => {
+          const llmError = new LlmError(`batch run failed unexpectedly: ${messageOf(error)}`, {
+            cause: error,
+          });
+          for (const item of items) item.reject(llmError);
+        });
+      });
+    }
+    item.attempts += 1;
+    queue.push(item);
   };
 
   return (params) =>
     new Promise((resolve, reject) => {
-      if (queue.length === 0) {
-        setImmediate(() => {
-          const items = queue;
-          queue = [];
-          // `run` settles every item itself; this catch only keeps a bug in it from leaking as an
-          // unhandled rejection that would leave the callers pending forever.
-          run(items).catch((error: unknown) => {
-            const llmError = new LlmError(`batch run failed unexpectedly: ${messageOf(error)}`, {
-              cause: error,
-            });
-            for (const item of items) item.reject(llmError);
-          });
-        });
-      }
-      queue.push({ params, resolve, reject });
+      const item: Queued = {
+        params,
+        attempts: 0,
+        settled: false,
+        resolve: (message) => {
+          item.settled = true;
+          resolve(message);
+        },
+        reject: (error) => {
+          item.settled = true;
+          reject(error);
+        },
+      };
+      enqueue(item);
     });
 }
