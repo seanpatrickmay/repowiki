@@ -379,3 +379,11 @@ prompt-cached prefix for every write call.
 Sub-projects #4–#9; human edits; an opinion setting; screenshots; symbol-level
 indexing for languages other than Python, TS, and TSX; hosted deployment; any
 write access to target repos.
+
+## v2 amendments
+
+- **People (#6; spec `2026-10-04-repowiki-v2-people-design.md`).** It changes four v1 rules:
+  - **F17 / ADR-0003.** Line authorship by `git blame -C -C -M` is computed at the wiki's head for person pages and feature-page contributor rows (ADR-0004). It is still never shown per claim.
+  - **§4 data flow.** Once a wiki has People on, `update` and `replay` end with a People refresh. `replay` does this once at its final head, not per step.
+  - **§5.** `WikiExport` gains `people` (within schema 3, default `null`).
+  - **§4 provider roles and §6.4 cost accounting.** `LlmRole` and `RunKind` gain `people`. People spend is its own run, never part of a build or update total.
