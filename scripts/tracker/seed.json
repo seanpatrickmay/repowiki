@@ -606,6 +606,203 @@
       "labels": ["v1", "type:task", "area:site"],
       "parent": "F12",
       "body": "**Deliverable:** header search box and /search/ with the Pagefind UI; the M5 exit check.\n\n**Done when:** search tests pass and pnpm site:demo is browsable locally. Plan Task 18."
+    },
+    {
+      "key": "M4-1",
+      "title": "[M4] tracker: M4 tickets",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "closed": true,
+      "body": "**Deliverable:** M4 tickets in seed.json.\n\n**Done when:** the seed creates M4-1 and M4-3..M4-29 (Task 2 closes the existing #113). Plan: docs/superpowers/plans/2026-10-01-repowiki-m4-write.md Task 1."
+    },
+    {
+      "key": "M4-3",
+      "title": "[M4] llm: retry errored and expired batch items",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** batcher resends errored (not permanent), expired and missing items, up to three batches.\n\n**Done when:** tests pass. Plan Task 3."
+    },
+    {
+      "key": "M4-4",
+      "title": "[M4] llm: journal batch requests and resume a submitted batch",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** BatchJournal in llm, store migration 5 batch_requests, resume of a submitted batch on a rerun.\n\n**Done when:** tests pass. Plan Task 4."
+    },
+    {
+      "key": "M4-5",
+      "title": "[M4] llm: ledger run kind and sha; cap LlmOutputError issues",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** LedgerEntry runKind and sha (optional), provider run stamp, LlmOutputError issues capped at 10.\n\n**Done when:** tests pass. Plan Task 5."
+    },
+    {
+      "key": "M4-6",
+      "title": "[M4] store: driver errors as StoreError; fix the fixture contentHash",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F03",
+      "body": "**Deliverable:** StoreError for driver failures and reused revision ids; fixture contentHash hashes its 15 cited lines (issue #53).\n\n**Done when:** tests pass. Plan Task 6."
+    },
+    {
+      "key": "M4-7",
+      "title": "[M4] index: import bindings and call sites",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F10",
+      "body": "**Deliverable:** extractBindings and extractCalls for Python, TS and TSX.\n\n**Done when:** tests pass. Plan Task 7."
+    },
+    {
+      "key": "M4-8",
+      "title": "[M4] index: call edges",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F10",
+      "body": "**Deliverable:** RepoIndex.calls: call edges resolved by name through imports.\n\n**Done when:** tests pass. Plan Task 8."
+    },
+    {
+      "key": "M4-9",
+      "title": "[M4] index: commit history and source text",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F06",
+      "body": "**Deliverable:** readHistory (commits with PR numbers) and readSources at a sha.\n\n**Done when:** tests pass. Plan Task 9."
+    },
+    {
+      "key": "M4-10",
+      "title": "[M4] verify: citations, citation rules and limitation evidence",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F03",
+      "body": "**Deliverable:** engine/verify: draft schemas, resolveReference, verifyClaim with citation rules and limitation evidence (issue #53).\n\n**Done when:** tests pass. Plan Task 10."
+    },
+    {
+      "key": "M4-11",
+      "title": "[M4] verify: diagram safety and stored-citation re-check",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F10",
+      "body": "**Deliverable:** diagramProblems (Mermaid safety) and revisionProblems (stored citations re-check).\n\n**Done when:** tests pass. Plan Task 11."
+    },
+    {
+      "key": "M4-12",
+      "title": "[M4] link: feature links, See also, no links to nowhere",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F02",
+      "body": "**Deliverable:** engine/link: feature links canonicalized on first mention, See also, linkViolations (issue #53).\n\n**Done when:** tests pass. Plan Task 12."
+    },
+    {
+      "key": "M4-13",
+      "title": "[M4] core: Wikipedia summaries in the store and export",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F13",
+      "body": "**Deliverable:** WikipediaSummary in core, store migration 6 cache, WikiExport.wikipedia and SCHEMA_VERSION 3.\n\n**Done when:** tests pass. Plan Task 13."
+    },
+    {
+      "key": "M4-14",
+      "title": "[M4] link: Wikipedia checks",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F13",
+      "body": "**Deliverable:** checkWikipediaTitles through the cache, with a recorded Wikipedia cassette.\n\n**Done when:** tests pass, cassette included. Plan Task 14."
+    },
+    {
+      "key": "M4-15",
+      "title": "[M4] link: code-identifier aliases",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F01",
+      "body": "**Deliverable:** codeAliases and store.amendManifestAliases.\n\n**Done when:** tests pass. Plan Task 15."
+    },
+    {
+      "key": "M4-16",
+      "title": "[M4] write: style guide and shared prefix",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F21",
+      "body": "**Deliverable:** style-guide.md, the write instructions and the shared cached prefix.\n\n**Done when:** tests pass. Plan Task 16."
+    },
+    {
+      "key": "M4-17",
+      "title": "[M4] write: diagram candidates and Mermaid source",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F10",
+      "body": "**Deliverable:** diagram candidates from import and call edges, and the engine-drawn Mermaid source.\n\n**Done when:** tests pass. Plan Task 17."
+    },
+    {
+      "key": "M4-18",
+      "title": "[M4] write: context packs",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** buildPack: budgeted source, commits, evidence, diagram candidates.\n\n**Done when:** tests pass. Plan Task 18."
+    },
+    {
+      "key": "M4-19",
+      "title": "[M4] write: page sections and infobox",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F03",
+      "body": "**Deliverable:** pageSections and computeInfobox.\n\n**Done when:** tests pass. Plan Task 19."
+    },
+    {
+      "key": "M4-20",
+      "title": "[M4] core: cap claim text; verify the markdown subset",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F03",
+      "body": "**Deliverable:** core CLAIM_TEXT_MAX_LENGTH 2000 and verify's markdown-subset check.\n\n**Done when:** tests pass. Plan Task 20."
+    },
+    {
+      "key": "M4-21",
+      "title": "[M4] write: verify a draft and prepare its retry",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F03",
+      "body": "**Deliverable:** PageState, verifyAll and the retry turns.\n\n**Done when:** tests pass. Plan Task 21."
+    },
+    {
+      "key": "M4-22",
+      "title": "[M4] write: assemble a revision",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F02",
+      "body": "**Deliverable:** assembleRevision: links, sections, infobox, diagram, See also.\n\n**Done when:** tests pass. Plan Task 22."
+    },
+    {
+      "key": "M4-23",
+      "title": "[M4] write: writePages",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** writePages: every page's first call in one batch.\n\n**Done when:** tests pass. Plan Task 23."
+    },
+    {
+      "key": "M4-24",
+      "title": "[M4] write: retry round",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F03",
+      "body": "**Deliverable:** the writePages retry round (spec §6.3).\n\n**Done when:** tests pass. Plan Task 24."
+    },
+    {
+      "key": "M4-25",
+      "title": "[M4] write: buildWiki",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** buildWiki: aliases, pages and head stored in one transaction; resume at the same sha.\n\n**Done when:** tests pass. Plan Task 25."
+    },
+    {
+      "key": "M4-26",
+      "title": "[M4] write: batch pin and recorded Claude run",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** one batch per round pinned through the real batcher; a recorded Claude cassette.\n\n**Done when:** tests pass, cassettes included. Plan Task 26."
+    },
+    {
+      "key": "M4-27",
+      "title": "[M4] write: build arguments and cost estimate",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** wiki:build arguments, the up-front cost estimate and the build summary.\n\n**Done when:** tests pass. Plan Task 27."
+    },
+    {
+      "key": "M4-28",
+      "title": "[M4] write: dev commands and next-chief-of-staff build",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** pnpm wiki:build and pnpm wiki:check.\n\n**Done when:** next-chief-of-staff at 7247d28 is fully built from its stored manifest, wiki:check passes, and the ledger cost is reported against the estimate. Plan Task 28."
+    },
+    {
+      "key": "M4-29",
+      "title": "[M4] site: Wikipedia hover previews",
+      "labels": ["v1", "type:task", "area:site"],
+      "parent": "F13",
+      "body": "**Deliverable:** hover previews for [[wp:Title]] links from WikiExport.wikipedia (export schema 3): one preview file per title under a hashed name, a data-preview attribute on wp: links, and client support in preview.ts.\n\n**Done when:** a wp: link in the fixture site shows its summary card. A follow-up the M4 plan's rulings name; not one of its tasks."
     }
   ]
 }
