@@ -518,11 +518,23 @@ export function renderBuildSummary(
   return `${lines.join("\n")}\n`;
 }
 
+/** What a build summary says of its estimate. */
+export const BUILD_ESTIMATE_NOTE = "The estimate is an upper-side estimate with no cache hits.";
+/** What an update summary says of its estimate: it prices the first round's calls only. */
+export const UPDATE_ESTIMATE_NOTE =
+  "The estimate counts the first round only; retries, cache writes and pages the drift call changes are extra.";
+
 /**
- * A summary's "LLM cost" section: the ledger's calls and tokens, unpriced calls, and the cost
- * with `upFront` (the estimate's sentence ending, or ".") after it.
+ * A summary's "LLM cost" section: the ledger's calls and tokens, unpriced calls, `note` on the
+ * estimate when there is one, and the cost with `upFront` (the estimate's sentence ending, or
+ * ".") after it.
  */
-export function costLines(totals: LedgerTotals, upFront: string, estimated: boolean): string[] {
+export function costLines(
+  totals: LedgerTotals,
+  upFront: string,
+  estimated: boolean,
+  note: string = BUILD_ESTIMATE_NOTE,
+): string[] {
   const t = totals.tokens;
   return [
     "## LLM cost",
@@ -536,7 +548,7 @@ export function costLines(totals: LedgerTotals, upFront: string, estimated: bool
           "",
         ]
       : []),
-    ...(estimated ? ["The estimate is an upper-side estimate with no cache hits.", ""] : []),
+    ...(estimated ? [note, ""] : []),
     `Cost: $${totals.usd.toFixed(4)}${upFront}`,
   ];
 }
