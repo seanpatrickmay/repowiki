@@ -25,7 +25,7 @@ export const MAX_READ_BYTES = 2 * 1024 * 1024;
 /** The most output grep reads from git; more is "too much output", not a stalled search. */
 const GREP_MAX_BUFFER = 32 * 1024 * 1024;
 /** A pattern that takes git longer than this is refused, so one call cannot stall the run. */
-export const GREP_TIMEOUT_MS = 10_000;
+const GREP_TIMEOUT_MS = 10_000;
 /** Room left under MAX_TOOL_RESULT_CHARS for a tool's own last line. */
 const BUDGET = MAX_TOOL_RESULT_CHARS - 300;
 
@@ -187,12 +187,14 @@ function grep(repo: string, sha: string, input: GrepInput, timeoutMs: number): s
   if (result.signal !== null) {
     throw new ToolError("grep took too long; narrow the pattern or the path");
   }
-  // No match is exit 1 with an empty stderr. Anything on stderr (a partial clone's "unable to
+  // No match is exit 1 with nothing on stderr. Any other message (a partial clone's "unable to
   // read <oid>", say) means files went unsearched, so "No matches." would be a false answer.
+  // Warning lines alone do not stop the search from having finished.
   const stderr = result.stderr.toString("utf8");
-  if (result.status === 1 && stderr.trim() === "") return "No matches.\n";
+  const complaints = stderr.split("\n").filter((l) => l.trim() !== "" && !l.startsWith("warning:"));
+  if (result.status === 1 && complaints.length === 0) return "No matches.\n";
   if (result.status !== 0) {
-    const cause = gitFailureCause(repo, stderr);
+    const cause = gitFailureCause(repo, stderr, { unreadableObject: result.status === 1 });
     const why = cause ?? cut(oneLine(stderr).replace(/^fatal: /, ""), 200);
     throw new ToolError(`grep failed: ${why}`);
   }

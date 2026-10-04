@@ -30,6 +30,27 @@ afterAll(() => {
   big.remove();
 });
 
+/** Runs `body` on a blobless clone of a one-file repository, so its blob is missing locally. */
+function withPartialClone(body: (clone: string, sha: string) => void): void {
+  const source = createTestRepo();
+  const scratch = mkdtempSync(join(tmpdir(), "repowiki-partial-"));
+  try {
+    source.write("a.txt", "hello\n");
+    const at = source.commit("init");
+    source.git("config", "uploadpack.allowFilter", "true");
+    const clone = join(scratch, "clone");
+    execFileSync(
+      "git",
+      ["clone", "-q", "--no-checkout", "--filter=blob:none", `file://${source.dir}`, clone],
+      { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+    );
+    body(clone, at);
+  } finally {
+    source.remove();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 describe("createRepoTools", () => {
   it("lists the files at the commit, under a directory or all of them", () => {
     const tools = createRepoTools(sample.repo.dir, sample.sha);
@@ -364,27 +385,22 @@ describe("createRepoTools against hostile config and content", () => {
   });
 
   it("does not call a grep that could not read a file in a partial clone 'No matches.'", () => {
-    const source = createTestRepo();
-    const scratch = mkdtempSync(join(tmpdir(), "repowiki-partial-"));
-    try {
-      source.write("a.txt", "hello\n");
-      const at = source.commit("init");
-      source.git("config", "uploadpack.allowFilter", "true");
-      const clone = join(scratch, "clone");
-      execFileSync(
-        "git",
-        ["clone", "-q", "--no-checkout", "--filter=blob:none", `file://${source.dir}`, clone],
-        { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
-      );
+    withPartialClone((clone, at) => {
       const result = createRepoTools(clone, at).run("grep", { pattern: "hello" });
       expect(result.isError).toBe(true);
       expect(result.text).toMatch(/^grep failed: .*partial clone/);
       expect(result.text).toMatch(/git fetch --refetch/);
       expect(result.text).not.toBe("No matches.\n");
-    } finally {
-      source.remove();
-      rmSync(scratch, { recursive: true, force: true });
-    }
+    });
+  });
+
+  it("does not take a bad pattern that mentions promisor for a partial clone's problem", () => {
+    withPartialClone((clone, at) => {
+      const result = createRepoTools(clone, at).run("grep", { pattern: "promisor(" });
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/^grep failed: -e option, 'promisor\(': /);
+      expect(result.text).not.toMatch(/partial clone/);
+    });
   });
 
   it("still says 'No matches.' when git exits 1 with nothing on stderr", () => {
