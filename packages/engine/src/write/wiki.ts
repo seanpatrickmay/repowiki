@@ -86,6 +86,8 @@ export function buildJournal(store: Store): BuildJournal {
           const forgotten = [...keys].filter((key) => !kept.has(key));
           for (const key of forgotten) keys.delete(key);
           store.forgetBatchRequests(batchId, forgotten);
+          // A settled request leaves its group, or a later flush would count it as unanswered.
+          for (const group of pages.values()) for (const key of forgotten) group.delete(key);
         }
       } catch {
         // A row left behind only costs a replay; it must never roll back the pages it answers.
