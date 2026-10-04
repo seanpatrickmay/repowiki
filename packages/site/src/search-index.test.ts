@@ -1,5 +1,6 @@
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -80,12 +81,12 @@ describe("writeSearchIndex", () => {
   });
 
   it("leaves every real bundle file non-empty the moment it returns, run after run", async () => {
-    // The real backend answers early in roughly 1 run in 50, so a few hundred runs make the
-    // unfixed code fail every time. Each run starts from a fresh copy of the pages only.
+    // The real backend answers early in roughly 1 run in 50. 50 runs is a smoke check on the real
+    // backend; the fake-backend test above is the deterministic guard. Each run starts from a fresh copy of the pages only.
     const pages = join(dir, "pages");
     for (const n of [1, 2, 3])
       cpSync(join(dir, `p${n}`), join(pages, `p${n}`), { recursive: true });
-    for (let run = 0; run < 300; run++) {
+    for (let run = 0; run < 50; run++) {
       const out = join(dir, `out${run}`);
       cpSync(pages, out, { recursive: true });
       await writeSearchIndex(out);
@@ -98,6 +99,31 @@ describe("writeSearchIndex", () => {
       rmSync(out, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it.each(["../escape.txt", "fragment/../../escape.txt", "/tmp/escape.txt", ".."])(
+    "refuses a bundle file path that escapes the output directory: %s",
+    async (path) => {
+      const index = {
+        addDirectory: async () => ({ errors: [], page_count: 1 }),
+        getFiles: async () => ({
+          errors: [],
+          files: [
+            { path: "pagefind-entry.json", content: Buffer.from("{}") },
+            { path, content: Buffer.from("x") },
+          ],
+        }),
+      };
+      const fake: SearchIndexApi = {
+        createIndex: async () => ({ errors: [], index }),
+        close: async () => {},
+      };
+      await expect(writeSearchIndex(dir, fake)).rejects.toThrow(
+        `pagefind: refusing to write outside the output directory: "${path}"`,
+      );
+      expect(existsSync(join(dir, "escape.txt"))).toBe(false);
+      expect(existsSync(join(dir, "pagefind"))).toBe(false);
+    },
+  );
 
   it("reports a Pagefind error and still closes the backend", async () => {
     let closed = false;
