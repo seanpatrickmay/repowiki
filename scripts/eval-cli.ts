@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { estimateTokens } from "@repowiki/engine";
@@ -6,14 +7,19 @@ import {
   ANSWER_WORDS,
   agentSystemPrompt,
   type EvalQuestion,
+  EvalRunError,
   type EvalRunOptions,
   type EvalRunResult,
+  JUDGE_MAX_TOKENS,
   JUDGE_SYSTEM,
   judgeTurn,
+  MAX_JUDGED_ANSWER_CHARS,
+  MAX_RETRY_PROBLEM_CHARS,
   MAX_TOOL_RESULT_CHARS,
   MAX_TURN_OUTPUT_TOKENS,
   QuestionSet,
   questionTurn,
+  retryTurn,
   runEval,
 } from "@repowiki/eval";
 import {
@@ -26,16 +32,18 @@ import {
   type ToolDefinition,
 } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
-import { priced, problemLine } from "./wiki-cli.ts";
+import { badOption, once, priced, problemLine } from "./wiki-cli.ts";
 
 export const EVAL_USAGE =
   "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|smoke [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
 
-/** Both agents' turn limit unless --turns says otherwise (spec §9: the same for both). */
+/** Both agents' turn limit unless --turns says otherwise (spec \u00A79: the same for both). */
 export const DEFAULT_TURN_LIMIT = 15;
 const MAX_TURN_LIMIT = 50;
 /** The run asks no further question once it has spent this much, unless --max-usd says otherwise. */
 export const DEFAULT_MAX_USD = 5;
+/** The highest --max-usd: a typo of a few zeros must not lift the budget stop. */
+const MAX_MAX_USD = 100;
 
 export interface EvalArgs {
   repo: string;
@@ -59,44 +67,41 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
   try {
     parsed = parse(argv);
   } catch (err) {
-    const flag = /'(-[^'=\s]*)/.exec((err as Error).message)?.[1];
-    const shown = flag?.slice(0, 40).replace(/[^\x21-\x7e]/g, "?");
-    throw new CliError(
-      `${shown === undefined ? "bad option" : `bad option ${shown}`}; ${EVAL_USAGE}`,
-      {
-        cause: err,
-      },
-    );
+    throw badOption(err, EVAL_USAGE);
   }
   const v = parsed.values;
   const [repo, ...extra] = parsed.positionals;
   if (repo === undefined || repo === "" || extra.length > 0) throw new CliError(EVAL_USAGE);
-  const set = QuestionSet.safeParse(v.set);
+  const set = QuestionSet.safeParse(once("--set", v.set, EVAL_USAGE));
   if (!set.success) throw fail("--set must be dev, held-out or smoke");
-  if (v.questions === undefined || v.questions === "") throw fail("--questions is required");
-  if (set.data === "held-out" && v["run-dir"] !== undefined) {
+  const questions = once("--questions", v.questions, EVAL_USAGE);
+  if (questions === undefined) throw fail("--questions is required");
+  const runDir = once("--run-dir", v["run-dir"], EVAL_USAGE) ?? null;
+  if (set.data === "held-out" && runDir !== null) {
     throw fail("the held-out set always runs in <out>/eval/held-out, so --run-dir cannot be given");
   }
-  const turns = Number(v.turns ?? DEFAULT_TURN_LIMIT);
-  if (!/^\d+$/.test(v.turns ?? "15") || turns < 1 || turns > MAX_TURN_LIMIT) {
+  const turnsText = once("--turns", v.turns, EVAL_USAGE) ?? String(DEFAULT_TURN_LIMIT);
+  const turns = Number(turnsText);
+  if (!/^\d+$/.test(turnsText) || turns < 1 || turns > MAX_TURN_LIMIT) {
     throw fail(`--turns must be a whole number from 1 to ${MAX_TURN_LIMIT}`);
   }
-  const maxUsd = Number(v["max-usd"] ?? DEFAULT_MAX_USD);
-  if (!/^\d+(\.\d+)?$/.test(v["max-usd"] ?? "5") || !(maxUsd > 0)) {
-    throw fail("--max-usd must be a number of dollars above 0");
+  const usdText = once("--max-usd", v["max-usd"], EVAL_USAGE) ?? String(DEFAULT_MAX_USD);
+  const maxUsd = Number(usdText);
+  if (!/^\d+(\.\d+)?$/.test(usdText) || !(maxUsd > 0 && maxUsd <= MAX_MAX_USD)) {
+    throw fail(`--max-usd must be a number of dollars above 0 and up to ${MAX_MAX_USD}`);
   }
   return {
     repo,
-    questions: v.questions,
+    questions,
     set: set.data,
-    out: v.out ?? null,
-    runDir: v["run-dir"] ?? null,
+    out: once("--out", v.out, EVAL_USAGE) ?? null,
+    runDir,
     turnLimit: turns,
     maxUsd,
-    config: v.config ?? null,
-    batch: v["no-batch"] !== true,
-    dryRun: v["dry-run"] === true,
-    verbose: v.verbose === true,
+    config: once("--config", v.config, EVAL_USAGE) ?? null,
+    batch: once("--no-batch", v["no-batch"], EVAL_USAGE) !== true,
+    dryRun: once("--dry-run", v["dry-run"], EVAL_USAGE) === true,
+    verbose: once("--verbose", v.verbose, EVAL_USAGE) === true,
   };
 }
 
@@ -105,16 +110,16 @@ function parse(argv: readonly string[]) {
     args: [...argv],
     allowPositionals: true,
     options: {
-      questions: { type: "string" },
-      set: { type: "string" },
-      out: { type: "string" },
-      "run-dir": { type: "string" },
-      turns: { type: "string" },
-      "max-usd": { type: "string" },
-      config: { type: "string" },
-      "no-batch": { type: "boolean" },
-      "dry-run": { type: "boolean" },
-      verbose: { type: "boolean" },
+      questions: { type: "string", multiple: true },
+      set: { type: "string", multiple: true },
+      out: { type: "string", multiple: true },
+      "run-dir": { type: "string", multiple: true },
+      turns: { type: "string", multiple: true },
+      "max-usd": { type: "string", multiple: true },
+      config: { type: "string", multiple: true },
+      "no-batch": { type: "boolean", multiple: true },
+      "dry-run": { type: "boolean", multiple: true },
+      verbose: { type: "boolean", multiple: true },
     },
   });
 }
@@ -147,6 +152,8 @@ export interface EvalEstimate {
   /** Both agents on every question taking every turn with full tool results, no cache hits. */
   ceilingUsd: number;
   judgeUsd: number;
+  /** Every judgment retried once, each answer as long as the judge reads, at its output cap. */
+  judgeCeilingUsd: number;
 }
 
 export interface EvalEstimateInput {
@@ -168,6 +175,7 @@ export function estimateEval(input: EvalEstimateInput): EvalEstimate {
   let agentsUsd = 0;
   let ceilingUsd = 0;
   let judgeUsd = 0;
+  let judgeCeilingUsd = 0;
   for (const question of input.questions) {
     for (const agent of ["wiki", "repo"] as const) {
       const prefix = estimateTokens(
@@ -196,9 +204,24 @@ export function estimateEval(input: EvalEstimateInput): EvalEstimate {
         ASSUMED_JUDGE_OUTPUT,
         input.batchJudge,
       );
+      // At most: the answer at the judge's cut, and a retry that adds the problem turn.
+      const longest = judgeTurn(question, "x".repeat(MAX_JUDGED_ANSWER_CHARS + 1));
+      const retry = retryTurn("x".repeat(MAX_RETRY_PROBLEM_CHARS));
+      judgeCeilingUsd += priced(
+        models.evalJudge,
+        estimateTokens(JUDGE_SYSTEM + longest) + estimateTokens(JUDGE_SYSTEM + longest + retry),
+        2 * JUDGE_MAX_TOKENS,
+        input.batchJudge,
+      );
     }
   }
-  return { questions: input.questions.length, agentsUsd, ceilingUsd, judgeUsd };
+  return {
+    questions: input.questions.length,
+    agentsUsd,
+    ceilingUsd,
+    judgeUsd,
+    judgeCeilingUsd,
+  };
 }
 
 /** The estimate as the one line eval:run prints before any call. */
@@ -207,7 +230,27 @@ export function estimateLine(
   args: Pick<EvalArgs, "turnLimit" | "maxUsd" | "batch">,
 ): string {
   const money = (x: number) => `$${x.toFixed(2)}`;
-  return `${estimate.questions} questions to both agents: about ${money(estimate.agentsUsd)} (assuming ${ASSUMED_TURNS.wiki} wiki and ${ASSUMED_TURNS.repo} repo turns a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+  const turns = (agent: AgentKind) => Math.min(ASSUMED_TURNS[agent], args.turnLimit);
+  return `${estimate.questions} questions to both agents: about ${money(estimate.agentsUsd)} (assuming ${turns("wiki")} wiki and ${turns("repo")} repo turns a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}, at most ${money(estimate.judgeCeilingUsd)} if every judgment is retried; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+}
+
+/**
+ * Refuses a run whose export changed between the read its estimate and identity came from and
+ * the build lock: from the lock on no wiki:build or wiki:update can change it, so the run's
+ * exportHash names the export the run read.
+ */
+export function requireSameExport(path: string, bytes: Uint8Array): void {
+  let now: Buffer;
+  try {
+    now = readFileSync(path);
+  } catch (error) {
+    throw new EvalRunError(`cannot read ${path}`, { cause: error });
+  }
+  if (!now.equals(bytes)) {
+    throw new EvalRunError(
+      `${path} changed while eval:run started (a wiki:build or wiki:update ran); run it again`,
+    );
+  }
 }
 
 /**

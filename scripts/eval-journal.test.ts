@@ -1,11 +1,20 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildJournal, openStore } from "@repowiki/engine";
 import {
   createRepoTools,
   createWikiTools,
+  EvalRunError,
   type EvalRunOptions,
   judgeAnswer,
   loadQuestions,
@@ -23,7 +32,7 @@ import {
   type ToolProvider,
 } from "@repowiki/llm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createJudgeProvider, logLine, runEvalJournaled } from "./eval-cli.ts";
+import { createJudgeProvider, logLine, requireSameExport, runEvalJournaled } from "./eval-cli.ts";
 import { exitWithError } from "./wiki-cli.ts";
 
 let sample: SampleWiki;
@@ -294,6 +303,21 @@ describe("the judge batch journal", () => {
     // Collected and recorded: the rows are forgotten, so a later run is not tied to this batch.
     for (const key of keys) expect(second.findBatchRequest(key)).toBeNull();
     second.close();
+  });
+});
+
+describe("the export under the lock", () => {
+  it("refuses a run whose export.json changed after it was read, before the lock was taken", () => {
+    const path = join(dir, "export.json");
+    writeFileSync(path, "first");
+    const bytes = readFileSync(path);
+    expect(() => requireSameExport(path, bytes)).not.toThrow();
+    writeFileSync(path, "second");
+    expect(() => requireSameExport(path, bytes)).toThrow(
+      new EvalRunError(
+        `${path} changed while eval:run started (a wiki:build or wiki:update ran); run it again`,
+      ),
+    );
   });
 });
 

@@ -81,6 +81,17 @@ describe("eval-run.ts as a process (no network)", () => {
     expect(existsSync(join(out, "eval"))).toBe(false);
   });
 
+  it("says on a dry run when the export records no build run, so the break-even would be unknown", () => {
+    writeFileSync(join(out, "export.json"), JSON.stringify({ ...sample.wiki, runs: [] }));
+    const result = evalRun("--questions", smoke, "--set", "smoke", "--dry-run");
+    expect(result.status).toBe(0);
+    const lines = result.stderr.trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe(
+      "export.json records no build run, so the report cannot state a break-even; re-run pnpm wiki:export to include build tokens first",
+    );
+  });
+
   it("names the pnpm command and --env-file when the key is missing, after the estimate", () => {
     const result = evalRun("--questions", smoke, "--set", "smoke");
     expect(result.status).toBe(1);
