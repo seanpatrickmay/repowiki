@@ -37,6 +37,40 @@ describe("replaySteps", () => {
     expect(() => replaySteps(repo.dir, tip, root)).toThrow(GitError);
   });
 
+  it("takes an octopus merge as one step", () => {
+    repo = createTestRepo();
+    repo.write("a.py", "a = 1\n");
+    const root = repo.commit("feat: root");
+    for (const name of ["left", "right"]) {
+      repo.git("switch", "-q", "-c", name, root);
+      repo.write(`${name}.py`, `${name} = 1\n`);
+      repo.commit(`feat: ${name}`);
+    }
+    repo.git("switch", "-q", "main");
+    repo.git("merge", "-q", "--no-ff", "-m", "Merge branches left and right", "left", "right");
+    const octopus = repo.git("rev-parse", "HEAD").trim();
+    expect(replaySteps(repo.dir, root, octopus)).toEqual([
+      { sha: octopus, subject: "Merge branches left and right", merge: true },
+    ]);
+  });
+
+  it("refuses a `from` on a diverged branch, and an argument that is not a full sha", () => {
+    repo = createTestRepo();
+    repo.write("a.py", "a = 1\n");
+    const root = repo.commit("feat: root");
+    repo.git("switch", "-q", "-c", "side");
+    repo.write("side.py", "s = 1\n");
+    const side = repo.commit("feat: side");
+    repo.git("switch", "-q", "main");
+    repo.write("b.py", "b = 1\n");
+    const tip = repo.commit("feat: b");
+    expect(() => replaySteps(repo.dir, side, tip)).toThrow(GitError);
+    for (const bad of ["--output=x", root.slice(0, 7), "main"]) {
+      expect(() => replaySteps(repo.dir, bad, tip)).toThrow(GitError);
+      expect(() => replaySteps(repo.dir, root, bad)).toThrow(GitError);
+    }
+  });
+
   it("takes each squash-merged pull request, a first-parent commit ending in (#N), as a step", () => {
     repo = createTestRepo();
     repo.write("a.py", "a = 1\n");
