@@ -249,8 +249,9 @@ export function createJudgeProvider(options: JudgeProviderOptions): Provider {
 /**
  * runEval, then the journal's flush: the judgments are in results.jsonl by then, so the batch
  * requests their answers came from are forgotten (a kill before this leaves them, and a rerun
- * collects the batch again at no cost). Runs on a failure too: what a judge answered was either
- * recorded or unusable, and a rerun must not replay an unusable answer.
+ * collects the batch again at no cost). Runs on a failure too, so a rerun never replays an
+ * unusable answer. The cost of that: a judgment collected from a batch but not recorded (appending
+ * it to results.jsonl failed, e.g. a full disk) is forgotten too, and a rerun pays for it again.
  */
 export async function runEvalJournaled(
   journal: { flush(): void },

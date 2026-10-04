@@ -99,7 +99,22 @@ async function main(): Promise<void> {
   const wikiTools = createWikiTools(wiki);
   const repoTools = createRepoTools(repo, wiki.head);
   const now = new Date();
-  const runDir = runDirFor(out, args.set, args.runDir, now);
+  // The run directory is the one path a run writes: it goes through the out dir's check too.
+  let chosenRunDir: string | null = null;
+  if (args.runDir !== null) {
+    chosenRunDir = resolveOutDir(repo, args.runDir);
+    if (chosenRunDir === null) {
+      throw new CliError(
+        "refusing to write inside the documented repository; choose a --run-dir path elsewhere",
+      );
+    }
+    if (chosenRunDir === resolveOutDir(repo, runDirFor(out, "held-out", null, now))) {
+      throw new CliError(
+        `${chosenRunDir} is the held-out set's run directory; choose another --run-dir for the ${args.set} set`,
+      );
+    }
+  }
+  const runDir = runDirFor(out, args.set, chosenRunDir, now);
   if (args.set === "held-out" && existsSync(join(runDir, RUN_INFO_FILE))) {
     const stored = readRunInfo(runDir);
     if (summarize(stored, readRecords(runDir)).complete) {
@@ -122,6 +137,12 @@ async function main(): Promise<void> {
   const release = acquireBuildLock(out, (line) => console.error(line));
   let store: Store | undefined;
   try {
+    // Printed whole, like the "Wrote" line: logLine would cut a long path, and it must be copied.
+    console.error(
+      args.set === "held-out"
+        ? `run directory: ${runDir} (a rerun resumes it)`
+        : `run directory: ${runDir} (rerun with --run-dir ${runDir} to resume)`,
+    );
     // The wiki store is only opened, never created: the journal rows go in the build's own file.
     const storePath = join(out, "wiki.db");
     if (!existsSync(storePath)) {
@@ -167,8 +188,11 @@ async function main(): Promise<void> {
     );
     console.log(`Wrote ${reportPath}`);
   } finally {
-    store?.close();
-    release();
+    try {
+      store?.close();
+    } finally {
+      release();
+    }
   }
 }
 

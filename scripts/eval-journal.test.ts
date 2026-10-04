@@ -262,6 +262,7 @@ describe("errors that reach the terminal", () => {
     const printed = vi.spyOn(console, "error").mockImplementation(() => {});
     exitSpy();
     expect(() => exitWithError(err)).toThrow("exit 1");
+    expect(printed).toHaveBeenCalledTimes(1);
     expect(String(printed.mock.calls[0]?.[0])).toBe("judge rejected the key [redacted]");
     // eval-run.ts hands runEval `logLine`, so a message a judge or an id carries is cleaned too.
     printed.mockClear();
@@ -321,8 +322,11 @@ describe("eval-run.ts as a process: store and error output", () => {
     );
     expect(result.status).toBe(1);
     const lines = result.stderr.trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toBe(
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(
+      /^run directory: .*\/wiki\/eval\/smoke-[0-9TZ-]+ \(rerun with --run-dir .*\/wiki\/eval\/smoke-[0-9TZ-]+ to resume\)$/,
+    );
+    expect(lines[2]).toBe(
       `no wiki store at ${join(out, "wiki.db")}; run pnpm wiki:build first (eval:run keeps its batch journal there)`,
     );
     expect(result.stderr).not.toContain(FAKE_KEY);
