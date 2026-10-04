@@ -23,6 +23,7 @@ import {
   estimateArchitecture,
   estimateBuild,
   parseWikiArgs,
+  problemLine,
   renderBuildSummary,
 } from "./wiki-cli.ts";
 
@@ -285,6 +286,15 @@ describe("renderBuildSummary", () => {
     const cells = row.slice(1, -1).split(/(?<!\\)\|/);
     expect(cells).toHaveLength(5);
     expect(cells[0]).toBe(" ``t `x` \\| [x](y)`` ");
+  });
+});
+
+describe("problemLine", () => {
+  it("is one printable line, redacted of API keys, cut to 300 characters", () => {
+    expect(problemLine("signals c-\u202e1\u0007\n: no such commit")).toBe(
+      "signals c-?1? : no such commit",
+    );
+    expect(problemLine("x".repeat(400))).toHaveLength(300);
   });
 });
 

@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { GitError, openStore, readHistory } from "@repowiki/engine";
+import { problemLine } from "./wiki-cli.ts";
 import { checkWiki } from "./wiki-problems.ts";
 
 /**
@@ -41,11 +42,6 @@ if (!existsSync(db)) {
   process.exit(1);
 }
 
-/** Problem lines quote ids and paths that came from a model: one printable line, cut short. */
-const MAX_PROBLEM_LENGTH = 300;
-const printable = (line: string): string =>
-  line.slice(0, MAX_PROBLEM_LENGTH).replace(/[^\x20-\x7e]/g, "?");
-
 /**
  * The commits reachable from the wiki's sha, read-only, or null (with a one-line usage error and
  * exit code 2 set) when the repository is not a git repository or does not hold that sha.
@@ -55,7 +51,7 @@ function historyAt(sha: string): ReturnType<typeof readHistory> | null {
     return readHistory(repo, sha);
   } catch (err) {
     if (!(err instanceof GitError)) throw err;
-    const why = printable(err.message.split("\n")[0] ?? "");
+    const why = problemLine(err.message.split("\n")[0] ?? "");
     console.error(`${repo} does not hold ${sha}, the sha the wiki was built at (${why}); ${USAGE}`);
     process.exitCode = 2;
     return null;
@@ -79,7 +75,7 @@ try {
       process.exitCode = 1;
     } else if (history !== null) {
       const check = checkWiki(store, repo, history);
-      for (const problem of check.problems) console.error(printable(problem));
+      for (const problem of check.problems) console.error(problemLine(problem));
       const n = check.problems.length;
       console.log(
         `${check.pages} pages${check.article ? " and the About article" : ""}: ${check.code} code citations re-hashed and ${check.commits} commit citations resolved; ${n === 0 ? "no problems" : `${n} problems`}`,

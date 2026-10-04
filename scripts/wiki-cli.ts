@@ -149,7 +149,7 @@ function parse(argv: readonly string[], limit: boolean) {
 }
 
 /** The commands that make live calls and so need the key. */
-export type LiveCommand = "wiki:build" | "wiki:update";
+export type LiveCommand = "wiki:build" | "wiki:update" | "wiki:replay";
 
 /** Why a run that needs a call cannot make one; the commands load .env only if present. */
 export function keylessMessage(command: LiveCommand): string {
@@ -559,6 +559,15 @@ function printable(text: string): string {
     .replace(/\s+/g, " ")
     .replace(/[^\x20-\x7e]/g, "?");
 }
+
+/** The longest problem line a script prints. */
+const MAX_PROBLEM_LENGTH = 300;
+
+/**
+ * A checkWiki problem (or a git error line) as a script prints it. Problems quote ids and paths
+ * that came from a model, so each is one printable line, redacted of API keys, cut short.
+ */
+export const problemLine = (line: string): string => printable(line).slice(0, MAX_PROBLEM_LENGTH);
 
 /**
  * An error as the scripts print it: its one-line message, and with `verbose` each cause in its

@@ -710,3 +710,169 @@ describe("wiki-update.ts as a process (no network)", () => {
     expect(existsSync(join(out, BUILD_LOCK))).toBe(true);
   });
 });
+
+describe("wiki-replay.ts as a process (no network)", () => {
+  /**
+   * gitRepo's repository, a store whose one feature (signals, owning src/app.ts) has a page at
+   * its commit, then two merges: #4 adds and removes a scratch file (no net change: an update
+   * with no call), #5 edits the line the page cites (an update that needs one).
+   */
+  function replayable(brokenClaimId: string | null = null) {
+    const { repo, sha: first, git } = gitRepo();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(
+      makeManifest({
+        sha: first,
+        features: [makeFeature()],
+        // Every file and symbol, as a built manifest holds them: an update then sees no churn.
+        membership: {
+          "src/app.ts": { featureId: "signals", weight: 1 },
+          "src/app.ts#app": { featureId: "signals", weight: 1 },
+        },
+      }),
+      { llmRevised: true },
+    );
+    const code = codeCitation({
+      path: "src/app.ts",
+      startLine: 1,
+      endLine: 1,
+      sha: first,
+      symbol: null,
+      contentHash: contentHash("export const app = 1;\n"),
+    });
+    store.putRevision(
+      makeRevision({
+        sha: first,
+        seeAlso: [],
+        sections: [
+          {
+            key: "lead",
+            claims: [leadClaim(brokenClaimId === null ? {} : { supports: [brokenClaimId] })],
+          },
+          {
+            key: "overview",
+            claims: [
+              bodyClaim({
+                ...(brokenClaimId === null ? {} : { id: brokenClaimId }),
+                // The broken page also cites a commit the history lacks, which the check reports.
+                citations: brokenClaimId === null ? [code] : [code, commitCitation()],
+              }),
+            ],
+          },
+        ],
+      }),
+    );
+    store.setHead(first);
+    store.close();
+    const merge = (branch: string, edit: () => void, pr: number) => {
+      git("switch", "-q", "-c", branch);
+      edit();
+      git("switch", "-q", "main");
+      git("merge", "-q", "--no-ff", "-m", `Merge pull request #${pr} from me/${branch}`, branch);
+      return git("rev-parse", "HEAD").trim();
+    };
+    const quiet = merge(
+      "scratch",
+      () => {
+        writeFileSync(join(repo, "scratch.txt"), "tmp\n");
+        git("add", "-A");
+        git("commit", "-q", "-m", "add scratch");
+        git("rm", "-q", "scratch.txt");
+        git("commit", "-q", "-m", "remove scratch");
+      },
+      4,
+    );
+    const loud = merge(
+      "app",
+      () => {
+        writeFileSync(join(repo, "src", "app.ts"), "export const app = 2;\n");
+        git("commit", "-q", "-am", "edit app");
+      },
+      5,
+    );
+    return { repo, out, first, quiet, loud };
+  }
+
+  it("is a usage error, exit 2, without its three positionals", () => {
+    const result = run("scripts/wiki-replay.ts", "../repo", "abc");
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/^usage: pnpm wiki:replay <repo-path> <from-rev> <to-rev> /);
+  });
+
+  it("lists the merges with an upper-side estimate on a dry run, as many as --limit allows", () => {
+    const { repo, out, first, quiet, loud } = replayable();
+    const all = run("scripts/wiki-replay.ts", repo, first, loud, "--out", out, "--dry-run");
+    expect(all.status).toBe(0);
+    const rows = all.stdout.split("\n").filter((line) => /^\| \d/.test(line));
+    expect(rows.map((row) => row.split(" | ").slice(1, 3))).toEqual([
+      [quiet.slice(0, 7), "4"],
+      [loud.slice(0, 7), "5"],
+    ]);
+    expect(rows.map((row) => row.split(" | ")[5])).toEqual(["0", "1"]);
+    expect(all.stdout).toMatch(
+      /2 steps estimated at about \$\d+\.\d{4}\.\nUpper-side for the update calls only: [^\n]+\n$/,
+    );
+    const one = run(
+      "scripts/wiki-replay.ts",
+      repo,
+      first,
+      loud,
+      "--out",
+      out,
+      "--dry-run",
+      "--limit",
+      "1",
+    );
+    expect(one.stdout).toContain("1 more steps after them are left for a later run");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  });
+
+  it("replays a step with no call, stops at the first call without a key, and resumes there", () => {
+    const { repo, out, first, quiet, loud } = replayable();
+    const result = run("scripts/wiki-replay.ts", repo, first, loud, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ANTHROPIC_API_KEY is not set");
+    expect(result.stderr).toContain("pnpm wiki:replay");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(quiet);
+    expect(store.getManifest(quiet)).not.toBeNull();
+    store.close();
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${loud.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summary).toContain("1 steps replayed, 1 left");
+    // The store holds no build run, so the token invariant was not compared, and says so.
+    expect(summary).toContain("token invariant not checked (no build run in the ledger)");
+    expect(summary).not.toContain("hold for every step");
+    // A rerun starts from the wiki's head: only the step that failed is left.
+    const again = run("scripts/wiki-replay.ts", repo, first, loud, "--out", out, "--dry-run");
+    expect(again.stdout.split("\n").filter((line) => /^\| \d/.test(line))).toHaveLength(1);
+  });
+
+  it("prints a problem line as one printable line, however its quoted path is spelled", () => {
+    // A claim whose citation no longer matches: the check's problem names its id, bidi included.
+    const { repo, out, first, quiet } = replayable("c-\u202e1\u0007");
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status).toBe(0);
+    const problems = result.stderr.split("\n").filter((line) => line.startsWith(quiet.slice(0, 7)));
+    expect(problems.length).toBeGreaterThan(0);
+    for (const line of problems) {
+      expect(line).toMatch(/^[\x20-\x7e]+$/);
+      expect(line.length).toBeLessThanOrEqual(300);
+    }
+    expect(problems.join("\n")).toContain("c-?1?");
+  });
+
+  it("refuses a range the wiki's head is not on, in one line", () => {
+    const { repo, out, first, loud } = replayable();
+    const result = run("scripts/wiki-replay.ts", repo, loud, loud, "--out", out, "--dry-run");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      `the wiki is at ${first}, which is not on the way from ${loud} to ${loud}\n`,
+    );
+  });
+});
