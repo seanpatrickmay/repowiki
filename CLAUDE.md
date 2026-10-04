@@ -12,7 +12,8 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 ## Layout
 - `packages/core` — zod schemas and types shared by every package; no I/O besides hashing
 - `packages/engine` — pipeline modules (`store/` first; later `index/`, `cluster/`, `manifest/`, `write/`, `verify/`, `link/`, `freshness/`). Modules import each other only through their own `index.ts`.
-- `packages/llm`, `site`, `cli`, `eval` — added in later milestones
+- `packages/llm` — the `Provider` interface, the Claude implementation (structured output, prompt caching, Message Batches), the `TokenLedger`, and record/replay cassettes
+- `site`, `cli`, `eval` — added in later milestones
 - `scripts/tracker` — seeds GitHub labels and issues from `seed.json`
 - `docs/decisions` — ADRs
 
