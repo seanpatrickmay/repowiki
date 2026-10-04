@@ -327,6 +327,11 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     const killed = await build(50);
     expect(api.canceled).toEqual([2]);
     expect(killed.stored.map((r) => r.featureId)).toEqual(["deliverables"]);
+    // Signals never settled, so its rows, the canceled retry batch's included, are still there.
+    expect(journaled.length).toBeGreaterThan(0);
+    const kept = journaled.flatMap((key) => store.findBatchRequest(key) ?? []);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.map((row) => row.batchId)).toContain("msgbatch_2");
     first = false;
     const rerun = await build();
     // The rerun collects signals' round-1 answer and its retry from the batches already paid for,

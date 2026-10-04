@@ -427,6 +427,22 @@ describe("codeAliases (F01)", () => {
     });
   });
 
+  it("leaves a short word ending in sis alone, so it is no stem of other words", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "sis-sync", title: "Sis sync", aliases: [] }),
+        makeFeature({ id: "planning", title: "Planning", aliases: [] }),
+      ],
+      membership: { "app/models.py": { featureId: "sis-sync", weight: 1 } },
+    });
+    // "sis" must not collapse to "s": the table "s_items" shares no word with the feature, so it
+    // is no alias of it, while "sis" itself is the feature's own word.
+    const models = ['__tablename__ = "sis"', '__tablename__ = "s_items"'].join("\n");
+    expect(codeAliases(manifest, new Map([["app/models.py", models]]))).toEqual({
+      "sis-sync": ["sis"],
+    });
+  });
+
   it("keeps an identifier that only shares a word with another feature, or names its own", () => {
     const manifest = makeManifest({
       features: [
