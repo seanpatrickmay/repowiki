@@ -298,6 +298,75 @@ describe("describeError", () => {
     const long = new Error("top", { cause: new Error("x".repeat(1000)) });
     expect(describeError(long, true).split("\n")[1]).toHaveLength(300 + "caused by: ".length);
   });
+
+  describe("redaction", () => {
+    const withKey = (key: string | undefined, body: () => void) => {
+      const saved = process.env.ANTHROPIC_API_KEY;
+      if (key === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = key;
+      try {
+        body();
+      } finally {
+        if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+        else process.env.ANTHROPIC_API_KEY = saved;
+      }
+    };
+
+    it("replaces every occurrence of the configured key, in the first line and in causes", () => {
+      withKey("fake-key-not-a-real-secret-0123", () => {
+        const err = new Error("auth failed for fake-key-not-a-real-secret-0123", {
+          cause: new Error(
+            "sent fake-key-not-a-real-secret-0123 and fake-key-not-a-real-secret-0123 again",
+          ),
+        });
+        const text = describeError(err, true);
+        expect(text).not.toContain("fake-key");
+        expect(text.split("\n")).toEqual([
+          "auth failed for [redacted]",
+          "caused by: Error: sent [redacted] and [redacted] again",
+        ]);
+      });
+    });
+
+    it("replaces a key-shaped string even when it is not the configured key", () => {
+      withKey(undefined, () => {
+        const err = new Error("top sk-ant-api03-FAKEFIRSTLINE_x-y rest", {
+          cause: new TypeError(
+            'Headers.append: "sk-ant-api03-FAKEHEADER_a-b\r\n" is an invalid header value.',
+          ),
+        });
+        expect(describeError(err, true).split("\n")).toEqual([
+          "top [redacted] rest",
+          'caused by: TypeError: Headers.append: "[redacted] " is an invalid header value.',
+        ]);
+      });
+    });
+
+    it("redacts before cutting, so a cut never leaves a prefix of the key", () => {
+      withKey("fake-key-not-a-real-secret-0123", () => {
+        const err = new Error("top", {
+          cause: new Error(`${"x".repeat(285)}fake-key-not-a-real-secret-0123`),
+        });
+        expect(describeError(err, true)).not.toContain("fake-key");
+      });
+    });
+
+    it("ignores an empty configured key", () => {
+      withKey("", () => {
+        expect(describeError(new Error("plain message"), true)).toBe("plain message");
+      });
+    });
+  });
+
+  it("filters the first line to printable ASCII on one line", () => {
+    expect(describeError(new Error("bad\n\u202eclaim\tx"), false)).toBe("bad ?claim x");
+  });
+
+  it("describes a cause that cannot be stringified instead of throwing", () => {
+    const bare = Object.assign(Object.create(null), { detail: "x" });
+    const err = new Error("top", { cause: bare });
+    expect(describeError(err, true).split("\n")).toEqual(["top", "caused by: [object Object]"]);
+  });
 });
 
 describe("acquireBuildLock", () => {

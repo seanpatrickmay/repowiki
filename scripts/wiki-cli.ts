@@ -394,18 +394,48 @@ const MAX_CAUSE_LENGTH = 300;
 /** How many causes deep --verbose follows the chain. */
 const MAX_CAUSES = 5;
 
+/** The shape of an Anthropic key, redacted even when it is not the configured one. */
+const KEY_SHAPE = /sk-ant-[A-Za-z0-9_-]*/g;
+
+/** Every occurrence of the configured API key, and of anything key-shaped, replaced. */
+function redact(text: string): string {
+  const key = process.env.ANTHROPIC_API_KEY;
+  const plain = key ? text.split(key).join("[redacted]") : text;
+  return plain.replace(KEY_SHAPE, "[redacted]");
+}
+
+/** A value's text, never throwing: a null-prototype object has no toString to call. */
+function textOf(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+/**
+ * One printable line: any API key redacted first (a cut or a character filter must never leave
+ * part of one), then whitespace collapsed and everything but printable ASCII replaced.
+ */
+function printable(text: string): string {
+  return redact(text)
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7e]/g, "?");
+}
+
 /**
  * An error as the scripts print it: its one-line message, and with `verbose` each cause in its
- * chain on a line of its own ("caused by: Name: message"), printable ASCII only and cut short,
- * since a cause such as a failed manifest verify on open quotes stored model output.
+ * chain on a line of its own ("caused by: Name: message"). Every line is redacted of API keys
+ * (a rejected header value is echoed in its error, key included) and printable ASCII only; cause
+ * lines are cut short, since a cause such as a failed manifest verify on open quotes stored model
+ * output.
  */
 export function describeError(err: unknown, verbose: boolean): string {
-  const lines = [err instanceof Error ? err.message : String(err)];
+  const lines = [printable(err instanceof Error ? err.message : textOf(err))];
   let cause = err instanceof Error ? err.cause : undefined;
   for (let depth = 0; verbose && cause !== undefined && depth < MAX_CAUSES; depth++) {
-    const text = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
-    const line = text.replace(/\s+/g, " ").replace(/[^\x20-\x7e]/g, "?");
-    lines.push(`caused by: ${line.slice(0, MAX_CAUSE_LENGTH)}`);
+    const text = cause instanceof Error ? `${cause.name}: ${cause.message}` : textOf(cause);
+    lines.push(`caused by: ${printable(text).slice(0, MAX_CAUSE_LENGTH)}`);
     cause = cause instanceof Error ? cause.cause : undefined;
   }
   return lines.join("\n");
