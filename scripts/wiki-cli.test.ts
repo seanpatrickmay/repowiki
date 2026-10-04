@@ -2,13 +2,16 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ContextPack, WikiBuildError } from "@repowiki/engine";
+import { makeArchitecture } from "@repowiki/core/test-fixtures";
+import { type ArchitectureOutcome, type ContextPack, WikiBuildError } from "@repowiki/engine";
 import { describe, expect, it } from "vitest";
 import { CliError } from "./manifest-cli.ts";
 import {
+  ASSUMED_ARCHITECTURE_OUTPUT_TOKENS,
   ASSUMED_PAGE_OUTPUT_TOKENS,
   acquireBuildLock,
   BUILD_LOCK,
+  estimateArchitecture,
   estimateBuild,
   parseWikiArgs,
   renderBuildSummary,
@@ -342,5 +345,66 @@ setTimeout(() => {}, 5000);`;
       expect(readFileSync(lock, "utf8")).not.toContain("pid 1 ");
       release();
     });
+  });
+});
+
+describe("estimateArchitecture", () => {
+  it("prices the system prompt, the whole pack budget and the assumed answer", () => {
+    const system = "x".repeat(10_000); // 4,000 estimated tokens
+    expect(estimateArchitecture(system, 50_000, "claude-haiku-4-5", true)).toEqual({
+      inputTokens: 54_000,
+      outputTokens: ASSUMED_ARCHITECTURE_OUTPUT_TOKENS,
+      usd: ((54_000 * 1 + 5_000 * 5) / 1_000_000) * 0.5,
+    });
+  });
+
+  it("is a CliError for an unpriced model", () => {
+    expect(() => estimateArchitecture("x", 1, "gpt-9", true)).toThrow(CliError);
+  });
+});
+
+describe("renderBuildSummary with the About article", () => {
+  const outcome = (overrides: Partial<ArchitectureOutcome>): ArchitectureOutcome => ({
+    architecture: makeArchitecture(),
+    failure: null,
+    dropped: [],
+    calls: 1,
+    tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
+    pack: { text: "", tokens: 0, features: [] },
+    ...overrides,
+  });
+  const row = (summary: string) =>
+    summary.split("\n").find((l) => l.startsWith("| About article")) ?? "";
+
+  it("adds a row for a written, a failed, a current and a skipped article", () => {
+    const at = (architecture: Parameters<typeof renderBuildSummary>[5]) =>
+      row(renderBuildSummary("repo", "a".repeat(40), [], estimate, totals, architecture));
+    expect(at({ outcome: outcome({}), skipped: null })).toBe(
+      "| About article | 3 | 0 | 1 | written |",
+    );
+    expect(
+      at({ outcome: outcome({ architecture: null, failure: "a|b", calls: 2 }), skipped: null }),
+    ).toBe("| About article | 0 | 0 | 2 | `a\\|b` |");
+    expect(at({ outcome: null, skipped: "current" })).toBe(
+      "| About article | 0 | 0 | 0 | already current; no call |",
+    );
+    expect(at({ outcome: null, skipped: "too few pages" })).toBe(
+      "| About article | 0 | 0 | 0 | skipped: fewer than two pages |",
+    );
+    expect(row(renderBuildSummary("repo", "a".repeat(40), [], estimate, totals))).toBe("");
+  });
+
+  it("states the About article's estimate on the Cost line when there is one", () => {
+    const summary = renderBuildSummary(
+      "repo",
+      "a".repeat(40),
+      [],
+      { ...estimate, architectureUsd: 0.0359 },
+      totals,
+      { outcome: outcome({}), skipped: null },
+    );
+    expect(summary.trimEnd().split("\n").at(-1)).toBe(
+      "Cost: $0.0123 (estimated up front: $0.0200 for the first round, plus $0.0359 for the About article).",
+    );
   });
 });

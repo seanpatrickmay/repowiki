@@ -2,6 +2,7 @@ import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
+  type ArchitectureOutcome,
   type ContextPack,
   estimateTokens,
   markdownCodeSpan,
@@ -189,6 +190,26 @@ export interface BuildEstimate {
   outputTokens: number;
   /** First round only, no cache hits; a retry round adds at most about the same per retried page. */
   usd: number;
+  /** The Architecture call's estimate (estimateArchitecture), when the build will make one. */
+  architectureUsd?: number;
+}
+
+/** Output tokens the Architecture article is assumed to take: a long page's. */
+export const ASSUMED_ARCHITECTURE_OUTPUT_TOKENS = 5000;
+
+/** The cost of some tokens at a model's rates; a CliError for a model with no price. */
+function priced(model: string, inputTokens: number, outputTokens: number, batch: boolean): number {
+  const usd = callCostUsd(
+    model,
+    { in: inputTokens, out: outputTokens, cacheRead: 0, cacheWrite: 0 },
+    batch,
+  );
+  if (usd === null) {
+    // the id is config data: one printable line, cut short
+    const id = model.slice(0, MAX_ECHOED_MODEL).replace(/[^\x20-\x7e]/g, "?");
+    throw new CliError(`no price for model ${id}; add it to packages/llm/src/pricing.ts`);
+  }
+  return usd;
 }
 
 /**
@@ -206,17 +227,30 @@ export function estimateBuild(
   const prefixTokens = estimateTokens(system);
   const inputTokens = packs.reduce((n, p) => n + p.tokens + prefixTokens, 0);
   const outputTokens = packs.length * ASSUMED_PAGE_OUTPUT_TOKENS;
-  const usd = callCostUsd(
-    model,
-    { in: inputTokens, out: outputTokens, cacheRead: 0, cacheWrite: 0 },
-    batch,
-  );
-  if (usd === null) {
-    // the id is config data: one printable line, cut short
-    const id = model.slice(0, MAX_ECHOED_MODEL).replace(/[^\x20-\x7e]/g, "?");
-    throw new CliError(`no price for model ${id}; add it to packages/llm/src/pricing.ts`);
-  }
+  const usd = priced(model, inputTokens, outputTokens, batch);
   return { pages: packs.length, inputTokens, outputTokens, usd };
+}
+
+/**
+ * The Architecture call's cost, stated before any call. Its pack needs the pages' leads, so it
+ * cannot be built yet: the estimate takes the whole pack budget, the system prompt and
+ * ASSUMED_ARCHITECTURE_OUTPUT_TOKENS, priced like a page (an upper-side figure).
+ */
+export function estimateArchitecture(
+  system: string,
+  budgetTokens: number,
+  model: string,
+  batch: boolean,
+): { inputTokens: number; outputTokens: number; usd: number } {
+  const inputTokens = estimateTokens(system) + budgetTokens;
+  const outputTokens = ASSUMED_ARCHITECTURE_OUTPUT_TOKENS;
+  return { inputTokens, outputTokens, usd: priced(model, inputTokens, outputTokens, batch) };
+}
+
+/** What the build did about the Architecture article, for its summary row. */
+export interface ArchitectureRow {
+  outcome: ArchitectureOutcome | null;
+  skipped: "current" | "too few pages" | null;
 }
 
 const count = (n: number): string => n.toLocaleString("en-US");
@@ -224,15 +258,35 @@ const count = (n: number): string => n.toLocaleString("en-US");
 /** A feature id or failure message in a table cell: a code span whose pipes cannot split the row. */
 const cell = (text: string): string => markdownCodeSpan(text).replace(/\|/g, "\\|");
 
-/** The build summary saved for the owner: pages, drops, and the ledger's cost with cache use. */
+/** The summary's row for the project's article (the About page). */
+function architectureRow({ outcome, skipped }: ArchitectureRow): string {
+  if (outcome === null) {
+    const why =
+      skipped === "current" ? "already current; no call" : "skipped: fewer than two pages";
+    return `| About article | 0 | 0 | 0 | ${why} |`;
+  }
+  const claims = outcome.architecture?.sections.reduce((n, s) => n + s.claims.length, 0) ?? 0;
+  const result = outcome.failure === null ? "written" : cell(outcome.failure);
+  return `| About article | ${claims} | ${outcome.dropped.length} | ${outcome.calls} | ${result} |`;
+}
+
+/**
+ * The build summary saved for the owner: pages, drops, the Architecture article's row when
+ * `architecture` is given, and the ledger's cost with cache use.
+ */
 export function renderBuildSummary(
   repoName: string,
   sha: string,
   pages: readonly PageOutcome[],
   estimate: BuildEstimate | null,
   totals: LedgerTotals,
+  architecture?: ArchitectureRow,
 ): string {
   const t = totals.tokens;
+  const upFront =
+    estimate === null
+      ? "."
+      : ` (estimated up front: $${estimate.usd.toFixed(4)} for the first round${estimate.architectureUsd === undefined ? "" : `, plus $${estimate.architectureUsd.toFixed(4)} for the About article`}).`;
   const lines = [
     `# Build: ${markdownCodeSpan(repoName)} at ${sha.slice(0, 7)}`,
     "",
@@ -245,6 +299,7 @@ export function renderBuildSummary(
       const result = p.failure === null ? "written" : cell(p.failure);
       return `| ${cell(p.featureId)} | ${claims} | ${p.dropped.length} | ${p.calls} | ${result} |`;
     }),
+    ...(architecture === undefined ? [] : [architectureRow(architecture)]),
     "",
     "## LLM cost",
     "",
@@ -260,7 +315,7 @@ export function renderBuildSummary(
     ...(estimate === null
       ? []
       : ["The estimate is an upper-side estimate with no cache hits.", ""]),
-    `Cost: $${totals.usd.toFixed(4)}${estimate === null ? "." : ` (estimated up front: $${estimate.usd.toFixed(4)} for the first round).`}`,
+    `Cost: $${totals.usd.toFixed(4)}${upFront}`,
   ];
   return `${lines.join("\n")}\n`;
 }

@@ -9,8 +9,8 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm check` — typecheck + lint + test; must pass before every commit
 - `pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format`
 - `pnpm manifest:build <repo> [rev] [--out dir]` — index, cluster, and build the manifest live (Haiku 4.5 via the Batches API); writes only under `~/.repowiki/<repo>/` or `--out`
-- `pnpm wiki:build <repo> [rev] [--out dir] [--dry-run]` — write, verify and link every page from the stored manifest (Haiku 4.5 via the Batches API) and write `export.json`; prints the cost estimate first; writes only under `~/.repowiki/<repo>/` or `--out`
-- `pnpm wiki:check <repo> [--out dir]` — check the stored wiki: every citation resolves with a matching hash, no link points nowhere
+- `pnpm wiki:build <repo> [rev] [--out dir] [--dry-run]` — write, verify and link every page from the stored manifest, then the project's About article (Haiku 4.5 via the Batches API), and write `export.json`; prints the cost estimate first; writes only under `~/.repowiki/<repo>/` or `--out`
+- `pnpm wiki:check <repo> [--out dir]` — check the stored wiki and its About article: every citation resolves with a matching hash, no link points nowhere
 - `pnpm cassettes:record <test files>` — re-record LLM cassettes live (needs `ANTHROPIC_API_KEY` in `.env`; costs money; review the diff)
 
 ## Layout

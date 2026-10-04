@@ -3,14 +3,17 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
   addAliases,
+  architectureSystemPrompt,
   buildFileGraph,
   buildJournal,
   buildPack,
   buildWiki,
   codeAliases,
+  DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
   DEFAULT_MAX_FILE_BYTES,
   featureNeighbours,
   indexRepo,
+  MIN_ARCHITECTURE_PAGES,
   openStore,
   readHistory,
   readSources,
@@ -32,6 +35,7 @@ import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
   acquireBuildLock,
+  estimateArchitecture,
   estimateBuild,
   KEYLESS_MESSAGE,
   parseWikiArgs,
@@ -89,9 +93,8 @@ async function runBuild(
     // those of the manifest with its code aliases, computed here in memory as buildWiki stores it.
     const manifest = addAliases(stored, codeAliases(stored, sources));
     const neighbours = featureNeighbours(graph, manifest);
-    const todo = manifest.features.filter(
-      (f) => f.status.kind === "active" && store.getCurrentRevision(f.id) === null,
-    );
+    const active = manifest.features.filter((f) => f.status.kind === "active");
+    const todo = active.filter((f) => store.getCurrentRevision(f.id) === null);
     const packs = todo.map((f) =>
       buildPack({
         featureId: f.id,
@@ -112,6 +115,30 @@ async function runBuild(
     console.error(
       `${estimate.pages} pages to write, about ${estimate.inputTokens.toLocaleString("en-US")} input tokens: first round estimated at $${estimate.usd.toFixed(4)}${args.batch ? " (batched)" : ""}`,
     );
+    // The project's article is due unless the stored one covers exactly the current pages.
+    const current = store.getCurrentArchitecture();
+    const basis = active
+      .flatMap((f) => store.getCurrentRevision(f.id) ?? [])
+      .map((p) => p.id)
+      .sort();
+    const architectureDue =
+      active.length >= MIN_ARCHITECTURE_PAGES &&
+      (todo.length > 0 ||
+        current === null ||
+        current.sha !== index.sha ||
+        current.basis.join("\n") !== basis.join("\n"));
+    if (architectureDue) {
+      const architecture = estimateArchitecture(
+        architectureSystemPrompt(repoName, manifest),
+        DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
+        models.write,
+        args.batch,
+      );
+      estimate.architectureUsd = architecture.usd;
+      console.error(
+        `the About article: at most about ${architecture.inputTokens.toLocaleString("en-US")} input tokens, estimated at $${architecture.usd.toFixed(4)}${args.batch ? " (batched)" : ""}`,
+      );
+    }
     if (args.dryRun) return;
 
     const runId = `wiki-build-${index.sha}-${new Date().toISOString()}`;
@@ -158,17 +185,20 @@ async function runBuild(
     );
     const exportPath = join(out, "export.json");
     writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });
-    if (build.written === null) {
-      console.error(`every page is already stored for ${index.sha}; no LLM call made`);
+    if (build.written === null && build.architecture === null) {
+      const article =
+        build.architectureSkipped === "current" ? ", and so is the About article" : "";
+      console.error(`every page is already stored for ${index.sha}${article}; no LLM call made`);
       console.log(`Wrote ${exportPath}`);
       return;
     }
     const summary = renderBuildSummary(
       repoName,
       index.sha,
-      build.written.pages,
+      build.written?.pages ?? [],
       estimate,
       totalsOf(store.listLedger(runId)),
+      { outcome: build.architecture, skipped: build.architectureSkipped },
     );
     const summaryPath = join(out, `build-${index.sha.slice(0, 7)}.md`);
     writeFileSync(summaryPath, summary);

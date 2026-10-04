@@ -10,6 +10,7 @@ import {
   commitCitation,
   leadClaim,
   makeArchitecture,
+  makeFeature,
   makeManifest,
   makeRevision,
   SHA_A,
@@ -27,10 +28,26 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Runs a script with no API key and HOME in the scratch dir; nothing reaches the network. */
 function run(script: string, ...args: string[]) {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.REPOWIKI_CASSETTE;
-  return spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env });
+  return runWith({}, script, ...args);
+}
+
+/** Variables that steer a request off the machine or choose its credentials, in any case. */
+const OUTBOUND_ENV =
+  /^(ANTHROPIC_.*|(HTTP|HTTPS|ALL|NO)_PROXY|NODE_USE_ENV_PROXY|REPOWIKI_CASSETTE)$/i;
+
+/**
+ * `run` with extra environment variables, for a test that sets a key and a dead endpoint. The
+ * child gets none of the caller's API or proxy settings, only HOME and `extra` on top of the rest.
+ */
+function runWith(extra: NodeJS.ProcessEnv, script: string, ...args: string[]) {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!OUTBOUND_ENV.test(name)) env[name] = value;
+  }
+  return spawnSync(process.execPath, [script, ...args], {
+    encoding: "utf8",
+    env: { ...env, HOME: dir, ...extra },
+  });
 }
 
 /** A one-commit git repository under the scratch dir, and its sha. */
@@ -80,6 +97,101 @@ describe("wiki-build.ts as a process (no network)", () => {
     expect(last).toContain("--env-file");
     expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
   });
+
+  /**
+   * A store at the repo's sha with three active features, pages stored for `paged` of them and,
+   * when `article` is set, the project's article over those pages. Nothing is built at the head
+   * unless a page is stored.
+   */
+  function wikiOf(paged: string[], article: boolean) {
+    const { repo, sha } = gitRepo();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(
+      makeManifest({
+        sha,
+        features: [
+          makeFeature(),
+          makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
+          makeFeature({ id: "extra", title: "Extra", aliases: [] }),
+        ],
+        membership: { "src/app.ts": { featureId: "extra", weight: 0.9 } },
+      }),
+      { llmRevised: true },
+    );
+    for (const featureId of paged) {
+      store.putRevision(makeRevision({ id: `rev-${featureId}`, featureId, sha, seeAlso: [] }));
+    }
+    if (paged.length > 0) store.setHead(sha);
+    if (article) {
+      store.putArchitecture(
+        makeArchitecture({
+          id: `architecture-${sha.slice(0, 12)}-1`,
+          sha,
+          basis: paged.map((f) => `rev-${f}`).sort(),
+          edges: [],
+        }),
+      );
+    }
+    store.close();
+    return { repo, out, sha };
+  }
+
+  it("states the About article's estimate after the pages' line on a dry run, when it is due", () => {
+    const { repo, out } = wikiOf([], false);
+    const result = run("scripts/wiki-build.ts", repo, "--out", out, "--dry-run");
+    expect(result.status).toBe(0);
+    const lines = result.stderr.trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(
+      /^3 pages to write, about [\d,]+ input tokens: first round estimated at \$\d+\.\d{4} \(batched\)$/,
+    );
+    expect(lines[1]).toMatch(
+      /^the About article: at most about [\d,]+ input tokens, estimated at \$\d+\.\d{4} \(batched\)$/,
+    );
+  });
+
+  it("states no estimate for an article that is already current", () => {
+    const { repo, out } = wikiOf(["signals", "deliverables", "extra"], true);
+    const result = run("scripts/wiki-build.ts", repo, "--out", out, "--dry-run");
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("About article");
+  });
+
+  it("says the article is stored too when a rerun has nothing left to write, with no key", () => {
+    const { repo, out, sha } = wikiOf(["signals", "deliverables", "extra"], true);
+    const result = run("scripts/wiki-build.ts", repo, "--out", out);
+    expect(result.status).toBe(0);
+    expect(result.stderr.trimEnd().split("\n")).toEqual([
+      "0 pages to write, about 0 input tokens: first round estimated at $0.0000 (batched)",
+      `every page is already stored for ${sha}, and so is the About article; no LLM call made`,
+    ]);
+  });
+
+  it("reports a page that fails again on a rerun and the article's failure, and exits 0 as for a partial failure", () => {
+    const { repo, out, sha } = wikiOf(["signals", "deliverables"], false);
+    // A placeholder key and an endpoint nothing listens on: every call fails to connect, which
+    // is a failed page and a failed article, not a thrown error. Nothing leaves the machine.
+    const result = runWith(
+      { ANTHROPIC_API_KEY: "placeholder", ANTHROPIC_BASE_URL: "http://127.0.0.1:9" },
+      "scripts/wiki-build.ts",
+      repo,
+      "--out",
+      out,
+      "--no-batch",
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("0 of 1 pages written, 0 claims dropped.");
+    expect(result.stdout).toMatch(
+      /^\| `extra` \| 0 \| 0 \| \d+ \| `the write call failed: APIConnectionError` \|$/m,
+    );
+    expect(result.stdout).toMatch(
+      /^\| About article \| 0 \| 0 \| \d+ \| `the architecture call failed: APIConnectionError` \|$/m,
+    );
+    expect(existsSync(join(out, `build-${sha.slice(0, 7)}.md`))).toBe(true);
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  }, 60_000);
 
   it("creates no out dir for a rev that names no commit", () => {
     const { repo } = gitRepo();
