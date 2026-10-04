@@ -39,15 +39,20 @@ export const SECTION_ORDER: readonly SectionKey[] = [
  * first), mapping lead supports to the new ids. Lead supports resolve against body claim ids only,
  * so a lead claim may share an id with a body claim. A lead claim left supporting no surviving
  * body claim is dropped, and so is an empty section. Null when no lead or no body claim survives:
- * such a page is not stored (spec §6.3).
+ * such a page is not stored (spec §6.3). `order` lists the section keys, "lead" among them; a
+ * feature page's is SECTION_ORDER, the Architecture article's its own.
  */
-export function pageSections(claims: ReadonlyMap<SectionKey, readonly Claim[]>): Section[] | null {
-  const bodyKeys = SECTION_ORDER.filter((k) => k !== "lead" && (claims.get(k) ?? []).length > 0);
+export function orderedSections<K extends string, C extends { id: string; supports: string[] }>(
+  order: readonly K[],
+  claims: ReadonlyMap<K, readonly C[]>,
+): { key: K; claims: C[] }[] | null {
+  const leadKey = order.find((k) => k === "lead");
+  const bodyKeys = order.filter((k) => k !== "lead" && (claims.get(k) ?? []).length > 0);
   const bodyIds = new Set(bodyKeys.flatMap((k) => (claims.get(k) ?? []).map((c) => c.id)));
-  const lead = (claims.get("lead") ?? [])
+  const lead = (leadKey === undefined ? [] : (claims.get(leadKey) ?? []))
     .map((c) => ({ ...c, supports: [...new Set(c.supports.filter((s) => bodyIds.has(s)))] }))
     .filter((c) => c.supports.length > 0);
-  if (lead.length === 0 || bodyKeys.length === 0) return null;
+  if (leadKey === undefined || lead.length === 0 || bodyKeys.length === 0) return null;
 
   // Lead claims are numbered first, then the body claims in page order.
   let next = lead.length;
@@ -64,7 +69,7 @@ export function pageSections(claims: ReadonlyMap<SectionKey, readonly Claim[]>):
   const supportId = (id: string) => bodyNewIds.get(id) ?? id;
   return [
     {
-      key: "lead",
+      key: leadKey,
       claims: lead.map((c, i) => ({ ...c, id: `c${i + 1}`, supports: c.supports.map(supportId) })),
     },
     ...body.map(({ key, claims: entries }) => ({
@@ -76,6 +81,11 @@ export function pageSections(claims: ReadonlyMap<SectionKey, readonly Claim[]>):
       })),
     })),
   ];
+}
+
+/** A feature page's sections in SECTION_ORDER (see orderedSections). */
+export function pageSections(claims: ReadonlyMap<SectionKey, readonly Claim[]>): Section[] | null {
+  return orderedSections(SECTION_ORDER, claims);
 }
 
 const LANGUAGE_NAMES: Record<SourceLanguage, string> = {
@@ -175,6 +185,40 @@ export function computeInfobox(
   };
 }
 
+/**
+ * Links one page's claims, in the order they are given (spec §7.3): the page linker's output if
+ * it is short enough and every link in it names an active page or a Wikipedia title that checked
+ * out; otherwise its links as plain words (`unlinkText`), first from the linker's output, then,
+ * if the feature titles made even that too long, from the claim as verified, which fit. `pageId`
+ * is the page's own feature id, never linked; "" for a page that is no feature's.
+ */
+export function createClaimLinker(
+  manifest: Manifest,
+  pageId: string,
+  wikipedia: ReadonlyMap<string, string | null>,
+): <C extends Claim>(claim: C) => C {
+  const link = createPageLinker(manifest, pageId, wikipedia);
+  const titles = new Map(manifest.features.map((f) => [f.id, f.title]));
+  const checked = new Set(
+    [...wikipedia.values()].flatMap((title) => (title === null ? [] : [title.trim()])),
+  );
+  const linksOk = (text: string): boolean =>
+    textLinkViolations(text, manifest).length === 0 &&
+    linkTokensIn(text).every(
+      (t) => !t.target.startsWith("wp:") || checked.has(t.target.slice(3).trim()),
+    );
+  return <C extends Claim>(claim: C): C => {
+    const linked = link(claim.text);
+    if (linked.length <= CLAIM_TEXT_MAX_LENGTH && linksOk(linked))
+      return { ...claim, text: linked };
+    const plain = unlinkText(linked, titles);
+    return {
+      ...claim,
+      text: plain.length <= CLAIM_TEXT_MAX_LENGTH ? plain : unlinkText(claim.text),
+    };
+  };
+}
+
 /** Everything a page's revision is made from once its claims are verified. */
 export interface RevisionParts {
   featureId: string;
@@ -214,26 +258,7 @@ export type Assembled =
  */
 export function assembleRevision(parts: RevisionParts): Assembled {
   const { featureId, index, manifest } = parts;
-  const link = createPageLinker(manifest, featureId, parts.wikipedia);
-  const titles = new Map(manifest.features.map((f) => [f.id, f.title]));
-  const checked = new Set(
-    [...parts.wikipedia.values()].flatMap((title) => (title === null ? [] : [title.trim()])),
-  );
-  const linksOk = (text: string): boolean =>
-    textLinkViolations(text, manifest).length === 0 &&
-    linkTokensIn(text).every(
-      (t) => !t.target.startsWith("wp:") || checked.has(t.target.slice(3).trim()),
-    );
-  const linkClaim = (claim: Claim): Claim => {
-    const linked = link(claim.text);
-    if (linked.length <= CLAIM_TEXT_MAX_LENGTH && linksOk(linked))
-      return { ...claim, text: linked };
-    const plain = unlinkText(linked, titles);
-    return {
-      ...claim,
-      text: plain.length <= CLAIM_TEXT_MAX_LENGTH ? plain : unlinkText(claim.text),
-    };
-  };
+  const linkClaim = createClaimLinker(manifest, featureId, parts.wikipedia);
 
   const bySection = new Map<SectionKey, Claim[]>();
   for (const key of SECTION_ORDER) {
