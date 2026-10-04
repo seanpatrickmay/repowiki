@@ -208,7 +208,7 @@ describe("wiki-build.ts as a process (no network)", () => {
     const result = run("scripts/wiki-build.ts", repo, "--out", out);
     expect(result.status).toBe(1);
     expect(result.stderr).toBe(
-      `another wiki:build is running on ${out} (${join(out, BUILD_LOCK)}); if none is, delete the lock file\n`,
+      `another wiki:build, wiki:update or wiki:replay is running on ${out} (${join(out, BUILD_LOCK)}); if none is, delete the lock file\n`,
     );
     expect(existsSync(join(out, BUILD_LOCK))).toBe(true);
   });

@@ -11,6 +11,7 @@ import {
   ASSUMED_PAGE_OUTPUT_TOKENS,
   acquireBuildLock,
   BUILD_LOCK,
+  describeError,
   estimateArchitecture,
   estimateBuild,
   parseWikiArgs,
@@ -28,6 +29,7 @@ describe("parseWikiArgs", () => {
       dryRun: true,
       budgetTokens: 20_000,
       deadlineMinutes: null,
+      verbose: false,
     });
     expect(
       parseWikiArgs(["../repo", "--no-batch", "--deadline", "90", "--out", "/tmp/w"]),
@@ -278,6 +280,26 @@ describe("renderBuildSummary", () => {
   });
 });
 
+describe("describeError", () => {
+  const failed = new Error("stored data failed to migrate (ZodError)", {
+    cause: new Error("revision signals-1:\n\u202ebad\tclaim", { cause: "disk" }),
+  });
+
+  it("prints only the message unless verbose", () => {
+    expect(describeError(failed, false)).toBe("stored data failed to migrate (ZodError)");
+  });
+
+  it("prints each cause on a printable line of its own when verbose", () => {
+    expect(describeError(failed, true).split("\n")).toEqual([
+      "stored data failed to migrate (ZodError)",
+      "caused by: Error: revision signals-1: ?bad claim",
+      "caused by: disk",
+    ]);
+    const long = new Error("top", { cause: new Error("x".repeat(1000)) });
+    expect(describeError(long, true).split("\n")[1]).toHaveLength(300 + "caused by: ".length);
+  });
+});
+
 describe("acquireBuildLock", () => {
   const withDir = (body: (dir: string) => void) => {
     const dir = mkdtempSync(join(tmpdir(), "repowiki-lock-"));
@@ -295,7 +317,7 @@ describe("acquireBuildLock", () => {
       expect(readFileSync(lock, "utf8")).toMatch(/^pid \d+ since \d{4}-/);
       expect(() => acquireBuildLock(dir, () => {})).toThrow(WikiBuildError);
       expect(() => acquireBuildLock(dir, () => {})).toThrow(
-        `another wiki:build is running on ${dir} (${lock}); if none is, delete the lock file`,
+        `another wiki:build, wiki:update or wiki:replay is running on ${dir} (${lock}); if none is, delete the lock file`,
       );
       release();
       expect(existsSync(lock)).toBe(false);
@@ -312,6 +334,18 @@ describe("acquireBuildLock", () => {
       expect(lines).toEqual([`ignoring the lock of a build that is no longer running: ${lock}`]);
       expect(readFileSync(lock, "utf8")).toContain(`pid ${process.pid} `);
       release();
+    });
+  });
+
+  it("loses a takeover race with a one-line refusal, not a raw fs error", () => {
+    withDir((dir) => {
+      const lock = join(dir, BUILD_LOCK);
+      writeFileSync(lock, "pid 2147483646 since 2026-10-02T00:00:00.000Z\n");
+      // Another run takes the freed lock between this one's removing it and creating it again.
+      const rival = () =>
+        writeFileSync(lock, `pid ${process.pid} since 2026-10-03T00:00:00.000Z\n`);
+      expect(() => acquireBuildLock(dir, rival)).toThrow(WikiBuildError);
+      expect(readFileSync(lock, "utf8")).toContain("2026-10-03");
     });
   });
 

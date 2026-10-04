@@ -152,8 +152,12 @@ function isTokenRun(run: readonly string[], tokens: readonly string[]): boolean 
   return false;
 }
 
-/** A word in its plain English singular: ies → y, (s|x|z|ch|sh)es → -es, s → -s (not ss). */
+/**
+ * A word in its plain English singular: ies → y, (s|x|z|ch|sh)es → -es, s → -s (not ss). A
+ * Greek -sis noun and its -ses plural meet on the same stem (analysis and analyses → analys).
+ */
 function singularOf(word: string): string {
+  if (/sis$/.test(word)) return `${word.slice(0, -3)}s`;
   if (/[^aeiou]ies$/.test(word)) return `${word.slice(0, -3)}y`;
   if (/(?:s|x|z|ch|sh)es$/.test(word)) return word.slice(0, -2);
   if (/[^s]s$/.test(word)) return word.slice(0, -1);
@@ -172,9 +176,14 @@ function sharesOwnWord(identifier: string, own: readonly (readonly string[])[]):
     .some((token) => words.has(singularOf(token)));
 }
 
-/** The plain English plurals of a word: +s, +es, and y → ies. */
+/** The plain English plurals of a word: +s, +es, y → ies, and sis → ses. */
 function pluralsOf(word: string): string[] {
-  return [`${word}s`, `${word}es`, ...(/[^aeiou]y$/.test(word) ? [`${word.slice(0, -1)}ies`] : [])];
+  return [
+    `${word}s`,
+    `${word}es`,
+    ...(/[^aeiou]y$/.test(word) ? [`${word.slice(0, -1)}ies`] : []),
+    ...(/sis$/.test(word) ? [`${word.slice(0, -2)}es`] : []),
+  ];
 }
 
 /**

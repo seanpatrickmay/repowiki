@@ -298,8 +298,14 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     addSampleReadme(input);
     const store = openStore(":memory:");
     store.putManifest(manifest, { llmRevised: true });
+    const journaled: string[] = [];
     const build = (deadline?: number) => {
       const journal = buildJournal(store);
+      const record = journal.record;
+      journal.record = (batchId, createdAt, items) => {
+        journaled.push(...items.map((item) => item.requestKey));
+        record(batchId, createdAt, items);
+      };
       const provider = createClaudeProvider({
         models: DEFAULT_MODELS,
         ledger: createLedger(),
@@ -327,5 +333,8 @@ describe("buildWiki through the real batcher and the store's journal", () => {
     // then asks for the project article, which one page alone did not get.
     expect(api.posts.map((p) => p.requests.length)).toEqual([2, 1, 1]);
     expect(rerun.stored.map((r) => r.featureId)).toEqual(["signals"]);
+    // Everything is settled and stored, so no row is left for a third run to collect.
+    expect(journaled.length).toBeGreaterThan(0);
+    expect(journaled.map((key) => store.findBatchRequest(key))).toEqual(journaled.map(() => null));
   });
 });
