@@ -8,13 +8,14 @@ const second = makeRevision({ id: "rev-2", parentId: "rev-1", reason: "update", 
 
 function makeExport(overrides: Partial<WikiExport> = {}): WikiExport {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     repo: "next-chief-of-staff",
     head: SHA_B,
     exportedAt: "2026-09-30T21:00:00Z",
     manifest: makeManifest(),
     pages: [second],
     history: { signals: [first, second] },
+    wikipedia: {},
     ...overrides,
   };
 }
@@ -27,6 +28,36 @@ function messages(wiki: unknown): string[] {
 describe("WikiExport", () => {
   it("accepts a consistent export with full revision bodies in history", () => {
     expect(WikiExport.parse(makeExport())).toEqual(makeExport());
+  });
+
+  it("rejects schema version 2, which had no Wikipedia summaries", () => {
+    expect(messages({ ...makeExport(), schemaVersion: 2 })).toHaveLength(1);
+  });
+
+  it("carries Wikipedia summaries, and defaults them to none", () => {
+    const summary = {
+      title: "Message queue",
+      extract: "A message queue is a form of asynchronous communication.",
+      url: "https://en.wikipedia.org/wiki/Message_queue",
+    };
+    const wiki = makeExport({ wikipedia: { "Message queue": summary } });
+    expect(WikiExport.parse(wiki).wikipedia).toEqual({ "Message queue": summary });
+    const { wikipedia: _omitted, ...without } = makeExport();
+    expect(WikiExport.parse(without).wikipedia).toEqual({});
+  });
+
+  it.each([
+    ["a non-Wikipedia URL", { url: "javascript:alert(1)" }],
+    ["another site", { url: "https://evil.example/wiki/X" }],
+    ["an over-long extract", { extract: "x".repeat(1201) }],
+  ])("rejects a summary with %s", (_name, overrides) => {
+    const summary = {
+      title: "X",
+      extract: "x",
+      url: "https://en.wikipedia.org/wiki/X",
+      ...overrides,
+    };
+    expect(messages(makeExport({ wikipedia: { X: summary } }))).toHaveLength(1);
   });
 
   it("rejects schema version 1, whose history held metadata only", () => {

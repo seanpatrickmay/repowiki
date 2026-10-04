@@ -1,12 +1,26 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { SCHEMA_VERSION, WikiExport } from "@repowiki/core";
+import { type Revision, SCHEMA_VERSION, WikiExport, type WikipediaSummary } from "@repowiki/core";
+import { wikipediaTitlesIn } from "../link/index.ts";
 import { EmptyStoreError } from "./errors.ts";
 import type { Store } from "./store.ts";
 
 export interface ExportOptions {
   repo: string;
   exportedAt: string;
+}
+
+/** The titles of every Wikipedia article the pages link, normalized as the link module writes them. */
+function linkedWikipediaTitles(pages: readonly Revision[]): string[] {
+  const titles = new Set<string>();
+  for (const page of pages) {
+    for (const section of page.sections) {
+      for (const claim of section.claims) {
+        for (const title of wikipediaTitlesIn(claim.text)) titles.add(title);
+      }
+    }
+  }
+  return [...titles].sort();
 }
 
 /** Assembles and validates the export consumed by the reader site and by agents. */
@@ -19,6 +33,11 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
   const history = Object.fromEntries(
     pages.map((page) => [page.featureId, store.listHistory(page.featureId)]),
   );
+  const wikipedia: Record<string, WikipediaSummary> = {};
+  for (const title of linkedWikipediaTitles(pages)) {
+    const summary = store.getWikipediaSummary(title)?.summary;
+    if (summary) wikipedia[title] = summary;
+  }
   return WikiExport.parse({
     schemaVersion: SCHEMA_VERSION,
     repo: options.repo,
@@ -27,6 +46,7 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     manifest,
     pages,
     history,
+    wikipedia,
   });
 }
 

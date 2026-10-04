@@ -58,6 +58,12 @@ export const MIGRATIONS: readonly Migration[] = [
     created_at TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE wikipedia_summaries (
+    title TEXT PRIMARY KEY,
+    body TEXT NOT NULL
+  );
+  `,
 ];
 
 interface StoredFeature {

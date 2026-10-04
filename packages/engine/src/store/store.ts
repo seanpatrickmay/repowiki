@@ -1,4 +1,11 @@
-import { GitSha, LedgerEntry, Manifest, Revision } from "@repowiki/core";
+import {
+  GitSha,
+  LedgerEntry,
+  Manifest,
+  Revision,
+  WikipediaCacheEntry,
+  type WikipediaSummary,
+} from "@repowiki/core";
 import { JOURNAL_RESULTS_TTL_MS } from "@repowiki/llm";
 import Database from "better-sqlite3";
 import { z } from "zod";
@@ -57,6 +64,13 @@ export interface Store {
    * replaced is kept.
    */
   forgetBatchRequests(batchId: string, requestKeys: readonly string[]): void;
+  /**
+   * A cached Wikipedia lookup, or null if never looked up. Lookups are keyed by
+   * normalizeWikipediaTitle(requested title), the form buildExport reads link tokens in.
+   */
+  getWikipediaSummary(title: string): WikipediaCacheEntry | null;
+  /** Caches a lookup under normalizeWikipediaTitle(requested title): the summary, or null for none. */
+  putWikipediaSummary(title: string, summary: WikipediaSummary | null, fetchedAt: string): void;
   /** The last sha the wiki was built or updated to. */
   setHead(sha: string): void;
   getHead(): string | null;
@@ -219,6 +233,21 @@ export function openStore(path: string): Store {
       db.transaction(() => {
         for (const key of requestKeys) remove.run(key, batchId);
       })();
+    },
+
+    getWikipediaSummary(title) {
+      const row = db.prepare("SELECT body FROM wikipedia_summaries WHERE title = ?").get(title) as
+        | BodyRow
+        | undefined;
+      return row === undefined ? null : WikipediaCacheEntry.parse(JSON.parse(row.body));
+    },
+
+    putWikipediaSummary(title, summary, fetchedAt) {
+      const body = WikipediaCacheEntry.parse({ summary, fetchedAt });
+      db.prepare("INSERT OR REPLACE INTO wikipedia_summaries (title, body) VALUES (?, ?)").run(
+        title,
+        JSON.stringify(body),
+      );
     },
 
     getManifest: (sha) =>

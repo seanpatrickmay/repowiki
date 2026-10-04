@@ -4,6 +4,7 @@ import { Manifest } from "./manifest.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 import { Revision } from "./revision.ts";
 import { SCHEMA_VERSION } from "./version.ts";
+import { WikipediaSummary } from "./wikipedia.ts";
 
 /** Everything the reader site and agents consume. Pages are the current revision of each feature. */
 export const WikiExport = z
@@ -16,6 +17,11 @@ export const WikiExport = z
     pages: z.array(Revision),
     /** Every stored revision body per feature, oldest first; the last one is the feature's page. */
     history: z.record(FeatureId, z.array(Revision)),
+    /**
+     * Summaries of the Wikipedia articles the pages link, by the canonical title their
+     * [[wp:Title]] tokens name, for hover previews (F13). Added in schema version 3.
+     */
+    wikipedia: z.record(z.string().min(1), WikipediaSummary).default({}),
   })
   .superRefine((wiki, ctx) => {
     const known = new Set(wiki.manifest.features.map((f) => f.id));
