@@ -1,10 +1,23 @@
-import type { TokenUsage } from "@repowiki/core";
+import type { LedgerEntry, TokenUsage } from "@repowiki/core";
 import { markdownCodeSpan, pullRequestOf, type ReplayStep } from "@repowiki/engine";
 import { estimateUpdate } from "./update-cli.ts";
-import { architectureSkipWhy } from "./wiki-cli.ts";
+import { architectureSkipWhy, problemLine } from "./wiki-cli.ts";
 
 /** Every token a run used, cached or not: the measure of spec §8's third replay invariant. */
 export const tokensOf = (t: TokenUsage): number => t.in + t.out + t.cacheRead + t.cacheWrite;
+
+/**
+ * The tokens of the newest build run in `ledger` (in ledger order), or null when it holds none.
+ * A run is its `runId`: two builds at one sha are two runs, and only the later one is the
+ * "full build" an update is compared against (spec §8's third invariant), never their sum.
+ */
+export function newestBuildTokens(ledger: readonly LedgerEntry[]): number | null {
+  const newest = ledger.findLast((e) => e.runKind === "build");
+  if (newest === undefined) return null;
+  return ledger
+    .filter((e) => e.runKind === "build" && e.runId === newest.runId)
+    .reduce((n, e) => n + tokensOf(e.tokens), 0);
+}
 
 /** The longest commit subject a summary row shows. */
 const MAX_SUBJECT = 60;
@@ -46,8 +59,9 @@ export interface StepProjection {
 /**
  * A step's cost before any call, from its diff alone (the store cannot be moved by a dry run):
  * every active feature with a changed member file is taken as one update call with a full pack
- * (`budgetTokens`), plus the About article when any page may change. An upper-side figure; the
- * live run states each step's own estimate from the real plan before its calls.
+ * (`budgetTokens`), plus the About article when any page may change. Upper-side for those calls
+ * only: it omits a tie-break or drift call, whole pages and the retry round. The live run states
+ * each step's own estimate from the real plan before its calls.
  */
 export function projectStep(
   input: { step: ReplayStep; files: number; pages: number },
@@ -85,7 +99,8 @@ export function renderProjection(projections: readonly StepProjection[], left: n
         `| ${i + 1} | ${p.step.sha.slice(0, 7)} | ${pullRequestOf(p.step.subject) ?? ""} | ${subjectCell(p.step.subject)} | ${p.files} | ${p.pages} | $${p.usd.toFixed(4)} |`,
     ),
     "",
-    `${projections.length} steps estimated at $${total.toFixed(4)} at most${left > 0 ? `; ${left} more steps after them are left for a later run` : ""}.`,
+    `${projections.length} steps estimated at about $${total.toFixed(4)}${left > 0 ? `; ${left} more steps after them are left for a later run` : ""}.`,
+    "Upper-side for the update calls only: tie-break, drift, whole-page and retry calls are not counted.",
   ].join("\n");
 }
 
@@ -94,16 +109,17 @@ export function renderProjection(projections: readonly StepProjection[], left: n
  * the article's skip reason, as one line under the replay table; null when it had none of them.
  */
 function stepNote(index: number, r: StepRecord): string | null {
+  const code = (text: string): string => markdownCodeSpan(problemLine(text));
   const parts = [
     ...(r.failures.length === 0
       ? []
       : [
-          `${r.failures.length} whole ${r.failures.length === 1 ? "page" : "pages"} could not be written: ${r.failures.map((f) => `${markdownCodeSpan(f.featureId)} (${markdownCodeSpan(f.failure)})`).join(", ")}`,
+          `${r.failures.length} whole ${r.failures.length === 1 ? "page" : "pages"} could not be written: ${r.failures.map((f) => `${code(f.featureId)} (${code(f.failure)})`).join(", ")}`,
         ]),
     ...(r.refused.length === 0
       ? []
       : [
-          `not updated: ${r.refused.map((f) => `${markdownCodeSpan(f.featureId)} (${markdownCodeSpan(f.why === "nothing changed" ? "unchanged" : f.why)})`).join(", ")}`,
+          `not updated: ${r.refused.map((f) => `${code(f.featureId)} (${code(f.why === "nothing changed" ? "unchanged" : f.why)})`).join(", ")}`,
         ]),
     ...(r.architectureSkipped === null
       ? []
@@ -127,22 +143,25 @@ export function renderReplaySummary(
   left: number,
   buildTokens: number | null,
 ): string {
-  // The comparison for spec §8's third invariant ("every update costs fewer tokens than the last
-  // full build") is made here, in `under` and `holds`, against `buildTokens`. The caller takes
-  // that from `runTotals`, which keys runs by kind and sha and ignores `runId`, so two builds at
-  // one sha are summed into one total: `buildTokens` can overstate the last build, and the
-  // comparison is then more lenient than the invariant.
+  // Spec §8's third invariant ("every update costs fewer tokens than the last full build") is
+  // compared here, in `under` and `holds`, against `buildTokens`: the newest build run's own
+  // tokens (see newestBuildTokens), or null when the ledger holds none, in which case the
+  // invariant was not checked and the verdict says so rather than claiming it holds.
   const under = (tokens: number) =>
     buildTokens === null ? "n/a" : tokens < buildTokens ? "yes" : "**no**";
   const usd = records.reduce((n, r) => n + r.usd, 0);
-  const holds =
-    records.every((r) => r.problems === 0) &&
-    (buildTokens === null || records.every((r) => r.tokens < buildTokens));
+  const clean = records.every((r) => r.problems === 0);
+  const holds = clean && (buildTokens === null || records.every((r) => r.tokens < buildTokens));
+  const verdict = !holds
+    ? "**broken**; see the rows above and pnpm wiki:check"
+    : buildTokens === null
+      ? "no step left a problem; token invariant not checked (no build run in the ledger)"
+      : "hold for every step";
   const notes = records.flatMap((r, i) => stepNote(i, r) ?? []);
   return `${[
     `# Replay: ${markdownCodeSpan(repoName)} ${from.slice(0, 7)} → ${to.slice(0, 7)}`,
     "",
-    `${records.length} steps replayed${left > 0 ? `, ${left} left` : ""}; the last full build used ${buildTokens === null ? "an unknown number of" : buildTokens.toLocaleString("en-US")} tokens.`,
+    `${records.length} steps replayed${left > 0 ? `, ${left} left` : ""}; ${buildTokens === null ? "the ledger holds no build run to compare them with" : `the newest full build used ${buildTokens.toLocaleString("en-US")} tokens`}.`,
     "",
     "| Step | Commit | PR | Subject | Stored | Carried | Stale | Tokens | Cost | Problems | Under build |",
     "|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---|",
@@ -152,7 +171,7 @@ export function renderReplaySummary(
     ),
     ...(notes.length === 0 ? [] : ["", "## Step notes", "", ...notes]),
     "",
-    `Invariants: ${holds ? "hold for every step" : "**broken**; see the rows above and pnpm wiki:check"}.`,
+    `Invariants: ${verdict}.`,
     "",
     `Cost: $${usd.toFixed(4)}.`,
   ].join("\n")}\n`;

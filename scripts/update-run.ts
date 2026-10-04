@@ -26,7 +26,7 @@ import {
 } from "@repowiki/engine";
 import { createLedger, type ModelConfig } from "@repowiki/llm";
 import { estimateUpdate, type UpdateEstimate } from "./update-cli.ts";
-import { lazyClaudeProvider, type RunFlags } from "./wiki-cli.ts";
+import { type LiveCommand, lazyClaudeProvider, type RunFlags } from "./wiki-cli.ts";
 
 /** The repository read at `sha`, as an update takes it. No call. */
 export async function readInput(repo: string, sha: string): Promise<UpdateInput> {
@@ -106,7 +106,8 @@ export function estimateFor(
  * Moves the store's wiki to input.index.sha with live calls: one ledger run of kind "update" at
  * that sha, and the store's batch journal, so a killed update's batches are collected by the
  * next run instead of paid for again. The Claude provider is built on the first call, so an
- * update that needs none (nothing cited changed) needs no API key.
+ * update that needs none (nothing cited changed) needs no API key; with none set, the keyless
+ * error names `command`.
  */
 export async function runUpdate(
   store: Store,
@@ -115,13 +116,14 @@ export async function runUpdate(
   models: ModelConfig,
   repoName: string,
   log: (line: string) => void,
+  command: LiveCommand = "wiki:update",
 ): Promise<{ update: WikiUpdate; runId: string }> {
   const sha = input.index.sha;
   const runId = `wiki-update-${sha}-${new Date().toISOString()}`;
   const ledger = createLedger((entry) => store.appendLedger(entry));
   const journal = buildJournal(store);
   const provider = lazyClaudeProvider({
-    command: "wiki:update",
+    command,
     models,
     ledger,
     runId,
