@@ -24,7 +24,10 @@ export interface VerifyContext {
 
 /** A citation must point at a passage, not a whole module. */
 export const MAX_CITED_LINES = 120;
-/** Claim text is a sentence or two; this bounds what reaches pages and hover previews. */
+/**
+ * Claim text is a sentence or two. The write step asks for at most 1000 characters, well inside
+ * core's CLAIM_TEXT_MAX_LENGTH (2000), so a verified claim always stores.
+ */
 export const MAX_CLAIM_LENGTH = 1000;
 const MIN_COMMIT_PREFIX = 7;
 const MAX_QUOTED_LENGTH = 80;
@@ -140,6 +143,101 @@ function resolveCommit(ref: string, prefix: string, ctx: VerifyContext): Resolve
   return { citation: { kind: "commit", sha: found.sha, subject, pr: found.pr }, lines: null };
 }
 
+/** The reader's own tokenizer: a code span or a [[link]] token is held aside before anything else. */
+const READER_TOKEN = /`([^`]+)`|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+/** Element names that make `<name …>` markup. Other `<word>` text is prose or a type name. */
+const HTML_ELEMENTS = new Set(
+  (
+    "a abbr address area article aside audio b base bdi bdo big blockquote body br button canvas " +
+    "caption center cite code col data dd del details dfn dialog div dl dt em embed fieldset " +
+    "figure font footer form h1 h2 h3 h4 h5 h6 head header hr html i iframe img input ins kbd " +
+    "label legend li link main map mark marquee menu meta nav noscript object ol option p " +
+    "picture pre q s samp script section select small source span strike strong style sub " +
+    "summary sup svg table tbody td template textarea tfoot th thead time title tr tt u ul var " +
+    "video wbr"
+  ).split(" "),
+);
+const TAG_START = /^<\/?([A-Za-z][A-Za-z0-9]*)(?=[\s/>])/;
+const TAG_HEAD_LENGTH = 40;
+
+/** True when the text holds `<element …>`, `</element>`, a comment or a doctype. One pass. */
+function hasHtmlTag(text: string): boolean {
+  let close = -1;
+  for (let open = text.indexOf("<"); open !== -1; open = text.indexOf("<", open + 1)) {
+    if (close < open) {
+      close = text.indexOf(">", open);
+      if (close === -1) return false;
+    }
+    const head = text.slice(open, Math.min(close + 1, open + TAG_HEAD_LENGTH));
+    if (/^<!(--|doctype\b)/i.test(head)) return true;
+    const name = TAG_START.exec(head)?.[1];
+    if (name !== undefined && HTML_ELEMENTS.has(name.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/**
+ * Claim text uses only the reader's markdown subset (spec §5 rule 11): **bold**, *italic*,
+ * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. Code
+ * spans and link tokens are blanked first, as the reader tokenizes them, so markup characters
+ * inside a code span are fine and `[[ingest]](the stage)` is a link followed by text. A line break
+ * is refused by verifyClaim's control-character check, which names it once. Every scan is linear.
+ */
+function markupProblems(text: string): string[] {
+  const plain = text.replace(READER_TOKEN, " ");
+  const found: string[] = [];
+  const linkOpen = plain.indexOf("](");
+  if (linkOpen !== -1 && plain.indexOf(")", linkOpen + 2) !== -1) found.push("a [text](url) link");
+  if (hasHtmlTag(plain)) found.push("an HTML tag");
+  if (/^#{1,6}\s/.test(plain)) found.push("a heading");
+  return found.length === 0
+    ? []
+    : [
+        `the claim uses markup outside **bold**, *italic*, \`code\` and [[links]]: ${found.join(", ")}`,
+      ];
+}
+
+const PATH_SEGMENT = String.raw`[\p{L}\p{N}_.@+~-]+`;
+/** "path:12", "path:12-30" and their L-forms; a path run that starts mid-token or after "/" is skipped. */
+const CITATION_IN_TEXT = new RegExp(
+  String.raw`(?<![\p{L}\p{N}_/.@~+-])(/?${PATH_SEGMENT}(?:/${PATH_SEGMENT})*):L?\d+(?:-L?\d+)?(?![\p{L}\p{N}_])`,
+  "gu",
+);
+const COMMIT_IN_TEXT = /(?<![\p{L}\p{N}_/.@~+-])commit:[0-9a-f]{7,64}\b/giu;
+const FILE_EXTENSION = /(?:^|[^.])\.[A-Za-z][A-Za-z0-9]{0,9}$/;
+const MAX_NAMED_TOKENS = 3;
+
+/**
+ * Whether "path" in "path:12" names a repository file. With a "/" it does when its last segment
+ * has an extension; without one ("Node.js:18", "redis.internal:6379") only when it is a file of
+ * the commit or the basename of one. Either way a key of the sources counts.
+ */
+function looksLikeFile(path: string, ctx: VerifyContext): boolean {
+  if (ctx.sources.has(path)) return true;
+  if (path.includes("/")) return FILE_EXTENSION.test(path.slice(path.lastIndexOf("/") + 1));
+  for (const file of ctx.sources.keys()) if (file.endsWith(`/${path}`)) return true;
+  return false;
+}
+
+/**
+ * Citations go in `cite`, never in the text, where nothing would check them. A "path:12-30" or
+ * "commit:abcdef1" token in the text is refused; times ("10:30"), ratios ("3:1"), URLs and
+ * "host:port" pairs are not, because a path must look like a repository file.
+ */
+function citationProblems(text: string, ctx: VerifyContext): string[] {
+  const tokens = new Set<string>();
+  for (const match of text.matchAll(CITATION_IN_TEXT)) {
+    if (looksLikeFile(match[1] ?? "", ctx)) tokens.add(match[0]);
+  }
+  for (const match of text.matchAll(COMMIT_IN_TEXT)) tokens.add(match[0]);
+  if (tokens.size === 0) return [];
+  const named = [...tokens].slice(0, MAX_NAMED_TOKENS).map(quote).join(", ");
+  const more = tokens.size > MAX_NAMED_TOKENS ? ", and more" : "";
+  return [
+    `the claim text holds ${tokens.size === 1 ? "a citation" : "citations"} (${named}${more}); citations go only in "cite", never in the text`,
+  ];
+}
+
 function kindOf(key: SectionKey): ClaimKind {
   if (key === "history") return "history";
   if (key === "known-limitations") return "limitation";
@@ -150,7 +248,8 @@ export type Verified = { claim: Claim; problems: [] } | { claim: null; problems:
 
 /**
  * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's
- * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short.
+ * citation rules hold (spec §5 rules 2-4), a limitation cites evidence, and the text is short,
+ * in the reader's markdown subset, and free of citation tokens.
  * The claim keeps the draft's id and supports; the page assembly renumbers them.
  */
 export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyContext): Verified {
@@ -158,13 +257,20 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
   const text = draft.text.trim();
   if (draft.id === "") problems.push("the claim has no id");
   if (text === "") problems.push("the claim has no text");
-  if ([...text].length > MAX_CLAIM_LENGTH) {
+  const length = [...text].length;
+  if (length > MAX_CLAIM_LENGTH) {
     problems.push(`the claim is over ${MAX_CLAIM_LENGTH} characters; split or shorten it`);
   }
   if (UNSAFE_TEXT.test(text)) {
     problems.push(
       "the claim text holds a control or line-break character; write one plain paragraph",
     );
+  }
+  // Over-length text is refused above; scanning it for markup would only spend time on a claim
+  // that is dropped anyway.
+  if (length <= MAX_CLAIM_LENGTH) {
+    problems.push(...markupProblems(text));
+    problems.push(...citationProblems(text, ctx));
   }
   const citations: Citation[] = [];
   let evidence = false;
