@@ -497,6 +497,15 @@ ins {
   padding-left: 1.25rem;
 }
 
+.mp-architecture {
+  margin-bottom: 1rem;
+}
+
+.page-ref {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
 .mp-date,
 .dyk-source,
 .all-pages-note {

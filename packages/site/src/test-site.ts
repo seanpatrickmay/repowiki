@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { WikiExport } from "@repowiki/core";
 import { fixtureExport } from "./test-fixtures.ts";
 
 const CLI = fileURLToPath(new URL("./cli.ts", import.meta.url));
@@ -40,12 +41,15 @@ export interface BuiltSite {
   cleanup(): void;
 }
 
-/** Writes the fixture export to a temp dir and builds the site from it. */
-export function buildFixtureSite(extraArgs: readonly string[] = []): BuiltSite {
+/** Writes the fixture export (or the given variant of it) to a temp dir and builds the site. */
+export function buildFixtureSite(
+  extraArgs: readonly string[] = [],
+  wikiExport: WikiExport = fixtureExport(),
+): BuiltSite {
   const dir = mkdtempSync(join(tmpdir(), "repowiki-site-"));
   try {
     const exportFile = join(dir, "export.json");
-    writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+    writeFileSync(exportFile, JSON.stringify(wikiExport, null, 2));
     const outDir = join(dir, "site");
     const result = runCli(["build", "--export", exportFile, "--out", outDir, ...extraArgs]);
     if (result.status !== 0)

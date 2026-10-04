@@ -4,13 +4,18 @@ import { renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { articleLink } from "./preview.ts";
 import { leadSummary } from "./summary.ts";
-import { articleUrl } from "./urls.ts";
+import { ARCHITECTURE_URL, articleUrl } from "./urls.ts";
 
 export const DID_YOU_KNOW_COUNT = 5;
 export const RECENT_COUNT = 5;
 
 export interface MainPageView {
   articleCount: number;
+  /**
+   * The project's article: its title (plain text) and lead (trusted HTML), which open the Main
+   * Page, or null when the export has none.
+   */
+  architecture: { href: string; title: string; leadHtml: string } | null;
   featured: { href: string; leadHtml: string } | null;
   didYouKnow: { html: string; href: string; title: string }[];
   recent: { href: string; title: string; date: string }[];
@@ -140,5 +145,15 @@ export function mainPageView(site: SiteModel): MainPageView {
       date: formatDate(page.commitDate),
     }));
 
-  return { articleCount: active.length, featured, didYouKnow, recent };
+  const lead = site.architecture?.sections.find((s) => s.key === "lead")?.claims ?? [];
+  const architecture =
+    site.architecture === null
+      ? null
+      : {
+          href: ARCHITECTURE_URL,
+          title: site.architecture.title,
+          leadHtml: lead.map((claim) => renderInline(claim.text, { link })).join(" "),
+        };
+
+  return { articleCount: active.length, architecture, featured, didYouKnow, recent };
 }

@@ -17,6 +17,13 @@ const map = featureMapSource(site);
       <code>{site.wiki.head.slice(0, 7)}</code>. {articleCountText(view.articleCount)}
     </p>
   </div>
+  {view.architecture !== null && (
+    <section class="mp-box mp-architecture" aria-labelledby="mp-architecture">
+      <h2 id="mp-architecture">About {view.architecture.title}</h2>
+      <p set:html={view.architecture.leadHtml} />
+      <p>(<a href={view.architecture.href}>Full article...</a>)</p>
+    </section>
+  )}
   <div class="mp-columns">
     <section class="mp-box" aria-labelledby="mp-featured">
       <h2 id="mp-featured">From the featured article</h2>

@@ -1,0 +1,67 @@
+---
+import { architectureView } from "../../architecture.ts";
+import { STALE_NOTICE } from "../../article.ts";
+import Diagram from "../../components/Diagram.astro";
+import Layout from "../../layouts/Layout.astro";
+import { getSite } from "../../site.ts";
+
+const site = getSite();
+const view = architectureView(site);
+---
+<Layout title={view === null ? "About" : view.title}>
+  {view === null && (
+    <Fragment slot="head">
+      <meta name="robots" content="noindex" />
+    </Fragment>
+  )}
+  <article class="article" data-pagefind-body={view === null ? undefined : ""}>
+    <h1 class="page-title">{view === null ? "About" : view.title}</h1>
+    <p class="tagline">From the {site.wiki.repo} wiki</p>
+    {view === null ? (
+      <p>
+        This wiki has no About article yet. <a href="/special/all-pages/">All articles</a>
+        lists every feature.
+      </p>
+    ) : (
+      <>
+        <p class="lead" set:html={view.leadHtml} />
+        {view.diagram !== null && (
+          <Diagram
+            source={view.diagram}
+            caption="Each box is a feature; an arrow points from the feature whose code calls or imports to the one it uses."
+          />
+        )}
+        {view.toc.length > 0 && (
+          <nav class="toc" aria-labelledby="toc-heading">
+            <h2 id="toc-heading">Contents</h2>
+            <ol>
+              {view.toc.map((entry) => (
+                <li><a href={`#${entry.anchor}`}>{entry.title}</a></li>
+              ))}
+            </ol>
+          </nav>
+        )}
+        {view.sections.map((section) => (
+          <section aria-labelledby={section.anchor}>
+            <h2 id={section.anchor}>{section.title}</h2>
+            {section.stale && <div class="ambox ambox-stale" role="note">{STALE_NOTICE}</div>}
+            <p set:html={section.html} />
+          </section>
+        ))}
+        {view.references.length > 0 && (
+          <section aria-labelledby="references">
+            <h2 id="references">References</h2>
+            <ol class="references">
+              {view.references.map((ref) => (
+                <li id={`cite-note-${ref.n}`}>
+                  <span class="ref-backs" set:html={ref.backlinks} /> <span set:html={ref.html} />
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+        <p class="last-edited" set:html={view.lastEdited} />
+      </>
+    )}
+  </article>
+</Layout>

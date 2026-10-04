@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <link rel="icon" href="data:,">
+    <title>Demo Repo - demo-repo wiki</title>
+    
+  <link rel="stylesheet" href="/_astro/ASSET"></head>
+  <body>
+    <a class="skip-link" href="#content">Jump to content</a>
+    <header class="site-header">
+      <a class="site-name" href="/">demo-repo<span class="site-tagline">wiki</span></a>
+      <form class="site-search" role="search" action="/search/" method="get">
+        <label class="visually-hidden" for="site-search-q">Search the demo-repo wiki</label>
+        <input id="site-search-q" name="q" type="search" placeholder="Search demo-repo wiki">
+        <button type="submit">Search</button>
+      </form>
+    </header>
+    <div class="page">
+      <nav class="site-nav" aria-label="Site">
+        <ul>
+          <li><a href="/">Main page</a></li>
+          <li><a href="/random/">Random article</a></li>
+          <li><a href="/special/all-pages/">All articles</a></li>
+          <li><a href="/special/about/">About Demo Repo</a></li>
+        </ul>
+      </nav>
+      <main id="content" class="content">
+        <article class="article" data-pagefind-body>
+    <h1 class="page-title">Demo Repo</h1>
+    <p class="tagline">From the demo-repo wiki</p>
+    
+        <p class="lead"><b>Demo Repo</b> turns <a class="wikilink" href="/wiki/signals/" title="Signal ingestion" data-preview="signals">Signal ingestion</a> into <a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">Deliverables</a> for a delivery team.</p>
+        <figure class="diagram">
+  <pre class="mermaid">flowchart LR
+  n1[[&quot;Deliverables&quot;]]
+  n2[[&quot;Signal ingestion&quot;]]
+  n1 --&gt;|&quot;5 calls, 2 imports&quot;| n2</pre>
+  <figcaption>Each box is a feature; an arrow points from the feature whose code calls or imports to the one it uses.</figcaption>
+</figure>
+        <nav class="toc" aria-labelledby="toc-heading">
+            <h2 id="toc-heading">Contents</h2>
+            <ol>
+              <li><a href="#purpose">Purpose and features</a></li><li><a href="#layers">Layers</a></li><li><a href="#request-paths">Request paths</a></li><li><a href="#dependencies">Feature dependencies</a></li><li><a href="#references">References</a></li>
+            </ol>
+          </nav>
+        <section aria-labelledby="purpose">
+            <h2 id="purpose">Purpose and features</h2>
+            
+            <p>A team can review every deliverable against the signals behind it.<sup class="reference" id="cite-ref-1-0"><a href="#cite-note-1">[1]</a></sup> <span class="page-ref">(see <a class="wikilink" href="/wiki/deliverables/">Deliverables</a>)</span></p>
+          </section><section aria-labelledby="layers">
+            <h2 id="layers">Layers</h2>
+            
+            <p>Ingestion runs in the API layer, in <code>ingest_chunk</code>.<sup class="reference" id="cite-ref-2-0"><a href="#cite-note-2">[2]</a></sup></p>
+          </section><section aria-labelledby="request-paths">
+            <h2 id="request-paths">Request paths</h2>
+            
+            <p>A request reaches <code>crud.py</code> first.<sup class="reference" id="cite-ref-3-0"><a href="#cite-note-3">[3]</a></sup></p>
+          </section><section aria-labelledby="dependencies">
+            <h2 id="dependencies">Feature dependencies</h2>
+            
+            <p>Deliverables depend on signals &lt;b&gt;and&lt;/b&gt; on ghost. <span class="page-ref">(see <a class="wikilink" href="/wiki/deliverables/">Deliverables</a>, <a class="wikilink" href="/wiki/signals/">Signal ingestion</a>, <a class="wikilink" href="/wiki/hostile-title/">&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;</a>)</span></p>
+          </section>
+        <section aria-labelledby="references">
+            <h2 id="references">References</h2>
+            <ol class="references">
+              <li id="cite-note-1">
+                  <span class="ref-backs"><a class="ref-back" href="#cite-ref-1-0" aria-label="Back to the citing claim">^</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/README.md#L1-L4"><code>README.md:L1-4@aaaaaaa</code></a></span>
+                </li><li id="cite-note-2">
+                  <span class="ref-backs"><a class="ref-back" href="#cite-ref-2-0" aria-label="Back to the citing claim">^</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/signals/ingest.py#L10-L24"><code>src/signals/ingest.py:L10-24@aaaaaaa</code></a> (<code>ingest_chunk</code>)</span>
+                </li><li id="cite-note-3">
+                  <span class="ref-backs"><a class="ref-back" href="#cite-ref-3-0" aria-label="Back to the citing claim">^</a></span> <span><a class="external" href="https://github.com/acme/demo-repo/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/deliverables/crud.py#L1-L40"><code>src/deliverables/crud.py:L1-40@aaaaaaa</code></a></span>
+                </li>
+            </ol>
+          </section>
+        <p class="last-edited">This page was last edited on 10 March 2026, at commit <a class="external" href="https://github.com/acme/demo-repo/commit/cccccccccccccccccccccccccccccccccccccccc"><code>ccccccc</code></a>.</p>
+      
+  </article>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      Generated by RepoWiki from <code>demo-repo</code> at commit
+      <code>ccccccc</code>.
+    </footer>
+    <script type="module" src="/_astro/ASSET"></script></body>
+</html>
