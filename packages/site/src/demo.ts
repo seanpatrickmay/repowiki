@@ -1,12 +1,15 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSite, previewSite } from "./build.ts";
 import { fixtureExport } from "./test-fixtures.ts";
 
 // Builds the fixture export and serves it, so the reader can be browsed before a real build exists.
-const dir = join(tmpdir(), "repowiki-demo");
-mkdirSync(dir, { recursive: true });
+// Every run gets its own directory, so a leftover from an earlier run can never block this one.
+const dir = mkdtempSync(join(tmpdir(), "repowiki-demo-"));
+process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(0));
+
 const exportFile = join(dir, "export.json");
 writeFileSync(exportFile, `${JSON.stringify(fixtureExport(), null, 2)}\n`);
 const outDir = join(dir, "site");

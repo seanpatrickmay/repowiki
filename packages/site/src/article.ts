@@ -2,6 +2,7 @@ import type { Revision, SectionKey } from "@repowiki/core";
 import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
+import { articleLink } from "./preview.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
 
 export const SECTION_TITLES: Record<Exclude<SectionKey, "lead">, string> = {
@@ -55,7 +56,7 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
   const feature = site.features.get(revision.featureId);
   const title = feature?.title ?? revision.featureId;
   const refs = collectReferences(revision);
-  const link = (id: string) => featureLink(site, id);
+  const link = (id: string) => articleLink(site, id);
 
   const stale = new Set<string>();
   for (const section of revision.sections) {
@@ -83,7 +84,7 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
         ],
   );
   const seeAlso = revision.seeAlso.flatMap((id) => {
-    const target = link(id);
+    const target = featureLink(site, id);
     return target === null ? [] : [target];
   });
   const references = refs.notes.map((note) => ({

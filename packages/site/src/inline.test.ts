@@ -30,6 +30,15 @@ describe("renderInline", () => {
     );
   });
 
+  it("omits the preview id for a link whose target has no preview", () => {
+    const options: InlineOptions = {
+      link: () => ({ href: "/wiki/old/", title: "Old", preview: false }),
+    };
+    expect(renderInline("See [[old]].", options)).toBe(
+      'See <a class="wikilink" href="/wiki/old/" title="Old">Old</a>.',
+    );
+  });
+
   it("renders unknown features as plain text", () => {
     expect(renderInline("[[ghost]] and [[ghost|<the old one>]]", known)).toBe(
       "ghost and &lt;the old one&gt;",

@@ -1,9 +1,17 @@
-import { bodyClaim, codeCitation, commitCitation, leadClaim } from "@repowiki/core/test-fixtures";
+import {
+  bodyClaim,
+  codeCitation,
+  commitCitation,
+  leadClaim,
+  makeFeature,
+  SHA_A,
+  SHA_B,
+} from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { articleView } from "./article.ts";
 import { formatDate, formatNumber } from "./format.ts";
 import { buildSiteModel } from "./model.ts";
-import { fixtureExport } from "./test-fixtures.ts";
+import { fixtureExport, fixtureExportWith } from "./test-fixtures.ts";
 
 const REPO = "https://github.com/acme/demo-repo";
 const site = buildSiteModel(fixtureExport(), REPO);
@@ -186,5 +194,47 @@ describe("articleView with hostile text", () => {
     expect(hostile.references[0]?.html).toContain("src/&lt;img");
     expect(hostile.references[0]?.html).toContain(`(<code>${ESCAPED}</code>)`);
     expect(hostile.references[1]?.html).toContain(`&quot;${ESCAPED}&quot;`);
+  });
+});
+
+describe("articleView preview ids", () => {
+  it("asks for a preview only where a preview file will exist", () => {
+    // `old-name` redirects to `scheduler`, which has no page, so there is nothing to preview.
+    const withDangling = buildSiteModel(
+      fixtureExportWith([
+        makeFeature({
+          id: "old-name",
+          title: "Old name",
+          aliases: [],
+          status: { kind: "redirect", to: "scheduler" },
+          lineage: [
+            { kind: "create", sha: SHA_A },
+            { kind: "merge", sha: SHA_B, into: "scheduler" },
+          ],
+        }),
+      ]),
+      REPO,
+    );
+    const revision = withDangling.pages.get("signals");
+    if (revision === undefined) throw new Error("no signals page");
+    const view = articleView(withDangling, {
+      ...revision,
+      sections: [
+        {
+          key: "lead",
+          claims: [
+            leadClaim({
+              id: "p-lead",
+              text: "See [[old-name]], [[legacy-signals]] and [[deliverables]].",
+              supports: [],
+            }),
+          ],
+        },
+      ],
+    });
+    expect(view.leadHtml).toContain('href="/wiki/old-name/" title="Old name">Old name</a>');
+    expect(view.leadHtml).not.toContain('data-preview="old-name"');
+    expect(view.leadHtml).toContain('data-preview="legacy-signals"');
+    expect(view.leadHtml).toContain('data-preview="deliverables"');
   });
 });
