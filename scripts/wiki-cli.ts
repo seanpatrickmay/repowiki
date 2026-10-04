@@ -219,21 +219,28 @@ export function writeFileAtomic(path: string, text: string): void {
   }
 }
 
+/** The ledger run id of a wiki:build starts with this (a manifest:build's does not). */
+export const WIKI_BUILD_RUN_PREFIX = "wiki-build-";
+
 /** The advisory lock file a running wiki:build holds in its out dir. */
 export const BUILD_LOCK = "wiki-build.lock";
-/** A lock older than this is left over from a killed build, never a running one (a batch ends in 24 h). */
+/** A lock whose line names no pid, older than this, is left over from a killed build (a batch ends in 24 h). */
 const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 
-/** True unless the lock text names a pid no process has: a build killed hard leaves such a lock. */
-function holderAlive(text: string): boolean {
+/** The pid a lock line names, or null when it names none. */
+function lockPid(text: string): number | null {
   const pid = Number(/^pid (\d+) /.exec(text)?.[1]);
-  if (!Number.isSafeInteger(pid) || pid <= 0) return true;
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+/** True unless `pid` is a process this host does not have (a build killed hard leaves such a lock). */
+function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (err) {
     // EPERM: the process exists but belongs to someone else.
-    return (err as NodeJS.ErrnoException).code === "EPERM";
+    return codeOf(err) !== "ESRCH";
   }
 }
 
@@ -260,17 +267,23 @@ interface JudgedLock {
 /**
  * Judges a lock someone holds: null while its holder runs, "freed" when it vanished while being
  * looked at, otherwise why it can be taken over and exactly which file that judgment is about.
+ * A lock naming a pid is stale exactly when that pid is gone from this host: its age says
+ * nothing, since the lock is never refreshed and a replay of batched steps can run past 24
+ * hours. Only a lock that names no pid, so cannot be checked, falls back to its age.
  */
 function judgeLock(path: string): JudgedLock | "freed" | null {
   try {
     const { mtimeMs, ino } = statSync(path);
     const text = readFileSync(path, "utf8");
-    if (Date.now() - mtimeMs >= STALE_LOCK_MS) {
-      return { reason: `ignoring a stale lock older than 24 hours: ${path}`, ino, text };
+    const pid = lockPid(text);
+    if (pid !== null) {
+      return pidAlive(pid)
+        ? null
+        : { reason: `ignoring the lock of a build that is no longer running: ${path}`, ino, text };
     }
-    return holderAlive(text)
-      ? null
-      : { reason: `ignoring the lock of a build that is no longer running: ${path}`, ino, text };
+    return Date.now() - mtimeMs >= STALE_LOCK_MS
+      ? { reason: `ignoring a stale lock older than 24 hours: ${path}`, ino, text }
+      : null;
   } catch (err) {
     if (codeOf(err) === "ENOENT") return "freed";
     throw err;
@@ -311,11 +324,11 @@ function moveStaleAside(path: string, judged: JudgedLock, busy: () => Error): bo
  * the same batches twice, and returns the function that frees it. The lock holds this run's
  * "pid … since …" line, published atomically: the line is written to a temp file and linked to
  * the lock path, which fails if any lock exists, so a lock is never seen half-written and never
- * replaced. A lock another live run holds is a WikiBuildError. A lock older than 24 hours, or
- * whose pid no process has, is taken over with a line to `log`: it is renamed aside, checked to be
- * the file that was judged stale (a lock taken in the meantime is put back and respected), and
- * then the lock is created as above, so of any runs racing for it exactly one holds it and the
- * rest get the same WikiBuildError. No POSIX call compares and swaps a path, so a third run
+ * replaced. A lock another live run holds is a WikiBuildError. A lock whose pid no process on this
+ * host has, or (when its line names no pid) one older than 24 hours, is taken over with a line to
+ * `log`: it is renamed aside, checked to be the file that was judged stale (a lock taken in the
+ * meantime is put back and respected), and then the lock is created as above, so of any runs
+ * racing for it exactly one holds it and the rest get the same WikiBuildError. No POSIX call compares and swaps a path, so a third run
  * landing between the check and the put-back can still go unnoticed; the window is microseconds.
  * The lock is freed on exit, SIGINT and SIGTERM too, and only while it still holds this run's own
  * line. Advisory: it guards these scripts against each other only. `afterJudging` is a test seam

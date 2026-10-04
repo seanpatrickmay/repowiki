@@ -3,10 +3,13 @@ import { SHA_A, SHA_B, SHA_C } from "@repowiki/core/test-fixtures";
 import { DEFAULT_MODELS } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import {
+  invariantsHold,
   newestBuildTokens,
+  parseStepRecords,
   projectStep,
   renderProjection,
   renderReplaySummary,
+  renderStepRecords,
   type StepRecord,
   tokensOf,
 } from "./replay-cli.ts";
@@ -43,22 +46,36 @@ describe("newestBuildTokens", () => {
   it("is null when the ledger holds no build run", () => {
     expect(newestBuildTokens([])).toBeNull();
     expect(newestBuildTokens([entry("u1", "update", 5)])).toBeNull();
-    const untagged: LedgerEntry = { ...entry("b0", "build", 5) };
+    const untagged: LedgerEntry = { ...entry("wiki-build-b0", "build", 5) };
     delete untagged.runKind;
     expect(newestBuildTokens([untagged])).toBeNull();
   });
 
   it("takes the newest build run alone, even when two builds share a sha", () => {
     const ledger = [
-      entry("b1", "build", 1000),
-      entry("b1", "build", 1000),
+      entry("wiki-build-b1", "build", 1000),
+      entry("wiki-build-b1", "build", 1000),
       entry("u1", "update", 7),
-      entry("b2", "build", 300),
-      entry("b2", "build", 200),
+      entry("wiki-build-b2", "build", 300),
+      entry("wiki-build-b2", "build", 200),
       entry("u2", "update", 9),
     ];
-    // b2 only: (300 + 10) + (200 + 10); not b1, and not the 2,520 the two builds sum to.
+    // wiki-build-b2 only: (300 + 10) + (200 + 10); not b1, and not the 2,520 the two builds sum to.
     expect(newestBuildTokens(ledger)).toBe(520);
+  });
+});
+
+describe("newestBuildTokens and manifest builds", () => {
+  it("compares against the newest wiki:build run, not a later manifest:build run", () => {
+    // manifest:build also tags its calls kind "build" (runId manifest-build-...), but it is no
+    // full build: its few tokens would make every update read as over the build.
+    const ledger = [
+      entry("wiki-build-x", "build", 4000),
+      entry("u1", "update", 7),
+      entry("manifest-build-y", "build", 50),
+    ];
+    expect(newestBuildTokens(ledger)).toBe(4010);
+    expect(newestBuildTokens([entry("manifest-build-y", "build", 50)])).toBeNull();
   });
 });
 
@@ -88,6 +105,31 @@ describe("projectStep and renderProjection", () => {
       true,
     );
     expect(loud.usd).toBeGreaterThan(0);
+    // An About article already due is a call even when no page is touched.
+    const due = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 0, articleDue: true },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    expect(due.usd).toBeGreaterThan(0);
+    const dirty = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 1 },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    const dirtyDue = projectStep(
+      { step: step(SHA_B, "Merge branch 'x'"), files: 2, pages: 1, articleDue: true },
+      prompts,
+      30_000,
+      DEFAULT_MODELS.write,
+      true,
+    );
+    // The article is priced once, never twice.
+    expect(dirtyDue.usd).toBe(dirty.usd);
     const table = renderProjection([quiet, loud], 3);
     expect(table).toContain("| 2 | ccccccc | 9 | `Merge pull request #9 from me/y` | 5 | 2 |");
     expect(table).toMatch(/2 steps estimated at about \$\d+\.\d{4}; 3 more steps after them/);
@@ -194,5 +236,76 @@ describe("renderReplaySummary", () => {
       .split("\n")
       .find((line) => line.startsWith("| 1 |"));
     expect(row?.split(" | ")).toHaveLength(11);
+  });
+});
+
+describe("a replay record across runs", () => {
+  it("numbers each row by its position in the full step list", () => {
+    const summary = renderReplaySummary(
+      "r",
+      SHA_A,
+      SHA_C,
+      [
+        record({ position: 1 }),
+        record({ step: step(SHA_C, "Merge pull request #9 from me/y"), position: 3 }),
+      ],
+      1,
+      null,
+    );
+    expect(summary).toContain("2 steps replayed, 1 left");
+    const rows = summary.split("\n").filter((line) => /^\| \d/.test(line));
+    expect(rows.map((row) => row.split(" | ").slice(0, 2))).toEqual([
+      ["| 1", "bbbbbbb"],
+      ["| 3", "ccccccc"],
+    ]);
+  });
+
+  it("saves and loads records as JSON, and refuses a file that is not one", () => {
+    const records = [
+      record({ position: 2, failures: [{ featureId: "auth", failure: "no answer" }] }),
+      record({ position: 3, recovered: true }),
+    ];
+    expect(parseStepRecords(renderStepRecords(records))).toEqual(records);
+    expect(() => parseStepRecords("not json")).toThrow(/replay record/);
+    expect(() => parseStepRecords(JSON.stringify({ version: 1, records: [{ step: 1 }] }))).toThrow(
+      /replay record/,
+    );
+  });
+
+  it("shows a recovered step's unknown counts as n/a and says how it was recorded", () => {
+    const summary = renderReplaySummary(
+      "r",
+      SHA_A,
+      SHA_C,
+      [record({ position: 1, recovered: true })],
+      0,
+      null,
+    );
+    expect(summary).toContain(
+      "| 1 | bbbbbbb | 88 | `Merge pull request #88 from me/x` | n/a | n/a | n/a | 12,000 |",
+    );
+    expect(summary).toContain(
+      "- Step 1 (bbbbbbb): stored by a run that stopped before recording it; checked when the replay resumed.",
+    );
+  });
+
+  it("records where a run stopped and why, printable and without a key", () => {
+    const summary = renderReplaySummary("r", SHA_A, SHA_C, [record({ position: 1 })], 1, null, {
+      position: 2,
+      sha: SHA_C,
+      reason: "bad\u202e answer sk-ant-api03-SECRET_x-y\nnext",
+    });
+    const line = summary.split("\n").find((l) => l.startsWith("Stopped at step 2")) ?? "";
+    expect(line).toBe("Stopped at step 2 (ccccccc): `bad? answer [redacted] next`.");
+    expect(summary).not.toContain("SECRET");
+    expect(summary).toContain("Invariants: no step left a problem; token invariant not checked");
+    expect(summary).not.toContain("hold for every step");
+  });
+
+  it("holds only when no step left a problem and none outspent the build", () => {
+    expect(invariantsHold([record()], 500_000)).toBe(true);
+    expect(invariantsHold([record()], null)).toBe(true);
+    expect(invariantsHold([record({ problems: 2 })], 500_000)).toBe(false);
+    expect(invariantsHold([record({ tokens: 500_000 })], 500_000)).toBe(false);
   });
 });

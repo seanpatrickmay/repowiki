@@ -504,16 +504,34 @@ setTimeout(() => {}, 5000);`;
     });
   });
 
-  it("takes over a lock older than 24 hours, and says so", () => {
+  it("never takes a lock whose process is alive, however old it is", () => {
     withDir((dir) => {
       const lock = join(dir, BUILD_LOCK);
-      writeFileSync(lock, "pid 1 since 2026-01-01T00:00:00.000Z\n");
+      // A replay can outlive 24 hours (each batched step may wait that long), and its lock's
+      // mtime is never refreshed: age alone says nothing while its pid runs.
+      const line = `pid ${process.pid} since 2026-01-01T00:00:00.000Z\n`;
+      writeFileSync(lock, line);
+      const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      utimesSync(lock, old, old);
+      const lines: string[] = [];
+      expect(() => acquireBuildLock(dir, (l) => lines.push(l))).toThrow(WikiBuildError);
+      expect(lines).toEqual([]);
+      expect(readFileSync(lock, "utf8")).toBe(line);
+    });
+  });
+
+  it("takes over a lock older than 24 hours only when its line names no pid, and says so", () => {
+    withDir((dir) => {
+      const lock = join(dir, BUILD_LOCK);
+      writeFileSync(lock, "since 2026-01-01T00:00:00.000Z\n");
+      // Younger than a batch can run: the holder cannot be judged gone.
+      expect(() => acquireBuildLock(dir, () => {})).toThrow(WikiBuildError);
       const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
       utimesSync(lock, old, old);
       const lines: string[] = [];
       const release = acquireBuildLock(dir, (line) => lines.push(line));
       expect(lines).toEqual([`ignoring a stale lock older than 24 hours: ${lock}`]);
-      expect(readFileSync(lock, "utf8")).not.toContain("pid 1 ");
+      expect(readFileSync(lock, "utf8")).toContain(`pid ${process.pid} `);
       release();
     });
   });
