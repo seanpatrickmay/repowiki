@@ -129,7 +129,8 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean =>
  * own round and stores it; a failed article is reported and never undoes the pages. A rerun at
  * the same sha writes only the pages that are missing (a page that failed, or one a crash never
  * stored), and rewrites the article (a new revision, parented on the old) only if it is missing or
- * the set of current pages changed; a finished rerun makes no LLM call. A store already built at
+ * the set of current pages changed; a finished rerun makes no LLM call. A page it writes is no
+ * longer pending a whole write (Store.getPendingWhole). A store already built at
  * another sha needs an update (M6), so this refuses.
  */
 export async function buildWiki(
@@ -180,8 +181,11 @@ export async function buildWiki(
         );
       }
     } else {
+      const writtenIds = new Set(stored.map((r) => r.featureId));
       store.transaction(() => {
         for (const revision of stored) store.putRevision(revision);
+        // A page written now is no longer owed the whole write an update left pending.
+        store.setPendingWhole(store.getPendingWhole().filter((id) => !writtenIds.has(id)));
         store.setHead(index.sha);
         journal?.flush();
       });
