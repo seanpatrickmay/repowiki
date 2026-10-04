@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { CONTROL_CHARACTERS } from "@repowiki/core";
+import { readFileSync, statSync } from "node:fs";
+import { INVISIBLE_CHARACTERS } from "@repowiki/core";
 import { z } from "zod";
+import { cut, oneLine } from "./text.ts";
 
 /** Spec §9's four kinds of question. */
 export const QuestionKind = z.enum(["where", "how", "why", "what-changed"]);
@@ -17,16 +18,48 @@ export const EXIT_CRITERIA_COUNTS = { dev: 20, "held-out": 10 } as const;
 export const MAX_QUESTION_LENGTH = 1000;
 export const MAX_REFERENCE_LENGTH = 2000;
 
-const CONTROL = new RegExp(CONTROL_CHARACTERS.source, "u");
+/** The largest question file read; the author's 30 questions are a few tens of KB. */
+export const MAX_QUESTION_FILE_BYTES = 1024 * 1024;
 
-/** Text the author wrote: trimmed, not empty, capped, and no control character but a newline. */
+const INVISIBLE = new RegExp(INVISIBLE_CHARACTERS.source, "u");
+
+/**
+ * Text the author wrote: trimmed, not empty, capped, and no control or invisible format character
+ * but a newline (a zero-width space or a tag character would hide text from the reader).
+ */
 const authored = (max: number) =>
   z
     .string()
     .trim()
     .min(1)
     .max(max)
-    .refine((text) => !CONTROL.test(text.replace(/\n/g, "")), "has a control character");
+    .refine(
+      (text) => !INVISIBLE.test(text.replace(/\n/g, "")),
+      "has a control or invisible character",
+    );
+
+/** A repository's name, as the export holds it: printed in every report, so a plain name. */
+const RepoName = z.string().regex(/^[A-Za-z0-9._-]{1,100}$/, "expected a repository name");
+
+/** Questions asked again in another set, by their text with case and spacing ignored. */
+function addRepeatIssues(
+  questions: readonly { set: string; question: string }[],
+  ctx: z.RefinementCtx,
+) {
+  const first = new Map<string, { set: string; index: number }>();
+  questions.forEach(({ set, question }, index) => {
+    const key = question.toLowerCase().replace(/\s+/g, " ").trim();
+    const seen = first.get(key);
+    if (seen === undefined) first.set(key, { set, index });
+    else if (seen.set !== set) {
+      ctx.addIssue({
+        code: "custom",
+        message: `repeats question ${seen.index} of the ${seen.set} set`,
+        path: ["questions", index, "question"],
+      });
+    }
+  });
+}
 
 const question = <S extends z.ZodType<QuestionSet>>(set: S) =>
   z.strictObject({
@@ -58,12 +91,13 @@ function addIdIssues(questions: readonly { id: string }[], ctx: z.RefinementCtx)
 export const ExitCriteriaQuestions = z
   .strictObject({
     suite: z.literal("exit-criteria"),
-    repo: z.string().min(1),
+    repo: RepoName,
     writtenOn: z.iso.date(),
     questions: z.array(question(z.enum(["dev", "held-out"]))),
   })
   .superRefine((file, ctx) => {
     addIdIssues(file.questions, ctx);
+    addRepeatIssues(file.questions, ctx);
     for (const set of ["dev", "held-out"] as const) {
       const n = file.questions.filter((q) => q.set === set).length;
       if (n !== EXIT_CRITERIA_COUNTS[set]) {
@@ -82,7 +116,7 @@ export const ExitCriteriaQuestions = z
 export const SmokeQuestions = z
   .strictObject({
     suite: z.literal("smoke"),
-    repo: z.string().min(1),
+    repo: RepoName,
     questions: z
       .array(question(z.literal("smoke")))
       .min(1)
@@ -107,24 +141,51 @@ export interface LoadedQuestions {
   hash: string;
 }
 
+/** A key the file chose, as an error message shows it: one short printable quoted line. */
+const quote = (key: PropertyKey) => JSON.stringify(cut(oneLine(String(key)), 40));
+
+/** A schema problem as one line: its path and message, every file-chosen key quoted. */
+function problem(issue: z.core.$ZodIssue): string {
+  const path = issue.path
+    .map((p) =>
+      typeof p === "number" || /^[A-Za-z0-9_-]{1,40}$/.test(String(p)) ? String(p) : quote(p),
+    )
+    .join(".");
+  const message =
+    issue.code === "unrecognized_keys"
+      ? `unrecognized key${issue.keys.length === 1 ? "" : "s"} ${issue.keys.slice(0, 3).map(quote).join(", ")}${issue.keys.length > 3 ? ` and ${issue.keys.length - 3} more` : ""}`
+      : issue.message;
+  return `${path || "(root)"}: ${message}`;
+}
+
 /**
- * Reads and validates a question file. A message names the file and each problem's path, never
- * a question or a reference answer.
+ * Reads and validates a question file (a regular file of at most 1 MiB). A message names the
+ * file and each problem's path, never a question or a reference answer; a file that is not JSON
+ * carries no cause, as JSON.parse's message quotes the file's text.
  */
 export function loadQuestions(path: string): LoadedQuestions {
   let bytes: Buffer;
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile())
+      throw new QuestionFileError(`cannot read question file ${path}: not a file`);
+    if (stat.size > MAX_QUESTION_FILE_BYTES) {
+      throw new QuestionFileError(`question file ${path} is over the 1 MiB limit`);
+    }
+    bytes = readFileSync(path);
+  } catch (error) {
+    if (error instanceof QuestionFileError) throw error;
+    throw new QuestionFileError(`cannot read question file ${path}`, { cause: error });
+  }
   let json: unknown;
   try {
-    bytes = readFileSync(path);
     json = JSON.parse(bytes.toString("utf8"));
-  } catch (error) {
-    throw new QuestionFileError(`cannot read question file ${path}`, { cause: error });
+  } catch {
+    throw new QuestionFileError(`question file ${path} is not JSON`);
   }
   const parsed = QuestionFile.safeParse(json);
   if (!parsed.success) {
-    const problems = parsed.error.issues
-      .slice(0, 10)
-      .map((issue) => `${issue.path.map(String).join(".") || "(root)"}: ${issue.message}`);
+    const problems = parsed.error.issues.slice(0, 10).map(problem);
     throw new QuestionFileError(`invalid question file ${path}: ${problems.join("; ")}`);
   }
   return { file: parsed.data, hash: createHash("sha256").update(bytes).digest("hex") };
