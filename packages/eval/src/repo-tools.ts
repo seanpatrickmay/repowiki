@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { GitError, scrubbedGitEnv } from "@repowiki/engine";
+import { assertSha, GitError, listBlobs, scrubbedGitEnv, type TreeBlob } from "@repowiki/engine";
 import { z } from "zod";
 import { count, cut, oneLine, toolText } from "./text.ts";
 import { defineTool, MAX_TOOL_RESULT_CHARS, ToolError, type ToolSet, toolSet } from "./tools.ts";
@@ -22,57 +22,34 @@ const GREP_TIMEOUT_MS = 10_000;
 /** Room left under MAX_TOOL_RESULT_CHARS for a tool's own last line. */
 const BUDGET = MAX_TOOL_RESULT_CHARS - 300;
 
-interface Blob {
-  oid: string;
-  size: number;
-}
-
-/** The environment for git: none of it can redirect git to another repository or inject config. */
-function gitEnv(): NodeJS.ProcessEnv {
-  const env = scrubbedGitEnv();
-  for (const name of Object.keys(env)) {
-    if (/^GIT_CONFIG_(KEY|VALUE)_/.test(name)) delete env[name];
-  }
-  delete env.GIT_CONFIG_COUNT;
-  delete env.GIT_CONFIG_PARAMETERS;
-  return env;
-}
-
 /**
- * Runs read-only git in `repo`. A git that cannot start is a GitError; a timeout or an output
- * overflow is left for the caller to read from `signal` and `error`.
+ * Runs read-only git in `repo` with the engine's scrubbed environment (no redirection, no config
+ * or pathspec rules from the environment, no lazy fetch). A git that cannot start is a GitError;
+ * a timeout or an output overflow (ENOBUFS, also when git exits just before the kill) is left for
+ * the caller to read from `signal` and `error`.
  */
 function git(repo: string, args: readonly string[], timeout?: number, maxBuffer = 1 << 30) {
-  const result = spawnSync("git", ["-C", repo, ...args], { env: gitEnv(), maxBuffer, timeout });
-  if (result.error !== undefined && result.signal === null) {
-    throw new GitError(`could not run git: ${result.error.message}`);
+  const result = spawnSync("git", ["-C", repo, ...args], {
+    env: scrubbedGitEnv(),
+    maxBuffer,
+    timeout,
+  });
+  const error = result.error as NodeJS.ErrnoException | undefined;
+  if (error !== undefined && result.signal === null && error.code !== "ENOBUFS") {
+    throw new GitError(`could not run git: ${error.message}`);
   }
   return result;
 }
 
-/** Regular files at `sha` (symlinks and submodules have no text to read), by path. */
-function listTree(repo: string, sha: string): Map<string, Blob> {
-  const result = git(repo, [
-    "ls-tree",
-    "-r",
-    "-z",
-    "--long",
-    "--full-tree",
-    "--end-of-options",
-    sha,
-  ]);
-  if (result.status !== 0) {
-    throw new GitError(`git ls-tree failed in ${repo}: ${result.stderr.toString("utf8").trim()}`);
-  }
-  const blobs = new Map<string, Blob>();
-  for (const entry of result.stdout.toString("utf8").split("\0")) {
-    const tab = entry.indexOf("\t");
-    if (tab === -1) continue;
-    const [mode, type, oid, size] = entry.slice(0, tab).split(/ +/);
-    if (type !== "blob" || mode === "120000" || oid === undefined) continue;
-    blobs.set(entry.slice(tab + 1), { oid, size: Number(size) });
-  }
-  return new Map([...blobs].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+/**
+ * The top level of the work tree `repo` is in (or `repo` itself, for a bare repository), so a
+ * directory inside a repository gives the whole repository: grep then names every path from the
+ * root, as list_files and read_file do.
+ */
+function topLevel(repo: string): string {
+  const result = git(repo, ["rev-parse", "--show-toplevel"]);
+  const top = result.status === 0 ? result.stdout.toString("utf8").trim() : "";
+  return top === "" ? repo : top;
 }
 
 /** A path the model gave, as a repository path: "./", a leading "/" and a trailing "/" dropped. */
@@ -125,7 +102,7 @@ interface ReadInput {
   end_line?: number | undefined;
 }
 
-function readFile(repo: string, blobs: ReadonlyMap<string, Blob>, input: ReadInput): string {
+function readFile(repo: string, blobs: ReadonlyMap<string, TreeBlob>, input: ReadInput): string {
   const path = repoPath(input.path);
   const blob = blobs.get(path);
   if (blob === undefined) {
@@ -174,11 +151,15 @@ interface GrepInput {
 function grep(repo: string, sha: string, input: GrepInput): string {
   const path = repoPath(input.path ?? "");
   // Pinned like the engine's diff calls. Global options come before the command: the path is a path,
-  // never a pathspec like ":(glob)*"; attributes come from the commit, not the working tree; and no
-  // config (grep.column, submodule.recurse, core.fsmonitor) can reshape the output or run a hook.
+  // never a pathspec like ":(glob)*"; attributes come from the commit, not the working tree or a
+  // core.attributesFile; and no config (grep.column, submodule.recurse, core.fsmonitor) can reshape
+  // the output or run a hook. -I still follows the repository's own .git/info/attributes and a
+  // diff driver's binary setting: local settings of the clone, not content of the commit.
   const args = [
     "-c",
     "core.fsmonitor=false",
+    "-c",
+    "core.attributesFile=/dev/null",
     "--literal-pathspecs",
     `--attr-source=${sha}`,
     "grep",
@@ -220,11 +201,12 @@ function grep(repo: string, sha: string, input: GrepInput): string {
     );
     at = textEnd === -1 ? out.length : textEnd + 1;
   }
-  // Parsing stopped at the cap. A path and a line number each end in a NUL and a match's text has
-  // none (-I skips files that do), so the matches left over are the remaining NULs, halved.
+  // Parsing stopped at the cap. Every match ends in a newline and its text cannot hold one (a text
+  // may hold a NUL: -I looks only at a file's start), so the matches left are the newlines left.
   let rest = 0;
-  for (let nul = out.indexOf("\0", at); nul !== -1; nul = out.indexOf("\0", nul + 1)) rest++;
-  const total = matches.length + rest / 2;
+  for (let end = out.indexOf("\n", at); end !== -1; end = out.indexOf("\n", end + 1)) rest++;
+  if (at < out.length && !out.endsWith("\n")) rest++;
+  const total = matches.length + rest;
   let body = "";
   let listed = 0;
   for (const match of matches) {
@@ -240,12 +222,14 @@ function grep(repo: string, sha: string, input: GrepInput): string {
 /**
  * The repo agent's tools (spec §9): `list_files`, `read_file` and `grep` over the repository at
  * `sha`, read through git objects only (ls-tree, cat-file, grep on the commit), never the working
- * tree, so the agent sees exactly the code the wiki was built from.
+ * tree, so the agent sees exactly the code the wiki was built from. A directory inside a
+ * repository gives the whole repository.
  */
-export function createRepoTools(repo: string, sha: string): ToolSet {
-  if (!/^[0-9a-f]{40}$/.test(sha))
-    throw new GitError(`not a 40-hex commit sha: ${JSON.stringify(sha)}`);
-  const blobs = listTree(repo, sha);
+export function createRepoTools(repoDir: string, sha: string): ToolSet {
+  assertSha(sha);
+  const repo = topLevel(repoDir);
+  // The engine's listBlobs: regular files at `sha` (symlinks and submodules have no text), sorted.
+  const blobs = new Map(listBlobs(repo, sha).map((blob) => [blob.path, blob]));
   const files = [...blobs.keys()];
   return toolSet([
     defineTool(
