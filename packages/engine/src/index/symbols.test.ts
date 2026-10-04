@@ -10,7 +10,7 @@ beforeAll(async () => {
 function symbolsOf(language: SourceLanguage, source: string) {
   const parsed = parser.parse(language, source);
   try {
-    return { hasError: parsed.hasError, symbols: extractSymbols(language, parsed.root) };
+    return { hasError: parsed.hasError, symbols: extractSymbols(language, parsed.root, parser) };
   } finally {
     parsed.dispose();
   }
@@ -181,28 +181,104 @@ describe("extractSymbols (typescript)", () => {
     expect(names("tsx", source)).toEqual(["function Button", "function Page"]);
   });
 
-  it("stops collecting symbols at syntax error regions", () => {
+  it("recovers the declarations after an unclosed paren from re-parsed chunks", () => {
     const source =
       "export function ok() {}\nexport function bad( {\nexport function after() {}\nexport const k = 1;\n";
     const result = symbolsOf("typescript", source);
     expect(result.hasError).toBe(true);
     expect(result.symbols).toEqual([
       { qualifiedName: "ok", kind: "function", startLine: 1, endLine: 1, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 3, endLine: 3, exported: true },
+      { qualifiedName: "k", kind: "variable", startLine: 4, endLine: 4, exported: true },
     ]);
   });
 
-  it("does not emit function locals or keywords as symbols", () => {
+  it("recovers later declarations after an unclosed brace in a function, without its locals", () => {
     const source =
       "export function outer() {\n  function inner() {}\n  const loc = 1;\n  if ( {\n  function inner2() {}\n}\nexport function after() {}\n";
     const result = symbolsOf("typescript", source);
     expect(result.hasError).toBe(true);
-    // When there's a syntax error, we only emit well-formed root-level declarations
-    // Do NOT emit: function locals (inner, loc, inner2), keywords (function, export)
-    const names = result.symbols.map((s) => s.qualifiedName);
-    expect(names).not.toContain("inner");
-    expect(names).not.toContain("loc");
-    expect(names).not.toContain("inner2");
-    expect(names).not.toContain("function");
-    expect(names).not.toContain("export");
+    expect(result.symbols).toEqual([
+      { qualifiedName: "after", kind: "function", startLine: 7, endLine: 7, exported: true },
+    ]);
+  });
+
+  it("bounds a declaration whose missing brace swallowed the next one", () => {
+    const source = "export function outer() {\n  if (x) {\n}\nfunction after() {}\n";
+    expect(symbolsOf("typescript", source).symbols).toEqual([
+      { qualifiedName: "outer", kind: "function", startLine: 1, endLine: 3, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 4, endLine: 4, exported: false },
+    ]);
+  });
+
+  it("keeps recovered class members qualified under their own class", () => {
+    const source = [
+      "export class A {",
+      "  m1() {",
+      "    if (x) {",
+      "  }",
+      "}",
+      "export class B {",
+      "  m3() {}",
+      "}",
+      "function priv() {}",
+    ].join("\n");
+    expect(symbolsOf("typescript", source).symbols).toEqual([
+      { qualifiedName: "A", kind: "class", startLine: 1, endLine: 5, exported: true },
+      { qualifiedName: "A.m1", kind: "method", startLine: 2, endLine: 5, exported: true },
+      { qualifiedName: "B", kind: "class", startLine: 6, endLine: 8, exported: true },
+      { qualifiedName: "B.m3", kind: "method", startLine: 7, endLine: 7, exported: true },
+      { qualifiedName: "priv", kind: "function", startLine: 9, endLine: 9, exported: false },
+    ]);
+  });
+
+  it("keeps decorators with a recovered declaration", () => {
+    const source = "f( {\n@Component({\n  x: 1,\n})\nexport class View {}\n";
+    expect(symbolsOf("typescript", source).symbols).toEqual([
+      { qualifiedName: "View", kind: "class", startLine: 2, endLine: 5, exported: true },
+    ]);
+  });
+
+  it("does not trust a chunk that starts inside a template literal", () => {
+    const source = [
+      "export function bad( {",
+      "const s = `",
+      "export const fake = 1;",
+      "`;",
+      "export const real = 2;",
+    ].join("\n");
+    expect(names("typescript", source)).toEqual(["variable real"]);
+  });
+});
+
+describe("extractSymbols (python) after a syntax error", () => {
+  it("recovers the definitions after an unclosed paren and keeps the broken binding", () => {
+    const source = [
+      "x = foo(",
+      "",
+      "@dec",
+      "def after():",
+      "    pass",
+      "",
+      "class _K:",
+      "    def m(self):",
+      "        pass",
+      "",
+      "LIMIT = 3",
+    ].join("\n");
+    const result = symbolsOf("python", source);
+    expect(result.hasError).toBe(true);
+    expect(result.symbols).toEqual([
+      { qualifiedName: "x", kind: "variable", startLine: 1, endLine: 1, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 3, endLine: 5, exported: true },
+      { qualifiedName: "_K", kind: "class", startLine: 7, endLine: 9, exported: false },
+      { qualifiedName: "_K.m", kind: "method", startLine: 8, endLine: 9, exported: true },
+      { qualifiedName: "LIMIT", kind: "variable", startLine: 11, endLine: 11, exported: true },
+    ]);
+  });
+
+  it("returns the same symbols for the same broken source", () => {
+    const source = "def a(:\n    pass\nclass B:\n    pass\nC = (\ndef d():\n    pass\n";
+    expect(symbolsOf("python", source)).toEqual(symbolsOf("python", source));
   });
 });
