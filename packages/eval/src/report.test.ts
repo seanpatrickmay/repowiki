@@ -54,6 +54,54 @@ describe("renderReport", () => {
     );
     expect(smoke).toContain("It measures nothing.");
   });
+
+  it("states the break-even only for a complete run, and what its numerator leaves out", () => {
+    const full = renderReport(summarize(info(), records()), records(), null);
+    expect(full).toContain(
+      "(1,000,000 / 60,000). The build's tokens are its build run's in export.json; manifest tokens are not included.",
+    );
+    const partial = renderReport(
+      summarize(info(), records().slice(0, -1)),
+      records().slice(0, -1),
+      null,
+    );
+    expect(partial).toContain("## Break-even\n\nNot known until every answer is judged.");
+    const old = renderReport(summarize(info({ buildTokens: null }), records()), records(), null);
+    expect(old).toContain(
+      "Unknown: the export this run read records no build run. Re-run pnpm wiki:export to include build tokens before the next run.",
+    );
+  });
+
+  it("states no pass test when the repo agent answered nothing correctly", () => {
+    const zero = records().map((r) => (r.kind === "judgment" ? { ...r, score: 0 as const } : r));
+    const text = renderReport(summarize(info(), zero), zero, null);
+    expect(text).toContain(
+      "## Pass test (spec \u00A79)\n\nNot meaningful on this run: the repo agent answered no question correctly, so 90% of its accuracy is 0 and any wiki accuracy would meet it.",
+    );
+    expect(text).not.toContain("Result on this set");
+  });
+
+  it("counts what failed judgments cost, and says when a cost is unknown", () => {
+    const failed: RunRecord = {
+      kind: "judge-failure",
+      questionId: "q1",
+      agent: "repo",
+      reason: "unusable twice",
+      usage: { in: 1000, out: 200, cacheRead: 0, cacheWrite: 0 },
+      usd: 0.001,
+      model: "claude-haiku-4-5",
+      batch: true,
+      at: "2026-10-04T12:30:00.000Z",
+    };
+    const withFailure = [...records(), failed];
+    expect(renderReport(summarize(info(), withFailure), withFailure, null)).toContain(
+      "Agents $0.4000, judge $0.0050 (failed judgments included): $0.4050 in all",
+    );
+    const unknown = records().map((r, i) => (i === 0 ? { ...r, usd: null } : r));
+    expect(renderReport(summarize(info(), unknown), unknown, null)).toContain(
+      "Agents unknown, judge $0.0040: unknown in all: a call's model has no price.",
+    );
+  });
   it("is counted in the report once the owner marks it", () => {
     const check = spotCheckSample(info(), records());
     const first = check.answers[0] as (typeof check.answers)[0];
@@ -169,6 +217,22 @@ describe("writeReport", () => {
     return dir;
   }
 
+  it("writes past a temporary file a killed run left behind", () => {
+    const dir = runDir(records());
+    try {
+      writeFileSync(join(dir, `${SPOT_CHECK_FILE}.${process.pid}.tmp`), "{");
+      writeFileSync(join(dir, `${REPORT_FILE}.${process.pid}.tmp`), "half");
+      writeReport(dir);
+      expect(
+        SpotCheck.parse(JSON.parse(readFileSync(join(dir, SPOT_CHECK_FILE), "utf8"))).answers,
+      ).toHaveLength(8);
+      expect(readFileSync(join(dir, REPORT_FILE), "utf8")).toContain("# Eval:");
+      expect(existsSync(join(dir, `${SPOT_CHECK_FILE}.${process.pid}.tmp`))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("writes the report, and the spot-check file once every answer is judged", () => {
     const partial = runDir(records().slice(0, -1));
     const full = runDir(records());
@@ -203,6 +267,13 @@ describe("writeReport", () => {
       );
       writeFileSync(path, "{");
       expect(() => writeReport(dir)).toThrow(EvalRunError);
+      writeFileSync(
+        path,
+        JSON.stringify({ ...check, answers: [{ ...check.answers[0], owner: "1" }] }),
+      );
+      expect(() => writeReport(dir)).toThrow(
+        `${path} is not a valid spot-check file: answers.0.owner: Invalid input; set "owner" to the number 0 or 1, or move the file aside to draw a new sample`,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

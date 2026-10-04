@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
@@ -12,10 +12,12 @@ import {
   spotCheckSample,
 } from "./spot-check.ts";
 import {
+  ACCURACY_PERCENT,
   ACCURACY_SHARE,
   type EvalSummary,
   latestRecords,
   summarize,
+  TOKEN_PERCENT,
   TOKEN_SHARE,
   tokensOf,
 } from "./summary.ts";
@@ -71,17 +73,24 @@ export function renderReport(
     }),
     "",
   );
-  if (summary.pass !== null) {
+  if (complete && agents.repo.correct === 0) {
+    lines.push(
+      "## Pass test (spec \u00A79)",
+      "",
+      `Not meaningful on this run: the repo agent answered no question correctly, so ${ACCURACY_PERCENT}% of its accuracy is 0 and any wiki accuracy would meet it.`,
+      "",
+    );
+  } else if (summary.pass !== null) {
     const { wiki, repo } = agents;
     const wAcc = wiki.accuracy ?? 0;
     const rAcc = repo.accuracy ?? 0;
     const wTok = wiki.tokensPerQuestion ?? 0;
     const rTok = repo.tokensPerQuestion ?? 0;
     lines.push(
-      "## Pass test (spec §9)",
+      "## Pass test (spec \u00A79)",
       "",
-      `- Accuracy: the wiki agent's ${percent(wAcc)} against at least ${percent(ACCURACY_SHARE * rAcc)} (90% of the repo agent's ${percent(rAcc)}): ${summary.pass.accuracy ? "met" : "not met"}.`,
-      `- Tokens: the wiki agent's ${count(wTok)} per question against at most ${count(TOKEN_SHARE * rTok)} (40% of the repo agent's ${count(rTok)}): ${summary.pass.tokens ? "met" : "not met"}.`,
+      `- Accuracy: the wiki agent's ${percent(wAcc)} against at least ${percent(ACCURACY_SHARE * rAcc)} (${ACCURACY_PERCENT}% of the repo agent's ${percent(rAcc)}): ${summary.pass.accuracy ? "met" : "not met"}.`,
+      `- Tokens: the wiki agent's ${count(wTok)} per question against at most ${count(TOKEN_SHARE * rTok)} (${TOKEN_PERCENT}% of the repo agent's ${count(rTok)}): ${summary.pass.tokens ? "met" : "not met"}.`,
       "",
       `Result on this set: ${summary.pass.accuracy && summary.pass.tokens ? "pass" : "fail"}.`,
       "",
@@ -90,9 +99,11 @@ export function renderReport(
   lines.push("## Break-even", "");
   if (info.buildTokens === null) {
     lines.push(
-      "Unknown: the export records no build run, so the build's tokens are not known.",
+      "Unknown: the export this run read records no build run. Re-run pnpm wiki:export to include build tokens before the next run.",
       "",
     );
+  } else if (!complete) {
+    lines.push("Not known until every answer is judged.", "");
   } else if (summary.breakEven === "never") {
     lines.push(
       `Never: the wiki agent used no fewer tokens per question than the repo agent, so the build's ${count(info.buildTokens)} tokens are never paid back.`,
@@ -101,7 +112,7 @@ export function renderReport(
   } else if (summary.breakEven !== null) {
     const saved = (agents.repo.tokensPerQuestion ?? 0) - (agents.wiki.tokensPerQuestion ?? 0);
     lines.push(
-      `The build cost ${count(info.buildTokens)} tokens. Each question answered from the wiki instead of the code saves ${count(saved)} tokens, so the build pays for itself after ${Math.ceil(summary.breakEven).toLocaleString("en-US")} questions (${count(info.buildTokens)} / ${count(saved)}).`,
+      `The build cost ${count(info.buildTokens)} tokens. Each question answered from the wiki instead of the code saves ${count(saved)} tokens, so the build pays for itself after ${Math.ceil(summary.breakEven).toLocaleString("en-US")} questions (${count(info.buildTokens)} / ${count(saved)}). The build's tokens are its build run's in export.json; manifest tokens are not included.`,
       "",
     );
   }
@@ -199,15 +210,34 @@ export function renderReport(
       "",
     );
   }
+  const { agentUsd, judgeUsd } = summary;
+  const failed = records.some((r) => r.kind === "judge-failure");
+  const money = (x: number | null) => (x === null ? "unknown" : usd(x));
+  const all = agentUsd === null || judgeUsd === null ? null : agentUsd + judgeUsd;
   lines.push(
     "## Cost",
     "",
-    `Agents ${usd(summary.agentUsd)}, judge ${usd(summary.judgeUsd)}: ${usd(summary.agentUsd + summary.judgeUsd)} in all, at the models' list prices.`,
+    `Agents ${money(agentUsd)}, judge ${money(judgeUsd)}${failed ? " (failed judgments included)" : ""}: ${money(all)} in all${all === null ? ": a call's model has no price." : ", at the models' list prices."}`,
   );
   return `${lines.join("\n")}\n`;
 }
 
 export const REPORT_FILE = "report.md";
+
+/**
+ * Creates `path` with `text` atomically, never over a file that exists: written to a temporary
+ * file, then linked to its name (which fails when the file exists) and the temporary removed, so a
+ * kill never leaves a half-written file that would then be refused.
+ */
+function createOnce(path: string, text: string): void {
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, text);
+    linkSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
 
 /**
  * Writes a run directory's report.md from its run.json, results and spot-check.json, first
@@ -220,16 +250,29 @@ export function writeReport(runDir: string): { summary: EvalSummary; reportPath:
   const summary = summarize(info, records);
   const spotPath = join(runDir, SPOT_CHECK_FILE);
   if (summary.complete && !existsSync(spotPath)) {
-    const sample = spotCheckSample(info, records);
-    writeFileSync(spotPath, `${JSON.stringify(sample, null, 2)}\n`, { flag: "wx" });
+    createOnce(spotPath, `${JSON.stringify(spotCheckSample(info, records), null, 2)}\n`);
   }
   let spotCheck: SpotCheck | null = null;
   if (existsSync(spotPath)) {
+    let json: unknown;
     try {
-      spotCheck = SpotCheck.parse(JSON.parse(readFileSync(spotPath, "utf8")));
+      json = JSON.parse(readFileSync(spotPath, "utf8"));
     } catch (error) {
-      throw new EvalRunError(`${spotPath} is not a valid spot-check file`, { cause: error });
+      throw new EvalRunError(
+        `${spotPath} is not a valid spot-check file: it is not JSON; move it aside to draw a new sample`,
+        { cause: error },
+      );
     }
+    const parsed = SpotCheck.safeParse(json);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue?.path.map(String).join(".") || "the file";
+      throw new EvalRunError(
+        `${spotPath} is not a valid spot-check file: ${oneLine(`${where}: ${issue?.message ?? "invalid"}`).slice(0, 200)}; set "owner" to the number 0 or 1, or move the file aside to draw a new sample`,
+        { cause: parsed.error },
+      );
+    }
+    spotCheck = parsed.data;
     const { run } = spotCheck;
     if (
       run.startedAt !== info.startedAt ||
@@ -245,7 +288,8 @@ export function writeReport(runDir: string): { summary: EvalSummary; reportPath:
   const reportPath = join(runDir, REPORT_FILE);
   const temporary = `${reportPath}.${process.pid}.tmp`;
   try {
-    writeFileSync(temporary, renderReport(summary, records, spotCheck), { flag: "wx" });
+    // The temporary name is this process's own, so a stale one a killed run left is written over.
+    writeFileSync(temporary, renderReport(summary, records, spotCheck));
     renameSync(temporary, reportPath);
   } catch (error) {
     rmSync(temporary, { force: true });

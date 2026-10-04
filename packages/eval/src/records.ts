@@ -75,7 +75,28 @@ export const JudgmentRecord = z.object({
 });
 export type JudgmentRecord = z.infer<typeof JudgmentRecord>;
 
-export const RunRecord = z.discriminatedUnion("kind", [AnswerRecord, JudgmentRecord]);
+/**
+ * A judgment that failed (the judge's output was unusable twice): no grade, but its calls were
+ * paid for, so the report's cost counts them. A rerun judges the answer again.
+ */
+export const JudgeFailureRecord = z.object({
+  kind: z.literal("judge-failure"),
+  questionId: z.string().min(1),
+  agent: Agent,
+  reason: z.string(),
+  usage: TokenUsage,
+  usd: z.number().nonnegative().nullable(),
+  model: z.string().nullable(),
+  batch: z.boolean(),
+  at: IsoDateTime,
+});
+export type JudgeFailureRecord = z.infer<typeof JudgeFailureRecord>;
+
+export const RunRecord = z.discriminatedUnion("kind", [
+  AnswerRecord,
+  JudgmentRecord,
+  JudgeFailureRecord,
+]);
 export type RunRecord = z.infer<typeof RunRecord>;
 
 export const RUN_INFO_FILE = "run.json";

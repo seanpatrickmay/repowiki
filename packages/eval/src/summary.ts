@@ -8,10 +8,12 @@ import {
   type RunRecord,
 } from "./records.ts";
 
-/** Spec §9's pass test, on the held-out set: wiki accuracy ≥ 90% of repo accuracy… */
-export const ACCURACY_SHARE = 0.9;
-/** …and wiki tokens ≤ 40% of repo tokens. */
-export const TOKEN_SHARE = 0.4;
+/** Spec §9's pass test, on the held-out set: wiki accuracy at least 90% of repo accuracy… */
+export const ACCURACY_PERCENT = 90;
+/** …and wiki tokens at most 40% of repo tokens. */
+export const TOKEN_PERCENT = 40;
+export const ACCURACY_SHARE = ACCURACY_PERCENT / 100;
+export const TOKEN_SHARE = TOKEN_PERCENT / 100;
 
 /** Every token an answer cost, all four classes: caching changes the price, not the count. */
 export const tokensOf = (t: TokenUsage): number => t.in + t.out + t.cacheRead + t.cacheWrite;
@@ -43,13 +45,24 @@ export interface EvalSummary {
   agents: Record<AgentKind, AgentStats>;
   /** Every question answered by both agents, and every answer judged. */
   complete: boolean;
-  /** Spec §9's two conditions, when the run is complete. */
+  /**
+   * Spec §9's two conditions, when the run is complete and the repo agent got at least one answer
+   * right (at 0, 90% of its accuracy is 0 and any wiki accuracy would meet it).
+   */
   pass: { accuracy: boolean; tokens: boolean } | null;
-  /** Questions after which the build has paid for itself: a number, "never", or null (unknown). */
+  /**
+   * Questions after which the build has paid for itself: a number, "never", or null (unknown, or
+   * the run is incomplete).
+   */
   breakEven: number | "never" | null;
-  agentUsd: number;
-  judgeUsd: number;
+  /** What the calls cost, failed judgments included; null when any call's cost is unknown. */
+  agentUsd: number | null;
+  judgeUsd: number | null;
 }
+
+/** The sum of the records' costs, or null when any of them is unknown. */
+const costOf = (records: readonly { usd: number | null }[]): number | null =>
+  records.some((r) => r.usd === null) ? null : records.reduce((sum, r) => sum + (r.usd ?? 0), 0);
 
 /** Each question's answer and judgment per agent, keyed `<questionId>\0<agent>`; the last one wins. */
 export function latestRecords(records: readonly RunRecord[]) {
@@ -58,7 +71,7 @@ export function latestRecords(records: readonly RunRecord[]) {
   for (const r of records) {
     const key = `${r.questionId}\0${r.agent}`;
     if (r.kind === "answer") answers.set(key, r);
-    else judgments.set(key, r);
+    else if (r.kind === "judgment") judgments.set(key, r);
   }
   return { answers, judgments };
 }
@@ -75,46 +88,49 @@ export function summarize(info: RunInfo, records: readonly RunRecord[]): EvalSum
     const judged = mine.filter((m) => m.j !== undefined);
     const correct = judged.filter((m) => m.j?.score === 1).length;
     const tokens = mine.reduce((sum, m) => sum + tokensOf(m.a.usage), 0);
-    const usd = mine.reduce((sum, m) => sum + (m.a.usd ?? 0), 0);
+    const usd = costOf(mine.map((m) => m.a));
     return {
       answered: mine.length,
       judged: judged.length,
       correct,
       accuracy: judged.length === n ? correct / n : null,
       tokensPerQuestion: mine.length === 0 ? null : tokens / mine.length,
-      usdPerQuestion: mine.length === 0 ? null : usd / mine.length,
+      usdPerQuestion: mine.length === 0 || usd === null ? null : usd / mine.length,
       lastTurn: mine.filter((m) => m.a.stop === "turn-limit").length,
     };
   };
   const agents = { wiki: stats("wiki"), repo: stats("repo") };
   const complete = AGENTS.every((a) => agents[a].judged === n);
   const { wiki, repo } = agents;
+  // Once complete, both agents answered all n questions: compare whole-number totals, exactly.
+  const total = (agent: AgentKind) =>
+    info.questions.reduce((sum, q) => {
+      const a = answers.get(`${q.id}\0${agent}`);
+      return sum + (a === undefined ? 0 : tokensOf(a.usage));
+    }, 0);
   const pass =
-    complete && wiki.accuracy !== null && repo.accuracy !== null
+    complete && repo.correct > 0
       ? {
-          accuracy: wiki.accuracy >= ACCURACY_SHARE * repo.accuracy,
-          tokens: (wiki.tokensPerQuestion ?? 0) <= TOKEN_SHARE * (repo.tokensPerQuestion ?? 0),
+          accuracy: 100 * wiki.correct >= ACCURACY_PERCENT * repo.correct,
+          tokens: 100 * total("wiki") <= TOKEN_PERCENT * total("repo"),
         }
       : null;
-  const saved =
-    wiki.tokensPerQuestion === null || repo.tokensPerQuestion === null
-      ? null
-      : repo.tokensPerQuestion - wiki.tokensPerQuestion;
+  const saved = complete ? total("repo") - total("wiki") : null;
   const breakEven =
     info.buildTokens === null || saved === null
       ? null
       : saved <= 0
         ? "never"
-        : info.buildTokens / saved;
-  const sumUsd = (kind: RunRecord["kind"]) =>
-    records.reduce((s, r) => s + (r.kind === kind ? (r.usd ?? 0) : 0), 0);
+        : (info.buildTokens * n) / saved;
+  const ofKind = (kinds: readonly RunRecord["kind"][]) =>
+    costOf(records.filter((r) => kinds.includes(r.kind)));
   return {
     info,
     agents,
     complete,
     pass,
     breakEven,
-    agentUsd: sumUsd("answer"),
-    judgeUsd: sumUsd("judgment"),
+    agentUsd: ofKind(["answer"]),
+    judgeUsd: ofKind(["judgment", "judge-failure"]),
   };
 }
