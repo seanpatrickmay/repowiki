@@ -43,6 +43,7 @@ import { articleDueAsStored, estimateFor, needsKey, readInput, runUpdate } from 
 import {
   acquireBuildLock,
   describeError,
+  exitWithError,
   problemLine,
   requireApiKey,
   writeFileAtomic,
@@ -342,10 +343,5 @@ function dryRun(
 try {
   await main();
 } catch (err) {
-  const known = err instanceof UpdateError || err instanceof WikiBuildError;
-  const code = known || err instanceof StoreError ? 1 : exitCodeFor(err);
-  if (code === null) throw err;
-  // The flag is read raw: a usage error must still print, verbose or not.
-  console.error(describeError(err, process.argv.includes("--verbose")));
-  process.exit(code);
+  exitWithError(err);
 }

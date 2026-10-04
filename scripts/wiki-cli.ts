@@ -9,6 +9,8 @@ import {
   estimateTokens,
   markdownCodeSpan,
   type PageOutcome,
+  StoreError,
+  UpdateError,
   WikiBuildError,
 } from "@repowiki/engine";
 import {
@@ -20,7 +22,7 @@ import {
   type Provider,
   type TokenLedger,
 } from "@repowiki/llm";
-import { CliError } from "./manifest-cli.ts";
+import { CliError, exitCodeFor } from "./manifest-cli.ts";
 
 const USAGE =
   "usage: pnpm wiki:build <repo-path> [rev] [--out dir] [--config file.json] [--no-batch] [--dry-run] [--budget tokens] [--deadline minutes] [--verbose]";
@@ -598,4 +600,17 @@ export function describeError(err: unknown, verbose: boolean): string {
     cause = cause instanceof Error ? cause.cause : undefined;
   }
   return lines.join("\n");
+}
+
+/**
+ * Ends a script that failed: one redacted line through `describeError` (causes too with
+ * `--verbose`, read raw from argv so a usage error still prints), then exit 2 for a usage error
+ * and 1 for everything else, an unexpected error included: a bug is one line and a code, never a
+ * stack trace. The caller's `finally` blocks have already run, so its lock is free by now.
+ */
+export function exitWithError(err: unknown): never {
+  const known = err instanceof UpdateError || err instanceof WikiBuildError;
+  const code = known || err instanceof StoreError ? 1 : (exitCodeFor(err) ?? 1);
+  console.error(describeError(err, process.argv.includes("--verbose")));
+  process.exit(code);
 }

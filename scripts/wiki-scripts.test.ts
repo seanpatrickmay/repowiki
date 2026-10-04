@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { contentHash } from "@repowiki/core";
 import {
   architectureClaim,
@@ -30,6 +31,24 @@ import {
 import { openStore } from "@repowiki/engine";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILD_LOCK } from "./wiki-cli.ts";
+
+/** Damages every stored page body, as a hand-edited or half-migrated store would be. */
+function corruptPages(out: string): void {
+  const db = new DatabaseSync(join(out, "wiki.db"));
+  db.exec("UPDATE revisions SET body = '{}'");
+  db.close();
+}
+
+/** One redacted line and no stack: what a script prints for a bug, not a raw crash. */
+function expectOneLineFailure(result: { status: number | null; stderr: string }): void {
+  expect(result.status).toBe(1);
+  const lines = result.stderr.split("\n").filter((line) => line !== "");
+  // At most an estimate or progress line before the one error line, which is printable ASCII.
+  expect(lines.length).toBeLessThanOrEqual(2);
+  expect(lines.at(-1)).toMatch(/^[\x20-\x7e]+$/);
+  expect(result.stderr).not.toMatch(/^\s+at /m);
+  expect(result.stderr).not.toContain("node:internal");
+}
 
 let dir: string;
 beforeEach(() => {
@@ -106,6 +125,14 @@ describe("wiki-build.ts as a process (no network)", () => {
     expect(last).toContain("ANTHROPIC_API_KEY is not set");
     expect(last).toContain("pnpm wiki:build");
     expect(last).toContain("--env-file");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  });
+
+  it("reports an unexpected error as one line, exits 1 and frees its lock", () => {
+    const { repo, out } = wikiOf(["signals"], false);
+    corruptPages(out);
+    const result = run("scripts/wiki-build.ts", repo, "--out", out);
+    expectOneLineFailure(result);
     expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
   });
 
@@ -681,6 +708,14 @@ describe("wiki-update.ts as a process (no network)", () => {
     store.close();
   });
 
+  it("reports an unexpected error as one line, exits 1 and frees its lock", () => {
+    const { repo, out, second } = updatable();
+    corruptPages(out);
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out);
+    expectOneLineFailure(result);
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  });
+
   it("states the About article's cost when no page is dirty but the article is due", () => {
     const { repo, out, second } = untouched("paged");
     const result = run("scripts/wiki-update.ts", repo, second, "--out", out, "--dry-run");
@@ -981,6 +1016,19 @@ describe("wiki-replay.ts as a process (no network)", () => {
     // the tie-break call alone.
     expect(rows[2]).toMatch(/\| 1 \| 0 \| \$(?!0\.0000)\d+\.\d{4} \|$/);
     expect(rows[1]).toMatch(/\| 1 \| 1 \| \$\d+\.\d{4} \|$/);
+  });
+
+  it("reports an unexpected error as one line, exits 1, frees its lock and records the stop", () => {
+    const { repo, out, first, quiet } = replayable();
+    corruptPages(out);
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expectOneLineFailure(result);
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${quiet.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summary).toContain(`Stopped at step 1 (${quiet.slice(0, 7)}): `);
   });
 
   it("refuses up front, with the head unmoved, a step whose only call is the due About article", () => {
