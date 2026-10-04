@@ -1,4 +1,4 @@
-import { callCostUsd, type Provider, type ToolProvider } from "@repowiki/llm";
+import { callCostUsd, type Provider, priceFor, type ToolProvider } from "@repowiki/llm";
 import { runAgent } from "./agent.ts";
 import { JudgeError, judgeAnswer } from "./judge.ts";
 import { type AgentKind, agentSystemPrompt } from "./prompts.ts";
@@ -7,6 +7,7 @@ import {
   AGENTS,
   type AnswerRecord,
   appendRecord,
+  EvalRunError,
   openRun,
   type RunInfo,
   type RunRecord,
@@ -39,6 +40,20 @@ export interface EvalRunResult {
   unjudged: number;
 }
 
+/** A model with no price: the run could not count what it spends, so it never counts it as free. */
+export class UnpricedModelError extends EvalRunError {
+  readonly model: string;
+
+  constructor(model: string, options?: ErrorOptions) {
+    super(`no price for model ${model}: the run cannot count what it spends`, options);
+    this.model = model;
+  }
+}
+
+const requirePrice = (model: string) => {
+  if (priceFor(model) === null) throw new UnpricedModelError(model);
+};
+
 const key = (r: { questionId: string; agent: AgentKind }) => `${r.questionId}\0${r.agent}`;
 
 /**
@@ -59,6 +74,17 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
     records.push(record);
   };
   const answered = new Set(records.flatMap((r) => (r.kind === "answer" ? [key(r)] : [])));
+  const unaskedQuestions = () =>
+    info.questions.some((q) =>
+      AGENTS.some((agent) => !answered.has(key({ questionId: q.id, agent }))),
+    );
+  const unjudgedAnswers = () => {
+    const judged = new Set(records.flatMap((r) => (r.kind === "judgment" ? [key(r)] : [])));
+    return records.flatMap((r) => (r.kind === "answer" && !judged.has(key(r)) ? [r] : []));
+  };
+  // Refuse an unpriced model before the first paid call, so no spend ever goes uncounted.
+  if (unaskedQuestions()) requirePrice(info.models.evalAgent);
+  if (unaskedQuestions() || unjudgedAnswers().length > 0) requirePrice(info.models.evalJudge);
   let spent = 0;
   let stopped: EvalRunResult["stopped"] = null;
   const tools = { wiki: wikiTools, repo: repoTools };
@@ -77,7 +103,7 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
     log(
       `[${i + 1}/${info.questions.length}] ${question.id}: asking the ${pending.join(" and ")} agent${pending.length > 1 ? "s" : ""}`,
     );
-    const answers = await Promise.all(
+    const outcomes = await Promise.allSettled(
       pending.map((agent) =>
         runAgent({
           provider: agents,
@@ -88,9 +114,14 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
         }),
       ),
     );
-    answers.forEach((answer, j) => {
+    // Every answer that finished was paid for: record it, even when its sibling failed.
+    let unpriced: string | null = null;
+    for (const [j, outcome] of outcomes.entries()) {
+      if (outcome.status === "rejected") continue;
       const agent = pending[j] as AgentKind;
-      spent += answer.usd ?? 0;
+      const answer = outcome.value;
+      if (answer.usd === null) unpriced ??= answer.model ?? info.models.evalAgent;
+      else spent += answer.usd;
       append({
         kind: "answer",
         questionId: question.id,
@@ -99,11 +130,13 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
         at: now().toISOString(),
       });
       answered.add(key({ questionId: question.id, agent }));
-    });
+    }
+    const failure = outcomes.find((o) => o.status === "rejected");
+    if (failure !== undefined) throw failure.reason;
+    if (unpriced !== null) throw new UnpricedModelError(unpriced);
   }
-  const judged = new Set(records.flatMap((r) => (r.kind === "judgment" ? [key(r)] : [])));
   const questions = new Map(info.questions.map((q) => [q.id, q]));
-  const unjudged = records.flatMap((r) => (r.kind === "answer" && !judged.has(key(r)) ? [r] : []));
+  const unjudged = unjudgedAnswers();
   if (unjudged.length > 0)
     log(`judging ${unjudged.length} answers${options.batchJudge ? " in one batch" : ""}`);
   const settled = await Promise.allSettled(
@@ -119,14 +152,17 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
       failed++;
       if (outcome.reason instanceof JudgeError) {
         // The unusable attempts were paid for, though no judgment is recorded.
-        spent += callCostUsd(info.models.evalJudge, outcome.reason.usage, options.batchJudge) ?? 0;
+        const cost = callCostUsd(info.models.evalJudge, outcome.reason.usage, options.batchJudge);
+        if (cost === null) firstError ??= new UnpricedModelError(info.models.evalJudge);
+        else spent += cost;
         log(`${r.questionId} (${r.agent}): ${outcome.reason.message}; a rerun judges it`);
       } else firstError ??= outcome.reason;
       return;
     }
     const j = outcome.value;
     const usd = j.model === null ? 0 : callCostUsd(j.model, j.usage, j.batch);
-    spent += usd ?? 0;
+    if (usd === null) firstError ??= new UnpricedModelError(j.model as string);
+    else spent += usd;
     append({
       kind: "judgment",
       questionId: r.questionId,

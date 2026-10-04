@@ -1,14 +1,14 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { GenerateRequest, Provider } from "@repowiki/llm";
+import type { GenerateRequest, Provider, ToolProvider } from "@repowiki/llm";
 import { LlmOutputError } from "@repowiki/llm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { JudgeVerdict } from "./judge.ts";
 import { loadQuestions, selectQuestions } from "./questions.ts";
 import { EvalRunError, RESULTS_FILE, RUN_INFO_FILE, type RunInfo, readRecords } from "./records.ts";
 import { createRepoTools } from "./repo-tools.ts";
-import { type EvalRunOptions, runEval } from "./run.ts";
+import { type EvalRunOptions, runEval, UnpricedModelError } from "./run.ts";
 import { scriptedToolProvider } from "./test-provider.ts";
 import { type SampleWiki, SMOKE_QUESTIONS, sampleWiki } from "./test-wiki.ts";
 import { createWikiTools } from "./wiki-tools.ts";
@@ -52,14 +52,13 @@ const VERDICT: JudgeVerdict = {
 /** A judge that grades every answer 1, or throws what `fail` returns for an answer, and counts calls. */
 function judge(fail: (answer: string) => Error | null = () => null) {
   const requests: GenerateRequest<unknown>[] = [];
-  let settledBeforeLastCall = false;
-  let open = 0;
+  // How many calls had been made when each call settled: all of them, if the calls were made together.
+  const madeWhenSettled: number[] = [];
   const provider: Provider = {
     async generate<T>(request: GenerateRequest<T>) {
       requests.push(request as GenerateRequest<unknown>);
-      open++;
       await Promise.resolve();
-      if (open < requests.length) settledBeforeLastCall = true;
+      madeWhenSettled.push(requests.length);
       const answer = JSON.parse(String(request.messages[0]?.content)).candidate as string;
       const error = fail(answer);
       if (error !== null) throw error;
@@ -70,7 +69,7 @@ function judge(fail: (answer: string) => Error | null = () => null) {
       };
     },
   };
-  return { provider, requests, together: () => !settledBeforeLastCall };
+  return { provider, requests, madeWhenSettled };
 }
 
 function options(overrides: Partial<EvalRunOptions> = {}): EvalRunOptions {
@@ -108,7 +107,8 @@ describe("runEval", () => {
     ]);
     expect(result.records.filter((r) => r.kind === "judgment")).toHaveLength(6);
     expect(scripted.requests.every((r) => r.batch === true)).toBe(true);
-    expect(scripted.together()).toBe(true);
+    // No judge call settled before the last was made: one batch, not six calls in a row.
+    expect(scripted.madeWhenSettled).toEqual([6, 6, 6, 6, 6, 6]);
     expect(readRecords(dir)).toEqual(result.records);
     expect(JSON.parse(readFileSync(join(dir, RUN_INFO_FILE), "utf8"))).toEqual(info());
     // Six agent answers of one turn ($0.0015 each) and six judge calls ($0.001 each, halved).
@@ -174,6 +174,88 @@ describe("runEval", () => {
     const result = await runEval(options({ judge: grading.provider }));
     // Six agent answers, three graded judgments, and three failed ones of two attempts each.
     expect(result.spentUsd).toBeCloseTo(6 * 0.0015 + 3 * 0.0005 + 3 * 0.001, 10);
+  });
+
+  it("records the answer of an agent that finished when the other one fails, and a rerun asks only the failed agent", async () => {
+    const answering = scriptedToolProvider([], () => ({ answer: "wiki answer" }));
+    const failing: ToolProvider = {
+      async turn(request) {
+        if (request.system.includes("wiki")) return answering.provider.turn(request);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error("overloaded");
+      },
+    };
+    await expect(runEval(options({ agents: failing }))).rejects.toThrow("overloaded");
+    const kept = readRecords(dir);
+    expect(kept.map((r) => `${r.kind}/${r.questionId}/${r.agent}`)).toEqual([
+      "answer/smoke-where/wiki",
+    ]);
+    const rerun = scriptedToolProvider([], (_q, request) => ({
+      answer: request.system.includes("wiki") ? "wiki answer" : "repo answer",
+    }));
+    const result = await runEval(options({ agents: rerun.provider }));
+    // smoke-where is asked of the repo agent only; the two other questions of both.
+    expect(rerun.requests.filter((r) => r.system.includes("wiki"))).toHaveLength(2);
+    expect(rerun.requests).toHaveLength(5);
+    expect(result.records.filter((r) => r.kind === "answer")).toHaveLength(6);
+  });
+
+  it("refuses a model with no price before any call", async () => {
+    const agents = scriptedToolProvider([]);
+    const unpricedAgent = info({
+      models: { evalAgent: "claude-unknown-9", evalJudge: "claude-haiku-4-5" },
+    });
+    await expect(
+      runEval(options({ agents: agents.provider, info: unpricedAgent })),
+    ).rejects.toThrow(new UnpricedModelError("claude-unknown-9"));
+    expect(agents.requests).toHaveLength(0);
+    const scripted = judge();
+    const unpricedJudge = info({
+      models: { evalAgent: "claude-haiku-4-5", evalJudge: "claude-unknown-9" },
+    });
+    const other = mkdtempSync(join(tmpdir(), "repowiki-eval-run-"));
+    try {
+      await expect(
+        runEval(options({ runDir: other, judge: scripted.provider, info: unpricedJudge })),
+      ).rejects.toThrow(new UnpricedModelError("claude-unknown-9"));
+      expect(scripted.requests).toHaveLength(0);
+      expect(readRecords(other)).toEqual([]);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("stops after recording an answer whose reported model has no price, instead of counting it as free", async () => {
+    const agents = scriptedToolProvider([], () => ({
+      content: [{ type: "text", text: "answer" }],
+      stopReason: "end_turn",
+      usage: { in: 1000, out: 100, cacheRead: 0, cacheWrite: 0 },
+      model: "claude-unknown-9",
+    }));
+    await expect(runEval(options({ agents: agents.provider }))).rejects.toThrow(
+      new UnpricedModelError("claude-unknown-9"),
+    );
+    // The first question's two paid answers are on disk; no further question is asked.
+    expect(readRecords(dir).map((r) => `${r.questionId}/${r.agent}`)).toEqual([
+      "smoke-where/wiki",
+      "smoke-where/repo",
+    ]);
+    expect(agents.requests).toHaveLength(2);
+  });
+
+  it("records the judgments it was paid for, then stops when the judge's model has no price", async () => {
+    const inner = judge();
+    const unpriced: Provider = {
+      async generate<T>(request: GenerateRequest<T>) {
+        return { ...(await inner.provider.generate(request)), model: "claude-unknown-9" };
+      },
+    };
+    await expect(runEval(options({ judge: unpriced }))).rejects.toThrow(
+      new UnpricedModelError("claude-unknown-9"),
+    );
+    const judged = readRecords(dir).filter((r) => r.kind === "judgment");
+    expect(judged).toHaveLength(6);
+    expect(judged.every((r) => r.usd === null)).toBe(true);
   });
 
   it("records the judgments it was paid for before a provider failure stops the run", async () => {

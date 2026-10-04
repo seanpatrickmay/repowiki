@@ -47,24 +47,27 @@ export const JUDGE_SYSTEM = [
  * become spaces, and any other control character becomes U+FFFD (`toolText`). The spot-check shows
  * the owner this text, so nothing can be said to the judge that the owner cannot see.
  */
-function visibleText(text: string): string {
+export function visibleText(text: string): string {
   return toolText(
     text.replace(/[\p{Cf}\u{E0000}-\u{E007F}]/gu, "").replace(/[\u2028\u2029\u0085]/g, " "),
   );
 }
 
+/** An answer as the judge reads it: `visibleText`, then cut at MAX_JUDGED_ANSWER_CHARS. */
+export function judgedAnswer(answer: string): string {
+  const seen = visibleText(answer);
+  return seen.length <= MAX_JUDGED_ANSWER_CHARS
+    ? seen
+    : `${seen.slice(0, MAX_JUDGED_ANSWER_CHARS)} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`;
+}
+
 /** The judge's user turn: the three texts as JSON strings, so no answer can leave its string. */
 export function judgeTurn(question: EvalQuestion, answer: string): string {
-  const seen = visibleText(answer);
-  const candidate =
-    seen.length <= MAX_JUDGED_ANSWER_CHARS
-      ? seen
-      : `${seen.slice(0, MAX_JUDGED_ANSWER_CHARS)} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`;
   return JSON.stringify(
     {
       question: visibleText(question.question),
       reference: visibleText(question.reference),
-      candidate,
+      candidate: judgedAnswer(answer),
     },
     null,
     2,
