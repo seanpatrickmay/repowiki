@@ -182,6 +182,38 @@ describe("reviseManifest", () => {
     });
   });
 
+  it("refuses an empty answer while a drifted feature has lost every file, so the model retires it", async () => {
+    const emptied = makeManifest({
+      sha: SHA_B,
+      features: manifest.features,
+      membership: Object.fromEntries(
+        Object.entries(manifest.membership).filter(([, m]) => m.featureId !== "deliverables"),
+      ),
+    });
+    const retire = {
+      ...create,
+      kind: "retire",
+      feature: "deliverables",
+      title: "",
+      aliases: [],
+      clusters: [],
+    };
+    const { provider, requests } = scriptedProvider((_r, n) =>
+      n === 1 ? { operations: [] } : { operations: [retire] },
+    );
+    const outcome = await reviseManifest(
+      { ...input, manifest: emptied },
+      { provider, clusterOptions },
+    );
+    expect(requests[1]?.messages.at(-1)?.content).toContain(
+      '"deliverables" would have no files; merge or retire it',
+    );
+    expect(outcome.revised).toBe(true);
+    expect(outcome.manifest.features.find((f) => f.id === "deliverables")?.status).toEqual({
+      kind: "retired",
+    });
+  });
+
   it("throws a provider failure", async () => {
     const { provider } = scriptedProvider(() => new LlmError("network"));
     await expect(reviseManifest(input, { provider, clusterOptions })).rejects.toThrow("network");
