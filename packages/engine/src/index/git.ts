@@ -47,8 +47,14 @@ export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.Proce
   }
   env.GIT_NO_LAZY_FETCH = "1";
   // English messages, whatever the user's locale: the causes below are read from git's own words.
-  env.LC_ALL = "C";
-  env.LANG = "C";
+  // LC_ALL and LANGUAGE would override LC_MESSAGES, so they go; the user's character-type locale
+  // (what `git grep -i` and -E use on non-ASCII text) stays, with an LC_ALL folded into LC_CTYPE.
+  if (env.LC_ALL !== undefined && env.LC_ALL !== "" && env.LC_CTYPE === undefined) {
+    env.LC_CTYPE = env.LC_ALL;
+  }
+  delete env.LC_ALL;
+  delete env.LANGUAGE;
+  env.LC_MESSAGES = "C";
   return env;
 }
 
