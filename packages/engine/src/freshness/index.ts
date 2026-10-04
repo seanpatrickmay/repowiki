@@ -22,6 +22,16 @@ export {
   ManifestOperation,
   ManifestOperations,
 } from "./ops.ts";
+export {
+  knownFeature,
+  measureDrift,
+  type PagePlan,
+  planPages,
+  planUpdate,
+  UpdateError,
+  type UpdateInput,
+  type UpdatePlan,
+} from "./plan.ts";
 export { type LineRange, remapRange } from "./remap.ts";
 export {
   type CitationFate,
