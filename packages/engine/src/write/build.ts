@@ -409,12 +409,16 @@ export async function writePages(
     }
   });
 
-  // Wikipedia titles of every surviving claim of a page still being written, checked once for
-  // the whole run: a failed page's links are never shown, so they cost no lookup.
+  // Wikipedia titles of every surviving claim of a page still being written, and of the History
+  // claims it carries (which keep a link only through the same check), checked once for the
+  // whole run: a failed page's links are never shown, so they cost no lookup.
   const titles = states.flatMap((s) =>
     s.failure !== null
       ? []
-      : [...s.verified.values()].flatMap(({ claim }) => wikipediaTitlesIn(claim.text)),
+      : [
+          ...[...s.verified.values()].map(({ claim }) => claim),
+          ...(input.carry?.get(s.pack.featureId) ?? []),
+        ].flatMap((claim) => wikipediaTitlesIn(claim.text)),
   );
   const wikipedia = await checkTitles(titles, options.wikipedia, log);
 

@@ -695,11 +695,16 @@ describe("updateWiki", () => {
               ? page(request.featureId ?? "")
               : standard(request),
         );
+        // A Wikipedia title the store has not cached is left plain, never fetched.
+        const unreachable = async (): Promise<Response> => {
+          throw new TypeError("no network in tests");
+        };
         return updateWiki(store, await inputAt(repo, to), {
           ...options,
           driftThreshold: 0,
           clusterOptions,
           provider: p,
+          wikipediaFetch: unreachable,
         });
       }
 
@@ -798,6 +803,45 @@ describe("updateWiki", () => {
           ["Deliverables was added first.", [first]],
           ["Both commits shaped it.", [first, branch]],
         ]);
+      });
+
+      it("keeps the Wikipedia link of a carried History claim", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const stored = store.getCurrentRevision("deliverables");
+        if (stored === null) throw new Error("no page");
+        const linked = "Deliverables began as a [[wp:Message queue]] reader.";
+        store.putRevision({
+          ...stored,
+          id: "deliverables-linked",
+          parentId: stored.id,
+          reason: "update",
+          sections: stored.sections.map((s) => ({
+            ...s,
+            claims: s.claims.map((c) => (c.id === "c3" ? { ...c, text: linked } : c)),
+          })),
+        });
+        store.putWikipediaSummary(
+          "Message queue",
+          {
+            title: "Message queue",
+            extract: "A message queue is a form of communication.",
+            url: "https://en.wikipedia.org/wiki/Message_queue",
+          },
+          "2026-10-01T00:00:00Z",
+        );
+        const { merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () =>
+            wholePage(
+              "Work records",
+              "`complete()` marks a deliverable done.",
+              "src/deliverables/crud.py:4-7",
+            ),
+        );
+        expect(store.getCurrentRevision("deliverables")?.reason).toBe("manifest-change");
+        expect(historyOf("deliverables")).toEqual([[linked, [first]]]);
       });
 
       it("writes a page whose manifest-change write failed whole again on the next update", async () => {
