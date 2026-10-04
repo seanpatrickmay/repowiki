@@ -1,4 +1,5 @@
 import type { Manifest, Revision } from "@repowiki/core";
+import { quote } from "../verify/index.ts";
 import { linkTokensIn } from "./links.ts";
 
 /**
@@ -12,9 +13,9 @@ export function textLinkViolations(text: string, manifest: Manifest): string[] {
   for (const { target } of linkTokensIn(text)) {
     if (target.startsWith("wp:")) continue;
     const kind = byId.get(target)?.status.kind;
-    if (kind === undefined) problems.push(`[[${target}]] is not a feature id`);
+    if (kind === undefined) problems.push(`a link to ${quote(target)} is not a feature id`);
     else if (kind === "retired" || kind === "redirect") {
-      problems.push(`[[${target}]] is not an active feature id`);
+      problems.push(`a link to ${quote(target)} is not an active feature id`);
     }
   }
   return problems;
@@ -25,20 +26,21 @@ export function textLinkViolations(text: string, manifest: Manifest): string[] {
  * a See also id that is not an active feature of the manifest, or the page itself, and a
  * [[id]] token whose id is not an active feature (or disambiguation page) of the manifest. Tokens
  * are read the way the site reads them, so a crafted target (a path, a URL, a nested bracket) is
- * reported, not rendered. Empty for every revision the linker wrote.
+ * reported, not rendered. Empty for every revision the linker wrote. Targets and ids are model
+ * strings, so the messages quote them (see `quote`).
  */
 export function linkViolations(revision: Revision, manifest: Manifest): string[] {
   const byId = new Map(manifest.features.map((f) => [f.id, f]));
   const problems: string[] = [];
   for (const id of revision.seeAlso) {
     if (byId.get(id)?.status.kind !== "active" || id === revision.featureId) {
-      problems.push(`${revision.featureId}: See also lists ${id}, which has no page`);
+      problems.push(`${revision.featureId}: See also lists ${quote(id)}, which has no page`);
     }
   }
   for (const section of revision.sections) {
     for (const claim of section.claims) {
       for (const problem of textLinkViolations(claim.text, manifest)) {
-        problems.push(`${revision.featureId} ${claim.id}: ${problem}`);
+        problems.push(`${revision.featureId} ${quote(claim.id)}: ${problem}`);
       }
     }
   }

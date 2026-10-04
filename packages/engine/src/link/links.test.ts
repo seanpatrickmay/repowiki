@@ -207,7 +207,7 @@ describe("fix round 1", () => {
     if (lead?.claims[0] === undefined) throw new Error("fixture has a lead");
     lead.claims[0].text = split("nowhere");
     expect(linkViolations(revision, linkManifest())).toEqual([
-      "signals lead-1: [[nowhere]] is not a feature id",
+      'signals "lead-1": a link to "nowhere" is not a feature id',
     ]);
   });
 

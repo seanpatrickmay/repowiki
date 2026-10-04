@@ -128,6 +128,23 @@ describe("createClaudeProvider", () => {
     expect(ledger.entries()).toHaveLength(1);
   });
 
+  it.each([
+    ["text that is not JSON", "Paris", "end_turn"],
+    ["JSON that misses the schema", '{"city":"Paris"}', "end_turn"],
+    ["a truncated answer", '{"city":', "max_tokens"],
+  ])(
+    "carries the ledgered usage and model on the LlmOutputError for %s",
+    async (_n, text, stop) => {
+      const { ledger, provider } = setup(cannedMessagesApi(text, stop).fetch);
+      const failure = await provider.generate(request).catch((e) => e);
+      expect(failure).toBeInstanceOf(LlmOutputError);
+      const [row] = ledger.entries();
+      expect(row?.tokens.in).toBeGreaterThan(0);
+      expect(failure.usage).toEqual(row?.tokens);
+      expect(failure.model).toBe(row?.model);
+    },
+  );
+
   it("caps the schema issues an LlmOutputError lists", async () => {
     const Many = z.object(
       Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`field${i}`, z.string()])),

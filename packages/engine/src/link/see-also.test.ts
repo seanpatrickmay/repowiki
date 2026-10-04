@@ -56,9 +56,9 @@ describe("linkViolations", () => {
     if (lead?.claims[0] === undefined) throw new Error("fixture has a lead");
     lead.claims[0].text = "Links [[nowhere]], [[wp:Cron]], [[billing|bills]] and `[[skip]]`.";
     expect(linkViolations(revision, linkManifest())).toEqual([
-      "signals: See also lists ghost, which has no page",
-      "signals: See also lists legacy-signals, which has no page",
-      "signals lead-1: [[nowhere]] is not a feature id",
+      'signals: See also lists "ghost", which has no page',
+      'signals: See also lists "legacy-signals", which has no page',
+      'signals "lead-1": a link to "nowhere" is not a feature id',
     ]);
   });
 
@@ -68,8 +68,8 @@ describe("linkViolations", () => {
     if (lead?.claims[0] === undefined) throw new Error("fixture has a lead");
     lead.claims[0].text = "[[legacy-signals]] [[retired-thing]] [[billing]] [[deliverables|d]]";
     expect(linkViolations(revision, linkManifest())).toEqual([
-      "signals lead-1: [[legacy-signals]] is not an active feature id",
-      "signals lead-1: [[retired-thing]] is not an active feature id",
+      'signals "lead-1": a link to "legacy-signals" is not an active feature id',
+      'signals "lead-1": a link to "retired-thing" is not an active feature id',
     ]);
   });
 
@@ -87,11 +87,23 @@ describe("linkViolations", () => {
       "`[[inside]]`",
     ].join(" ");
     expect(linkViolations(revision, linkManifest())).toEqual([
-      "signals lead-1: [[../../etc]] is not a feature id",
-      "signals lead-1: [[javascript:alert(1)]] is not a feature id",
-      "signals lead-1: [[ghost]] is not a feature id",
-      "signals lead-1: [[[[billing]] is not a feature id",
-      "signals lead-1: [[Billing]] is not a feature id",
+      'signals "lead-1": a link to "../../etc" is not a feature id',
+      'signals "lead-1": a link to "javascript:alert(1)" is not a feature id',
+      'signals "lead-1": a link to "ghost" is not a feature id',
+      'signals "lead-1": a link to "[[billing" is not a feature id',
+      'signals "lead-1": a link to "Billing" is not a feature id',
+    ]);
+  });
+
+  it("quotes a crafted target or claim id, escaping what would hide in a log line", () => {
+    const revision = makeRevision({ seeAlso: ["gh\u202Eost"] });
+    const lead = revision.sections[0];
+    if (lead?.claims[0] === undefined) throw new Error("fixture has a lead");
+    lead.claims[0].id = "lead\u202E-1";
+    lead.claims[0].text = "[[a\u202Eb]]";
+    expect(linkViolations(revision, linkManifest())).toEqual([
+      'signals: See also lists "gh\\u202eost", which has no page',
+      'signals "lead\\u202e-1": a link to "a\\u202eb" is not a feature id',
     ]);
   });
 });

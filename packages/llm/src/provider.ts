@@ -43,14 +43,32 @@ export class LlmError extends Error {
   }
 }
 
-/** The model answered, but not with valid output. Its tokens are already in the ledger. */
+/** What an answered call spent: the numbers the provider wrote to the ledger for it. */
+export interface AnsweredCall {
+  usage: TokenUsage;
+  /** The model id the API reported. */
+  model: string;
+}
+
+/**
+ * The model answered, but not with valid output. Its tokens are already in the ledger, and a
+ * provider that knows them also puts them here, so a caller can total a page's cost.
+ */
 export class LlmOutputError extends LlmError {
   /** The raw text the model returned, for a retry prompt. */
   readonly text: string;
+  /** The tokens the answered call used; absent when the provider does not report them. */
+  readonly usage?: TokenUsage;
+  /** The model id that answered; absent when the provider does not report it. */
+  readonly model?: string;
 
-  constructor(message: string, text: string) {
+  constructor(message: string, text: string, answered?: AnsweredCall) {
     super(message);
     this.text = text;
+    if (answered !== undefined) {
+      this.usage = answered.usage;
+      this.model = answered.model;
+    }
   }
 }
 
