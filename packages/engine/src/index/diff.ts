@@ -1,0 +1,168 @@
+import { spawnSync } from "node:child_process";
+import { assertSha, GitError, git, scrubbedGitEnv } from "./git.ts";
+
+/**
+ * One hunk of a zero-context diff, as git writes it: `oldCount` lines from `oldStart` became
+ * `newCount` lines from `newStart`. A count of 0 is a pure insertion (old side) or deletion (new
+ * side), placed after line `oldStart` or `newStart`.
+ */
+export interface Hunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+}
+
+/** How one regular file differs between two commits. */
+export interface FileChange {
+  status: "added" | "modified" | "deleted" | "renamed";
+  /** The path at the older commit; null when the file was added. */
+  oldPath: string | null;
+  /** The path at the newer commit; null when the file was deleted. */
+  newPath: string | null;
+  /** The changed line ranges of a modified or renamed text file, in order; empty otherwise. */
+  hunks: Hunk[];
+  /** True when git diffs the two versions as binary, so there are no hunks to follow. */
+  binary: boolean;
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/** The hunks of a `git diff -U0` text, and whether git called the files binary. */
+export function parseHunks(diff: string): { hunks: Hunk[]; binary: boolean } {
+  const hunks: Hunk[] = [];
+  let binary = false;
+  for (const line of diff.split("\n")) {
+    const match = HUNK_HEADER.exec(line);
+    if (match !== null) {
+      hunks.push({
+        oldStart: Number(match[1]),
+        oldCount: match[2] === undefined ? 1 : Number(match[2]),
+        newStart: Number(match[3]),
+        newCount: match[4] === undefined ? 1 : Number(match[4]),
+      });
+    } else if (line.startsWith("Binary files ")) binary = true;
+  }
+  return { hunks, binary };
+}
+
+/** A regular file's mode (100644 or 100755); symlinks and submodules are not indexed. */
+const isFile = (mode: string): boolean => mode.startsWith("100");
+
+/** Hunks between two blobs, by object id, so no path is ever parsed out of diff text. */
+function blobHunks(
+  repo: string,
+  oldOid: string,
+  newOid: string,
+): { hunks: Hunk[]; binary: boolean } {
+  if (oldOid === newOid) return { hunks: [], binary: false };
+  const text = git(repo, [
+    "diff",
+    "-U0",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--end-of-options",
+    oldOid,
+    newOid,
+  ]).toString("utf8");
+  return parseHunks(text);
+}
+
+/**
+ * Every regular file that differs between commits `from` and `to`, with its line hunks: git's
+ * rename detection (-M) pairs a moved file with its new path. Read-only plumbing, NUL-separated,
+ * so no path text can forge an entry. A symlink or submodule is not a file: one that became a
+ * file is added, a file that became one is deleted. A copy that the caller's git config reports
+ * counts as an added file.
+ */
+export function diffCommits(repo: string, from: string, to: string): FileChange[] {
+  assertSha(from);
+  assertSha(to);
+  if (from === to) return [];
+  const tokens = git(repo, [
+    "diff",
+    "--raw",
+    "-z",
+    "-M",
+    "--no-abbrev",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--end-of-options",
+    from,
+    to,
+  ])
+    .toString("utf8")
+    .split("\0");
+  const changes: FileChange[] = [];
+  let i = 0;
+  while (i < tokens.length && tokens[i] !== "") {
+    const meta = tokens[i] as string;
+    const [srcMode = "", dstMode = "", srcOid = "", dstOid = "", status = ""] = meta
+      .slice(1)
+      .split(" ");
+    if (!meta.startsWith(":") || status === "") {
+      throw new GitError(`unparseable diff entry between ${from} and ${to}`);
+    }
+    const twoPaths = status.startsWith("R") || status.startsWith("C");
+    const first = tokens[i + 1] ?? "";
+    const second = twoPaths ? (tokens[i + 2] ?? "") : first;
+    i += twoPaths ? 3 : 2;
+    const was = isFile(srcMode);
+    const is = isFile(dstMode);
+    const kind = status[0];
+    if (kind === "R" && was && is) {
+      changes.push({
+        status: "renamed",
+        oldPath: first,
+        newPath: second,
+        ...blobHunks(repo, srcOid, dstOid),
+      });
+    } else if (kind === "M" || kind === "T" || kind === "R") {
+      if (was && is) {
+        changes.push({
+          status: "modified",
+          oldPath: first,
+          newPath: second,
+          ...blobHunks(repo, srcOid, dstOid),
+        });
+      } else if (was) {
+        changes.push({
+          status: "deleted",
+          oldPath: first,
+          newPath: null,
+          hunks: [],
+          binary: false,
+        });
+      } else if (is) {
+        changes.push({ status: "added", oldPath: null, newPath: second, hunks: [], binary: false });
+      }
+    } else if ((kind === "A" || kind === "C") && is) {
+      changes.push({ status: "added", oldPath: null, newPath: second, hunks: [], binary: false });
+    } else if (kind === "D" && was) {
+      changes.push({ status: "deleted", oldPath: first, newPath: null, hunks: [], binary: false });
+    }
+  }
+  return changes;
+}
+
+/** True when `ancestor` is `descendant` or one of its ancestors. */
+export function isAncestor(repo: string, ancestor: string, descendant: string): boolean {
+  assertSha(ancestor);
+  assertSha(descendant);
+  const out = spawnSync("git", ["-C", repo, "merge-base", "--is-ancestor", ancestor, descendant], {
+    env: scrubbedGitEnv(),
+  });
+  if (out.error) throw new GitError(`could not run git: ${out.error.message}`);
+  if (out.status === 0) return true;
+  if (out.status === 1) return false;
+  throw new GitError(`git merge-base failed in ${repo}: ${out.stderr.toString("utf8").trim()}`);
+}
+
+/** Every commit reachable from `sha`, itself included. */
+export function reachableCommits(repo: string, sha: string): Set<string> {
+  assertSha(sha);
+  const out = git(repo, ["rev-list", "--end-of-options", sha]).toString("utf8");
+  return new Set(out.split("\n").filter((line) => line !== ""));
+}
