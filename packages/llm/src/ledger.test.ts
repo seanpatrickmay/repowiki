@@ -87,6 +87,15 @@ describe("runTotals (spec §6.4)", () => {
       at("build", SHA_A, 20),
       at(undefined, undefined, 99),
     ];
+    // The kind is part of the key: an update to a sha a build was at is a run of its own.
+    const both = runTotals([...entries, at("update", SHA_A, 7)]);
+    expect(both.map((r) => [r.kind, r.sha, r.tokens.in])).toEqual([
+      ["build", SHA_A, 30],
+      ["update", SHA_B, 5],
+      ["update", SHA_A, 7],
+    ]);
+    // A row with only one of the two run fields is left out too.
+    expect(runTotals([at("build", undefined, 1), at(undefined, SHA_A, 1)])).toEqual([]);
     expect(runTotals(entries)).toEqual([
       {
         kind: "build",
@@ -101,5 +110,50 @@ describe("runTotals (spec §6.4)", () => {
         tokens: { in: 5, out: 1, cacheRead: 2, cacheWrite: 3 },
       },
     ]);
+  });
+
+  it("counts an answer a resumed run collected through the journal once, with the run that paid", () => {
+    const row = (runId: string, requestKey: string, n: number, collected = false) =>
+      makeLedgerEntry({
+        runId,
+        batch: true,
+        runKind: "update",
+        sha: SHA_B,
+        requestKey,
+        ...(collected ? { collected: true } : {}),
+        tokens: { in: n, out: 0, cacheRead: 0, cacheWrite: 0 },
+      });
+    const entries = [
+      // The killed run read its tie-break and round-1 answers, then stopped before storing.
+      row("update-1", "tie-break", 10),
+      row("update-1", "signals", 100),
+      // The resumed run collects both from the journal, then pays for its retry.
+      row("update-2", "tie-break", 10, true),
+      row("update-2", "signals", 100, true),
+      row("update-2", "signals-retry", 50),
+    ];
+    expect(runTotals(entries)).toEqual([
+      {
+        kind: "update",
+        sha: SHA_B,
+        calls: 3,
+        tokens: { in: 160, out: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+    ]);
+  });
+
+  it("counts a collected answer no earlier row paid for: its run was killed before reading it", () => {
+    const entries = [
+      makeLedgerEntry({
+        runId: "update-2",
+        batch: true,
+        runKind: "update",
+        sha: SHA_B,
+        requestKey: "signals",
+        collected: true,
+        tokens: { in: 100, out: 0, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+    expect(runTotals(entries).map((r) => r.calls)).toEqual([1]);
   });
 });

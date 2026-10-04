@@ -264,13 +264,23 @@ describe("createClaudeProvider", () => {
     await make(sent.fetch, sentLedger).generate({ ...request, batch: true });
     expect(sent.posts).toHaveLength(1);
     expect(sentLedger.entries()).toMatchObject([{ batch: true, runKind: "update", sha: run.sha }]);
+    const [paid] = sentLedger.entries();
+    expect(paid?.requestKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(paid).not.toHaveProperty("collected");
 
     const resumedLedger = createLedger();
     const resumed = cannedBatchApi([succeededLine("req-0", PARIS)]);
     await make(resumed.fetch, resumedLedger).generate({ ...request, batch: true });
     expect(resumed.posts).toHaveLength(0);
+    // Collected, not paid again: marked so the run totals count it once, with the run that paid.
     expect(resumedLedger.entries()).toMatchObject([
-      { batch: true, runKind: "update", sha: run.sha },
+      {
+        batch: true,
+        runKind: "update",
+        sha: run.sha,
+        requestKey: paid?.requestKey,
+        collected: true,
+      },
     ]);
   });
 
