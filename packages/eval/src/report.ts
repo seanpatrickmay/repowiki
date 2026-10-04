@@ -1,9 +1,16 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import type { QuestionKind } from "./questions.ts";
 import { AGENTS, EvalRunError, type RunRecord, readRecords, readRunInfo } from "./records.ts";
-import { SPOT_CHECK_FILE, SPOT_CHECK_SIZE, SpotCheck, spotCheckSample } from "./spot-check.ts";
+import {
+  SPOT_CHECK_FILE,
+  SPOT_CHECK_SIZE,
+  SpotCheck,
+  spotCheckEntry,
+  spotCheckSample,
+} from "./spot-check.ts";
 import {
   ACCURACY_SHARE,
   type EvalSummary,
@@ -147,11 +154,22 @@ export function renderReport(
       "",
     );
   } else {
-    // The judge's grade is read from results.jsonl; the copy in spot-check.json is never used.
-    const entries = spotCheck.judgments.map((j) => ({
-      ...j,
-      judge: judgments.get(`${j.questionId}\0${j.agent}`)?.score ?? null,
-    }));
+    // The file is blind: each entry's key is joined back to its agent and judgment here.
+    const byEntry = new Map(
+      [...judgments.values()].map((j) => [
+        spotCheckEntry(info.startedAt, j.questionId, j.agent),
+        j,
+      ]),
+    );
+    const entries = spotCheck.answers.map((a) => {
+      const j = byEntry.get(a.entry);
+      return {
+        ...a,
+        agent: j?.agent,
+        judge: j?.score ?? null,
+        reason: j === undefined ? "" : visibleText(j.reason),
+      };
+    });
     const marked = entries.filter((j) => j.owner !== null);
     const compared = marked.filter((j) => j.judge !== null);
     const unmatched = marked.length - compared.length;
@@ -176,7 +194,7 @@ export function renderReport(
         .filter((j) => j.owner !== j.judge)
         .map(
           (j) =>
-            `- Disagrees on ${cell(j.questionId)} (${j.agent}): the judge gave ${j.judge}, the owner ${j.owner}.`,
+            `- Disagrees on ${cell(j.questionId)} (${j.agent}): the judge gave ${j.judge}, the owner ${j.owner}. The judge's reason: ${cell(j.reason, 500)}`,
         ),
       "",
     );
@@ -211,6 +229,17 @@ export function writeReport(runDir: string): { summary: EvalSummary; reportPath:
       spotCheck = SpotCheck.parse(JSON.parse(readFileSync(spotPath, "utf8")));
     } catch (error) {
       throw new EvalRunError(`${spotPath} is not a valid spot-check file`, { cause: error });
+    }
+    const { run } = spotCheck;
+    if (
+      run.startedAt !== info.startedAt ||
+      run.set !== info.set ||
+      run.repo !== info.repo ||
+      run.head !== info.head
+    ) {
+      throw new EvalRunError(
+        `${spotPath} is from another run (begun ${oneLine(run.startedAt)}), not this one (begun ${info.startedAt}); move it aside to draw a new sample`,
+      );
     }
   }
   const reportPath = join(runDir, REPORT_FILE);

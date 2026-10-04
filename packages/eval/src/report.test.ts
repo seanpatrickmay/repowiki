@@ -2,11 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EvalRunError, openRun, RESULTS_FILE, type RunRecord } from "./records.ts";
+import { AGENTS, EvalRunError, openRun, RESULTS_FILE, type RunRecord } from "./records.ts";
 import { REPORT_FILE, renderReport, writeReport } from "./report.ts";
-import { SPOT_CHECK_FILE, SpotCheck, spotCheckSample } from "./spot-check.ts";
+import { SPOT_CHECK_FILE, SpotCheck, spotCheckEntry, spotCheckSample } from "./spot-check.ts";
 import { summarize } from "./summary.ts";
-import { info, records } from "./test-records.ts";
+import { AT, info, records } from "./test-records.ts";
 
 describe("renderReport", () => {
   it("reports both agents, the pass test, the break-even point and each question", () => {
@@ -56,55 +56,72 @@ describe("renderReport", () => {
   });
   it("is counted in the report once the owner marks it", () => {
     const check = spotCheckSample(info(), records());
-    check.judgments[0] = { ...(check.judgments[0] as (typeof check.judgments)[0]), owner: 1 };
-    const first = check.judgments[1] as (typeof check.judgments)[0];
-    check.judgments[1] = { ...first, owner: first.judgeScore === 1 ? 0 : 1 };
+    const first = check.answers[0] as (typeof check.answers)[0];
+    const second = check.answers[1] as (typeof check.answers)[0];
+    const judged = judgedAs(second);
+    check.answers[0] = { ...first, owner: 1 };
+    check.answers[1] = { ...second, owner: judged.score === 1 ? 0 : 1 };
     const text = renderReport(summarize(info(), records()), records(), check);
     expect(text).toContain("The owner marked 2 of 8 judgments in spot-check.json and agrees with");
-    expect(text).toContain(`- Disagrees on ${first.questionId} (${first.agent})`);
+    expect(text).toContain(
+      `- Disagrees on ${second.questionId} (${judged.agent}): the judge gave ${judged.score}, the owner ${judged.score === 1 ? 0 : 1}. The judge's reason: `,
+    );
   });
 });
 
-describe("the owner's agreement with the judge", () => {
-  const resultScore = (j: { questionId: string; agent: string }) => {
-    const found = records().find(
-      (r) => r.kind === "judgment" && r.questionId === j.questionId && r.agent === j.agent,
+/** The judgment and agent behind a spot-check entry, from results.jsonl. */
+function judgedAs(entry: { entry: string; questionId: string }, recorded = records()) {
+  for (const agent of AGENTS) {
+    if (spotCheckEntry(info().startedAt, entry.questionId, agent) !== entry.entry) continue;
+    const found = recorded.find(
+      (r) => r.kind === "judgment" && r.questionId === entry.questionId && r.agent === agent,
     );
-    return found?.kind === "judgment" ? found.score : null;
-  };
+    return { agent, score: found?.kind === "judgment" ? found.score : null };
+  }
+  throw new Error(`no agent for ${entry.entry}`);
+}
 
-  it("follows results.jsonl, not the judge's grade copied into spot-check.json", () => {
+describe("the owner's agreement with the judge", () => {
+  it("joins each entry to its judgment in results.jsonl and names the agent only there", () => {
     const check = spotCheckSample(info(), records());
-    // The file's copy of the judge's grade is flipped on every entry; the owner marks the real grade.
-    check.judgments = check.judgments.map((j) => ({
-      ...j,
-      judgeScore: j.judgeScore === 1 ? 0 : 1,
-      owner: resultScore(j),
-    }));
+    check.answers = check.answers.map((a) => ({ ...a, owner: judgedAs(a).score }));
     const text = renderReport(summarize(info(), records()), records(), check);
     expect(text).toContain(
       "The owner marked 8 of 8 judgments in spot-check.json and agrees with 8.",
     );
     expect(text).not.toContain("Disagrees on");
-    // And the other way round: the file's copy says they agree, results.jsonl says they do not.
-    check.judgments = check.judgments.map((j) => ({ ...j, judgeScore: 1, owner: 1 }));
-    const wrong = check.judgments.filter((j) => resultScore(j) === 0);
+    check.answers = check.answers.map((a) => ({ ...a, owner: 1 }));
+    const wrong = check.answers.filter((a) => judgedAs(a).score === 0);
     const again = renderReport(summarize(info(), records()), records(), check);
     expect(wrong.length).toBeGreaterThan(0);
     expect(again).toContain(`agrees with ${8 - wrong.length}.`);
-    for (const j of wrong) {
+    for (const a of wrong) {
       expect(again).toContain(
-        `- Disagrees on ${j.questionId} (${j.agent}): the judge gave 0, the owner 1.`,
+        `- Disagrees on ${a.questionId} (${judgedAs(a).agent}): the judge gave 0, the owner 1. The judge's reason: Names \\| another file.`,
       );
     }
   });
 
+  it("shows the judge's reason where they disagree as text the owner can see", () => {
+    const hostile = records().map((r) =>
+      r.kind === "judgment" && r.score === 0
+        ? { ...r, reason: "Wrong\u202E file\u200B, see [x](https://e.example)\n# heading" }
+        : r,
+    );
+    const check = spotCheckSample(info(), hostile);
+    check.answers = check.answers.map((a) => ({ ...a, owner: 1 }));
+    const text = renderReport(summarize(info(), hostile), hostile, check);
+    const line = text.split("\n").find((l) => l.startsWith("- Disagrees on")) ?? "";
+    expect(line).toContain("The judge's reason: Wrong file, see ");
+    expect(line).not.toMatch(/[\u200B\u202E]/);
+  });
+
   it("does not count a marked entry that has no judgment in results.jsonl", () => {
     const check = spotCheckSample(info(), records());
-    check.judgments = check.judgments.map((j) => ({ ...j, owner: resultScore(j) }));
+    check.answers = check.answers.map((a) => ({ ...a, owner: judgedAs(a).score }));
     const kept = records().filter((r) => !(r.kind === "judgment" && r.questionId === "q1"));
     const text = renderReport(summarize(info(), kept), kept, check);
-    const orphans = check.judgments.filter((j) => j.questionId === "q1").length;
+    const orphans = check.answers.filter((a) => a.questionId === "q1").length;
     expect(orphans).toBeGreaterThan(0);
     expect(text).toContain(`agrees with ${8 - orphans}.`);
     expect(text).toContain(`${orphans} marked entries have no judgment in results.jsonl`);
@@ -113,8 +130,8 @@ describe("the owner's agreement with the judge", () => {
   it("states a spot-check of fewer than 10 entries, or none", () => {
     const check = spotCheckSample(info(), records());
     const text = renderReport(summarize(info(), records()), records(), check);
-    expect(text).toContain("Spec §9 asks for 10; this spot-check has 8.");
-    check.judgments = [];
+    expect(text).toContain("Spec \u00A79 asks for 10; this spot-check has 8.");
+    check.answers = [];
     const empty = renderReport(summarize(info(), records()), records(), check);
     expect(empty).toContain("spot-check.json holds no judgments.");
     expect(empty).not.toContain("marked none of the 0");
@@ -150,12 +167,16 @@ describe("writeReport", () => {
       writeReport(dir);
       const path = join(dir, SPOT_CHECK_FILE);
       const check = SpotCheck.parse(JSON.parse(readFileSync(path, "utf8")));
-      check.judgments = check.judgments.map((j) => ({ ...j, owner: j.judgeScore }));
+      check.answers = check.answers.map((a) => ({ ...a, owner: judgedAs(a).score }));
       writeFileSync(path, JSON.stringify(check));
       writeReport(dir);
       expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(check);
       expect(readFileSync(join(dir, REPORT_FILE), "utf8")).toContain(
         "The owner marked 8 of 8 judgments in spot-check.json and agrees with 8.",
+      );
+      writeFileSync(path, JSON.stringify({ ...check, run: { ...check.run, startedAt: AT } }));
+      expect(() => writeReport(dir)).toThrow(
+        `${path} is from another run (begun ${AT}), not this one (begun ${info().startedAt}); move it aside to draw a new sample`,
       );
       writeFileSync(path, "{");
       expect(() => writeReport(dir)).toThrow(EvalRunError);
