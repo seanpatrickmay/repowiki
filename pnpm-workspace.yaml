@@ -3,6 +3,9 @@ packages:
 onlyBuiltDependencies:
   - better-sqlite3
 ignoredBuiltDependencies:
+  - esbuild
   - tree-sitter-javascript
   - tree-sitter-python
   - tree-sitter-typescript
+ignoredOptionalDependencies:
+  - sharp

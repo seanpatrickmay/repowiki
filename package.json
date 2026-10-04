@@ -15,7 +15,10 @@
     "tracker:seed": "node scripts/tracker/run.ts",
     "index:repo": "node scripts/index-repo.ts",
     "manifest:build": "node --env-file=.env scripts/manifest-build.ts",
-    "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run"
+    "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run",
+    "site:build": "node packages/site/src/cli.ts build",
+    "site:preview": "node packages/site/src/cli.ts preview",
+    "site:demo": "node packages/site/src/demo.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

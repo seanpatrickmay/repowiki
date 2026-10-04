@@ -1,0 +1,11 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getSite } from "../site.ts";
+
+const { wiki } = getSite();
+---
+
+<Layout title="Main page">
+  <h1 class="page-title">Welcome to the {wiki.repo} wiki</h1>
+  <p>{wiki.pages.length} articles generated from commit <code>{wiki.head.slice(0, 7)}</code>.</p>
+</Layout>
