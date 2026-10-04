@@ -36,10 +36,12 @@ describe("Architecture revisions", () => {
   it("stores the article, makes the newest current and lists them oldest first", () => {
     expect(store.getCurrentArchitecture()).toBeNull();
     expect(store.listArchitectureHistory()).toEqual([]);
+    expect(store.countArchitectureRevisions()).toBe(0);
     store.putArchitecture(first);
     store.putArchitecture(second);
     expect(store.getCurrentArchitecture()).toEqual(second);
     expect(store.listArchitectureHistory().map((a) => a.id)).toEqual([ID_1, ID_2]);
+    expect(store.countArchitectureRevisions()).toBe(2);
   });
 
   it("refuses a parent that is not the current revision", () => {
@@ -153,7 +155,7 @@ describe("buildExport with an Architecture article", () => {
 
 describe("migration 7", () => {
   it("adds the table to a store at schema 6 without touching what it holds", () => {
-    expect(MIGRATIONS).toHaveLength(7);
+    expect(MIGRATIONS.length).toBeGreaterThanOrEqual(7);
     const dir = mkdtempSync(join(tmpdir(), "repowiki-architecture-"));
     try {
       const path = join(dir, "store.db");
@@ -170,7 +172,7 @@ describe("migration 7", () => {
       reopened.close();
 
       const after = new Database(path);
-      expect(after.pragma("user_version", { simple: true })).toBe(7);
+      expect(after.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
       expect(after.prepare("SELECT value FROM meta WHERE key = 'head'").get()).toEqual({
         value: "kept",
       });

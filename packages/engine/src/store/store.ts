@@ -102,7 +102,11 @@ export interface Store {
   listCurrentRevisions(): Revision[];
   /** Every revision of a feature, oldest first. */
   listHistory(featureId: string): Revision[];
-  /** Current claims with a code citation in path overlapping [startLine, endLine], bounds inclusive. */
+  /**
+   * Current claims with a code citation in path overlapping [startLine, endLine], bounds
+   * inclusive: one row per claim (its first overlapping citation by start, then end line),
+   * ordered by feature, claim, start and end line.
+   */
   findClaimsCitingRange(path: string, startLine: number, endLine: number): CitingClaim[];
   /**
    * Stores a revision of the Architecture article (F27) and makes it current. parentId must equal
@@ -114,6 +118,8 @@ export interface Store {
   getCurrentArchitecture(): Architecture | null;
   /** Every stored revision of the Architecture article, oldest first. */
   listArchitectureHistory(): Architecture[];
+  /** How many revisions of the Architecture article are stored. */
+  countArchitectureRevisions(): number;
 }
 
 /**
@@ -436,7 +442,7 @@ export function openStore(path: string): Store {
         throw new RangeError(`line bounds must be integers >= 1, got ${startLine}-${endLine}`);
       }
       if (startLine > endLine) throw new RangeError(`startLine ${startLine} > endLine ${endLine}`);
-      return db
+      const rows = db
         .prepare(
           `SELECT r.feature_id AS featureId, c.revision_id AS revisionId, c.claim_id AS claimId,
                   c.start_line AS startLine, c.end_line AS endLine
@@ -444,9 +450,17 @@ export function openStore(path: string): Store {
            JOIN current_revisions cur ON cur.revision_id = c.revision_id
            JOIN revisions r ON r.id = c.revision_id
            WHERE c.path = ? AND c.start_line <= ? AND c.end_line >= ?
-           ORDER BY r.feature_id, c.claim_id, c.start_line`,
+           ORDER BY r.feature_id, c.claim_id, c.start_line, c.end_line`,
         )
         .all(path, endLine, startLine) as CitingClaim[];
+      // A claim with two citations in the range has two rows; the first, in order, stands for it.
+      const seen = new Set<string>();
+      return rows.filter((row) => {
+        const key = `${row.revisionId}\0${row.claimId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     },
 
     putArchitecture(article) {
@@ -479,5 +493,8 @@ export function openStore(path: string): Store {
       (db.prepare("SELECT body FROM architecture_revisions ORDER BY seq").all() as BodyRow[]).map(
         (row) => Architecture.parse(JSON.parse(row.body)),
       ),
+
+    countArchitectureRevisions: () =>
+      (db.prepare("SELECT COUNT(*) AS n FROM architecture_revisions").get() as { n: number }).n,
   };
 }

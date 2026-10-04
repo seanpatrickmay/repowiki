@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WikiExport } from "@repowiki/core";
@@ -75,6 +75,31 @@ describe("writeExport", () => {
     const text = readFileSync(out, "utf8");
     expect(text.endsWith("\n")).toBe(true);
     expect(WikiExport.parse(JSON.parse(text))).toEqual(buildExport(store, options));
+  });
+
+  it("replaces the previous export and leaves no temporary file (issue #53)", () => {
+    seed();
+    const out = join(dir, "export.json");
+    writeFileSync(out, "old");
+    writeExport(store, out, options);
+    expect(WikiExport.parse(JSON.parse(readFileSync(out, "utf8"))).head).toBe(SHA_B);
+    expect(readdirSync(dir)).toEqual(["export.json"]);
+  });
+
+  it("removes its temporary file and throws when the export cannot be put in place", () => {
+    seed();
+    const out = join(dir, "taken");
+    mkdirSync(join(out, "child"), { recursive: true });
+    expect(() => writeExport(store, out, options)).toThrow();
+    expect(readdirSync(dir)).toEqual(["taken"]);
+  });
+
+  it("leaves the previous export in place when the store cannot be exported", () => {
+    const out = join(dir, "export.json");
+    writeFileSync(out, "old");
+    expect(() => writeExport(store, out, options)).toThrow(EmptyStoreError);
+    expect(readFileSync(out, "utf8")).toBe("old");
+    expect(readdirSync(dir)).toEqual(["export.json"]);
   });
 });
 

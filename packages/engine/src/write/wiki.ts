@@ -200,7 +200,7 @@ export async function buildWiki(
       history: input.history,
       pages,
       parent: current,
-      number: store.listArchitectureHistory().length + 1,
+      number: store.countArchitectureRevisions() + 1,
     },
     {
       provider: options.provider,

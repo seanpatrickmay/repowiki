@@ -72,6 +72,13 @@ export const MIGRATIONS: readonly Migration[] = [
     body TEXT NOT NULL
   );
   `,
+  // A store whose manifests predate the llm_revised column (migration 4) has no drift baseline.
+  // Its first manifest is the one its build stored, so that one becomes the baseline (spec §6.1).
+  `
+  UPDATE manifests SET llm_revised = 1
+  WHERE seq = (SELECT MIN(seq) FROM manifests)
+    AND NOT EXISTS (SELECT 1 FROM manifests WHERE llm_revised = 1);
+  `,
 ];
 
 interface StoredFeature {
