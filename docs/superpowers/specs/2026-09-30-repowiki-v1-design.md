@@ -93,7 +93,7 @@ packages/
   llm/        Provider interface, claude/ implementation, TokenLedger
   engine/
     index/      tree-sitter symbols, import graph, git co-change -> RepoIndex@sha
-    cluster/    weighted graph -> candidate clusters (Louvain via graphology, fixed seed)
+    cluster/    weighted graph -> candidate clusters (deterministic Louvain in plain TS)
     manifest/   LLM names/merges/splits clusters; updates the prior manifest, never rebuilds it
     write/      context pack -> sections of claims with citations
     verify/     resolves every citation at its sha; enforces citation rules
@@ -107,6 +107,22 @@ packages/
 
 - **Data location:** outside the target repo. The default is `~/.repowiki/<repo-name>/`, overridable with `--out`. RepoWiki never writes to the repo it documents.
 - **Provider interface:** `generate({ system, messages, schema, cacheKey?, batch? }) -> { output, usage }`. Every call is recorded in the `TokenLedger` (input, output, cache-read, and cache-write tokens, model, purpose, featureId). Model IDs come from config, set per role (`manifest`, `write`, `tieBreak`, `evalAgent`, `evalJudge`). Every role defaults to the cheapest current model, `claude-haiku-4-5` ($1 / $5 per MTok, 200K context). Upgrading a role is a config change, not a code change. Because Haiku 4.5 has a 200K context window, every prompt (including the manifest call) must fit under 200K tokens; the manifest call receives cluster summaries, not source code.
+  - **Request fields (M3).** A request also carries `purpose` (the role: it selects the model and labels the ledger entry), an optional `featureId`, and `maxTokens`.
+  - **`cacheKey`.** It names a reusable prefix. The system prompt gets the `cache_control` breakpoint, and one key must always carry the same system text and model; a mismatch throws before any request is sent. Haiku 4.5 caches only prefixes of at least 4096 tokens, so shorter prompts are simply not cached.
+  - **`batch: true`.** Requests made in the same tick go out together as one Message Batch (50% off, stacking with caching). Each caller's promise settles with its own item, and an errored, expired or missing item rejects only that caller.
+  - **Output.** Output is structured JSON through `output_config.format`, generated from the request's zod schema, and is validated again on receipt. No `thinking` parameter is sent.
+  - **Retries.** The SDK retries failed requests itself (`maxRetries: 2`, so 3 attempts in all, per §6.3).
+  - **Ledger.** Each ledger entry records `runId`, `at`, `purpose`, `model`, `featureId`, `batch`, `cacheKey` and the four token counts, and is persisted in the store's `ledger` table. Cost is computed from the entries, never stored: each token count times the model's price for that class, halved for batch entries. For Haiku 4.5 the prices per MTok are $1 input, $5 output, $1.25 cache write (5-minute TTL) and $0.10 cache read.
+- **Clustering (M3).** The file graph has these edges:
+  - import edges of weight 1, scaled by `min(1, 4 / in-degree)` so barrels and shared fixtures don't glue the repo together;
+  - co-change edges of weight 2 × Jaccard, for pairs that changed together at least twice;
+  - a weak directory edge, 0.3 shared among each directory's siblings.
+
+  Non-code files join only through co-change and directory. Louvain runs at resolution 3 with no randomness: nodes are visited in sorted path order, and a tie keeps the current community, then prefers the lowest id. Clusters under 5 files are absorbed into the cluster they share the most edge weight with. Cluster ids (`c01`, …) number the clusters largest first, with ties broken by first path.
+- **Manifest build (M3).** One call (batched by default) receives a digest of every cluster's summary: the top files, exported symbols, directories, external packages and neighbouring clusters. The digest shrinks its listings until the estimate fits the 150K-token budget.
+  - **Answer.** The call returns the features (slug, title, 3–8 aliases) and exactly one `{ cluster, feature, role: core | supporting }` assignment per cluster.
+  - **Retry.** An answer that breaks a rule is retried once, with the reasons quoted and the cached prefix reused. Features left with no clusters are dropped rather than retried.
+  - **Scope.** M3 builds only a repo's first manifest. Moving a stored manifest to a new sha is `update` (§6.1, M6), never a rebuild.
 - **Languages in v1:** symbol-level indexing for Python, TypeScript, and TSX. Every other tracked file (including Terraform) is indexed at file level and joins features through co-change only.
 - **What the index reads:** git objects at the requested sha only (`ls-tree`, `cat-file`, `log`), never the working tree, so uncommitted changes in the target repo have no effect on the index.
 - **Symbols:** functions, classes, qualified methods, interfaces, type aliases, enums, and public module-level bindings (exported TS `const`s; Python top-level assignments to non-underscore names). Function bodies are not descended into. Repeated definitions of one name in a file (such as a property getter and setter) merge into one span. `.js`/`.jsx` files are indexed at file level.
@@ -170,15 +186,23 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
 ### Rules
 
 1. **Feature IDs are permanent.** A rename keeps the ID and appends the old title to `aliases`. A merge turns the absorbed ID into a `redirect`. A split turns the original ID into a `disambiguation` page. A retired feature stays readable in history. No feature URL ever stops resolving.
+   - **Lineage and status agree both ways (M3).** `create` is the first event and appears once. Every `rename`'s old title is in `aliases`.
+   - **Ending events.** At most one of `merge`, `split` and `retire` appears, and the status says the same thing:
+     - `merge` into X ⇔ `redirect` to X;
+     - `split` into S ⇔ `disambiguation` over exactly S;
+     - `retire` ⇔ `retired`;
+     - none of them ⇔ `active`.
+   - **Migration.** Store migration 2 repairs bodies stored under the older one-way rule.
 2. **Every non-lead claim needs at least one citation.** Lead claims have no citations of their own; they list the body claims they summarize in `supports`, and they go stale when any supported claim goes stale.
 3. **`limitation` claims** must cite evidence: a `TODO`/`FIXME` comment, a skipped test, or a reverting commit.
 4. **`history` claims** must cite at least one `commit` citation. The History section is append-only.
 5. **`commitDate` is the date shown to readers.** `generatedAt` and `tokens` are kept as cost evidence (F25).
 6. **`contentHash`** is the SHA-256 of the cited lines with line endings normalized. It is the only test of whether cited code changed.
 7. **Member ids** (`SymbolOrFileId`) are `path` or `path#symbol`, produced only by `memberId()` in `@repowiki/core`. The path part percent-encodes `%` as `%25` and `#` as `%23`, so the first `#` always separates the path from the symbol, while the symbol itself may contain `#` (for TS private members).
-8. **Feature ids are URL path segments.** They are lowercase kebab-case slugs of at most 64 characters (`FEATURE_ID_MAX_LENGTH`). The cap shipped before any feature-id producer (M3), so no stored body could break it and no store migration was needed.
-9. **The export carries full history.** `history[id]` holds every stored revision body, oldest first. Its last entry is the page, and each entry's `parentId` is the previous entry's id. The reader computes diffs from these bodies.
-10. **Claim text** is a small markdown subset: `**bold**`, `*italic*`, `` `code` `` and the link tokens `[[id]]`, `[[id|label]]`, `[[wp:Title]]` and `[[wp:Title|label]]`. Anything else is shown literally, HTML-escaped.
+8. **Membership covers every file and every symbol (M3).** In v1 a symbol inherits its file's feature. A member's weight is its cluster's role (`core` 1, `supporting` 0.5) × its centrality, which is the share of the file's edge weight that stays inside its feature (at least 0.05), rounded to 3 decimals.
+9. **Feature ids are URL path segments.** They are lowercase kebab-case slugs of at most 64 characters (`FEATURE_ID_MAX_LENGTH`). M3's manifest step caps ids at 40 characters (`proposal.ts`), so no stored body exceeds the 64-character schema cap and no migration is needed.
+10. **The export carries full history.** `history[id]` holds every stored revision body, oldest first. Its last entry is the page, and each entry's `parentId` is the previous entry's id. The reader computes diffs from these bodies.
+11. **Claim text** is a small markdown subset: `**bold**`, `*italic*`, `` `code` `` and the link tokens `[[id]]`, `[[id|label]]`, `[[wp:Title]]` and `[[wp:Title|label]]`. Anything else is shown literally, HTML-escaped.
 
 ## 6. Freshness
 
@@ -187,7 +211,7 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
 1. **Diff and incremental index.** Run `git diff -M shaA shaB`, re-parse only the changed files, and add the new commits to the co-change matrix. No LLM calls.
 2. **Remap citations.** For each code citation in a touched file, translate its line range through the diff hunks and follow renames. Recompute `contentHash` at `shaB`. If it matches, update the line numbers and the sha; the claim stays fresh. If it doesn't match, or the range was deleted, mark the claim stale. No LLM calls.
 3. **Find coverage gaps.** New symbols that no claim cites get assigned to a feature using import neighbours, co-change, and directory. The LLM (the tie-break model) is called only when those signals disagree. Each gap is recorded against its feature.
-4. **Check manifest drift.** Track cumulative membership churn per feature (weight added + weight removed, divided by the weight at the last manifest revision). If no feature exceeds `driftThreshold` (default 0.20, configurable), the manifest changes only by adding new members. If one does, a single constrained LLM call returns operations (`rename | merge | split | create | retire`) applied to the existing manifest, and the affected pages get `reason: "manifest-change"`.
+4. **Check manifest drift.** Track cumulative membership churn per feature (weight added + weight removed, divided by the weight at the last manifest revision). The last manifest revision is the drift baseline. It is persisted: the store marks every manifest an LLM produced or revised (`putManifest(m, { llmRevised: true })`), and `getDriftBaseline()` returns the latest one, so manifests that only gained members never reset the baseline. If no feature exceeds `driftThreshold` (default 0.20, configurable), the manifest changes only by adding new members. If one does, a single constrained LLM call returns operations (`rename | merge | split | create | retire`) applied to the existing manifest, and the affected pages get `reason: "manifest-change"`.
 5. **Rewrite dirty sections.** A section is dirty if it contains a stale claim. Coverage gaps make the feature's `how-it-works` section dirty. Membership changes cause the diagram to be rebuilt, and new commits are appended to `history`. The LLM receives the old section with stale claims marked, plus the new code context, and is told to reproduce unchanged claims word for word. The lead is rewritten only if a claim it `supports` changed.
 6. **Verify, link, store.** Only pages with changes get a new revision; all other pages carry forward unchanged. Links to merged IDs resolve through redirects.
 
@@ -243,6 +267,9 @@ prompt-cached prefix for every write call.
 - **Property tests (`fast-check`)** for citation remapping: random edits above, below, overlapping, and inside cited ranges, plus renames, each checked against the expected fresh/stale outcome.
 - **A fixture repo builder** creates small git repos with scripted histories inside tests. `index`, `freshness`, and `replay` are tested against them in CI.
 - **LLM record/replay cassettes.** CI never calls a live API. Live calls happen only in `eval` and in manual runs.
+  - **What a cassette is.** Record/replay works at the SDK's `fetch` layer. A cassette is committed JSON in a `__cassettes__/` directory beside its test, holding each exchange's request method, path and body and its response status, content type and body. It holds no headers, so no key can leak, and Biome skips these files.
+  - **Matching.** Replay matches requests by method, path and canonical body. A request with no matching recording throws `CassetteMissError` and never reaches the network.
+  - **Re-recording.** `pnpm cassettes:record <test files>` re-records live with the key from `.env`.
 - **Golden snapshots** of HTML rendered from a fixture export (the site reads only the export), plus a crawl that fails on any same-site link to a missing page or anchor.
 - **Schema validation:** every export is validated with the `core` zod schemas, and the site imports the same types.
 - **Replay invariants** on next-chief-of-staff (run manually, results recorded in the M6 PR):
