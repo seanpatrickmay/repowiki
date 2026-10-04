@@ -102,4 +102,49 @@ describe("runTotals (spec §6.4)", () => {
       },
     ]);
   });
+
+  it("counts an answer a resumed run collected through the journal once, with the run that paid", () => {
+    const row = (runId: string, requestKey: string, n: number, collected = false) =>
+      makeLedgerEntry({
+        runId,
+        batch: true,
+        runKind: "update",
+        sha: SHA_B,
+        requestKey,
+        ...(collected ? { collected: true } : {}),
+        tokens: { in: n, out: 0, cacheRead: 0, cacheWrite: 0 },
+      });
+    const entries = [
+      // The killed run read its tie-break and round-1 answers, then stopped before storing.
+      row("update-1", "tie-break", 10),
+      row("update-1", "signals", 100),
+      // The resumed run collects both from the journal, then pays for its retry.
+      row("update-2", "tie-break", 10, true),
+      row("update-2", "signals", 100, true),
+      row("update-2", "signals-retry", 50),
+    ];
+    expect(runTotals(entries)).toEqual([
+      {
+        kind: "update",
+        sha: SHA_B,
+        calls: 3,
+        tokens: { in: 160, out: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+    ]);
+  });
+
+  it("counts a collected answer no earlier row paid for: its run was killed before reading it", () => {
+    const entries = [
+      makeLedgerEntry({
+        runId: "update-2",
+        batch: true,
+        runKind: "update",
+        sha: SHA_B,
+        requestKey: "signals",
+        collected: true,
+        tokens: { in: 100, out: 0, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+    expect(runTotals(entries).map((r) => r.calls)).toEqual([1]);
+  });
 });
