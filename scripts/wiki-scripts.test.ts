@@ -1,5 +1,16 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contentHash } from "@repowiki/core";
@@ -50,8 +61,8 @@ function runWith(extra: NodeJS.ProcessEnv, script: string, ...args: string[]) {
   });
 }
 
-/** A one-commit git repository under the scratch dir, and its sha. */
-function gitRepo(): { repo: string; sha: string } {
+/** A one-commit git repository under the scratch dir, its sha, and git run in it. */
+function gitRepo(): { repo: string; sha: string; git: (...args: string[]) => string } {
   const repo = join(dir, "repo");
   mkdirSync(join(repo, "src"), { recursive: true });
   writeFileSync(join(repo, "src", "app.ts"), "export const app = 1;\n");
@@ -72,7 +83,7 @@ function gitRepo(): { repo: string; sha: string } {
   git("init", "-q", "-b", "main");
   git("add", "-A");
   git("commit", "-q", "-m", "init");
-  return { repo, sha: git("rev-parse", "HEAD").trim() };
+  return { repo, sha: git("rev-parse", "HEAD").trim(), git };
 }
 
 describe("wiki-build.ts as a process (no network)", () => {
@@ -470,5 +481,232 @@ describe("wiki-check.ts as a process (no network)", () => {
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("3 links name an active feature with no stored page");
+  });
+});
+
+describe("wiki-update.ts as a process (no network)", () => {
+  /**
+   * gitRepo's repository and a store under `out` whose wiki is at its commit. "pending": two
+   * features, only signals with a page, citing line 1 of src/app.ts (deliverables is written
+   * whole). "single": signals is the only feature. "paged": both features have a page citing
+   * line 1 of their file, and no article is stored.
+   */
+  function storedWiki(kind: "pending" | "single" | "paged" = "pending") {
+    const { repo, sha: base, git } = gitRepo();
+    let sha = base;
+    if (kind === "paged") {
+      writeFileSync(join(repo, "src", "other.ts"), "export const other = 1;\n");
+      git("add", "-A");
+      git("commit", "-q", "-m", "other");
+      sha = git("rev-parse", "HEAD").trim();
+    }
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    // Files and their symbols, as indexRepo names them: a manifest without the symbols would
+    // read as churn against the index and call for a drift round.
+    const membership: Record<string, { featureId: string; weight: number }> = {
+      "src/app.ts": { featureId: "signals", weight: 1 },
+      "src/app.ts#app": { featureId: "signals", weight: 1 },
+    };
+    if (kind === "paged") {
+      membership["src/other.ts"] = { featureId: "deliverables", weight: 1 };
+      membership["src/other.ts#other"] = { featureId: "deliverables", weight: 1 };
+    }
+    store.putManifest(
+      makeManifest({
+        sha,
+        membership,
+        ...(kind === "single" ? { features: [makeFeature()] } : {}),
+      }),
+      { llmRevised: true },
+    );
+    const page = (featureId: string, path: string, line: string) =>
+      makeRevision({
+        id: `${featureId}-1`,
+        featureId,
+        sha,
+        seeAlso: [],
+        sections: [
+          { key: "lead", claims: [leadClaim()] },
+          {
+            key: "overview",
+            claims: [
+              bodyClaim({
+                citations: [
+                  codeCitation({
+                    path,
+                    startLine: 1,
+                    endLine: 1,
+                    sha,
+                    symbol: null,
+                    contentHash: contentHash(line),
+                  }),
+                ],
+              }),
+            ],
+          },
+        ],
+      });
+    store.putRevision(page("signals", "src/app.ts", "export const app = 1;\n"));
+    if (kind === "paged") {
+      store.putRevision(page("deliverables", "src/other.ts", "export const other = 1;\n"));
+    }
+    store.setHead(sha);
+    store.close();
+    return { repo, out, sha, git };
+  }
+
+  /** storedWiki("pending") with a second commit that edits the line the stored page cites. */
+  function updatable(): { repo: string; out: string; first: string; second: string } {
+    const { repo, out, sha, git } = storedWiki();
+    writeFileSync(join(repo, "src", "app.ts"), "export const app = 2;\n");
+    git("commit", "-q", "-am", "Merge pull request #3 from me/app");
+    return { repo, out, first: sha, second: git("rev-parse", "HEAD").trim() };
+  }
+
+  /** A second commit that changes no file: nothing to update. */
+  function untouched(kind: "single" | "paged") {
+    const { repo, out, sha, git } = storedWiki(kind);
+    git("commit", "-q", "--allow-empty", "-m", "chore: nothing");
+    return { repo, out, first: sha, second: git("rev-parse", "HEAD").trim() };
+  }
+
+  it("is a usage error, exit 2, without its two positionals", () => {
+    const result = run("scripts/wiki-update.ts", "../repo");
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/^usage: pnpm wiki:update <repo-path> <rev> /);
+  });
+
+  it("is a one-line error, exit 1, when there is no wiki to update", () => {
+    const { repo, sha } = gitRepo();
+    const out = join(dir, "empty");
+    const result = run("scripts/wiki-update.ts", repo, sha, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(`no wiki at ${join(out, "wiki.db")}; run pnpm wiki:build first\n`);
+  });
+
+  it("states the estimate on a dry run and stops there, holding no lock", () => {
+    const { repo, out, first, second } = updatable();
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out, "--dry-run");
+    expect(result.stderr).toMatch(
+      /^1 pages to update, 1 to write whole, \d small calls: about [\d,]+ input tokens, estimated at \$\d+\.\d{4} \(batched\), plus at most \$\d+\.\d{4} if the About article is due\n$/,
+    );
+    expect(result.status).toBe(0);
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    expect(existsSync(join(out, "export.json"))).toBe(false);
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(first);
+    store.close();
+  });
+
+  it("refuses the commit the wiki is already at, in one line", () => {
+    const { repo, out, first } = updatable();
+    const result = run("scripts/wiki-update.ts", repo, first, "--out", out, "--dry-run");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(`the wiki is already at ${first}\n`);
+  });
+
+  it("fails once, up front, naming wiki:update, when calls are due and there is no key", () => {
+    const { repo, out, first, second } = updatable();
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out);
+    expect(result.status).toBe(1);
+    const message =
+      "ANTHROPIC_API_KEY is not set: pnpm wiki:update reads it from a .env file in the directory it runs in, if there is one (node --env-file-if-exists=.env); add it there, or run node --env-file=<path to .env> scripts/wiki-update.ts";
+    expect(result.stderr).toMatch(
+      new RegExp(
+        `^1 pages to update, 1 to write whole, [^\\n]*\\n${message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n$`,
+      ),
+    );
+    expect(result.stderr).not.toContain("wiki:build");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(first);
+    store.close();
+  });
+
+  it("needs no key when nothing cited changed, and writes its export and summary", () => {
+    const { repo, out, second } = untouched("single");
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out);
+    expect(result.stderr).toMatch(/^0 pages to update, 0 to write whole, 0 small calls: [^\n]*\n$/);
+    expect(result.status).toBe(0);
+    const summaryPath = join(out, `update-${second.slice(0, 7)}.md`);
+    expect(readFileSync(summaryPath, "utf8")).toContain("0 pages stored, 1 carried forward");
+    expect(result.stdout).toContain(`Wrote ${join(out, "export.json")} and ${summaryPath}`);
+    expect(JSON.parse(readFileSync(join(out, "export.json"), "utf8")).repo).toBe("repo");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    expect(readdirSync(out).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(second);
+    store.close();
+  });
+
+  it("replaces a symlink at the summary's name instead of writing through it", () => {
+    const { repo, out, second } = untouched("single");
+    const target = join(dir, "outside.md");
+    writeFileSync(target, "keep\n");
+    const summaryPath = join(out, `update-${second.slice(0, 7)}.md`);
+    symlinkSync(target, summaryPath);
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out);
+    expect(result.status).toBe(0);
+    expect(readFileSync(target, "utf8")).toBe("keep\n");
+    expect(lstatSync(summaryPath).isSymbolicLink()).toBe(false);
+    expect(readFileSync(summaryPath, "utf8")).toContain("# Update:");
+  });
+
+  it("states the About article's cost when no page is dirty but the article is due", () => {
+    const { repo, out, second } = untouched("paged");
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out, "--dry-run");
+    expect(result.status).toBe(0);
+    expect(result.stderr).toMatch(
+      /^0 pages to update, 0 to write whole, 0 small calls: about 0 input tokens, estimated at \$0\.0000 \(batched\), plus at most \$(?!0\.0000)\d+\.\d{4} if the About article is due\n$/,
+    );
+  });
+
+  it("refuses a target that is not after the wiki's commit, in one line", () => {
+    const { repo, out, first } = updatable();
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: repo,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_AUTHOR_NAME: "Fixture",
+          GIT_AUTHOR_EMAIL: "fixture@example.com",
+          GIT_COMMITTER_NAME: "Fixture",
+          GIT_COMMITTER_EMAIL: "fixture@example.com",
+        },
+      });
+    git("switch", "-q", "--orphan", "other");
+    writeFileSync(join(repo, "x.ts"), "export const x = 1;\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "other root");
+    const other = git("rev-parse", "HEAD").trim();
+    const result = run("scripts/wiki-update.ts", repo, other, "--out", out, "--dry-run");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      `${first} is not an ancestor of ${other}; an update only moves forward along history\n`,
+    );
+  });
+
+  it("is a one-line error, exit 1, for a rev that names no commit", () => {
+    const { repo, out } = updatable();
+    const result = run("scripts/wiki-update.ts", repo, "no-such-rev", "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(`${repo}: "no-such-rev" does not name a commit\n`);
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  });
+
+  it("refuses to start while another run holds the lock, and leaves the lock alone", () => {
+    const { repo, out, second } = updatable();
+    writeFileSync(join(out, BUILD_LOCK), "pid 1 since 2026-10-01T00:00:00.000Z\n");
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      `another wiki:build, wiki:update or wiki:replay is running on ${out} (${join(out, BUILD_LOCK)}); if none is, delete the lock file\n`,
+    );
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(true);
   });
 });

@@ -53,7 +53,7 @@ describe("estimateUpdate", () => {
       drifted: true,
       article: null,
     };
-    const batched = estimateUpdate(input, DEFAULT_MODELS.write, true);
+    const batched = estimateUpdate(input, DEFAULT_MODELS, true);
     expect(batched).toMatchObject({
       rewrites: 2,
       whole: 0,
@@ -62,14 +62,60 @@ describe("estimateUpdate", () => {
       outputTokens: 2 * ASSUMED_UPDATE_OUTPUT_TOKENS + 1000,
       articleUsd: null,
     });
-    const direct = estimateUpdate(input, DEFAULT_MODELS.write, false);
+    const direct = estimateUpdate(input, DEFAULT_MODELS, false);
     expect(direct.usd).toBeCloseTo(batched.usd * 2, 10);
     const withArticle = estimateUpdate(
       { ...input, article: { system: "a", budgetTokens: 30_000 } },
-      DEFAULT_MODELS.write,
+      DEFAULT_MODELS,
       true,
     );
     expect(withArticle.articleUsd).toBeGreaterThan(0);
+  });
+});
+
+describe("estimateUpdate by role", () => {
+  const input = {
+    rewrites: [{ tokens: 3000 }],
+    updateSystem: "u",
+    whole: [],
+    writeSystem: "w",
+    disputed: false,
+    drifted: false,
+    article: null,
+  };
+  const unpriced = "claude-unpriced";
+
+  it("prices the tie-break call at the tieBreak model and the drift call at the manifest model", () => {
+    const models = { ...DEFAULT_MODELS, tieBreak: unpriced, manifest: unpriced };
+    // Neither call is made, so neither model is asked for a price.
+    expect(estimateUpdate(input, models, true).usd).toBeGreaterThan(0);
+    expect(() => estimateUpdate({ ...input, disputed: true }, models, true)).toThrow(
+      `no price for model ${unpriced}`,
+    );
+    expect(() => estimateUpdate({ ...input, drifted: true }, models, true)).toThrow(
+      `no price for model ${unpriced}`,
+    );
+    const onlyManifest = { ...DEFAULT_MODELS, manifest: unpriced };
+    expect(estimateUpdate({ ...input, disputed: true }, onlyManifest, true).small).toBe(1);
+  });
+
+  it("prices the update, whole-page and article calls at the write model", () => {
+    const models = { ...DEFAULT_MODELS, write: unpriced };
+    expect(() => estimateUpdate(input, models, true)).toThrow(`no price for model ${unpriced}`);
+    expect(() =>
+      estimateUpdate({ ...input, rewrites: [], whole: [{ tokens: 1 }] }, models, true),
+    ).toThrow(`no price for model ${unpriced}`);
+    expect(() =>
+      estimateUpdate(
+        { ...input, rewrites: [], article: { system: "a", budgetTokens: 1 } },
+        models,
+        true,
+      ),
+    ).toThrow(`no price for model ${unpriced}`);
+    // Only small calls, priced at their own roles: the write model is never asked.
+    expect(
+      estimateUpdate({ ...input, rewrites: [], disputed: true, drifted: true }, models, true).usd,
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -91,7 +137,9 @@ describe("renderUpdateSummary", () => {
     carried: ["deliverables"],
     staleClaims: 1,
     failures: [],
+    refused: [],
     articleDue: null,
+    architectureSkipped: "current",
     architecture: null,
   } as unknown as WikiUpdate;
   const totals = {
@@ -148,5 +196,35 @@ describe("renderUpdateSummary", () => {
     );
     expect(summary).not.toContain("already current");
     expect(summary).toContain("| `signals` | update | 2 | 0 | stored |");
+  });
+
+  it("says a one-page wiki has too few pages for an article, not that it is current", () => {
+    const small = { ...update, architectureSkipped: "too few pages" } as unknown as WikiUpdate;
+    const summary = renderUpdateSummary("repo", small, null, totals);
+    expect(summary).toContain("| About article | 0 | 0 | 0 | skipped: fewer than two pages |");
+    expect(summary).not.toContain("already current");
+  });
+
+  it("shows why the assembler refused a rewrite, and the claims it kept stale", () => {
+    const refused = {
+      ...update,
+      rewrites: [
+        { featureId: "billing", keptStale: ["c1", "c2"], failure: null },
+        { featureId: "invoices", keptStale: [], failure: null },
+        { featureId: "signals", keptStale: [], failure: null },
+      ],
+      refused: [
+        { featureId: "billing", why: "links to nowhere: [[ghost]] | here" },
+        { featureId: "invoices", why: "nothing changed" },
+      ],
+    } as unknown as WikiUpdate;
+    const summary = renderUpdateSummary("repo", refused, null, totals);
+    expect(summary).toContain(
+      "| `billing` | update | 0 | 2 | `links to nowhere: [[ghost]] \\| here` |",
+    );
+    expect(summary).toContain("| `invoices` | update | 0 | 0 | `unchanged` |");
+    // A stored rewrite is not a refused one.
+    expect(summary).toContain("| `signals` | update | 2 | 0 | stored |");
+    expect(summary).not.toContain("| `signals` | update | 0 | 0 |");
   });
 });

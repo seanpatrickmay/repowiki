@@ -17,6 +17,7 @@
     "manifest:build": "node --env-file=.env scripts/manifest-build.ts",
     "wiki:build": "node --env-file-if-exists=.env scripts/wiki-build.ts",
     "wiki:check": "node scripts/wiki-check.ts",
+    "wiki:update": "node --env-file-if-exists=.env scripts/wiki-update.ts",
     "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run",
     "site:build": "node packages/site/src/cli.ts build",
     "site:preview": "node packages/site/src/cli.ts preview",

@@ -14,6 +14,8 @@ export {
   type WeightedEdge,
 } from "./cluster/index.ts";
 export {
+  articleDue,
+  DEFAULT_DRIFT_THRESHOLD,
   measureDrift,
   type PagePlan,
   planPages,
@@ -107,6 +109,7 @@ export {
   type BuildJournal,
   buildJournal,
   buildPack,
+  buildUpdatePack,
   buildWiki,
   type ContextPack,
   DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
@@ -115,6 +118,7 @@ export {
   MAX_PAGE_OUTPUT_TOKENS,
   MIN_ARCHITECTURE_PAGES,
   type PageOutcome,
+  updateSystemPrompt,
   type WikiBuild,
   WikiBuildError,
   type WikiBuildOptions,

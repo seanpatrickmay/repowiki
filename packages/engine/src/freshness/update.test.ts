@@ -230,8 +230,26 @@ describe("updateWiki", () => {
     const { provider: p, requests } = provider(() => new Error("no call expected"));
     const result = await updateWiki(store, await inputAt(repo, empty), { ...options, provider: p });
     expect(requests).toEqual([]);
-    expect(result).toMatchObject({ stored: [], carried: ["deliverables", "signals"], pr: null });
+    expect(result).toMatchObject({
+      stored: [],
+      carried: ["deliverables", "signals"],
+      pr: null,
+      architectureSkipped: "current",
+    });
     expect(store.getHead()).toBe(empty);
+  });
+
+  it("records why a rewrite that stored nothing was refused, and still carries its page", async () => {
+    ({ repo, store, first } = await builtWiki());
+    // A new file the page does not cite: the page is rewritten, and the model has nothing to add.
+    repo.write("src/signals/batch.py", "def drain(queue):\n    return list(queue)\n");
+    const added = repo.commit("feat: drain signals");
+    const { provider: p } = provider(() => ({ claims: [], diagram: { nodes: [], edges: [] } }));
+    const result = await updateWiki(store, await inputAt(repo, added), { ...options, provider: p });
+    expect(result.stored).toEqual([]);
+    expect(result.carried).toEqual(["deliverables", "signals"]);
+    expect(result.refused).toEqual([{ featureId: "signals", why: "nothing changed" }]);
+    expect(result.architectureSkipped).toBe("current");
   });
 
   it("stops before storing anything when a call fails", async () => {

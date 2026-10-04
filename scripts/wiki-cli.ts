@@ -1,15 +1,25 @@
-import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
   type ArchitectureOutcome,
+  type BuildJournal,
   type ContextPack,
   estimateTokens,
   markdownCodeSpan,
   type PageOutcome,
   WikiBuildError,
 } from "@repowiki/engine";
-import { callCostUsd, type LedgerTotals } from "@repowiki/llm";
+import {
+  callCostUsd,
+  createClaudeProvider,
+  type LedgerTotals,
+  LlmError,
+  type ModelConfig,
+  type Provider,
+  type TokenLedger,
+} from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 
 const USAGE =
@@ -138,18 +148,85 @@ function parse(argv: readonly string[], limit: boolean) {
   });
 }
 
-/** Why a build that needs a call cannot make one; `pnpm wiki:build` loads .env only if present. */
-export const KEYLESS_MESSAGE =
-  "ANTHROPIC_API_KEY is not set: pnpm wiki:build reads it from a .env file in the directory it runs in, if there is one (node --env-file-if-exists=.env); add it there, or run node --env-file=<path to .env> scripts/wiki-build.ts";
+/** The commands that make live calls and so need the key. */
+export type LiveCommand = "wiki:build" | "wiki:update";
+
+/** Why a run that needs a call cannot make one; the commands load .env only if present. */
+export function keylessMessage(command: LiveCommand): string {
+  return `ANTHROPIC_API_KEY is not set: pnpm ${command} reads it from a .env file in the directory it runs in, if there is one (node --env-file-if-exists=.env); add it there, or run node --env-file=<path to .env> scripts/${command.replace(":", "-")}.ts`;
+}
+
+/** Throws the one-line keyless LlmError when ANTHROPIC_API_KEY is unset or empty. */
+export function requireApiKey(command: LiveCommand): void {
+  if (!process.env.ANTHROPIC_API_KEY) throw new LlmError(keylessMessage(command));
+}
+
+export interface LazyClaudeOptions {
+  command: LiveCommand;
+  models: ModelConfig;
+  ledger: TokenLedger;
+  runId: string;
+  run: { kind: "build" | "update"; sha: string };
+  journal: BuildJournal;
+  deadlineMinutes: number | null;
+  log: (line: string) => void;
+}
+
+/**
+ * A Provider that builds the Claude provider on its first call, so a run that needs no call needs
+ * no API key; with no key that first call throws the command's keyless LlmError. Batch progress
+ * goes to `log`; the batch journal is the store's, so a killed run's batches are collected again.
+ */
+export function lazyClaudeProvider(options: LazyClaudeOptions): Provider {
+  let claude: Provider | undefined;
+  return {
+    generate: (request) => {
+      if (claude === undefined) requireApiKey(options.command);
+      claude ??= createClaudeProvider({
+        models: options.models,
+        ledger: options.ledger,
+        runId: options.runId,
+        run: options.run,
+        batchJournal: options.journal,
+        onBatchRequest: options.journal.tag,
+        ...(options.deadlineMinutes === null
+          ? {}
+          : { batchDeadlineMs: options.deadlineMinutes * 60_000 }),
+        onBatchCreated: (b) => options.log(`batch ${b.id} created (${b.requests} requests)`),
+        onBatchProgress: (p) =>
+          options.log(
+            `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
+          ),
+      });
+      return claude.generate(request);
+    },
+  };
+}
+
+/**
+ * Writes `text` to `path` as a whole or not at all: a temporary file beside it (created
+ * exclusively, so a planted link is never followed), then a rename, which replaces a symlink at
+ * `path` itself rather than writing through it.
+ */
+export function writeFileAtomic(path: string, text: string): void {
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, text, { flag: "wx" });
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}
 
 /** The advisory lock file a running wiki:build holds in its out dir. */
 export const BUILD_LOCK = "wiki-build.lock";
 /** A lock older than this is left over from a killed build, never a running one (a batch ends in 24 h). */
 const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
 
-/** True unless the lock names a pid no process has: a build killed hard leaves such a lock. */
-function holderAlive(path: string): boolean {
-  const pid = Number(/^pid (\d+) /.exec(readFileSync(path, "utf8"))?.[1]);
+/** True unless the lock text names a pid no process has: a build killed hard leaves such a lock. */
+function holderAlive(text: string): boolean {
+  const pid = Number(/^pid (\d+) /.exec(text)?.[1]);
   if (!Number.isSafeInteger(pid) || pid <= 0) return true;
   try {
     process.kill(pid, 0);
@@ -160,68 +237,128 @@ function holderAlive(path: string): boolean {
   }
 }
 
-/** Opens the lock file only if no other process has it; null when one does. */
-function openNew(path: string): number | null {
+const codeOf = (err: unknown) => (err as NodeJS.ErrnoException).code;
+
+/** Publishes `tmp` as `path` only if nothing is there: link fails with EEXIST, never replaces. */
+function linkNew(tmp: string, path: string): boolean {
   try {
-    return openSync(path, "wx");
+    linkSync(tmp, path);
+    return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return null;
+    if (codeOf(err) === "EEXIST") return false;
+    throw err;
+  }
+}
+
+/** A lock judged takeable: why, and which file (inode and content) was judged. */
+interface JudgedLock {
+  reason: string;
+  ino: number;
+  text: string;
+}
+
+/**
+ * Judges a lock someone holds: null while its holder runs, "freed" when it vanished while being
+ * looked at, otherwise why it can be taken over and exactly which file that judgment is about.
+ */
+function judgeLock(path: string): JudgedLock | "freed" | null {
+  try {
+    const { mtimeMs, ino } = statSync(path);
+    const text = readFileSync(path, "utf8");
+    if (Date.now() - mtimeMs >= STALE_LOCK_MS) {
+      return { reason: `ignoring a stale lock older than 24 hours: ${path}`, ino, text };
+    }
+    return holderAlive(text)
+      ? null
+      : { reason: `ignoring the lock of a build that is no longer running: ${path}`, ino, text };
+  } catch (err) {
+    if (codeOf(err) === "ENOENT") return "freed";
     throw err;
   }
 }
 
 /**
- * Why a lock someone holds can be taken over, or null while its holder runs. A lock that vanished
- * while being looked at was freed: it can be taken too.
+ * Moves a lock judged stale out of the way, and only that lock. Renaming is the one step that
+ * takes whatever is at the path, so the moved file is checked to be the one judged: if another
+ * run took the lock after the judgment, a live lock was moved, and it is put back (link, which
+ * never replaces) before refusing. Returns false when the lock vanished first.
  */
-function takeOverReason(path: string): string | null {
+function moveStaleAside(path: string, judged: JudgedLock, busy: () => Error): boolean {
+  const aside = `${path}.${process.pid}.${randomUUID()}.stale`;
   try {
-    if (Date.now() - statSync(path).mtimeMs >= STALE_LOCK_MS) {
-      return `ignoring a stale lock older than 24 hours: ${path}`;
-    }
-    return holderAlive(path)
-      ? null
-      : `ignoring the lock of a build that is no longer running: ${path}`;
+    renameSync(path, aside);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return `the lock was freed: ${path}`;
+    if (codeOf(err) === "ENOENT") return false;
     throw err;
+  }
+  try {
+    const moved = statSync(aside);
+    if (moved.ino === judged.ino && readFileSync(aside, "utf8") === judged.text) return true;
+    try {
+      linkSync(aside, path);
+    } catch (err) {
+      // Another run has since taken the path; the moved lock cannot be put back.
+      if (codeOf(err) !== "EEXIST") throw err;
+    }
+    throw busy();
+  } finally {
+    rmSync(aside, { force: true });
   }
 }
 
 /**
  * Takes the out dir's build lock, so two runs (wiki:build, wiki:update or wiki:replay) never send
- * the same batches twice, and returns the function that frees it. The lock holds this process's
- * pid and is freed on exit, SIGINT and SIGTERM too. A lock another live run holds is a
- * WikiBuildError; one older than 24 hours, or whose pid no process has, is taken over with a line
- * to `log`. Two runs taking over the same lock at once race to create it again, and the loser
- * gets the same WikiBuildError, never a raw fs error. Advisory: it guards these scripts against
- * each other only.
+ * the same batches twice, and returns the function that frees it. The lock holds this run's
+ * "pid … since …" line, published atomically: the line is written to a temp file and linked to
+ * the lock path, which fails if any lock exists, so a lock is never seen half-written and never
+ * replaced. A lock another live run holds is a WikiBuildError. A lock older than 24 hours, or
+ * whose pid no process has, is taken over with a line to `log`: it is renamed aside, checked to be
+ * the file that was judged stale (a lock taken in the meantime is put back and respected), and
+ * then the lock is created as above, so of any runs racing for it exactly one holds it and the
+ * rest get the same WikiBuildError. No POSIX call compares and swaps a path, so a third run
+ * landing between the check and the put-back can still go unnoticed; the window is microseconds.
+ * The lock is freed on exit, SIGINT and SIGTERM too, and only while it still holds this run's own
+ * line. Advisory: it guards these scripts against each other only. `afterJudging` is a test seam
+ * that runs between judging a lock stale and taking it over.
  */
-export function acquireBuildLock(out: string, log: (line: string) => void): () => void {
+export function acquireBuildLock(
+  out: string,
+  log: (line: string) => void,
+  afterJudging?: () => void,
+): () => void {
   const path = join(out, BUILD_LOCK);
   const busy = () =>
     new WikiBuildError(
       `another wiki:build, wiki:update or wiki:replay is running on ${out} (${path}); if none is, delete the lock file`,
     );
-  let fd = openNew(path);
-  if (fd === null) {
-    const reason = takeOverReason(path);
-    if (reason === null) throw busy();
-    rmSync(path, { force: true });
-    log(reason);
-    fd = openNew(path);
-    if (fd === null) throw busy();
-  }
+  const line = `pid ${process.pid} since ${new Date().toISOString()} id ${randomUUID()}\n`;
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(tmp, line, { flag: "wx" });
   try {
-    writeSync(fd, `pid ${process.pid} since ${new Date().toISOString()}\n`);
+    if (!linkNew(tmp, path)) {
+      const judged = judgeLock(path);
+      if (judged === null) throw busy();
+      afterJudging?.();
+      if (judged === "freed") {
+        log(`the lock was freed: ${path}`);
+      } else if (moveStaleAside(path, judged, busy)) {
+        log(judged.reason);
+      }
+      if (!linkNew(tmp, path)) throw busy();
+    }
   } finally {
-    closeSync(fd);
+    rmSync(tmp, { force: true });
   }
   const release = () => {
     process.off("exit", release);
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
-    rmSync(path, { force: true });
+    try {
+      // Another run may hold the lock by now (this one was displaced): leave it be.
+      if (readFileSync(path, "utf8") === line) rmSync(path, { force: true });
+    } catch (err) {
+      if (codeOf(err) !== "ENOENT") throw err;
+    }
   };
   // Free the lock, then let the signal end the process as it would have.
   const onSignal = (signal: NodeJS.Signals) => {
@@ -394,18 +531,48 @@ const MAX_CAUSE_LENGTH = 300;
 /** How many causes deep --verbose follows the chain. */
 const MAX_CAUSES = 5;
 
+/** The shape of an Anthropic key, redacted even when it is not the configured one. */
+const KEY_SHAPE = /sk-ant-[A-Za-z0-9_-]*/g;
+
+/** Every occurrence of the configured API key, and of anything key-shaped, replaced. */
+function redact(text: string): string {
+  const key = process.env.ANTHROPIC_API_KEY;
+  const plain = key ? text.split(key).join("[redacted]") : text;
+  return plain.replace(KEY_SHAPE, "[redacted]");
+}
+
+/** A value's text, never throwing: a null-prototype object has no toString to call. */
+function textOf(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+/**
+ * One printable line: any API key redacted first (a cut or a character filter must never leave
+ * part of one), then whitespace collapsed and everything but printable ASCII replaced.
+ */
+function printable(text: string): string {
+  return redact(text)
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7e]/g, "?");
+}
+
 /**
  * An error as the scripts print it: its one-line message, and with `verbose` each cause in its
- * chain on a line of its own ("caused by: Name: message"), printable ASCII only and cut short,
- * since a cause such as a failed manifest verify on open quotes stored model output.
+ * chain on a line of its own ("caused by: Name: message"). Every line is redacted of API keys
+ * (a rejected header value is echoed in its error, key included) and printable ASCII only; cause
+ * lines are cut short, since a cause such as a failed manifest verify on open quotes stored model
+ * output.
  */
 export function describeError(err: unknown, verbose: boolean): string {
-  const lines = [err instanceof Error ? err.message : String(err)];
+  const lines = [printable(err instanceof Error ? err.message : textOf(err))];
   let cause = err instanceof Error ? err.cause : undefined;
   for (let depth = 0; verbose && cause !== undefined && depth < MAX_CAUSES; depth++) {
-    const text = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
-    const line = text.replace(/\s+/g, " ").replace(/[^\x20-\x7e]/g, "?");
-    lines.push(`caused by: ${line.slice(0, MAX_CAUSE_LENGTH)}`);
+    const text = cause instanceof Error ? `${cause.name}: ${cause.message}` : textOf(cause);
+    lines.push(`caused by: ${printable(text).slice(0, MAX_CAUSE_LENGTH)}`);
     cause = cause instanceof Error ? cause.cause : undefined;
   }
   return lines.join("\n");

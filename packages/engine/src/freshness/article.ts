@@ -15,6 +15,19 @@ const leadOf = (revision: Revision | null | undefined): string =>
     .join("\n") ?? "";
 
 /**
+ * Why an update left the article alone: "too few pages" when fewer than MIN_ARCHITECTURE_PAGES
+ * have a page (there is nothing to write, whether or not an article is stored), "current" when
+ * the stored article still reads right; null when it was due (`due` is not null).
+ */
+export function articleSkipped(
+  due: ArticleDue | null,
+  pageCount: number,
+): "too few pages" | "current" | null {
+  if (due !== null) return null;
+  return pageCount < MIN_ARCHITECTURE_PAGES ? "too few pages" : "current";
+}
+
+/**
  * Whether an update rewrites the project's article (spec §6.1, F27): its `basis` names the page
  * revisions it was written from, so it is current while the features with a page are the
  * basis's features, each one's lead reads as it did, and no claim names a feature that is no
