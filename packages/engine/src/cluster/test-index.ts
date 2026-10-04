@@ -29,5 +29,6 @@ export function makeIndex(
     unresolved: [],
     coChange: { commitsConsidered: pairs.length, commitsSkipped: 0, fileCommits, pairs },
     invalidPaths: [],
+    calls: [],
   };
 }

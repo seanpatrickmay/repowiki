@@ -1,5 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { extractBindings, extractCalls } from "./calls.ts";
+import {
+  type CallSite,
+  extractBindings,
+  extractCalls,
+  type ImportBinding,
+  type ResolvedBinding,
+  resolveBinding,
+  resolveCalls,
+  type SymbolSpan,
+} from "./calls.ts";
 import { createSourceParser, type SourceLanguage, type SourceParser } from "./languages.ts";
 
 let parser: SourceParser;
@@ -104,6 +113,121 @@ describe("extractCalls", () => {
   it("gives a this member tag in TSX the receiver self", () => {
     expect(calls("tsx", "const x = <this.X />;\n")).toEqual([
       { name: "X", receiver: "self", line: 1 },
+    ]);
+  });
+});
+
+const py = (module: string, level: number, name: string, local = name): ImportBinding => ({
+  local,
+  imported: name,
+  raw: { kind: "python", module, level, names: [name], line: 1 },
+});
+
+describe("resolveBinding", () => {
+  it("binds a real submodule as the module itself", () => {
+    expect(resolveBinding(py("", 1, "sub"), ["app/sub.py"])).toEqual({
+      local: "sub",
+      imported: null,
+      target: "app/sub.py",
+    });
+    expect(resolveBinding(py("pkg", 1, "sub"), ["app/pkg/sub.py"])).toEqual({
+      local: "sub",
+      imported: null,
+      target: "app/pkg/sub.py",
+    });
+    expect(resolveBinding(py("", 1, "sub"), ["app/sub/__init__.py"])?.imported).toBeNull();
+  });
+
+  it("keeps a from-import of a name that shares its module's file stem as a symbol import", () => {
+    expect(resolveBinding(py("util", 1, "util"), ["app/util.py"])).toEqual({
+      local: "util",
+      imported: "util",
+      target: "app/util.py",
+    });
+    expect(resolveBinding(py("config", 1, "config"), ["app/config/__init__.py"])?.imported).toBe(
+      "config",
+    );
+  });
+
+  it("is null when nothing resolved", () => {
+    expect(resolveBinding(py("x", 1, "y"), [])).toBeNull();
+  });
+});
+
+const span = (qualifiedName: string, kind: string, startLine: number, endLine: number) => ({
+  id: `f.py#${qualifiedName}`,
+  qualifiedName,
+  kind,
+  startLine,
+  endLine,
+});
+const FILE_SYMBOLS: SymbolSpan[] = [
+  span("run", "function", 1, 5),
+  span("K", "class", 10, 20),
+  span("K.m", "function", 11, 14),
+  span("K.n", "function", 15, 20),
+  span("save", "function", 30, 31),
+];
+const file = { id: "f.py", path: "f.py", symbols: FILE_SYMBOLS };
+const site = (name: string, line: number, receiver: string | null = null): CallSite => ({
+  name,
+  receiver,
+  line,
+});
+const resolve = (
+  sites: CallSite[],
+  bound: ResolvedBinding[] = [],
+  others: Record<string, SymbolSpan[]> = {},
+) =>
+  resolveCalls(file, sites, bound, (path) =>
+    path === "f.py" ? FILE_SYMBOLS : (others[path] ?? []),
+  );
+
+describe("resolveCalls", () => {
+  it("drops recursion and self-method recursion", () => {
+    expect(resolve([site("run", 3), site("m", 12, "self")])).toEqual([]);
+  });
+
+  it("keeps one edge per pair, at the first line", () => {
+    expect(resolve([site("save", 2), site("save", 4)])).toEqual([
+      { from: "f.py#run", to: "f.py#save", line: 2 },
+    ]);
+  });
+
+  it("resolves self.m() to the enclosing class, and nothing outside a class", () => {
+    expect(resolve([site("n", 12, "self")])).toEqual([
+      { from: "f.py#K.m", to: "f.py#K.n", line: 12 },
+    ]);
+    expect(resolve([site("m", 3, "self")])).toEqual([]);
+  });
+
+  it("uses the file for module-level calls", () => {
+    expect(resolve([site("save", 40)])).toEqual([{ from: "f.py", to: "f.py#save", line: 40 }]);
+  });
+
+  it("finds an imported symbol, but a symbol-import receiver has no edge", () => {
+    const util: SymbolSpan[] = [span("util", "function", 1, 2), span("load", "function", 4, 5)];
+    const bound: ResolvedBinding[] = [{ local: "util", imported: "util", target: "u.py" }];
+    const symbolsOf = { "u.py": util.map((s) => ({ ...s, id: `u.py#${s.qualifiedName}` })) };
+    expect(resolve([site("util", 2)], bound, symbolsOf)).toEqual([
+      { from: "f.py#run", to: "u.py#util", line: 2 },
+    ]);
+    expect(resolve([site("load", 2, "util")], bound, symbolsOf)).toEqual([]);
+  });
+
+  it("resolves a module binding's attribute", () => {
+    const bound: ResolvedBinding[] = [{ local: "sub", imported: null, target: "sub.py" }];
+    const symbolsOf = { "sub.py": [{ ...span("f", "function", 1, 2), id: "sub.py#f" }] };
+    expect(resolve([site("f", 2, "sub")], bound, symbolsOf)).toEqual([
+      { from: "f.py#run", to: "sub.py#f", line: 2 },
+    ]);
+  });
+
+  it("prefers the file's own top-level symbol over an import of the same name", () => {
+    const bound: ResolvedBinding[] = [{ local: "save", imported: "save", target: "s.py" }];
+    const symbolsOf = { "s.py": [{ ...span("save", "function", 1, 2), id: "s.py#save" }] };
+    expect(resolve([site("save", 2)], bound, symbolsOf)).toEqual([
+      { from: "f.py#run", to: "f.py#save", line: 2 },
     ]);
   });
 });

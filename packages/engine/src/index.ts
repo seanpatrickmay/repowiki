@@ -14,6 +14,7 @@ export {
   type WeightedEdge,
 } from "./cluster/index.ts";
 export {
+  type CallEdge,
   type CoChange,
   type CoChangePair,
   DEFAULT_MAX_FILE_BYTES,

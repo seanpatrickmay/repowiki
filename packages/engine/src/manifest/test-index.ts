@@ -57,5 +57,6 @@ export function sampleIndex(): RepoIndex {
       pairs: [{ a: "docs/C#.md", b: "src/api/app.py", count: 2 }],
     },
     invalidPaths: [],
+    calls: [],
   };
 }
