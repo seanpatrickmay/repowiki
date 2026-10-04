@@ -85,6 +85,62 @@ describe("findClaimsCitingRange", () => {
     expect(hits(1, 1000)).toEqual(["c-1"]);
   });
 
+  it("returns one row per claim, its first overlapping citation by start then end line", () => {
+    const twice = makeRevision({
+      id: "rev-2",
+      parentId: "rev-1",
+      reason: "update",
+      sha: SHA_B,
+      sections: [
+        { key: "lead", claims: [leadClaim()] },
+        {
+          key: "overview",
+          claims: [
+            bodyClaim({
+              citations: [
+                codeCitation({ startLine: 12, endLine: 20 }),
+                codeCitation({ startLine: 12, endLine: 14 }),
+                codeCitation({ startLine: 10, endLine: 24 }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    store.putRevision(twice);
+    expect(store.findClaimsCitingRange(PATH, 13, 13)).toEqual([
+      { featureId: "signals", revisionId: "rev-2", claimId: "c-1", startLine: 10, endLine: 24 },
+    ]);
+    expect(store.findClaimsCitingRange(PATH, 14, 14).map((c) => c.endLine)).toEqual([24]);
+  });
+
+  it("breaks a tie on the start line by the end line", () => {
+    const pair = makeRevision({
+      id: "rev-2",
+      parentId: "rev-1",
+      reason: "update",
+      sha: SHA_B,
+      sections: [
+        { key: "lead", claims: [leadClaim()] },
+        {
+          key: "overview",
+          claims: [
+            bodyClaim({
+              citations: [
+                codeCitation({ startLine: 12, endLine: 20 }),
+                codeCitation({ startLine: 12, endLine: 14 }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    store.putRevision(pair);
+    expect(store.findClaimsCitingRange(PATH, 13, 13)).toEqual([
+      { featureId: "signals", revisionId: "rev-2", claimId: "c-1", startLine: 12, endLine: 14 },
+    ]);
+  });
+
   it("rejects an inverted range", () => {
     expect(() => store.findClaimsCitingRange(PATH, 30, 10)).toThrow(RangeError);
   });

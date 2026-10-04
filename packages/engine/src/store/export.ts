@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   type Architecture,
@@ -62,8 +62,20 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
   });
 }
 
+/**
+ * Writes the export to `outPath` atomically: to a temporary file beside it, then renamed over it,
+ * so a reader (or a site build) never sees half an export, and a failed write leaves the previous
+ * export in place.
+ */
 export function writeExport(store: Store, outPath: string, options: ExportOptions): void {
   const wiki = buildExport(store, options);
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, `${JSON.stringify(wiki, null, 2)}\n`, "utf8");
+  const temporary = `${outPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(wiki, null, 2)}\n`, "utf8");
+    renameSync(temporary, outPath);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }

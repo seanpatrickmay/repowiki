@@ -103,3 +103,23 @@ describe("revisions", () => {
     expect(store.getCurrentRevision("deliverables")).toBeNull();
   });
 });
+
+describe("a run's transaction (issue #53)", () => {
+  it("leaves the current pointers, citation ranges and head untouched when it throws", () => {
+    store.putRevision(rev1);
+    store.setHead(rev1.sha);
+    expect(() =>
+      store.transaction(() => {
+        store.putRevision(rev2);
+        store.setHead(SHA_B);
+        throw new Error("the run failed");
+      }),
+    ).toThrow("the run failed");
+    expect(store.getCurrentRevision("signals")?.id).toBe("rev-1");
+    expect(store.getRevision("rev-2")).toBeNull();
+    expect(store.getHead()).toBe(rev1.sha);
+    expect(store.findClaimsCitingRange("src/signals/ingest.py", 10, 24)).toEqual([
+      { featureId: "signals", revisionId: "rev-1", claimId: "c-1", startLine: 10, endLine: 24 },
+    ]);
+  });
+});
