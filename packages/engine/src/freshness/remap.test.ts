@@ -125,14 +125,18 @@ describe("remapRange", () => {
   it("agrees with git's own hunks over 15 seeded edits", { timeout: 30_000 }, () => {
     const next = random(7);
     const repo = createTestRepo();
+    const text = (lines: string[]) => (lines.length === 0 ? "" : `${lines.join("\n")}\n`);
     try {
       for (let n = 0; n < 15; n++) {
-        const { old, result, range, touched } = scenario(next);
-        repo.write("a.txt", `${old.join("\n")}\n`);
+        const { old, result, hunks: made, range, touched } = scenario(next);
+        repo.write("a.txt", text(old));
         const from = repo.commit(`old ${n}`);
-        repo.write("a.txt", `${result.join("\n")}\n`);
+        // A file left with no line is empty, not one blank line.
+        repo.write("a.txt", text(result));
         const to = repo.commit(`new ${n}`);
         const hunks = diffCommits(repo.dir, from, to)[0]?.hunks ?? [];
+        // The generator's hunks are git's: the model test above speaks for git's diffs too.
+        expect(hunks, `case ${n}`).toEqual(made);
         const mapped = remapRange(range, hunks);
         if (touched) expect(mapped, `case ${n}`).toBeNull();
         else {
@@ -143,6 +147,21 @@ describe("remapRange", () => {
           );
         }
       }
+    } finally {
+      repo.remove();
+    }
+  });
+
+  it("reads git's hunks for an edit that deletes every line of a file", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write("a.txt", "one\ntwo\nthree\n");
+      const from = repo.commit("three lines");
+      repo.write("a.txt", "");
+      const to = repo.commit("no line");
+      const hunks = diffCommits(repo.dir, from, to)[0]?.hunks ?? [];
+      expect(hunks).toEqual([{ oldStart: 1, oldCount: 3, newStart: 0, newCount: 0 }]);
+      expect(remapRange({ start: 2, end: 2 }, hunks)).toBeNull();
     } finally {
       repo.remove();
     }
