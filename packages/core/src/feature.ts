@@ -99,34 +99,57 @@ export const Feature = z
       }
     }
 
-    // Status-lineage correspondence
-    if (feature.status.kind === "redirect") {
-      const redirectTo = feature.status.to;
-      const hasMerge = feature.lineage.some((e) => e.kind === "merge" && e.into === redirectTo);
-      if (!hasMerge) {
+    // Lineage <-> status, both ways (issue #53). create opens the lineage and appears once; a
+    // rename keeps the old title as an alias; merge, split and retire end a feature's life, so at
+    // most one of them appears and the status must say the same thing.
+    feature.lineage.forEach((event, index) => {
+      if (event.kind === "create" && index > 0) {
         ctx.addIssue({
           code: "custom",
-          message: "redirect status requires a merge lineage event",
-          path: ["status"],
+          message: "create may only be the first lineage event",
+          path: ["lineage", index],
         });
       }
+      if (event.kind === "rename" && !feature.aliases.includes(event.fromTitle)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `rename lineage requires "${event.fromTitle}" in aliases`,
+          path: ["aliases"],
+        });
+      }
+    });
+    const endings = feature.lineage.filter(
+      (e) => e.kind === "merge" || e.kind === "split" || e.kind === "retire",
+    );
+    if (endings.length > 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "lineage may contain at most one merge, split, or retire event",
+        path: ["lineage"],
+      });
     }
-
-    if (feature.status.kind === "disambiguation") {
-      const targetSet = new Set(feature.status.to);
-      const hasSplit = feature.lineage.some(
-        (e) =>
-          e.kind === "split" &&
-          new Set(e.into).size === targetSet.size &&
-          e.into.every((t) => targetSet.has(t)),
-      );
-      if (!hasSplit) {
-        ctx.addIssue({
-          code: "custom",
-          message: "disambiguation status requires a matching split lineage event",
-          path: ["status"],
-        });
+    const ending = endings[0];
+    const status = feature.status;
+    const statusIssue = (message: string) =>
+      ctx.addIssue({ code: "custom", message, path: ["status"] });
+    if (status.kind === "redirect") {
+      if (ending?.kind !== "merge" || ending.into !== status.to) {
+        statusIssue("redirect status requires a merge lineage event into its target");
       }
+    } else if (status.kind === "disambiguation") {
+      const targets = new Set(status.to);
+      const matches =
+        ending?.kind === "split" &&
+        new Set(ending.into).size === targets.size &&
+        ending.into.every((t) => targets.has(t));
+      if (!matches) statusIssue("disambiguation status requires a matching split lineage event");
+    } else if (status.kind === "retired") {
+      if (ending?.kind !== "retire") statusIssue("retired status requires a retire lineage event");
+    } else if (ending !== undefined) {
+      const expected = { merge: "redirect", split: "disambiguation", retire: "retired" }[
+        ending.kind
+      ];
+      statusIssue(`a ${ending.kind} lineage event requires ${expected} status`);
     }
   });
 export type Feature = z.infer<typeof Feature>;
