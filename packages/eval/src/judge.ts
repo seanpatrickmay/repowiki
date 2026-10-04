@@ -2,7 +2,7 @@ import type { TokenUsage } from "@repowiki/core";
 import { LlmOutputError, type Provider } from "@repowiki/llm";
 import { z } from "zod";
 import type { EvalQuestion } from "./questions.ts";
-import { toolText } from "./text.ts";
+import { cut, oneLine, toolText } from "./text.ts";
 
 /** The most characters of an answer the judge reads; the agents are asked for 200 words. */
 export const MAX_JUDGED_ANSWER_CHARS = 4000;
@@ -100,6 +100,19 @@ export interface Judgment {
   batch: boolean;
 }
 
+/** The most code points of the first attempt's problem that the retry quotes back to the judge. */
+export const MAX_RETRY_PROBLEM_CHARS = 600;
+
+/**
+ * The extra user turn of the judge's retry: what was wrong with its first output, quoted on one
+ * capped line. It makes the retry a different request, so neither a batch journal nor a cassette
+ * can answer it with the first output, and it tells the judge what to change.
+ */
+export function retryTurn(problem: string): string {
+  const quoted = JSON.stringify(cut(oneLine(problem), MAX_RETRY_PROBLEM_CHARS));
+  return `Your previous output was not a usable verdict: ${quoted}. Answer again with one JSON object that matches the schema: 1 to 12 facts of at most 300 characters each, and a reason of at most 500 characters.`;
+}
+
 /** The judge answered twice with output that was not a verdict. */
 export class JudgeError extends Error {
   /** The tokens both attempts used, so a failed judgment is still counted. */
@@ -116,8 +129,9 @@ const NO_TOKENS: TokenUsage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
 
 /**
  * Judges one answer against its question's reference (spec §9) with one `evalJudge` call at
- * temperature 0, asked again once if its output is unusable. An empty answer scores 0 with no
- * call. The judge is not told which agent wrote the answer.
+ * temperature 0, asked again once if its output is unusable; the retry adds the problem as a
+ * second user turn (retryTurn). The usage counts each call made once. An empty answer scores 0
+ * with no call. The judge is not told which agent wrote the answer.
  */
 export async function judgeAnswer(
   provider: Provider,
@@ -129,12 +143,13 @@ export async function judgeAnswer(
     return { score: 0, verdict: null, reason: "no answer", usage: NO_TOKENS, model: null, batch };
   }
   let usage = NO_TOKENS;
+  const messages = [{ role: "user" as const, content: judgeTurn(question, answer) }];
   for (let attempt = 1; ; attempt++) {
     try {
       const result = await provider.generate({
         purpose: "evalJudge",
         system: JUDGE_SYSTEM,
-        messages: [{ role: "user", content: judgeTurn(question, answer) }],
+        messages: [...messages],
         schema: JudgeVerdict,
         maxTokens: JUDGE_MAX_TOKENS,
         batch,
@@ -158,6 +173,7 @@ export async function judgeAnswer(
           cause: error,
         });
       }
+      messages.push({ role: "user", content: retryTurn(error.message) });
     }
   }
 }

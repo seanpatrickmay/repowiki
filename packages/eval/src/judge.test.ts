@@ -10,6 +10,8 @@ import {
   judgedAnswer,
   judgeTurn,
   MAX_JUDGED_ANSWER_CHARS,
+  MAX_RETRY_PROBLEM_CHARS,
+  retryTurn,
   scoreOf,
 } from "./judge.ts";
 import type { EvalQuestion } from "./questions.ts";
@@ -169,6 +171,19 @@ describe("judgeAnswer", () => {
     });
     const again = scriptedJudge([unusable(), unusable()]);
     await expect(judgeAnswer(again.provider, question, "x", false)).rejects.toThrow(JudgeError);
+    // The retry is a different request: it quotes the first answer's problem, one capped line.
+    const turn = judgeTurn(question, "src/other.py");
+    expect(retried.requests[0]?.messages).toEqual([{ role: "user", content: turn }]);
+    expect(retried.requests[1]?.messages).toEqual([
+      { role: "user", content: turn },
+      { role: "user", content: retryTurn("model output is not JSON") },
+    ]);
+    expect(retryTurn("model output is not JSON")).toBe(
+      'Your previous output was not a usable verdict: "model output is not JSON". Answer again with one JSON object that matches the schema: 1 to 12 facts of at most 300 characters each, and a reason of at most 500 characters.',
+    );
+    const long = retryTurn(`bad\n\u202E${"x".repeat(5000)}`);
+    expect(long).toContain(`"bad \uFFFD${"x".repeat(MAX_RETRY_PROBLEM_CHARS - 6)}\u2026"`);
+    expect(long).not.toMatch(/\n/);
     const down = scriptedJudge([new Error("connection reset")]);
     await expect(judgeAnswer(down.provider, question, "x", false)).rejects.toThrow(
       "connection reset",
