@@ -139,6 +139,7 @@ packages/
 - `replay <fromSha> <toSha>`: runs `update` once for each merge commit along `main`'s first-parent history.
 - `export`: writes the JSON for the current revisions plus `llms.txt`. **M7:** the dev command is `pnpm wiki:export <repo>`, with no call; wiki:build, wiki:update and wiki:replay write both files themselves, and `site:build` copies both to the site's root.
 - `serve`: builds and serves the Astro site from the export.
+- **v2 (F23, work in flight).** Two v1 rules change: `update` (and each replay step) now ends with an offline step that drops the open pull requests it merged from the stored in-flight snapshot and re-derives the rest against the new head, with no network and no LLM call; and `WikiExport` (§5) gains `inflight`, defaulting to `null` within schema 3. GitHub is read only by the separate `wiki:inflight` command. See `2026-10-04-repowiki-v2-work-in-flight-design.md`.
 
 ### Reader (M5)
 
