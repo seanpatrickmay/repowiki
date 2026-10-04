@@ -139,7 +139,7 @@ packages/
 - `replay <fromSha> <toSha>`: runs `update` once for each merge commit along `main`'s first-parent history.
 - `export`: writes the JSON for the current revisions plus `llms.txt`. **M7:** the dev command is `pnpm wiki:export <repo>`, with no call; wiki:build, wiki:update and wiki:replay write both files themselves, and `site:build` copies both to the site's root.
 - `serve`: builds and serves the Astro site from the export.
-- **v2 (F23, work in flight).** Two v1 rules change: `update` (and each replay step) now ends with an offline step that drops the open pull requests it merged from the stored in-flight snapshot and re-derives the rest against the new head, with no network and no LLM call; and `WikiExport` (§5) gains `inflight`, defaulting to `null` within schema 3. GitHub is read only by the separate `wiki:inflight` command. See `2026-10-04-repowiki-v2-work-in-flight-design.md`.
+- **v2.** `update` and `replay` gain end-of-run steps for work in flight and People; see "v2 amendments" at the end of this spec.
 
 ### Reader (M5)
 
@@ -382,8 +382,39 @@ write access to target repos.
 
 ## v2 amendments
 
-- **People (#6; spec `2026-10-04-repowiki-v2-people-design.md`).** It changes four v1 rules:
-  - **F17 / ADR-0003.** Line authorship by `git blame -C -C -M` is computed at the wiki's head for person pages and feature-page contributor rows (ADR-0004). It is still never shown per claim.
-  - **§4 data flow.** Once a wiki has People on, `update` and `replay` end with a People refresh. `replay` does this once at its final head, not per step.
-  - **§5.** `WikiExport` gains `people` (within schema 3, default `null`).
-  - **§4 provider roles and §6.4 cost accounting.** `LlmRole` and `RunKind` gain `people`. People spend is its own run, never part of a build or update total.
+v2 is four milestones in a fixed order, each specified in its own design and reconciled in their
+shared "Cross-spec rulings" (C1–C15): M8 agent interface (#5,
+`2026-10-04-repowiki-v2-agent-interface-design.md`), M9 Ask sidebar (#4,
+`…-ask-sidebar-design.md`), M10 work in flight (#9, `…-work-in-flight-design.md`) and M11 People
+(#6, `…-people-design.md`). Only the v1 rules listed here change.
+
+- **M8, agent interface.** No v1 rule changes. §4's package list gains `query` (the eval's
+  retrieval, extracted; depends on `core` only) and `mcp` (a stdio MCP server that makes no LLM
+  call and writes nothing). F07's MCP server and F08 ship here.
+- **M9, Ask sidebar.** §4: `serve` becomes `pnpm wiki:serve`, the one local HTTP server
+  (127.0.0.1), serving the built site and `/api/ask`; the CSP meta is unchanged, and the package
+  list gains `ask`. Claims on the site gain `#claim-<id>` anchors. `LlmRole` gains `ask`, whose
+  spend stays out of the store's ledger and `WikiExport.runs`.
+- **M10, work in flight (F23).**
+  - **§4 data flow.** `update` ends, after the About article, with an offline step that drops the
+    open pull requests it merged from the stored in-flight snapshot and re-derives the rest
+    against the new head, with no network and no LLM call; `replay` does this once at the head it
+    reached, not per step. GitHub is read only by the separate `wiki:inflight` command, the only
+    command that touches the network.
+  - **§5.** `WikiExport` gains `inflight` (within schema 3, default `null`); store migration 9.
+  - **§4 provider roles and §6.4.** `LlmRole` and `RunKind` gain `inflight`.
+- **M11, People (F14–F16).**
+  - **F17 / ADR-0003.** Line authorship by `git blame -C -C -M` is computed at the wiki's head for
+    person pages and feature-page contributor rows (ADR-0006, superseding ADR-0003). It is still
+    never shown per claim.
+  - **§4 data flow.** Once a wiki has People on, `update` ends with a People refresh after the
+    in-flight step; `replay` does it once at the head it reached, not per step. Both write the
+    export once, after these steps.
+  - **§5.** `WikiExport` gains `people` (within schema 3, default `null`), and the in-flight
+    `Author` gains `person`; store migration 10.
+  - **§4 provider roles and §6.4.** `LlmRole` and `RunKind` gain `people`.
+- **All of v2.** `SCHEMA_VERSION` stays 3: every new export field defaults, so every earlier
+  export parses. §6.4: `WikiExport.runs` gains `inflight` and `people` totals (one of each per
+  wiki head); the break-even (§9) still uses the build run and the replay invariant (§8) still
+  compares update runs, so in-flight and People spend never counts as a build or an update. Every
+  new role defaults to `claude-haiku-4-5`.

@@ -17,7 +17,7 @@ v1 documents a repository's features. People documents the people who built them
 Goals, in priority order:
 
 1. **Factual.** Every number is computed from git. Every narrative sentence cites commits that verify mechanically: they are the person's own commits, and their dates match the dates the sentence states. The model writes prose around the facts and never makes up a fact.
-2. **Private by construction.** No email address, and no hash of one, reaches the export, the site, `llms.txt`, a prompt or ordinary terminal output. People can be excluded completely.
+2. **Private by construction.** No email address, and no hash of one, reaches the export, the site, `llms.txt`, a prompt or ordinary terminal output. People can be excluded from everything RepoWiki generates about them; repository text that names them, such as a commit subject, is not rewritten (R12, C8).
 3. **Cheap and incremental.** The computed facts cost $0. The narratives cost about $0.12 for a first run on next-chief-of-staff. An update rewrites only the people who have new commits.
 4. **Deterministic.** The same repository, sha and people file always produce a byte-identical computed snapshot. The git that People runs is hermetic in the way M6 and M7 require.
 
@@ -30,7 +30,8 @@ Goals, in priority order:
   - `/people/<id>/`: the person page, with its infobox, all-time chart, per-year calendar heatmaps, chronicle, areas of work, pull requests and references.
   - `/special/activity/`, `/special/activity/<yyyy>/` and `/special/activity/<yyyy-mm>/`: repository activity at zoom levels a reader clicks through.
   - A **Main contributors** row on every feature page's infobox, and a **People** link in the site navigation.
-- The JSON export carries `people`, so agents (#5) and the Ask sidebar (#4) can answer "who worked on X" questions without reading git. `llms.txt` lists the person pages.
+- The JSON export carries `people`, so a later agent tool (#5) or Ask index (#4) can answer "who worked on X" questions without reading git; neither is in v2's tasks (C9). `llms.txt` lists the person pages.
+- Open pull requests and issues from work in flight (M10) link their authors to person pages, and an excluded person's login disappears from them (C8).
 
 On next-chief-of-staff (600 commits, of which 160 are merges; 15 distinct name/email pairs), the automatic rules group the authors into 8 humans and 1 bot. One people-file entry joins a handle (`wyattb`-style: first name plus last initial) to its full-name identity, which gives 7 human pages. All 7 have at least 3 commits, so all 7 get narratives.
 
@@ -40,7 +41,7 @@ Every ruling has the form "Ruling: X — why — cost if wrong".
 
 | # | Topic | Ruling |
 |---|---|---|
-| R1 | Blame (ADR-0003) | Ruling: People **uses** `git blame -C -C -M`, computed once at the wiki's head over every text file, to measure who wrote the code that exists now (current lines per person and per feature). It is never used per claim or per historical revision. — Commit counts measure activity; blame measures what survived, and blame is the only way to answer "who wrote this feature's current code". It is cheap: 27 s for all 429 files (69,143 lines) of next-chief-of-staff on the owner's machine, and incremental after that (R3). — Cost if wrong: about 30 s added to the first people run; dropping blame later removes one infobox row and the contributors table. ADR-0004 supersedes ADR-0003's deferral. |
+| R1 | Blame (ADR-0003) | Ruling: People **uses** `git blame -C -C -M`, computed once at the wiki's head over every text file, to measure who wrote the code that exists now (current lines per person and per feature). It is never used per claim or per historical revision. — Commit counts measure activity; blame measures what survived, and blame is the only way to answer "who wrote this feature's current code". It is cheap: 27 s for all 429 files (69,143 lines) of next-chief-of-staff on the owner's machine, and incremental after that (R3). — Cost if wrong: about 30 s added to the first people run; dropping blame later removes one infobox row and the contributors table. ADR-0006 supersedes ADR-0003's deferral (C1). |
 | R2 | Blame hermeticity | Ruling: blame runs through `scrubbedGitEnv()` as `git -c core.fsmonitor=false -c blame.ignoreRevsFile= -c blame.markIgnoredLines=false -c blame.markUnblamableLines=false -c diff.algorithm=myers blame --incremental -C -C -M --diff-algorithm=myers [--ignore-rev <sha>]… --end-of-options <sha> -- <path>`, with `--literal-pathspecs`. Only the commit sha and line count of each record are read. Author names in blame output are ignored, because blame applies the work tree's `.mailmap`; authors come from People's own log (R5). — This is the same rule as M6's diff ruling (pinned algorithm, env scrubbed) and M7's grep ruling (config injection stripped, no lazy fetch). — Cost if wrong: a hostile or unusual git config could change attribution; the hermetic test pins this. |
 | R3 | Blame cache | Ruling: blame results are cached in the store by `(path, blob oid)` as run-length `[commitSha, lineCount]` lists. On an update, only paths whose blob changed, or that are new, are blamed again. Rows for `(path, oid)` pairs that are no longer in the head tree are pruned. — An unchanged path has an unchanged blame, because every line still comes from a commit at or before the old head. — Cost if wrong: a stale ownership share until the next full recompute (`wiki:people --rebuild-blame`). |
 | R4 | Blame ignore-revs | Ruling: honour the repository's committed `.git-blame-ignore-revs`, read as a blob at the sha (never from the work tree). Each line must be 40 hex digits (others are skipped), at most 1,000 entries, passed as `--ignore-rev`. Sweep commits are not otherwise ignored. — The file is the repository's own statement that formatting sweeps are not authorship, and reading it from the blob keeps the run hermetic. — Cost if wrong: a repository's ignore list could hide a real author's lines; the owner can remove the file's effect with `ignoreRevs: false` in the people file. |
@@ -49,13 +50,13 @@ Every ruling has the form "Ruling: X — why — cost if wrong".
 | R7 | Identity sources and precedence | Ruling: identities resolve in this order: the people file (explicit groups, `exclude`, `bots`) before the committed `.mailmap` blob at the sha, before automatic rules. Automatic rules join identities that share a case-folded email; share a GitHub login taken from a `users.noreply.github.com` address; where one identity's name equals another's login (case-insensitive); or that share a normalised full name of two or more words. An identity in an explicit group never joins anything automatically, so a group also splits a wrong automatic merge. — Explicit statements beat inference. The four automatic rules group next-chief-of-staff's 15 pairs into 9 people with no false merge, and they merge `seanpatrickmay` = `Sean May` with no configuration (name equals the noreply login). — Cost if wrong: two different people with the same two-word name merge until a group splits them. |
 | R8 | Fuzzy matches are suggestions only | Ruling: handle-to-name matches (`wyattb` ≈ "Wyatt B…", first initial plus last name, first.last, and similar) are printed by `people:suggest` and never applied. — A wrong merge publishes one person's work under another's name; one pasted line fixes a missed merge. — Cost if wrong: the owner adds one entry per handle. |
 | R9 | People file | Ruling: `<out>/people.json` (default `~/.repowiki/<repo>/people.json`, override `--people-file`), validated by a core zod schema. It is never read from or allowed inside the documented repository (a path inside it is refused, exit 2). Match keys are `name:`, `email:` and `login:`. — Exclusion lists name people who asked not to appear, so committing that list would leak it. The file follows the "data lives outside the repo" rule. — Cost if wrong: a team cannot share the file through the repository; it can share `.mailmap` instead. |
-| R10 | Email privacy | Ruling: emails never appear in the export, the site, `llms.txt`, prompts or command output. `people:suggest` shows emails masked (first three characters of the local part, then `…@domain`). The store keeps only salted SHA-256 identity keys (the salt is random per store, in `meta`), never raw emails. Logins appear only in `people:suggest`. — The brief's rule, plus defence in depth if a store file leaks. — Cost if wrong: none for correctness; matching works through the keys. |
+| R10 | Email privacy | Ruling: emails never appear in the export, the site, `llms.txt`, prompts or command output. `people:suggest` shows emails masked (first three characters of the local part, then `…@domain`). The store keeps only salted SHA-256 identity keys (the salt is random per store, in `meta`), never raw emails. Logins People derives from git identities (noreply addresses, people-file `login:` keys) appear only in `people:suggest`; the GitHub logins of open PR and issue authors are work in flight's (M10) data, shown as #9 R13 says, and an excluded person's is removed (C8). — The brief's rule, plus defence in depth if a store file leaks. — Cost if wrong: none for correctness; matching works through the keys. |
 | R11 | Bots | Ruling: an identity is a bot if its name or login ends in `[bot]`, if it is on a fixed list (dependabot, renovate, github-actions, pre-commit-ci, snyk-bot, greenkeeper, mergify, codecov, allcontributors, imgbot), or if the people file lists it under `bots`. A bot gets no page and no narrative. It is listed on `/people/` under "Automated contributors" with its counts, and shown as its own series in the repository chart. — Bot work is real activity but not a person's story. — Cost if wrong: a human with a bot-like name loses their page until the people file lists them under `humans`. |
-| R12 | Exclusion | Ruling: an excluded person (people file `exclude`) has no page, no name and no id anywhere in the export, site or `llms.txt`. Their commits and current lines still count in repository totals, as an anonymous "other contributors" series. If they had a page, it disappears, with no redirect; privacy beats URL permanence. — The repository's activity is a fact about the repository; the person's identity is theirs. — Cost if wrong: with exactly one excluded person, "other contributors" is identifiable by elimination. The owner is told this when he excludes one person (§12). |
+| R12 | Exclusion | Ruling: an excluded person (people file `exclude`) has no page, and People puts no name, id or login of theirs anywhere in the export, site or `llms.txt`; work in flight's authors resolving to them are exported as `null` (C8). Repository text that names them (commit subjects in citations, PR titles) is not rewritten, and `wiki:people` says so when it excludes someone. Their commits and current lines still count in repository totals, as an anonymous "other contributors" series. If they had a page, it disappears, with no redirect; privacy beats URL permanence. — The repository's activity is a fact about the repository; the person's identity is theirs. — Cost if wrong: with exactly one excluded person, "other contributors" is identifiable by elimination. The owner is told this when he excludes one person (§12). |
 | R13 | Person ids | Ruling: a person id is a permanent kebab-case slug (at most 64 characters). It is made from the display name (NFKD, diacritics stripped, ASCII only). A name that slugs to nothing becomes `person-<n>`, and a collision gets `-2`, `-3` in order of first commit. Once published, an id survives renames; a merge turns the absorbed id into a redirect to the survivor. When a group splits, the larger side by commits keeps the id. The people file may set `id` before or after publication; a change leaves a redirect behind. — This is the same permanence promise as feature ids (rule 1), using the same machinery. — Cost if wrong: an awkward permanent id such as `seanpatrickmay`, fixed with a people-file `id` that leaves a redirect. |
 | R14 | Display name | Ruling: the display name is, in order: the people file's `name`; the `.mailmap` proper name; the most frequent name with two or more words; the most frequent name. Ties go to the earliest commit. It is cleaned like an Architecture title (v1 §5 rule 12): 1–120 code points, no control or invisible characters. A name that cleans to nothing becomes `Contributor <n>`. — A real full name beats a handle. — Cost if wrong: a handle shown as a title until the people file names the person. |
 | R15 | Narrative or no narrative | Ruling: hybrid. The facts (infobox, graphs, areas table, PR list) are always computed with no LLM call. The narrative (lead, chronicle, areas of work) is one batched Haiku call per eligible person, verified like a feature page. A person without a narrative gets a computed one-sentence lead ("X made N commits between D1 and D2."). Eligible means human, not excluded, at least 3 non-merge commits (`minCommits`), at most `maxNarratives` people (default 25, ranked by commits). `--no-narrative` gives $0 pages. — Facts must never depend on a model; prose is what makes F14 readable. — Cost if wrong: about $0.12 per first run on next-chief-of-staff. |
-| R16 | Voice: F14 reshaped | Ruling: F14's "war-chronicle voice" becomes a **chronicle (annals) voice**: dated, in chronological order, past tense, sober. There are no martial metaphors, no evaluation of the person, no comparison with others, no motives unless a cited commit message states them, and no other person named. ADR-0005 records the reshape. — War metaphors invite drama and judgement about real colleagues, which conflicts with NPOV (v1 §7.1) and with verifiability. The dated, episodic structure the owner asked for survives intact. — Cost if wrong: a flatter read. The voice lives in one style-guide file plus a banned-word list, so a bolder voice is a prompt change and a cassette re-record. |
+| R16 | Voice: F14 reshaped | Ruling: F14's "war-chronicle voice" becomes a **chronicle (annals) voice**: dated, in chronological order, past tense, sober. There are no martial metaphors, no evaluation of the person, no comparison with others, no motives unless a cited commit message states them, and no other person named. ADR-0007 records the reshape (C1). — War metaphors invite drama and judgement about real colleagues, which conflicts with NPOV (v1 §7.1) and with verifiability. The dated, episodic structure the owner asked for survives intact. — Cost if wrong: a flatter read. The voice lives in one style-guide file plus a banned-word list, so a bolder voice is a prompt change and a cassette re-record. |
 | R17 | Citations on person pages | Ruling: person claims cite **commits only**, never code ranges. Every cited commit must be the person's own non-merge commit, or a PR merge commit for a PR they authored or merged. — Commits are immutable, so person claims never go stale (no remapping, no content hashes), and authorship is checkable. — Cost if wrong: no "wrote the scanner at `path:L1-L80`" sentences; the areas table links the feature instead. |
 | R18 | Mechanical fact checks | Ruling: verify refuses a person claim that: states a date outside its cited commits' author-date range (for a lead, which cites nothing, the person's first-to-last commit range), at the granularity stated (day, month or year); is a chronicle claim with no date; states statistics (a number followed by commits, lines, files, pull requests, PRs or %); names another known person (any display name or other name of at least 4 characters, whole word); uses an evaluative or martial word from `PEOPLE_BANNED_WORDS`; or is an areas claim whose commits do not touch the one feature it links. — Each of these is a way a narrative about a real person goes wrong, and each can be checked without a model. — Cost if wrong: a few more claims dropped and retried (cents). |
 | R19 | Commit → feature mapping | Ruling: a commit touches the features whose members are the files it changed. Paths are followed through renames (`git log -M`, walked newest first) to their path at the head, then looked up in the head manifest. A path missing from the head manifest takes its feature from the newest stored manifest that contains it. A path that never reached a stored manifest maps to none. — 858 of 2,690 file changes in next-chief-of-staff touch files deleted before the head; older manifests recover some of them in replayed wikis, and guessing by directory would invent links (the M2 "drop, don't guess" ruling). — Cost if wrong: a person whose work was mostly on deleted code shows fewer areas; the chronicle still covers those commits. |
@@ -65,11 +66,11 @@ Every ruling has the form "Ruling: X — why — cost if wrong".
 | R23 | Feature → people links | Ruling: feature pages get a computed **Main contributors** infobox row: the top 5 people by current lines in the feature's files, as shares, plus "and N more" linking to `/people/#feature-<id>`. Feature claims never name people, and `Revision` is unchanged. — Feature pages stay about code (NPOV); the back-link is a computed fact and needs no new revision. — Cost if wrong: none; the row is pure rendering. |
 | R24 | When People runs | Ruling: People is opt-in per wiki. `wiki:people` turns it on by storing the first snapshot, and `wiki:people --disable` turns it off. `wiki:build` never runs it (v1 build cost unchanged). Once People is on, `wiki:update` refreshes the snapshot at its head (no call) and then rewrites due narratives in one batched round. `wiki:replay` does nothing for People per step; it refreshes once at its final head. — Facts are cheap and should never lag. Narratives at every replay step would cost about $0.01 × 160 steps for prose that the next step replaces. — Cost if wrong: replayed wikis have no historical person-page revisions (pages carry no "View history" in v2 anyway, R27). |
 | R25 | Due narratives | Ruling: a person's narrative is due when they have non-merge commits newer than its `basis`, when their identity group changed (a merge or split makes it due **whole**), or when the narrative is missing. Otherwise it is carried forward word for word. An append keeps every stored chronicle claim; the model adds new chronicle claims and rewrites the lead and the areas section. Links to features that no longer route render as plain text, as on stored pages (M6). — This mirrors M6's update rounds and the append-only History rule (rule 4). — Cost if wrong: a lead that summarises older work until the next append. |
-| R26 | Cost caps | Ruling: `wiki:people` prints its estimate before any call and refuses to start when the estimate exceeds `--max-usd` (default $1, at most $100, parsed as `eval:run` parses its `--max-usd`). `wiki:update` and `wiki:replay` cap their People round with `--people-max-usd` (default $0.50). Over the cap, the round is skipped, narratives stay due, and the summary says so (exit 0). Due narrative calls count in the up-front key check, as the About article's do (M6 ruling). — This follows the brief's "estimate first, cap" rule without changing v1 update semantics. — Cost if wrong: a skipped round is retried on the next run. |
+| R26 | Cost caps | Ruling: `wiki:people` prints its estimate before any call; `--max-usd` (default $1, at most $100, parsed as `eval:run` parses its `--max-usd`) is a ceiling under C12's rule: due narratives are taken in rank order (commits, descending), each counted at its ceiling including a retry, while the next fits; the rest are reported "over budget" and stay due. `wiki:update` and `wiki:replay` cap their People round the same way with `--people-max-usd` (default $0.50); the summary says what was skipped (exit 0). Due narrative calls count in the up-front key check, as the About article's do (M6 ruling). — This follows the brief's "estimate first, cap" rule without changing v1 update semantics. — Cost if wrong: a skipped round is retried on the next run. |
 | R27 | Revisions and history | Ruling: person narratives are stored as a revision chain (`parentId`, like Architecture), but the export carries only the current revision and the site shows no history view for people in v2. — Narratives are append-only chronicles, so older revisions add little, and this keeps the export small. — Cost if wrong: one later additive export field and two site routes. |
 | R28 | Export shape | Ruling: `WikiExport.people` is added within schema 3 with a default of `null`, as `architecture` and `runs` were. `SCHEMA_VERSION` stays 3, and every earlier export parses. — This is the established additive pattern (v1 §5 rule 12). — Cost if wrong: none. |
-| R29 | Store | Ruling: one appended migration adds four new tables: `people_registry`, `people_snapshot` (latest row only), `person_revisions` and `blame_cache`. It rewrites no stored body. Its index is the next free one at merge time; parallel v2 work may have taken 9. — New tables reject nothing already stored. — Cost if wrong: none. |
-| R30 | LLM role | Ruling: a new `LlmRole` value `people` (default `claude-haiku-4-5`) labels and prices people calls (its run kind is R33). Adding an enum value rejects no stored ledger row. — Per-role config and ledger purpose (v1 §4). — Cost if wrong: none. |
+| R29 | Store | Ruling: one appended migration adds four new tables: `people_registry`, `people_snapshot` (latest row only), `person_revisions` and `blame_cache`. It rewrites no stored body. It is migration 10: `main` ships 8 and work in flight (M10) takes 9 (C2). — New tables reject nothing already stored. — Cost if wrong: none. |
+| R30 | LLM role | Ruling: a new `LlmRole` value `people` (default `claude-haiku-4-5` in `DEFAULT_MODELS`, added in the same task, C6) labels and prices people calls (its run kind is R33). Adding an enum value rejects no stored ledger row. — Per-role config and ledger purpose (v1 §4). — Cost if wrong: none. |
 | R31 | Where code lives | Ruling: git readers (`readAuthorship`, `readBlobAt` for `.mailmap` and `.git-blame-ignore-revs`, `blameFile`) go in `engine/index/` beside `readHistory`, so every git spawn shares `scrubbedGitEnv`. The new `engine/people/` module holds identities, registry, snapshot, pack, prompt, rounds and update. Schemas and the pure `contributorsOf()` go in `@repowiki/core`, so the site, #5 and #4 share them without importing `engine` or `eval`. `write/` exports its generic round helpers (`uniqueDraft`, `verifyClaims`, `fixRequest`, `retryRequest`) and `featureDirectory` through `write/index.ts`. — This respects the engine boundary rule and the brief's "extract shared pieces into a package" rule. — Cost if wrong: one re-export. |
 | R32 | Large teams | Ruling: narratives are capped at `maxNarratives` (default 25). Everyone else gets a computed page. The pack is budgeted at 20,000 estimated tokens per person and trims deterministically (§8.2). — This bounds cost on open-source-sized repositories (25 × about $0.02 = $0.50 worst case). — Cost if wrong: the 26th most active contributor has no narrative until the owner raises the cap. |
 | R33 | Run kind | Ruling: `RunKind` gains `people`. Every People call's ledger row carries `runKind: "people"` and `sha` set to the head it documents, including the People round inside `wiki:update` and `wiki:replay`. — People spend then shows in `WikiExport.runs` as its own run and never counts toward build or update totals, so the replay invariant "every update costs fewer tokens than the last full build" (v1 §8) still measures v1's pipeline. This mirrors #9's `inflight` run kind. — Cost if wrong: none; widening an enum rejects no stored row. |
@@ -103,7 +104,8 @@ packages/engine/src/
     resolve.ts       resolvePerson(store, { login?, name?, email? })   (for #9, §16)
     index.ts
   store/             migration (R29); registry, snapshot, person revision and blame-cache methods
-  store/export.ts    buildExport adds `people` (current revisions, excluded filtered)
+  store/export.ts    buildExport adds `people` (current revisions, excluded filtered) and, when
+                     People is on, resolves M10's in-flight authors through resolvePerson (C8)
 packages/site/src/
   activity-svg.ts    barChart(series, range, bucket), heatmap(days, year)   (pure, escaped)
   people.ts          view models: peopleIndexView, personView, activityView, contributorsRow
@@ -111,7 +113,8 @@ packages/site/src/
   pages/special/activity/index.astro, [period].astro
 scripts/
   people-suggest.ts, wiki-people.ts, people-cli.ts (args, estimate, summary)
-  wiki-update.ts, wiki-replay.ts, update-run.ts   (People step at the end, R24)
+  wiki-update.ts, wiki-replay.ts, update-run.ts   (People step after M10's in-flight step,
+                                                   before the one export write; R24, C14)
   wiki-check.ts      person revisions re-verified
 ```
 
@@ -236,7 +239,7 @@ The identity salt is stored in `meta` under the key `people.salt` (32 random byt
    - A stored person whose keys split across groups stays with the group that has more of the person's commits; the other group gets a new id.
 6. **`people:suggest`** prints one table row per group: id, display name, other names, masked emails, logins, commits, and join reasons. It then prints suggested merges (R8), each with its rule (`handle = first name + last initial`, `first.last`, `flast`, an email local part equal to a handle) and a JSON snippet to paste. Its output goes through the same printable/redaction helpers as other CLIs.
 
-`resolvePerson(store, { login?, name?, email? })` returns `{ kind: "person", id } | { kind: "bot" } | { kind: "excluded" } | null`, using the stored registry keys. Work in flight (#9) uses it to link PR authors (§16).
+`resolvePerson(store, { login?, name?, email? })` returns `{ kind: "person", id } | { kind: "bot" } | { kind: "excluded" } | null`, using the stored registry keys. People's `buildExport` step uses it to link work in flight's PR and issue authors (P23, §16, C8).
 
 ## 7. Computed facts (F15 data, ownership)
 
@@ -343,10 +346,10 @@ A failed People round never undoes the snapshot or any page.
 
 ## 9. Freshness (`wiki:update`, `wiki:replay`)
 
-- **`wiki:update shaA → shaB`** (R24) runs v1 §6.1 unchanged. If People is on, then after the pages and the About article are stored, it takes three steps:
+- **`wiki:update shaA → shaB`** (R24) runs v1 §6.1 unchanged. If People is on, then after the pages and the About article are stored and work in flight's offline re-derive has run (M10, C14), it takes three steps:
   1. **Refresh.** `readAuthorship` at shaB (the log is about 0.2 s on next-chief-of-staff), identities, registry, incremental blame (only paths whose blob changed between shaA and shaB, plus new paths), then the snapshot. It makes no call.
   2. **Due narratives** (R25), with the estimate printed up front alongside the update's own estimate. The round is capped by `--people-max-usd`.
-  3. **Export.** The summary file gets a People row: people refreshed, narratives written, carried or skipped (and why).
+  3. **Export.** The export and `llms.txt` are written once, after both steps (C14). The summary file gets a People row: people refreshed, narratives written, carried or skipped (and why).
 - **`wiki:replay`** runs its steps as in M6, then performs the update's People steps once at the final head. If a replay stops early (`--limit`), the refresh runs at the head it reached.
 - **A people-file change** is picked up by the next refresh. Merges and splits make the affected narratives due whole. A newly excluded person's revisions stay in the store but leave the export at once. To erase them from the store as well, run `wiki:people --forget <match-key>` (for example `--forget "name:Someone Private"`; an excluded person's id is never shown, so the flag takes a people-file match key). It deletes the person's revisions and registry row.
 - **`wiki:check`** re-verifies every current person revision against the stored snapshot's commit set and the current identity map: authorship, dates, link routing. It also checks that the export, `llms.txt` and the site's HTML (when present) contain no email from the author set. That check reads the emails from git at check time and never prints them.
@@ -393,8 +396,9 @@ pnpm wiki:update / wiki:replay … [--people-max-usd N]      (new flag; everythi
   - **Escaping.** Every string in an SVG passes through `xmlText()` (escapes `& < > " '`, and drops `INVISIBLE_CHARACTERS` and control characters).
   - **Size.** The SVG has a fixed `viewBox` and scales by CSS.
   - **Accessibility.** A visually hidden `<table>` after each chart holds the same numbers.
-- **Feature pages** (R23). `Article.astro`'s infobox gets the computed **Main contributors** row when the export has People; feature pages with no blamed lines get no row. `contributorsOf(people, featureId, 5)` from core supplies it.
-- **Navigation and search.** The Layout's nav gains **People** when the export has People. Person pages carry `data-pagefind-body` (search finds them by name, other names and narrative). Redirect and activity pages do not.
+- **Feature pages** (R23). `Article.astro`'s infobox gets the computed **Main contributors** row when the export has People; feature pages with no blamed lines get no row. `contributorsOf(people, featureId, 5)` from core supplies it. The row carries `data-pagefind-ignore`, so a name search finds person pages rather than every feature page (C9).
+- **Navigation and search.** The Layout's nav gains **People** when the export has People, last, after M10's "In progress" (C10). Person pages carry `data-pagefind-body` (search finds them by name, other names and narrative). Redirect and activity pages do not. Person pages are not in `@repowiki/query`'s index, so the MCP server and the ask's served answers do not cite them (C9); the ask's static-mode client lists Pagefind results, so its link pattern (#4 R19) gains `/people/<id>/`.
+- **Work in flight's pages** (M10): an author People resolves to a person links `/people/<id>/`; one resolved as excluded is exported as `null` and shown as "unknown author" (C8).
 - **No new dependency, no client script, CSP unchanged.** The no-external-assets and crawl tests cover the new routes.
 
 ## 12. Security, privacy and untrusted text
@@ -438,46 +442,52 @@ pnpm wiki:update / wiki:replay … [--people-max-usd N]      (new flag; everythi
   - An excluded person's name and id appear nowhere in the export, site or `llms.txt`.
 - **Cassettes.** `people.claude.test.ts` records one batched round plus one retry for 2 fixture people, and one append. These are 3 live recordings, about $0.01–0.02 in all. Tests never reach the network, and cassettes carry no headers (v1 §8).
 - **Site.** Golden snapshots of `/people/`, a person page, a redirect, `/special/activity/` and a year page, plus an SVG snapshot and a hostile-name SVG test. The crawl test covers every bar link. Tests assert the CSP meta is unchanged and that the pages load nothing off-site. The existing site snapshots, built from `people: null` exports, must pass unchanged.
-- **Store.** Migration round-trip, parent check on person revisions, blame-cache pruning, and a real-Node smoke test (M3 ruling).
+- **Store.** Migration 10 from a v9 store (C2), round-trip, parent check on person revisions, blame-cache pruning, and a real-Node smoke test (M3 ruling).
 
 ## 14. Milestone breakdown
 
-This is the People milestone, assumed to be **M11**, last in the v2 order the Ask sidebar spec proposes (#5 M8, #4 M9, #9 M10, #6 M11); if the sequencing changes, only the number changes. Tasks are written `P1…P25` below; branches are `m11/people-<short>`. Each task is one `[M11]` sub-issue under F14, F15 or F16, and one PR of about 300 changed lines or fewer (fixtures, cassettes and snapshots excluded). TDD, commits at every green step, merge commits.
+This is the People milestone, **M11**, last in the fixed v2 order (#5 M8, #4 M9, #9 M10, #6 M11); it starts after M10 has merged. Tasks are written `P1…P27` below; branches are `m11/people-<short>`. Each task is one `[M11]` sub-issue under F14, F15 or F16, and one PR of about 300 changed lines or fewer (fixtures, cassettes and snapshots excluded). TDD, commits at every green step, merge commits.
 
-| Task | Contents | Feature |
-|---|---|---|
-| P1 | ADR-0004 (blame for People; supersedes ADR-0003's deferral), ADR-0005 (F14 voice reshaped to chronicle; trailers ignored), `seed.json` tickets | F14, F17 |
-| P2 | core `person.ts`: PersonId, PersonName, CalendarDay, ActivityDay, PullRequestRef, PersonFacts, PeopleSnapshot + tests | F15 |
-| P3 | core: PersonSectionKey, PersonRevision, `personClaimViolations` + tests | F14 |
-| P4 | core: PeopleExport, `WikiExport.people` (default null) + integrity rules, `LlmRole` and `RunKind` `people`, `contributorsOf()`; no-email export test | F14 |
-| P5 | core `people-config.ts`: PeopleConfig and match keys + tests | F16 |
-| P6 | index `authorship.ts`: `readAuthorship` (NUL-parsed log, author fields, merge body line, numstat `-M`; PR numbers from `readHistory`'s existing assignment, shared rather than copied) + hostile tests | F15 |
-| P7 | index `blob.ts` and people `mailmap.ts`: blob at sha, mailmap parse and apply + tests | F16 |
-| P8 | index `blame.ts`: hermetic `blameFile`, stateful incremental parse, ignore-revs, timeout + hermetic test | F15 |
-| P9 | store migration (four tables, salt) + methods for the registry, snapshot, person revisions and blame cache + round-trip tests | F14 |
-| P10 | people `identities.ts`: resolution, fences, exclusion, bots, display name, salted keys | F16 |
-| P11 | people `registry.ts`: id assignment, permanence, redirects, split and merge, config ids | F16 |
-| P12 | people `ownership.ts`: blame over the tree with cache, concurrency, lockfile and size skips, pruning | F15 |
-| P13 | people `snapshot.ts`: activity, areas (R19 rename map plus older manifests), PRs (R6), shares; determinism tests | F15 |
-| P14 | `people:suggest` script + `suggest.ts` (masked output, join reasons, snippet) | F16 |
-| P15 | export integration: `buildExport` adds `people` (excluded filtered), `llms.txt` People section; privacy tests | F14 |
-| P16 | people `pack.ts`: episodes, budget trimming, neutralisation | F14 |
-| P17 | people `prompt.ts` + `people-style.md` + `PersonDraft` schema; `write/index.ts` re-exports (R31) | F14 |
-| P18 | people `verify.ts`: commit-only citations, authorship, R18 checks | F14 |
-| P19 | people `write.ts`: batch and retry rounds through `write/rounds.ts`, journal, computed-lead fallback; test provider, then one recorded cassette (live, about $0.01) | F14 |
-| P20 | people `update.ts`: due detection, append request, carried chronicle; append cassette (live, about $0.005) | F14 |
-| P21 | `wiki:people` script: args, estimate, `--max-usd`, `--dry-run`, `--only`, `--disable`, `--forget <match-key>`, lock, summary | F14 |
-| P22 | `wiki:update`/`wiki:replay` People step and `--people-max-usd`; `wiki:check` person checks and the email scan; `describeError` email redaction; the #9 author join (§16) | F14 |
-| P23 | site `activity-svg.ts` (bars, stacked bars, heatmap, a11y table, `xmlText`) + `/special/activity/` routes | F15 |
-| P24 | site `/people/` and `/people/<id>/` pages, redirects, nav link, Pagefind; crawl and CSP tests | F14, F15 |
-| P25 | site: feature-page Main contributors row and the `/people/` by-feature table (`contributorsOf`) | F14 |
+| Task | Contents | Feature | ≈ Lines |
+|---|---|---|---:|
+| P1 | ADR-0006 (blame for People; supersedes ADR-0003's deferral, whose status it updates), ADR-0007 (F14 voice reshaped to chronicle; trailers ignored) (C1), `seed.json` tickets | F14, F17 | 180 |
+| P2 | core `person.ts`: PersonId, PersonName, CalendarDay, ActivityDay, PullRequestRef, PersonFacts, PeopleSnapshot + tests | F15 | 250 |
+| P3 | core: PersonSectionKey, PersonRevision, `personClaimViolations` + tests | F14 | 200 |
+| P4 | core: PeopleExport, `WikiExport.people` (default null) + integrity rules, `LlmRole` and `RunKind` `people` with `DEFAULT_MODELS.people` (C6), `contributorsOf()`; no-email export test | F14 | 260 |
+| P5 | core `people-config.ts`: PeopleConfig and match keys + tests | F16 | 150 |
+| P6 | index `authorship.ts`: `readAuthorship` (NUL-parsed log, author fields, merge body line, numstat `-M`; PR numbers from `readHistory`'s existing assignment, shared rather than copied) + hostile tests | F15 | 280 |
+| P7 | index `blob.ts` and people `mailmap.ts`: blob at sha, mailmap parse and apply + tests | F16 | 220 |
+| P8 | index `blame.ts`: hermetic `blameFile`, stateful incremental parse, ignore-revs, timeout + hermetic test | F15 | 260 |
+| P9 | store migration 10 (four tables, salt; C2) + methods for the registry, snapshot, person revisions and blame cache + round-trip tests | F14 | 280 |
+| P10 | people `identities.ts`: resolution, fences, exclusion, bots, display name, salted keys | F16 | 290 |
+| P11 | people `registry.ts`: id assignment, permanence, redirects, split and merge, config ids | F16 | 280 |
+| P12 | people `ownership.ts`: blame over the tree with cache, concurrency, lockfile and size skips, pruning | F15 | 230 |
+| P13 | people `snapshot.ts`: activity, areas (R19 rename map plus older manifests), PRs (R6), shares; determinism tests | F15 | 290 |
+| P14 | `people:suggest` script + `suggest.ts` (masked output, join reasons, snippet) | F16 | 250 |
+| P15 | export integration: `buildExport` adds `people` (excluded filtered), `llms.txt` People section; privacy tests | F14 | 220 |
+| P16 | people `pack.ts`: episodes, budget trimming, neutralisation | F14 | 250 |
+| P17 | people `prompt.ts` + `people-style.md` + `PersonDraft` schema; `write/index.ts` re-exports (R31) | F14 | 200 |
+| P18 | people `verify.ts`: commit-only citations, authorship, R18 checks | F14 | 280 |
+| P19 | people `write.ts`: batch and retry rounds through `write/rounds.ts`, journal, computed-lead fallback; test provider, then one recorded cassette (live, about $0.01) | F14 | 260 |
+| P20 | people `update.ts`: due detection, append request, carried chronicle; append cassette (live, about $0.005) | F14 | 250 |
+| P21 | `wiki:people` script: args, estimate, `--max-usd` selection (R26, C12), `--dry-run`, `--only`, `--disable`, `--forget <match-key>`, lock, summary | F14 | 290 |
+| P22 | `wiki:update`/`wiki:replay` People step after M10's in-flight step (C14) and `--people-max-usd`; `wiki:check` re-verifies person revisions | F14 | 250 |
+| P23 | The work-in-flight author join (C8): `Author.person` (default null), `buildExport` resolving M10's authors through `resolvePerson` (excluded → `null`), person links on the in-progress pages; `wiki:check`'s email scan; `describeError` email redaction | F14, F16 | 260 |
+| P24 | site `activity-svg.ts` (bars, stacked bars, heatmap, a11y table, `xmlText`) + `/special/activity/` routes | F15 | 290 |
+| P25 | site `/people/` and `/people/<id>/` pages, redirects, nav link (last, C10), Pagefind; the ask client's link pattern gains `/people/<id>/` (C9); crawl and CSP tests | F14, F15 | 290 |
+| P26 | site: feature-page Main contributors row (`data-pagefind-ignore`) and the `/people/` by-feature table (`contributorsOf`) | F14 | 180 |
+| P27 | `eval:accuracy` covers person pages: their claims join the accuracy sheet (§15 criterion 4) | F14 | 120 |
 
-**Live gate (after P25, controller-run, about $0.15).**
+Twenty-seven tasks. Earlier-milestone dependencies: P4 and P9 follow M10's enum values and
+migration 9 (C2, C6); P22 hooks in after M10's update step (M10 T12); P23 needs M10's `Author`
+schema and in-progress pages (M10 T2, T13); P25 edits M9's ask client (M9 task 15).
+
+**Live gate (after P27, controller-run, about $0.15).**
 
 - `wiki:people` on a scratch copy of next-chief-of-staff's store, with a one-entry people file.
 - `wiki:people` on RepoWiki's own store.
 - `wiki:update` across one new merge.
-- Record the numbers in the P25 PR and run the owner's review (§15).
+- Record the numbers in the P27 PR and run the owner's review (§15).
 
 ## 15. Exit criteria
 
@@ -501,21 +511,20 @@ This is the People milestone, assumed to be **M11**, last in the v2 order the As
 
 ## 16. Dependencies on the other v2 sub-projects
 
-- **#9 Work in flight.**
+All three earlier milestones have merged when M11 starts.
+
+- **#9 Work in flight (M10).**
   - People provides `resolvePerson(store, { login?, name?, email? })` (§6) and permanent `/people/<id>/` URLs.
-  - #9 must link PR authors only through it.
-  - #9 must render nothing identifying (name or login) for `{ kind: "excluded" }`.
-  - #9 must never print emails.
-  - #9's draft exports `Author { login, bot }` for each open PR and issue. Because People lands after #9 (M11), P22 adds the join: when People is on, each #9 author whose login resolves to a person gains that person's `personId`, and the site links it. An author resolving to `{ kind: "excluded" }` is exported with `login: null`, so an excluded person's GitHub login never appears beside work in flight. The cross-spec review must accept that #9's export can hide a login.
-- **#5 Agent interface (MCP).**
-  - People provides `WikiExport.people` (additive, `null` when off) and core's `contributorsOf()`, so tools such as "who worked on feature X" or "what did person Y do" read the export and never git.
-  - #5 must treat names and narrative text as untrusted data, as with page text.
-  - #5 must not need person-revision history (R27). If it does, it adds an export field through the same additive pattern.
-- **#4 Ask sidebar.** Person pages are ordinary indexed pages, in Pagefind and in the export. If #4 builds its own index from the export, it may include `people.pages`. It must not surface an excluded person, and it cannot, because the export has none.
-- **Shared constraints.**
-  - People appends one store migration. #9's draft takes migration 9, and People takes the next free index when it merges; none renumbers a shipped one.
-  - People adds `WikiExport.people`, `LlmRole` `people` and `RunKind` `people`; #4 adds `ask` and #9 adds `inflight` to the same enums. These are textual conflicts only, resolved in merge order. Other sub-projects adding export fields use the same within-schema-3 default pattern, so no two of them need a `SCHEMA_VERSION` bump in the same release.
-  - The Layout nav gains one link; coordinate the order with #4's sidebar.
+  - M10 exports `Author { login, bot } | null` for each open PR and issue, with authors as plain text. P23 adds the join, in People's own `buildExport` step (C8): when People is on, each author whose login resolves to a person gains `person` (a new field, default `null`, C5) and the site links it; an author resolving to `{ kind: "excluded" }` is exported as `author: null` ("unknown author"), so an excluded person's GitHub login never appears beside work in flight; a bot keeps its badge; a login that resolves to nobody stays plain text. The join runs at export time, so a people-file change applies at the next export without an in-flight refresh.
+  - Nothing prints an email.
+- **#5 Agent interface (M8).**
+  - People provides `WikiExport.people` (additive, `null` when off) and core's `contributorsOf()`, so a later tool ("who worked on feature X", "what did person Y do") can read the export and never git. No such tool is in v2's tasks, and M8's tools print no author (C8, C9).
+  - Such a tool must treat names and narrative text as untrusted data, as with page text, and must not need person-revision history (R27); if it does, it adds an export field through the same additive pattern.
+- **#4 Ask sidebar (M9).** Person pages are in Pagefind and in the export, but not in `@repowiki/query`'s index, so served answers never cite them (C9). The static-mode client lists Pagefind results, so P25 widens its link pattern (#4 R19) to `/people/<id>/`. It cannot surface an excluded person, because the export has none.
+- **Shared constraints** (C2, C5, C6, C10).
+  - People appends migration 10; work in flight's is 9. None renumbers a shipped one.
+  - People adds `WikiExport.people`, `Author.person`, `LlmRole` `people` and `RunKind` `people`; M9 added `ask` and M10 `inflight` to the same enums. No `SCHEMA_VERSION` bump.
+  - The Layout nav gains **People**, last; the header (M9's Ask button) is untouched.
 
 ## 17. Out of scope (v2 People)
 
@@ -535,10 +544,175 @@ This is the People milestone, assumed to be **M11**, last in the v2 order the As
 
 The decisions you are most likely to want to change:
 
-1. **R16, voice.** "War chronicle" became a sober dated chronicle with no martial metaphor and no other people named. If you want more colour, it is a style-guide and banned-word change plus one cassette re-record. ADR-0005 records the reshape.
+1. **R16, voice.** "War chronicle" became a sober dated chronicle with no martial metaphor and no other people named. If you want more colour, it is a style-guide and banned-word change plus one cassette re-record. ADR-0007 records the reshape (C1).
 2. **R15 and the privacy defaults, narratives about teammates.** Every human with at least 3 commits gets a narrative unless excluded. You might prefer an opt-in list (`narrate: [ids]`) on repositories you share with others.
 3. **R1, blame is in.** It answers "who wrote what exists now" for about 30 s once per wiki. Dropping it removes only the current-lines and share figures.
 4. **R5, co-authors ignored.** `Co-authored-by` trailers earn no credit, which matters for pair-programmed work. In your repositories the trailers are mostly AI models.
 5. **R24, opt-in and no per-step replay narratives.** People is off until `wiki:people` runs, and replay writes narratives only at its end, so person pages have no dated revision history from replay.
 6. **R12, exclusion beats URL permanence.** An excluded person's page vanishes without a redirect.
 7. **R8, no fuzzy auto-merge.** Handle-to-name matches are suggested, not applied, so your repository needs one people-file line for its one handle.
+
+## Cross-spec rulings (consistency review, 2026-10-04)
+
+The four v2 specs (#5 Agent interface M8, #4 Ask sidebar M9, #9 Work in flight M10, #6 People
+M11) were reviewed together after they were written. These rulings bind all four and appear word
+for word in each; sections above that said otherwise were edited to agree. Each is "ruling — why —
+cost if wrong".
+
+- **C1 ADR numbers, in milestone order.** ADR-0004: hand-rolled stdio MCP (M8 task 1). ADR-0005:
+  work in flight reads GitHub through `gh` (M10 T1). ADR-0006: blame for People, superseding
+  ADR-0003, whose status P1 sets to "superseded by ADR-0006" (M11 P1). ADR-0007: the F14 chronicle
+  voice (M11 P1). M9 writes none, since F09 is built as v1 §3 states it. — Numbers are taken in
+  merge order. — None.
+- **C2 Store migrations.** `main` ships 8 (`MIGRATIONS` has 8 entries; `user_version` 8).
+  Migration 9 is work in flight's three tables (M10 T3); migration 10 is People's four tables and
+  salt (M11 P9). M8 and M9 add none. — Merge order; both are additive SQL and rewrite no stored
+  body. — None.
+- **C3 One shared retrieval package, `@repowiki/query`, created once in M8 task 2.** Its runtime
+  dependencies are `@repowiki/core` and `zod` only; its sources import no `engine` or `llm`, spawn
+  no process and touch no network (a boundary test); `engine`'s test-repo is a devDependency for
+  the moved `test-wiki` fixture. M8 contents: `text.ts`; `tools.ts` (`defineTool`, `toolSet`,
+  `ToolError`, `MAX_TOOL_RESULT_CHARS`, a local `ToolDefinition` shape); `search.ts` (`terms`,
+  `searchIndex`: BM25F); `wiki-view.ts` (`WikiView`, `ABOUT_PAGE_ID`, `listedPage`, `reference`);
+  `wiki-page.ts` (`readPage(view, id, max, options?)`); `wiki-tools.ts` (`createWikiTools`);
+  `as-of.ts` (`parseAsOf(text, resolveCommit)`, `revisionAt(revisions, asOf, isAncestor)`,
+  `architectureAt`, `WikiView.at`, with git passed in as functions); `changes.ts`; `load.ts`
+  (`loadExport`); `test-wiki.ts`. Everything that runs git or engine code lives in
+  `@repowiki/mcp` (M8 task 4; depends on `core`, `engine`, `query`): the git helper moved out of
+  eval's `repo-tools.ts`, `code.ts`, `head-status.ts` and `agent-tools.ts`. M9 adds to `query`,
+  opt-in with every default unchanged: `claim-index.ts`, a handles option of `readPage`
+  (`readPageWithHandles`) and `hrefs.ts`. M10 T15 uses `searchIndex` and `terms` for issue
+  evidence, but `engine` never depends on `query`: `mapIssues` takes a `suggest` function that
+  `scripts/` builds from `query` (both of #9's callers are scripts, C14), so there is no package
+  cycle. M11 adds nothing to `query`. No later milestone re-extracts or falls back to extracting.
+  — The ask must not load `engine`, and an `engine → query → engine` cycle is avoided. — A later
+  `query` function that needs git takes it as a parameter, as `isAncestor` does.
+- **C4 Byte-stable defaults.** `query`'s default `search`, `read_page` and `list_pages` text is
+  pinned by the M7 and M8 eval cassettes and, from M9, by the ask's answer cache. A PR that changes
+  a default output re-records the affected cassettes and bumps `ASK_PROMPT_VERSION` in the same
+  PR. Adding a page kind to `query`'s index is such a change. — One retrieval for eval, agent and
+  sidebar means one change reaches all three. — A missed bump serves answers rendered from the old
+  output until "Ask again".
+- **C5 `WikiExport` stays schema 3.** M10 adds `inflight: InFlight | null` and M11 adds
+  `people: PeopleExport | null`, both defaulting to `null`; M11 also adds `person: PersonId | null`
+  (default `null`) to M10's `Author`. M8 and M9 add no export field. Every earlier schema-3 export
+  parses and `SCHEMA_VERSION` is not bumped. — The pattern `architecture` and `runs` set. — None.
+- **C6 Roles, run kinds, models, prices.** `LlmRole` gains `ask` (M9 task 2), `inflight` (M10 T2)
+  and `people` (M11 P4), each with its `DEFAULT_MODELS` entry (`claude-haiku-4-5`) in the same
+  task, since `ModelConfig` is a record over `LlmRole`. `RunKind` gains `inflight` (M10 T2) and
+  `people` (M11 P4). The ask (M9) and the eval agents (M8) record no run kind: their ledgers stay
+  in memory and never reach the store. `pricing.ts` does not change; a role moved to an unpriced
+  model is refused before any call. — Widening an enum rejects no stored row, so no migration. —
+  None.
+- **C7 Run totals.** `WikiExport.runs` sums store ledger rows by `(runKind, sha)`, so it gains one
+  `inflight` total and one `people` total per wiki head (every refresh at that head summed). People
+  calls made inside `wiki:update` and `wiki:replay` carry `people`, never `update`. The eval's
+  break-even uses the last `build` run and the replay invariant compares `update` runs, so neither
+  counts in-flight or People spend. — v1 §6.4 measures v1's pipeline. — None.
+- **C8 Identity.** M8 and M9 print no author identity of their own; they print wiki text (claims,
+  titles, commit subjects) through `query`'s neutralisation. M10 exports the GitHub logins of open
+  PR and issue authors (validated, never emails); they are the only logins in the export. When
+  People is on, M11 P23 resolves each in-flight author in `buildExport` through `resolvePerson`: a
+  person gains `person` and the site links `/people/<id>/`; `{ kind: "excluded" }` exports
+  `author: null` ("unknown author"), so an excluded person's login never appears; a login that
+  resolves to nobody stays plain text. The join runs at export time, so a new exclusion applies at
+  the next export without a re-derive. Exclusion removes People's own output; repository text
+  (commit subjects in citations, PR titles) is not rewritten, and `wiki:people` says so when it
+  excludes someone. — `resolvePerson` is the one identity map. — A login that no people-file
+  `login:` key or noreply address names is shown unlinked.
+- **C9 Search and indexes.** `query`'s index (MCP `search`, the ask's page search and claim index)
+  covers active feature pages and the About article through M11. In-flight data is never indexed:
+  in-flight pages carry no `data-pagefind-body`, and on articles the In progress section, claim
+  markers and notice carry `data-pagefind-ignore="all"`. Person pages are in Pagefind (M11) but not
+  in `query`; the Main contributors row carries `data-pagefind-ignore`. M11 P25 widens the ask
+  client's link pattern (#4 R19) to `/people/<id>/`, so static-mode results can link person pages.
+  An MCP or ask view of in-flight or People data is a follow-up outside v2's tasks; if built,
+  in-flight output is labelled "open work, not merged code". — Answers and search results stay
+  code-backed, and GitHub text never enters an index. — "Who worked on X" is not answerable by the
+  agent or the sidebar in v2.
+- **C10 Site shell.** The CSP meta is unchanged by all four. `wiki:serve` sends the same policy
+  plus `frame-ancestors 'none'`, built from one exported constant that `Layout.astro` also renders
+  (M9 task 13), so the two cannot drift. Only M9 adds to the header (the Ask button, after the
+  search form). Nav order: Main page, Random article, All articles, About <project>, In progress
+  (M10, when `inflight` is set), People (M11, when `people` is set). Claim anchors
+  (`id="claim-<id>"` from core's `claimAnchor`) are added once, in M9 task 6; M10 links to them.
+  Each milestone regenerates site snapshots on top of the previous one's merge. — Shared files are
+  edited in milestone order. — None.
+- **C11 One local server; out-dir names.** The only HTTP server is `pnpm wiki:serve` on
+  `127.0.0.1` (default port 4321, also `site:preview`'s, so one runs at a time; a busy port names
+  `--port`). The MCP server is stdio and opens no port. M10 and M11 add no server, and `wiki:serve`
+  never reads GitHub or runs blame. Under `<out>/`: v1's `wiki.db`, `export.json`, `llms.txt`,
+  `site/`, `eval/`; M8 `eval/history-<time>/`; M9 `ask/answers.jsonl`, `eval/ask-<time>/`; M10
+  `inflight.git/`; M11 `people.json`, `people-<sha7>.md`. `site:build --no-inflight` refuses the
+  default `<out>/site/`, which `wiki:serve` rebuilds with in-flight data; a build to share goes to
+  another `--out`. `llms.txt` lists no in-flight data; M11 adds a People section. — No two features
+  claim a port, a process or a path. — None.
+- **C12 Cost rules.** Every paid command prints its estimate before the first call and needs a key
+  only when the estimate shows calls. `--max-usd` is a ceiling counted at each call's upper bound:
+  independent units (questions, PR summaries, narratives) are taken in priority order while the
+  next fits, and the rest are reported as over budget and stay due. Defaults: `eval:run` $5 (M7),
+  `ask:eval` $1.50, `wiki:serve` $0.05 a question and $1 a session, `wiki:inflight` $1,
+  `wiki:people` $1, and the People round of `wiki:update`/`wiki:replay` $0.50
+  (`--people-max-usd`). Rounds whose calls do not wait on each other are batched; interactive tool
+  loops (eval agents, the ask) are not. A `cacheKey` is set only when an estimated prefix of at
+  least 4,096 tokens is shared by at least two calls of one round: People (≈5,000) qualifies; the
+  ask (≈3,000) and in-flight summaries (≈2,500) never do; the MCP server makes no call. — One rule
+  the owner can predict. — None.
+- **C13 Safety and hermetic git.** Untrusted text is neutralised on every path out (each spec's
+  table). Nothing is written inside the documented repository: every output goes through
+  `resolveOutDir`, and M8 and M10 tests compare a listing of the fixture's `.git` before and after.
+  Every git process runs with engine's `scrubbedGitEnv()` (redirection, diff-shaping, pathspec and
+  `GIT_CONFIG_*` injection stripped; `GIT_NO_LAZY_FETCH=1`), so hardening goes in argv `-c`, never
+  the environment. M8 adds `GIT_OPTIONAL_LOCKS=0`; M11 pins blame's config (#6 R2). M10, the only
+  network path: every command in `<out>/inflight.git` also sets `GIT_CONFIG_NOSYSTEM=1`,
+  `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_TERMINAL_PROMPT=0`, so a user's `url.*.insteadOf` cannot
+  turn the built https URL into SSH and no global hook, merge driver or credential helper runs; an
+  inherited `GIT_ALLOW_PROTOCOL` is kept and overrides `protocol.*.allow`, so a value without
+  `https` (process tests set `file`) disables the fetch and heads report `missing`.
+  `GIT_NO_LAZY_FETCH` leaves the explicit fetch alone, but a partial-clone documented repository's
+  missing object becomes an error rather than a fetch: that PR is `missing`, and `inflight.git` is
+  rebuilt at most once per run. — One git rule everywhere. — An owner who relies on a global
+  `http.proxy` sets `HTTPS_PROXY` instead.
+- **C14 Update and replay.** After v1 §6.1 (pages, then the About article), `wiki:update` runs the
+  in-flight offline re-derive (M10, no call), then the People refresh and due narratives (M11),
+  then writes `export.json` and `llms.txt` once. `wiki:replay` runs both once, at the head it
+  reached, never per step, dropping the PRs merged by every step. Both hooks live in `scripts/`
+  (`update-run.ts`, `wiki-update.ts`, `wiki-replay.ts`), so engine's `freshness/update.ts` is
+  unchanged. #9's prediction check (R22) is written only for a run of one step that starts at the
+  snapshot's `wikiHead`. — A per-step re-derive costs minutes for a state the next step replaces. —
+  None.
+- **C15 Each piece is built once.** The `query` extraction is M8's; claim anchors are M9's; each
+  enum value, model default, ADR and migration belongs to the task named above. Later milestones
+  name these as dependencies and do not repeat them.
+
+## Review notes (consistency review, 2026-10-04)
+
+Fixed in this spec:
+
+- ADR-0004 and ADR-0005 collided with M8's ADR-0004; they are ADR-0006 and ADR-0007 (C1). The
+  migration is 10 (C2).
+- R10 said logins appear only in `people:suggest`, but M10 exports open PR authors' GitHub logins;
+  R10 is scoped to the logins People derives, and the excluded case is handled by C8.
+- Goal 2 and R12 promised an excluded person appears nowhere, but commit subjects (GitHub's
+  "Merge pull request #N from <login>/<branch>") and PR titles are repository text RepoWiki does
+  not rewrite; both now say so, and `wiki:people` tells the owner.
+- R26 refused the whole run when the estimate passed `--max-usd`, while #9 selects within its cap;
+  both now select by rank (C12).
+- P22 bundled the update step, `wiki:check`, `describeError` redaction and the #9 author join;
+  it is split into P22 and P23. §15.4 relied on an `eval:accuracy` extension no task built; P27
+  adds it. The table gained sizes and explicit dependencies on M9 and M10.
+- §2 promised that agents and the Ask sidebar answer "who worked on X"; no task in any milestone
+  did that, so it is now a follow-up (C9). Person pages enter Pagefind, so P25 widens the ask's
+  static-mode link pattern.
+- Nav order and the Main contributors row's search exclusion are fixed (C9, C10).
+
+Flagged, not changed:
+
+- §15.1's counts (8 human groups, 1 bot, 7 pages) come from the spec writer's reading of
+  next-chief-of-staff; the owner confirms them at the gate.
+- §15.6's time bars depend on the machine; they are measured on the owner's.
+- The exclusion privacy test needs a fixture whose commit subjects do not name the excluded
+  person, or it fails by C8's carve-out.
+- Narratives about every teammate with 3 or more commits are on by default (R15, §18.2). On a
+  shared repository such as next-chief-of-staff, the owner should decide this before the live
+  gate.
