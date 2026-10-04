@@ -456,13 +456,13 @@ export const count = (n: number): string => n.toLocaleString("en-US");
 /** A feature id or failure message in a table cell: a code span whose pipes cannot split the row. */
 export const cell = (text: string): string => markdownCodeSpan(text).replace(/\|/g, "\\|");
 
+/** Why the About article made no call, as an update summary and a replay summary both say it. */
+export const architectureSkipWhy = (skipped: ArchitectureRow["skipped"]): string =>
+  skipped === "current" ? "already current; no call" : "skipped: fewer than two pages";
+
 /** The summary's row for the project's article (the About page). */
 export function architectureRow({ outcome, skipped }: ArchitectureRow): string {
-  if (outcome === null) {
-    const why =
-      skipped === "current" ? "already current; no call" : "skipped: fewer than two pages";
-    return `| About article | 0 | 0 | 0 | ${why} |`;
-  }
+  if (outcome === null) return `| About article | 0 | 0 | 0 | ${architectureSkipWhy(skipped)} |`;
   const claims = outcome.architecture?.sections.reduce((n, s) => n + s.claims.length, 0) ?? 0;
   const result = outcome.failure === null ? "written" : cell(outcome.failure);
   return `| About article | ${claims} | ${outcome.dropped.length} | ${outcome.calls} | ${result} |`;
