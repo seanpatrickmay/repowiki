@@ -13,7 +13,8 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "tracker:seed": "node scripts/tracker/run.ts",
-    "index:repo": "node scripts/index-repo.ts"
+    "index:repo": "node scripts/index-repo.ts",
+    "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

@@ -8,6 +8,7 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm install` — install dependencies (Node 24, pnpm 10)
 - `pnpm check` — typecheck + lint + test; must pass before every commit
 - `pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format`
+- `pnpm cassettes:record <test files>` — re-record LLM cassettes live (needs `ANTHROPIC_API_KEY` in `.env`; costs money; review the diff)
 
 ## Layout
 - `packages/core` — zod schemas and types shared by every package; no I/O besides hashing
