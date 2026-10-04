@@ -1,22 +1,25 @@
 import type { LedgerEntry, TokenUsage } from "@repowiki/core";
 import { markdownCodeSpan, pullRequestOf, type ReplayStep } from "@repowiki/engine";
 import { estimateUpdate } from "./update-cli.ts";
-import { architectureSkipWhy, problemLine } from "./wiki-cli.ts";
+import { architectureSkipWhy, problemLine, WIKI_BUILD_RUN_PREFIX } from "./wiki-cli.ts";
 
 /** Every token a run used, cached or not: the measure of spec §8's third replay invariant. */
 export const tokensOf = (t: TokenUsage): number => t.in + t.out + t.cacheRead + t.cacheWrite;
 
 /**
- * The tokens of the newest build run in `ledger` (in ledger order), or null when it holds none.
- * A run is its `runId`: two builds at one sha are two runs, and only the later one is the
+ * The tokens of the newest wiki:build run in `ledger` (in ledger order), or null when it holds
+ * none. The ledger tags both wiki:build and manifest:build calls `kind: "build"`; a wiki:build run
+ * is the one whose `runId` starts with WIKI_BUILD_RUN_PREFIX, since a manifest:build is no full
+ * build. A run is its `runId`: two builds at one sha are two runs, and only the later one is the
  * "full build" an update is compared against (spec §8's third invariant), never their sum.
  */
 export function newestBuildTokens(ledger: readonly LedgerEntry[]): number | null {
-  const newest = ledger.findLast((e) => e.runKind === "build");
+  const builds = ledger.filter(
+    (e) => e.runKind === "build" && e.runId.startsWith(WIKI_BUILD_RUN_PREFIX),
+  );
+  const newest = builds.at(-1);
   if (newest === undefined) return null;
-  return ledger
-    .filter((e) => e.runKind === "build" && e.runId === newest.runId)
-    .reduce((n, e) => n + tokensOf(e.tokens), 0);
+  return builds.filter((e) => e.runId === newest.runId).reduce((n, e) => n + tokensOf(e.tokens), 0);
 }
 
 /** The longest commit subject a summary row shows. */

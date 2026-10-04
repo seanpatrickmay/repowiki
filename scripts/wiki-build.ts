@@ -34,6 +34,7 @@ import {
   lazyClaudeProvider,
   parseWikiArgs,
   renderBuildSummary,
+  WIKI_BUILD_RUN_PREFIX,
   type WikiArgs,
 } from "./wiki-cli.ts";
 
@@ -135,7 +136,7 @@ async function runBuild(
     }
     if (args.dryRun) return;
 
-    const runId = `wiki-build-${index.sha}-${new Date().toISOString()}`;
+    const runId = `${WIKI_BUILD_RUN_PREFIX}${index.sha}-${new Date().toISOString()}`;
     const ledger = createLedger((entry) => store.appendLedger(entry));
     // Forgets a collected request only once buildWiki stores its page, so a kill never re-pays.
     const journal = buildJournal(store);

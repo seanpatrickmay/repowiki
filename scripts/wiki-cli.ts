@@ -219,6 +219,9 @@ export function writeFileAtomic(path: string, text: string): void {
   }
 }
 
+/** The ledger run id of a wiki:build starts with this (a manifest:build's does not). */
+export const WIKI_BUILD_RUN_PREFIX = "wiki-build-";
+
 /** The advisory lock file a running wiki:build holds in its out dir. */
 export const BUILD_LOCK = "wiki-build.lock";
 /** A lock whose line names no pid, older than this, is left over from a killed build (a batch ends in 24 h). */

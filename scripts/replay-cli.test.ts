@@ -43,22 +43,36 @@ describe("newestBuildTokens", () => {
   it("is null when the ledger holds no build run", () => {
     expect(newestBuildTokens([])).toBeNull();
     expect(newestBuildTokens([entry("u1", "update", 5)])).toBeNull();
-    const untagged: LedgerEntry = { ...entry("b0", "build", 5) };
+    const untagged: LedgerEntry = { ...entry("wiki-build-b0", "build", 5) };
     delete untagged.runKind;
     expect(newestBuildTokens([untagged])).toBeNull();
   });
 
   it("takes the newest build run alone, even when two builds share a sha", () => {
     const ledger = [
-      entry("b1", "build", 1000),
-      entry("b1", "build", 1000),
+      entry("wiki-build-b1", "build", 1000),
+      entry("wiki-build-b1", "build", 1000),
       entry("u1", "update", 7),
-      entry("b2", "build", 300),
-      entry("b2", "build", 200),
+      entry("wiki-build-b2", "build", 300),
+      entry("wiki-build-b2", "build", 200),
       entry("u2", "update", 9),
     ];
-    // b2 only: (300 + 10) + (200 + 10); not b1, and not the 2,520 the two builds sum to.
+    // wiki-build-b2 only: (300 + 10) + (200 + 10); not b1, and not the 2,520 the two builds sum to.
     expect(newestBuildTokens(ledger)).toBe(520);
+  });
+});
+
+describe("newestBuildTokens and manifest builds", () => {
+  it("compares against the newest wiki:build run, not a later manifest:build run", () => {
+    // manifest:build also tags its calls kind "build" (runId manifest-build-...), but it is no
+    // full build: its few tokens would make every update read as over the build.
+    const ledger = [
+      entry("wiki-build-x", "build", 4000),
+      entry("u1", "update", 7),
+      entry("manifest-build-y", "build", 50),
+    ];
+    expect(newestBuildTokens(ledger)).toBe(4010);
+    expect(newestBuildTokens([entry("manifest-build-y", "build", 50)])).toBeNull();
   });
 });
 
