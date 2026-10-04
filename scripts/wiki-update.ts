@@ -13,7 +13,7 @@ import { totalsOf } from "@repowiki/llm";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { estimateLine, parseUpdateArgs, renderUpdateSummary } from "./update-cli.ts";
-import { estimateFor, readInput, runUpdate } from "./update-run.ts";
+import { estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
 import { acquireBuildLock, describeError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
 
 /**
@@ -47,8 +47,8 @@ async function main(): Promise<void> {
       console.error(estimateLine(estimate, args.batch));
       if (args.dryRun) return;
       // Calls are certain, so fail once here rather than once per page; an update that makes
-      // none (nothing cited changed) needs no key.
-      if (estimate.rewrites + estimate.whole + estimate.small > 0) requireApiKey("wiki:update");
+      // none (nothing cited changed, no article due) needs no key.
+      if (needsKey(estimate)) requireApiKey("wiki:update");
       const log = (line: string) => console.error(line);
       const { update, runId } = await runUpdate(store, input, args, models, repoName, log);
       const exportPath = join(out, "export.json");

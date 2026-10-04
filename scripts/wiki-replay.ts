@@ -34,7 +34,7 @@ import {
   type ReplayArgs,
   renderUpdateSummary,
 } from "./update-cli.ts";
-import { estimateFor, readInput, runUpdate } from "./update-run.ts";
+import { estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
 import {
   acquireBuildLock,
   describeError,
@@ -161,9 +161,10 @@ async function replay(
     const input = await readInput(repo, step.sha);
     const estimate = estimateFor(store, input, args, models, repoName);
     log(`[${i + 1}/${todo.length}] ${step.sha.slice(0, 7)}: ${estimateLine(estimate, args.batch)}`);
-    // Calls are certain, so fail once here rather than once per page; a step that makes none
-    // (nothing cited changed) needs no key.
-    if (estimate.rewrites + estimate.whole + estimate.small > 0) requireApiKey("wiki:replay");
+    // Calls are certain, so fail once here rather than once per page, and before the step
+    // commits anything; a step that makes none (nothing cited changed, no article due) needs no
+    // key.
+    if (needsKey(estimate)) requireApiKey("wiki:replay");
     const { update, runId } = await runUpdate(
       store,
       input,

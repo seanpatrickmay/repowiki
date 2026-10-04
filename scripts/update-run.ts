@@ -103,6 +103,14 @@ export function estimateFor(
 }
 
 /**
+ * Whether the update the estimate describes makes a call, so it needs the API key: any page or
+ * small call, or the About article (a due article is a call even when no page is dirty). The
+ * commands check this before the update, which commits a step's pages and head first.
+ */
+export const needsKey = (estimate: UpdateEstimate): boolean =>
+  estimate.rewrites + estimate.whole + estimate.small > 0 || estimate.articleUsd !== null;
+
+/**
  * Moves the store's wiki to input.index.sha with live calls: one ledger run of kind "update" at
  * that sha, and the store's batch journal, so a killed update's batches are collected by the
  * next run instead of paid for again. The Claude provider is built on the first call, so an

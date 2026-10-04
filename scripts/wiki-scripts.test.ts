@@ -654,6 +654,16 @@ describe("wiki-update.ts as a process (no network)", () => {
     expect(readFileSync(summaryPath, "utf8")).toContain("# Update:");
   });
 
+  it("fails up front, with the head unmoved, when the About article is the only call and there is no key", () => {
+    const { repo, out, first, second } = untouched("paged");
+    const result = run("scripts/wiki-update.ts", repo, second, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ANTHROPIC_API_KEY is not set");
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(first);
+    store.close();
+  });
+
   it("states the About article's cost when no page is dirty but the article is due", () => {
     const { repo, out, second } = untouched("paged");
     const result = run("scripts/wiki-update.ts", repo, second, "--out", out, "--dry-run");
@@ -716,20 +726,38 @@ describe("wiki-replay.ts as a process (no network)", () => {
    * gitRepo's repository, a store whose one feature (signals, owning src/app.ts) has a page at
    * its commit, then two merges: #4 adds and removes a scratch file (no net change: an update
    * with no call), #5 edits the line the page cites (an update that needs one).
+   * `paged` stores a second feature (deliverables, owning src/other.ts) with a page and no About
+   * article, which is then due; `twoQuiet` adds another no-call merge (#6) before #5.
    */
-  function replayable(brokenClaimId: string | null = null) {
-    const { repo, sha: first, git } = gitRepo();
+  function replayable(
+    brokenClaimId: string | null = null,
+    { paged = false, twoQuiet = false } = {},
+  ) {
+    const { repo, sha: base, git } = gitRepo();
+    let first = base;
+    if (paged) {
+      writeFileSync(join(repo, "src", "other.ts"), "export const other = 1;\n");
+      git("add", "-A");
+      git("commit", "-q", "-m", "other");
+      first = git("rev-parse", "HEAD").trim();
+    }
     const out = join(dir, "o");
     mkdirSync(out);
     const store = openStore(join(out, "wiki.db"));
     store.putManifest(
       makeManifest({
         sha: first,
-        features: [makeFeature()],
+        ...(paged ? {} : { features: [makeFeature()] }),
         // Every file and symbol, as a built manifest holds them: an update then sees no churn.
         membership: {
           "src/app.ts": { featureId: "signals", weight: 1 },
           "src/app.ts#app": { featureId: "signals", weight: 1 },
+          ...(paged
+            ? {
+                "src/other.ts": { featureId: "deliverables", weight: 1 },
+                "src/other.ts#other": { featureId: "deliverables", weight: 1 },
+              }
+            : {}),
         },
       }),
       { llmRevised: true },
@@ -764,6 +792,36 @@ describe("wiki-replay.ts as a process (no network)", () => {
         ],
       }),
     );
+    if (paged) {
+      store.putRevision(
+        makeRevision({
+          id: "deliverables-1",
+          featureId: "deliverables",
+          sha: first,
+          seeAlso: [],
+          sections: [
+            { key: "lead", claims: [leadClaim()] },
+            {
+              key: "overview",
+              claims: [
+                bodyClaim({
+                  citations: [
+                    codeCitation({
+                      path: "src/other.ts",
+                      startLine: 1,
+                      endLine: 1,
+                      sha: first,
+                      symbol: null,
+                      contentHash: contentHash("export const other = 1;\n"),
+                    }),
+                  ],
+                }),
+              ],
+            },
+          ],
+        }),
+      );
+    }
     store.setHead(first);
     store.close();
     const merge = (branch: string, edit: () => void, pr: number) => {
@@ -784,6 +842,19 @@ describe("wiki-replay.ts as a process (no network)", () => {
       },
       4,
     );
+    const quiet2 = twoQuiet
+      ? merge(
+          "scratch2",
+          () => {
+            writeFileSync(join(repo, "scratch2.txt"), "tmp\n");
+            git("add", "-A");
+            git("commit", "-q", "-m", "add scratch2");
+            git("rm", "-q", "scratch2.txt");
+            git("commit", "-q", "-m", "remove scratch2");
+          },
+          6,
+        )
+      : null;
     const loud = merge(
       "app",
       () => {
@@ -792,7 +863,7 @@ describe("wiki-replay.ts as a process (no network)", () => {
       },
       5,
     );
-    return { repo, out, first, quiet, loud };
+    return { repo, out, first, quiet, quiet2, loud, git };
   }
 
   it("is a usage error, exit 2, without its three positionals", () => {
@@ -865,6 +936,21 @@ describe("wiki-replay.ts as a process (no network)", () => {
       expect(line.length).toBeLessThanOrEqual(300);
     }
     expect(problems.join("\n")).toContain("c-?1?");
+  });
+
+  it("refuses up front, with the head unmoved, a step whose only call is the due About article", () => {
+    // Two pages and no article: the About article is due, and it is the step's only call.
+    const { repo, out, first, quiet } = replayable(null, { paged: true });
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ANTHROPIC_API_KEY is not set");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+    const store = openStore(join(out, "wiki.db"));
+    expect(store.getHead()).toBe(first);
+    store.close();
+    // The step was not half-applied, so a rerun still has it to do.
+    const again = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out, "--dry-run");
+    expect(again.stdout.split("\n").filter((line) => /^\| \d/.test(line))).toHaveLength(1);
   });
 
   it("refuses a range the wiki's head is not on, in one line", () => {
