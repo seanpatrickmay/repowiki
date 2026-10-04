@@ -6,16 +6,27 @@ import {
   ANSWER_WORDS,
   agentSystemPrompt,
   type EvalQuestion,
+  type EvalRunOptions,
+  type EvalRunResult,
   JUDGE_SYSTEM,
   judgeTurn,
   MAX_TOOL_RESULT_CHARS,
   MAX_TURN_OUTPUT_TOKENS,
   QuestionSet,
   questionTurn,
+  runEval,
 } from "@repowiki/eval";
-import type { ModelConfig, ToolDefinition } from "@repowiki/llm";
+import {
+  type BatchJournal,
+  type ClaudeProviderOptions,
+  createClaudeProvider,
+  type ModelConfig,
+  type Provider,
+  type TokenLedger,
+  type ToolDefinition,
+} from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
-import { priced } from "./wiki-cli.ts";
+import { priced, problemLine } from "./wiki-cli.ts";
 
 export const EVAL_USAGE =
   "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|smoke [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
@@ -197,4 +208,57 @@ export function estimateLine(
 ): string {
   const money = (x: number) => `$${x.toFixed(2)}`;
   return `${estimate.questions} questions to both agents: about ${money(estimate.agentsUsd)} (assuming ${ASSUMED_TURNS.wiki} wiki and ${ASSUMED_TURNS.repo} repo turns a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+}
+
+/**
+ * A progress line of eval:run as it is printed: the run's own lines quote question ids and a
+ * judge's complaint about an answer, so each is one printable line, redacted of API keys.
+ */
+export function logLine(line: string): void {
+  console.error(problemLine(line));
+}
+
+export interface JudgeProviderOptions {
+  models: ModelConfig;
+  ledger: TokenLedger;
+  runId: string;
+  /** The wiki store's batch journal (buildJournal), so a killed run's judge batch is collected. */
+  journal: BatchJournal;
+  log: (line: string) => void;
+  /** Replaces the key, the transport or the poll interval; tests only. */
+  client?: Pick<ClaudeProviderOptions, "apiKey" | "fetch" | "pollIntervalMs">;
+}
+
+/**
+ * The judge's provider: Claude, its Message Batches journaled in the wiki store the way
+ * wiki:build journals its pages, so a rerun after a kill collects the batch it already paid for.
+ */
+export function createJudgeProvider(options: JudgeProviderOptions): Provider {
+  return createClaudeProvider({
+    models: options.models,
+    ledger: options.ledger,
+    runId: options.runId,
+    batchJournal: options.journal,
+    onBatchCreated: (b) => options.log(`batch ${b.id} created (${b.requests} requests)`),
+    onBatchProgress: (p) =>
+      options.log(`batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`),
+    ...options.client,
+  });
+}
+
+/**
+ * runEval, then the journal's flush: the judgments are in results.jsonl by then, so the batch
+ * requests their answers came from are forgotten (a kill before this leaves them, and a rerun
+ * collects the batch again at no cost). Runs on a failure too: what a judge answered was either
+ * recorded or unusable, and a rerun must not replay an unusable answer.
+ */
+export async function runEvalJournaled(
+  journal: { flush(): void },
+  options: EvalRunOptions,
+): Promise<EvalRunResult> {
+  try {
+    return await runEval(options);
+  } finally {
+    journal.flush();
+  }
 }

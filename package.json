@@ -20,6 +20,8 @@
     "wiki:export": "node scripts/wiki-export.ts",
     "wiki:update": "node --env-file-if-exists=.env scripts/wiki-update.ts",
     "wiki:replay": "node --env-file-if-exists=.env scripts/wiki-replay.ts",
+    "eval:run": "node --env-file-if-exists=.env scripts/eval-run.ts",
+    "eval:report": "node scripts/eval-report.ts",
     "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run",
     "site:build": "node packages/site/src/cli.ts build",
     "site:preview": "node packages/site/src/cli.ts preview",
