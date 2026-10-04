@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import * as pagefind from "pagefind";
 
 /** The slice of the Pagefind Node API the site build uses (a seam so a test can stand in for it). */
@@ -38,7 +38,13 @@ export async function writeSearchIndex(
     const writes = bundle.files.map((file) => {
       const path = resolve(target, file.path);
       const inside = relative(target, path);
-      if (inside === "" || inside.startsWith("..") || isAbsolute(inside) || isAbsolute(file.path)) {
+      if (
+        inside === "" ||
+        inside === ".." ||
+        inside.startsWith(`..${sep}`) ||
+        isAbsolute(inside) ||
+        isAbsolute(file.path)
+      ) {
         throw new Error(`pagefind: refusing to write outside the output directory: "${file.path}"`);
       }
       return { path, content: file.content };
