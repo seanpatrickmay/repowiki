@@ -16,7 +16,9 @@ export {
   type Hunk,
   isAncestor,
   parseHunks,
+  type ReplayStep,
   reachableCommits,
+  replaySteps,
 } from "./diff.ts";
 export { GitError, resolveCommit, scrubbedGitEnv } from "./git.ts";
 export { type CommitInfo, pullRequestOf, readHistory, readSources } from "./history.ts";
