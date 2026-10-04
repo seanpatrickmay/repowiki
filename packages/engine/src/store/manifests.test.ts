@@ -1,4 +1,4 @@
-import { makeFeature, makeManifest, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
+import { makeFeature, makeManifest, SHA_A, SHA_B, SHA_C } from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DroppedFeatureError, DuplicateManifestError } from "./errors.ts";
 import { openStore, type Store } from "./store.ts";
@@ -81,5 +81,21 @@ describe("head", () => {
 
   it("rejects abbreviated shas", () => {
     expect(() => store.setHead("abc123")).toThrow();
+  });
+});
+
+describe("drift baseline", () => {
+  it("is null until an LLM-revised manifest is stored", () => {
+    store.putManifest(makeManifest());
+    expect(store.getDriftBaseline()).toBeNull();
+  });
+
+  it("is the latest LLM-revised manifest; member-only manifests do not move it", () => {
+    store.putManifest(makeManifest(), { llmRevised: true });
+    store.putManifest(makeManifest({ sha: SHA_B }));
+    expect(store.getLatestManifest()?.sha).toBe(SHA_B);
+    expect(store.getDriftBaseline()?.sha).toBe(SHA_A);
+    store.putManifest(makeManifest({ sha: SHA_C }), { llmRevised: true });
+    expect(store.getDriftBaseline()?.sha).toBe(SHA_C);
   });
 });
