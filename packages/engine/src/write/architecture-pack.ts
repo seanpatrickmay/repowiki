@@ -36,8 +36,8 @@ export interface ArchitecturePack {
   features: string[];
   /**
    * Path to the 1-based lines the pack showed: the numbered lines it printed (README, documents,
-   * infrastructure outlines, entry-point signatures) and the edge sites it gave. An article claim
-   * may cite only these.
+   * the lines around edge sites, infrastructure outlines, entry-point signatures) and the edge
+   * sites it gave. An article claim may cite only these.
    */
   shown: ReadonlyMap<string, ReadonlySet<number>>;
 }
@@ -53,6 +53,10 @@ interface Shown {
  * carries the README and top-level docs.
  */
 export const DEFAULT_ARCHITECTURE_BUDGET_TOKENS = 50_000;
+/** Lines shown on each side of an edge's site, numbered so a claim can cite them. */
+const SITE_WINDOW_RADIUS = 3;
+/** The share of the pack's budget the lines around edge sites may take, all edges together. */
+export const EDGE_WINDOW_SHARE = 0.15;
 /** The README's first lines shown, and each other document's. */
 const MAX_README_LINES = 120;
 const MAX_DOC_LINES = 60;
@@ -205,7 +209,8 @@ const directoryOf = (path: string): string => path.slice(0, path.lastIndexOf("/"
  * top-level layout and languages; the README (its first 120 lines) and up to three other
  * documents (60 lines each, docs/ design documents first), numbered so a claim can cite them;
  * every covered feature with its file count, main directories and its page's lead; the
- * cross-feature edges, each with the lines that prove it; the top-level lines of
+ * cross-feature edges, each with the lines that prove it and, while they fit EDGE_WINDOW_SHARE of
+ * the budget, the numbered lines around them; the top-level lines of
  * infrastructure files; and the signatures of each feature's first entry point. Sections are
  * filled in that order, item by item, while the pack fits `budgetTokens`; what does not fit is
  * counted in an "and N more" line. Every repository- or model-derived string goes through
@@ -328,12 +333,38 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   });
   section("## Features", features, (n) => `- and ${n} more features not shown`);
 
-  const edges = input.edges.map((edge) => {
+  // The lines around the edges' sites, numbered so a request-path claim can cite the call it
+  // describes, within their share of the budget; past it, an edge gives its site lines alone.
+  let windowRoom = Math.floor(input.budgetTokens * CHARS_PER_TOKEN * EDGE_WINDOW_SHARE);
+  const edges = input.edges.map((edge): Shown => {
     // Each site on its own line, in the form a claim cites it, so the edge is never copied.
     const sites = edge.sites.map((s) => `\n  - ${clean(s.path)}:${s.line} (${s.kind})`).join("");
+    const text = `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}${sites}`;
+    const siteLines = edge.sites.map((s) => ({ path: s.path, lines: [s.line] }));
+    const around = new Map<string, Set<number>>();
+    for (const site of edge.sites) {
+      const source = sources.get(site.path);
+      if (source === undefined) continue;
+      const count = sourceLines(source).length;
+      const numbers = around.get(site.path) ?? new Set<number>();
+      const last = Math.min(count, site.line + SITE_WINDOW_RADIUS);
+      for (let n = Math.max(1, site.line - SITE_WINDOW_RADIUS); n <= last; n++) numbers.add(n);
+      if (numbers.size > 0) around.set(site.path, numbers);
+    }
+    const windows = [...around].map(([path, numbers]): Shown => {
+      const lines = sourceLines(sources.get(path) ?? "");
+      const sorted = [...numbers].sort((a, b) => a - b);
+      return {
+        text: `#### ${clean(path)} (around its sites; ${lines.length} lines)\n${numbered(lines, sorted, String(lines.length).length)}`,
+        shows: [{ path, lines: sorted }],
+      };
+    });
+    const length = windows.reduce((n, w) => n + 1 + w.text.length, 0);
+    if (windows.length === 0 || length > windowRoom) return { text, shows: siteLines };
+    windowRoom -= length;
     return {
-      text: `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}${sites}`,
-      shows: edge.sites.map((s) => ({ path: s.path, lines: [s.line] })),
+      text: [text, ...windows.map((w) => w.text)].join("\n"),
+      shows: [...siteLines, ...windows.flatMap((w) => w.shows)],
     };
   });
   section(
