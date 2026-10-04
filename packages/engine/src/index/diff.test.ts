@@ -87,6 +87,56 @@ describe("diffCommits", () => {
     ]);
   });
 
+  it("gives the same hunks whatever the caller's git config or environment says", () => {
+    const body = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+    repo.write("a.py", lines(...body));
+    const from = repo.commit("first");
+    const edited = [...body];
+    for (const n of [2, 5, 9]) edited[n - 1] = `EDIT ${n}`;
+    repo.write("a.py", lines(...edited));
+    const to = repo.commit("second");
+    repo.git("config", "diff.interHunkContext", "5");
+    repo.git("config", "diff.algorithm", "patience");
+    const saved = { opts: process.env.GIT_DIFF_OPTS, ext: process.env.GIT_EXTERNAL_DIFF };
+    process.env.GIT_DIFF_OPTS = "-u5";
+    process.env.GIT_EXTERNAL_DIFF = "/nonexistent/diff-tool";
+    try {
+      expect(diffCommits(repo.dir, from, to)).toEqual([
+        {
+          status: "modified",
+          oldPath: "a.py",
+          newPath: "a.py",
+          hunks: [
+            { oldStart: 2, oldCount: 1, newStart: 2, newCount: 1 },
+            { oldStart: 5, oldCount: 1, newStart: 5, newCount: 1 },
+            { oldStart: 9, oldCount: 1, newStart: 9, newCount: 1 },
+          ],
+          binary: false,
+        },
+      ]);
+    } finally {
+      for (const [name, value] of [
+        ["GIT_DIFF_OPTS", saved.opts],
+        ["GIT_EXTERNAL_DIFF", saved.ext],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
+  it("gives an added or deleted binary file no hunks and no binary flag", () => {
+    repo.write("gone.bin", Buffer.from([0, 1, 2, 3]));
+    const from = repo.commit("first");
+    repo.git("rm", "-q", "gone.bin");
+    repo.write("new.bin", Buffer.from([0, 4, 5, 6]));
+    const to = repo.commit("second");
+    expect(diffCommits(repo.dir, from, to)).toEqual([
+      { status: "deleted", oldPath: "gone.bin", newPath: null, hunks: [], binary: false },
+      { status: "added", oldPath: null, newPath: "new.bin", hunks: [], binary: false },
+    ]);
+  });
+
   it("is empty between a commit and itself, or across an empty commit", () => {
     repo.write("a.py", "x = 1\n");
     const from = repo.commit("first");

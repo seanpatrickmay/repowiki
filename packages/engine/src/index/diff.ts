@@ -22,7 +22,11 @@ export interface FileChange {
   newPath: string | null;
   /** The changed line ranges of a modified or renamed text file, in order; empty otherwise. */
   hunks: Hunk[];
-  /** True when git diffs the two versions as binary, so there are no hunks to follow. */
+  /**
+   * True when git diffs the two versions of a modified or renamed file as binary, so there are no
+   * hunks to follow. An added or deleted file is never flagged: it has no other version, and its
+   * `hunks` are empty either way.
+   */
   binary: boolean;
 }
 
@@ -49,7 +53,11 @@ export function parseHunks(diff: string): { hunks: Hunk[]; binary: boolean } {
 /** A regular file's mode (100644 or 100755); symlinks and submodules are not indexed. */
 const isFile = (mode: string): boolean => mode.startsWith("100");
 
-/** Hunks between two blobs, by object id, so no path is ever parsed out of diff text. */
+/**
+ * Hunks between two blobs, by object id, so no path is ever parsed out of diff text. Every option
+ * that shapes hunks is pinned, so neither git config (diff.interHunkContext, diff.algorithm,
+ * diff.indentHeuristic) nor GIT_DIFF_OPTS (dropped by scrubbedGitEnv) can widen or move them.
+ */
 function blobHunks(
   repo: string,
   oldOid: string,
@@ -59,6 +67,9 @@ function blobHunks(
   const text = git(repo, [
     "diff",
     "-U0",
+    "--inter-hunk-context=0",
+    "--diff-algorithm=myers",
+    "--no-indent-heuristic",
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
