@@ -50,6 +50,9 @@ export function wikipediaTitlesIn(text: string): string[] {
   return titles;
 }
 
+/** How a link target and a feature's names are compared: trimmed and lowercased. */
+export const linkNameKey = (name: string): string => name.trim().toLowerCase();
+
 /**
  * Finds the page a link target means: a feature id, title or alias (case-insensitive), followed
  * through redirects to the final feature. A retired feature has no current page, so it is not a
@@ -66,7 +69,7 @@ export function createTargetResolver(manifest: Manifest): (target: string) => Fe
   const byName = new Map<string, Feature>();
   for (const feature of manifest.features) {
     for (const name of [feature.title, ...feature.aliases]) {
-      const key = name.trim().toLowerCase();
+      const key = linkNameKey(name);
       const held = byName.get(key);
       if (held === undefined || better(feature, held)) byName.set(key, feature);
     }
@@ -82,7 +85,7 @@ export function createTargetResolver(manifest: Manifest): (target: string) => Fe
     return current === undefined || current.status.kind === "retired" ? null : current;
   };
   return (target) => {
-    const found = byId.get(target.trim()) ?? byName.get(target.trim().toLowerCase());
+    const found = byId.get(target.trim()) ?? byName.get(linkNameKey(target));
     return found === undefined ? null : final(found);
   };
 }

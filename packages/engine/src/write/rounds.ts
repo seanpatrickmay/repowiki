@@ -1,5 +1,5 @@
 import { type Claim, CONTROL_CHARACTERS, type SectionKey, type TokenUsage } from "@repowiki/core";
-import type { LlmMessage } from "@repowiki/llm";
+import { type LlmMessage, type LlmOutputError, MAX_TOKENS_STOP_REASON } from "@repowiki/llm";
 import {
   type DraftClaim,
   LIMITATION_EVIDENCE_PROBLEM,
@@ -234,6 +234,18 @@ function oneLine(reason: string): string {
   return chars.length <= MAX_REASON_LENGTH && line.length <= 2 * MAX_REASON_LENGTH
     ? line
     : `${chars.slice(0, MAX_REASON_LENGTH - 1).join("")}…`;
+}
+
+/** Added to a rejection cut off at max_tokens, so the whole-answer retry fits the same cap. */
+export const ANSWER_SHORTER = "it was too long, so answer shorter, with fewer and shorter claims";
+
+/**
+ * What a retry turn says about an unusable answer: the error's message, asking for a shorter
+ * answer when the model stopped at max_tokens (the article's round and an update's).
+ */
+export function rejectionOf(error: LlmOutputError): { text: string; reason: string } {
+  const cut = error.stopReason === MAX_TOKENS_STOP_REASON;
+  return { text: error.text, reason: cut ? `${error.message}; ${ANSWER_SHORTER}` : error.message };
 }
 
 /** The retry turn for a page whose first answer was unusable (spec §6.3: retry once). */

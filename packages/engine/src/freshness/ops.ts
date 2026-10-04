@@ -1,6 +1,5 @@
 import {
   aliasProblem,
-  controlCharacters,
   type Feature,
   FeatureId,
   Manifest,
@@ -9,12 +8,16 @@ import {
 } from "@repowiki/core";
 import { z } from "zod";
 import type { Cluster } from "../cluster/index.ts";
+import { linkNameKey } from "../link/index.ts";
 import {
+  aliasProblems,
   cleanAliases,
+  limitProblems,
   MAX_ALIASES,
   MAX_FEATURE_ID_LENGTH,
-  MAX_TITLE_LENGTH,
   MIN_ALIASES,
+  quote,
+  titleProblems,
 } from "../manifest/index.ts";
 
 /**
@@ -49,16 +52,6 @@ export type ManifestOperation = z.infer<typeof ManifestOperation>;
 export const ManifestOperations = z.object({ operations: z.array(ManifestOperation) });
 export type ManifestOperations = z.infer<typeof ManifestOperations>;
 
-/** Problems listed back to the model; the rest are counted. */
-const MAX_PROBLEMS = 20;
-const MAX_QUOTED = 80;
-const quote = (text: string): string => {
-  const chars = [...text];
-  return JSON.stringify(
-    chars.length <= MAX_QUOTED ? text : `${chars.slice(0, MAX_QUOTED).join("")}…`,
-  );
-};
-
 export interface AppliedOperations {
   /** The revised manifest, or null when a problem stops it. */
   manifest: Manifest | null;
@@ -75,7 +68,10 @@ export interface AppliedOperations {
  * Applies the drift call's operations, in order, to `manifest` (the update's membership at `sha`,
  * not yet revised), with lineage events at `sha` so status and lineage agree (spec §5 rule 1).
  * Ids are permanent: a new id must be new to the manifest, and no feature is removed. A cluster
- * is used by one operation at most. Every rule broken is reported, and then nothing is applied.
+ * is used by one operation at most. Every title and alias an operation writes must differ, as a
+ * link target (`linkNameKey`), from every other feature's id, title and aliases, so no existing
+ * `[[…]]` link changes page. Only features the operations touch must end with files. Every rule
+ * broken is reported, and then nothing is applied.
  */
 export function applyOperations(
   manifest: Manifest,
@@ -92,27 +88,33 @@ export function applyOperations(
   const usedClusters = new Set<string>();
   const changed = new Set<string>();
   const isActive = (id: string) => features.get(id)?.status.kind === "active";
-  const titleTaken = (title: string, except?: string) =>
-    [...features.values()].some(
-      (f) => f.id !== except && f.title.trim().toLowerCase() === title.trim().toLowerCase(),
-    );
-
+  /** Why `name` cannot be written for a feature other than `except`: another feature has it. */
+  const takenBy = (name: string, except?: string): string | null => {
+    const key = linkNameKey(name);
+    for (const other of features.values()) {
+      if (other.id === except) continue;
+      const role =
+        other.id === key
+          ? "id"
+          : linkNameKey(other.title) === key
+            ? "title"
+            : other.aliases.some((alias) => linkNameKey(alias) === key)
+              ? "alias"
+              : null;
+      if (role !== null) return `is taken by ${quote(other.id)} as its ${role}`;
+    }
+    return null;
+  };
+  const checkName = (where: string, kind: string, name: string, except?: string): boolean => {
+    const taken = takenBy(name, except);
+    if (taken !== null) problems.push(`${where}: the ${kind} ${quote(name.trim())} ${taken}`);
+    return taken === null;
+  };
   const checkTitle = (where: string, title: string, except?: string): boolean => {
     const trimmed = title.trim();
-    const length = [...trimmed].length;
-    const before = problems.length;
-    if (trimmed === "") problems.push(`${where} has an empty title`);
-    else if (titleTaken(trimmed, except))
-      problems.push(`${where}: the title ${quote(trimmed)} is taken`);
-    if (length > MAX_TITLE_LENGTH) {
-      problems.push(
-        `${where} has a title of ${length} characters; use at most ${MAX_TITLE_LENGTH}`,
-      );
-    }
-    if (controlCharacters(trimmed).length > 0) {
-      problems.push(`${where} has a control or invisible character in its title`);
-    }
-    return problems.length === before;
+    const own = titleProblems(where, trimmed);
+    problems.push(...own);
+    return own.length === 0 && checkName(where, "title", trimmed, except);
   };
   const checkNew = (
     where: string,
@@ -127,15 +129,18 @@ export function applyOperations(
       );
     } else if (features.has(id)) {
       problems.push(`${where}: ${quote(id)} is already a feature id; ids are never reused`);
-    }
+    } else checkName(where, "id", id);
     checkTitle(where, title);
-    const clean = cleanAliases(title, aliases).filter((a) => aliasProblem(a) === null);
-    if (clean.length < MIN_ALIASES) {
+    const clean = cleanAliases(title, aliases);
+    const usable = clean.filter((a) => aliasProblem(a) === null);
+    if (usable.length < MIN_ALIASES) {
       problems.push(
-        `${where} has ${clean.length} usable aliases; give ${MIN_ALIASES} to ${MAX_ALIASES}`,
+        `${where} has ${usable.length} usable aliases; give ${MIN_ALIASES} to ${MAX_ALIASES}`,
       );
     }
-    return problems.length === before ? clean.slice(0, MAX_ALIASES) : null;
+    problems.push(...aliasProblems(where, clean));
+    for (const alias of usable) checkName(where, "alias", alias);
+    return problems.length === before ? usable.slice(0, MAX_ALIASES) : null;
   };
   const takeClusters = (where: string, ids: readonly string[]): string[] | null => {
     const files: string[] = [];
@@ -184,9 +189,21 @@ export function applyOperations(
     switch (op.kind) {
       case "rename": {
         const title = op.title.trim();
-        if (feature === undefined || !checkTitle(where, title, feature.id)) return;
+        if (feature === undefined) return;
+        if (linkNameKey(title) === linkNameKey(feature.title)) {
+          problems.push(`${where}: ${quote(title)} is already its title`);
+          return;
+        }
+        // Spec §5 rule 1: the old title always becomes an alias. M3's 8-alias and 60-character
+        // limits govern model-proposed aliases only; core caps neither, and code aliases already
+        // fill many features' lists, so the only check is that no other feature holds the name.
+        const keep = !feature.aliases.includes(feature.title);
+        const before = problems.length;
+        if (keep) checkName(where, "alias", feature.title, feature.id);
+        const titleOk = checkTitle(where, title, feature.id);
+        if (!titleOk || problems.length > before) return;
         feature.lineage.push({ kind: "rename", sha, fromTitle: feature.title });
-        if (!feature.aliases.includes(feature.title)) feature.aliases.push(feature.title);
+        if (keep) feature.aliases.push(feature.title);
         feature.title = title;
         changed.add(feature.id);
         return;
@@ -273,16 +290,14 @@ export function applyOperations(
       }
     }
   });
-  for (const feature of features.values()) {
-    if (feature.status.kind === "active" && filesOfFeature(feature.id).length === 0) {
-      problems.push(`${quote(feature.id)} would have no files; merge or retire it`);
+  // A feature the operations did not touch may already be empty; that is not theirs to refuse.
+  for (const id of changed) {
+    if (isActive(id) && filesOfFeature(id).length === 0) {
+      problems.push(`${quote(id)} would have no files; merge or retire it`);
     }
   }
   if (problems.length > 0) {
-    const listed = problems.slice(0, MAX_PROBLEMS);
-    if (problems.length > MAX_PROBLEMS)
-      listed.push(`and ${problems.length - MAX_PROBLEMS} more problems`);
-    return { manifest: null, affected: [], problems: listed };
+    return { manifest: null, affected: [], problems: limitProblems(problems) };
   }
   const revised = Manifest.safeParse({ sha, features: [...features.values()], membership });
   if (!revised.success) {

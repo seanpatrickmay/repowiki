@@ -19,6 +19,15 @@ export {
 export { buildPack, type ContextPack, DEFAULT_CONTEXT_BUDGET_TOKENS } from "./pack.ts";
 export { STYLE_GUIDE, writeSystemPrompt } from "./prompt.ts";
 export {
+  MAX_UPDATE_OUTPUT_TOKENS,
+  type RewriteInput,
+  type RewriteOptions,
+  type RewriteOutcome,
+  rewritePages,
+  UPDATE_GIVE_UP,
+  updateCacheKey,
+} from "./rewrite.ts";
+export {
   buildUpdatePack,
   type PageRewrite,
   type PlannedClaim,
