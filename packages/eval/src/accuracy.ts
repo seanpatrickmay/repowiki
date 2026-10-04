@@ -75,8 +75,12 @@ export interface AccuracyTally {
 
 /** A claim line as the sheet writes it, with any one-character mark. */
 const CLAIM_LINE = /^- \[(.)\] `([^`]+)` \(/;
-/** Any line that looks like a checkbox: a mark the tally must read, or refuse. */
-const MARK_LIKE = /^\s*[-*+]\s*\[/;
+/**
+ * Any line that looks like a mark the tally must read, or refuse: a checkbox bullet, or a bracket
+ * before a claim id's code span anywhere on the line (a mark that lost its bullet, or was quoted
+ * or numbered).
+ */
+const MARK_LIKE = /^\s*[-*+]\s*\[|\[[^\]]{0,3}\]\s*`[^`]+\/[^`]+`/;
 
 /**
  * Counts a marked sheet: `[x]` true, `[!]` false, `[ ]` not reviewed. Any other mark, any line

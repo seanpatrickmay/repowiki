@@ -30,7 +30,8 @@ export function cut(text: string, max: number): string {
  * U+FFFD, as in `oneLine`), every other invisible format character dropped
  * (core's INVISIBLE_CHARACTERS: zero-width, tag characters, soft hyphens), cut to `max` code
  * points, then every character that opens markdown or HTML syntax (a link, an image, an autolink,
- * a tag, a code span, emphasis, strikethrough, a heading, a table cell) escaped with a backslash.
+ * a tag, an entity, a code span, emphasis, strikethrough, a heading, a table cell) escaped with a
+ * backslash; `\&` keeps a named entity such as `&ZeroWidthSpace;` from rendering a dropped character.
  */
 export function markdownText(text: string, max: number): string {
   const plain = text
@@ -38,7 +39,7 @@ export function markdownText(text: string, max: number): string {
     .replace(INVISIBLE_CHARACTERS, "")
     .replace(/\s+/g, " ")
     .trim();
-  return cut(plain, max).replace(/[\\`*_[\]()<>!#|~]/g, (c) => `\\${c}`);
+  return cut(plain, max).replace(/[\\`*_[\]()<>!#|~&]/g, (c) => `\\${c}`);
 }
 
 /** "1 file", "2 files". */

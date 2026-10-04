@@ -147,6 +147,15 @@ describe("text from a model or the author in the report", () => {
       "  - wiki (1): See \\[x\\]\\(https://e.example\\) \\!\\[p\\]\\(https://e.example/p.png\\) \\<img src=x\\> \\`code\\` \\*\\*b\\*\\* \\_i\\_ \\~\\~s\\~\\~ \\#h a\\\\b \\| c end",
     );
     expect(text.split("\n")[0]).toBe("# Eval: \\[evil\\]\\(https://e.example\\), held-out set");
+    // A named entity cannot render a character the text dropped.
+    const entity = records().map((r) =>
+      r.kind === "judgment" && r.questionId === "q1" && r.agent === "wiki"
+        ? { ...r, reason: "a&ZeroWidthSpace;b &shy; &amp;" }
+        : r,
+    );
+    expect(renderReport(summarize(info(), entity), entity, null)).toContain(
+      "  - wiki (1): a\\&ZeroWidthSpace;b \\&shy; \\&amp;",
+    );
     expect(text).not.toMatch(/[\u200B\u00AD\u2060]|\u{E0041}/u);
   });
 });

@@ -70,8 +70,9 @@ describe("openRun", () => {
 
   it("leaves only run.json in the directory, with no temporary file", () => {
     writeFileSync(join(dir, `${RUN_INFO_FILE}.12345.tmp`), "{");
+    writeFileSync(join(dir, "notes.123.tmp"), "the owner's own file");
     openRun(dir, info);
-    expect(readdirSync(dir)).toEqual([RUN_INFO_FILE]);
+    expect(readdirSync(dir).sort()).toEqual(["notes.123.tmp", RUN_INFO_FILE]);
   });
 
   it("creates a file once, also where the file system has no hard links", () => {

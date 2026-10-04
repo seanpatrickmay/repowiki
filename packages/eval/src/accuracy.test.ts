@@ -86,6 +86,9 @@ describe("tallySheet", () => {
       "- [!]`a/7` (Overview): x",
       "-  [!] `a/9` (Overview): x",
       "- [x] not a claim line",
+      "[!] `a/2` (Overview): x",
+      "> - [!] `a/2` (Overview): x",
+      "1. [!] `a/2` (Overview): x",
     ]) {
       expect(() => tallySheet(`- [x] \`a/1\` (Lead): y\n${bad}\n`), bad).toThrow(
         /^line 2: not a claim line as the sheet wrote it; change only the mark between \[ and \]$/,

@@ -169,11 +169,17 @@ export function createOnce(path: string, text: string, link = linkSync): boolean
   }
 }
 
-/** Removes the temporary files a killed run left in `runDir` (`<name>.<pid>.tmp`). */
+/**
+ * Removes the temporary files a killed run left in `runDir`: only the eval's own
+ * (`run.json.<pid>.tmp`, `report.md.<pid>.tmp`, `spot-check.json.<pid>.tmp`), never another file
+ * in a directory the owner chose.
+ */
 function removeStaleTemporaries(runDir: string): void {
   if (!existsSync(runDir)) return;
   for (const name of readdirSync(runDir)) {
-    if (/\.\d+\.tmp$/.test(name)) rmSync(join(runDir, name), { force: true });
+    if (/^(run\.json|report\.md|spot-check\.json)\.\d+\.tmp$/.test(name)) {
+      rmSync(join(runDir, name), { force: true });
+    }
   }
 }
 
