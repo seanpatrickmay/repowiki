@@ -1,10 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "files": { "includes": ["**", "!**/__snapshots__"] },
+  "files": { "includes": ["**", "!**/__cassettes__", "!**/__snapshots__"] },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "linter": {
+    "enabled": true,
+    "rules": { "preset": "recommended", "style": { "noCommonJs": "error" } }
+  },
   "overrides": [
     {
       "includes": ["**/*.astro"],

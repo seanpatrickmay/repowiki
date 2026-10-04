@@ -1,0 +1,132 @@
+import { createHash } from "node:crypto";
+import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import type {
+  Message,
+  MessageCreateParamsNonStreaming,
+} from "@anthropic-ai/sdk/resources/messages/messages";
+import type { TokenUsage } from "@repowiki/core";
+import { type BatchProgress, createBatcher } from "./batcher.ts";
+import type { FetchLike } from "./cassette.ts";
+import type { TokenLedger } from "./ledger.ts";
+import {
+  type GenerateRequest,
+  LlmError,
+  LlmOutputError,
+  type ModelConfig,
+  type Provider,
+} from "./provider.ts";
+
+export interface ClaudeProviderOptions {
+  models: ModelConfig;
+  ledger: TokenLedger;
+  runId: string;
+  /** Defaults to process.env.ANTHROPIC_API_KEY. */
+  apiKey?: string;
+  /** Replaces global fetch, e.g. with a cassette in tests. */
+  fetch?: FetchLike;
+  /** Wait between batch status polls. Default 30 seconds. */
+  pollIntervalMs?: number;
+  onBatchProgress?: (progress: BatchProgress) => void;
+  now?: () => Date;
+}
+
+function usageOf(message: Message): TokenUsage {
+  return {
+    in: message.usage.input_tokens,
+    out: message.usage.output_tokens,
+    cacheRead: message.usage.cache_read_input_tokens ?? 0,
+    cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
+  };
+}
+
+/** JSON with object keys sorted, so equal schemas hash equal whatever their key order. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
+/**
+ * The Claude API provider. Output is structured JSON (output_config.format, which Haiku 4.5
+ * supports); no thinking is requested. A cacheKey puts a cache breakpoint on the system prompt.
+ */
+export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
+  const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new LlmError("ANTHROPIC_API_KEY is not set; run with node --env-file=.env");
+  }
+  // The SDK retries 429, 5xx, and network errors with backoff: 1 try + 2 retries = spec §6.3.
+  const client = new Anthropic({ apiKey, maxRetries: 2, fetch: options.fetch });
+  const batcher = createBatcher(client, {
+    pollIntervalMs: options.pollIntervalMs ?? 30_000,
+    onProgress: options.onBatchProgress,
+  });
+  const now = options.now ?? (() => new Date());
+  const prefixes = new Map<string, string>();
+
+  return {
+    async generate<T>(request: GenerateRequest<T>) {
+      const model = options.models[request.purpose];
+      const { type, schema } = zodOutputFormat(request.schema);
+      if (request.cacheKey !== undefined) {
+        // Everything that breaks the cache: the model, the output format, and the system text.
+        const prefix = createHash("sha256")
+          .update(`${model}\0${stableJson(schema)}\0${request.system}`)
+          .digest("hex");
+        const seen = prefixes.get(request.cacheKey);
+        if (seen !== undefined && seen !== prefix) {
+          throw new LlmError(`cacheKey ${request.cacheKey} was reused with a different prefix`);
+        }
+        prefixes.set(request.cacheKey, prefix);
+      }
+      const params: MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: request.maxTokens,
+        system: [
+          {
+            type: "text",
+            text: request.system,
+            ...(request.cacheKey === undefined ? {} : { cache_control: { type: "ephemeral" } }),
+          },
+        ],
+        messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+        output_config: { format: { type, schema } },
+      };
+      const batch = request.batch === true;
+      const message = batch ? await batcher(params) : await client.messages.create(params);
+      const usage = usageOf(message);
+      options.ledger.record({
+        runId: options.runId,
+        at: now().toISOString(),
+        purpose: request.purpose,
+        model: message.model,
+        featureId: request.featureId ?? null,
+        batch,
+        cacheKey: request.cacheKey ?? null,
+        tokens: usage,
+      });
+      const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+      if (message.stop_reason !== "end_turn") {
+        throw new LlmOutputError(`model stopped with ${message.stop_reason}`, text);
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new LlmOutputError("model output is not JSON", text);
+      }
+      const parsed = request.schema.safeParse(json);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+        throw new LlmOutputError(
+          `model output does not match the schema: ${issues.join("; ")}`,
+          text,
+        );
+      }
+      return { output: parsed.data, usage, model: message.model };
+    },
+  };
+}
