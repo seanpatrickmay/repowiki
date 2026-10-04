@@ -187,6 +187,7 @@ export function makeArchitecture(overrides: Partial<Architecture> = {}): Archite
   return {
     id: "architecture-aaaaaaaaaaaa-1",
     sha: SHA_A,
+    title: "demo",
     commitDate: "2026-02-03T10:00:00-05:00",
     generatedAt: "2026-09-30T20:00:00Z",
     parentId: null,

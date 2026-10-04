@@ -7,10 +7,12 @@ export {
   INVISIBLE_CHARACTERS,
 } from "./alias.ts";
 export {
+  ARCHITECTURE_TITLE_MAX_LENGTH,
   Architecture,
   ArchitectureClaim,
   ArchitectureSection,
   ArchitectureSectionKey,
+  ArchitectureTitle,
   architectureClaimViolations,
   FeatureEdge,
   MAX_CLAIM_PAGES,
