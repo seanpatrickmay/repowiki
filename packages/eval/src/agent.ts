@@ -38,7 +38,7 @@ export interface AgentAnswer {
   usage: TokenUsage;
   /** The cost of every turn at its model's price, or null when a model has no price. */
   usd: number | null;
-  /** The model id the API reported, or null when no turn answered. */
+  /** The model id the API reported for the last turn (a run always takes at least one turn). */
   model: string | null;
 }
 
@@ -105,14 +105,16 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
       .join("")
       .trim();
     if (result.stopReason === "max_tokens" || uses.length === 0 || last) {
+      // A last turn that ended normally is "turn-limit"; a refusal there keeps its own label. A
+      // model that called a tool anyway on the last turn answered with its text: no tool runs.
       const stop: AgentStop =
         result.stopReason === "max_tokens"
           ? "max-tokens"
-          : last
-            ? "turn-limit"
-            : result.stopReason === "end_turn"
-              ? "answered"
-              : "other";
+          : result.stopReason === "end_turn" || (last && result.stopReason === "tool_use")
+            ? last
+              ? "turn-limit"
+              : "answered"
+            : "other";
       return { answer: text, stop, turns: turn, calls, usage, usd, model };
     }
     // The API refuses a whitespace-only text block, which a model may write before a tool call.

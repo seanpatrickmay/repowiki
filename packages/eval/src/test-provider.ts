@@ -12,7 +12,8 @@ export const SCRIPTED_MODEL = "claude-haiku-4-5-20251001";
 
 /**
  * A ToolProvider that plays `script` in order (per call, across conversations) and keeps every
- * request; `answerFor` answers turns past the script's end, keyed by the conversation's question.
+ * request; `answerFor` answers turns past the script's end. It is given the conversation's first
+ * user text as sent, "Question: " prefix included, and the request.
  */
 export function scriptedToolProvider(
   script: readonly ScriptedTurn[],
