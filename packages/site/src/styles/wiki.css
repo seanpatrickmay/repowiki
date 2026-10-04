@@ -307,3 +307,24 @@ a.external::after {
     margin: 0 0 1rem;
   }
 }
+
+/* Redirects and disambiguation pages */
+.redirect-note {
+  margin: -0.75rem 0 1rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.redirect-target {
+  font-size: 1.1rem;
+}
+
+.dab-list li {
+  margin: 0.25rem 0;
+}
+
+.dab-note {
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}

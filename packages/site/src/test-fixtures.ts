@@ -1,4 +1,4 @@
-import { type Revision, SCHEMA_VERSION, WikiExport } from "@repowiki/core";
+import { type Feature, type Revision, SCHEMA_VERSION, WikiExport } from "@repowiki/core";
 import {
   bodyClaim,
   codeCitation,
@@ -309,5 +309,14 @@ export function fixtureExport(): WikiExport {
       "legacy-signals": [legacy],
       signals: [signalsV1, signalsV2],
     },
+  });
+}
+
+/** The fixture export with extra manifest features, parsed so the manifest rules still apply. */
+export function fixtureExportWith(extra: Feature[]): WikiExport {
+  const base = fixtureExport();
+  return WikiExport.parse({
+    ...base,
+    manifest: { ...base.manifest, features: [...base.manifest.features, ...extra] },
   });
 }

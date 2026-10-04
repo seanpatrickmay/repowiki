@@ -1,8 +1,7 @@
 ---
-import { articleView } from "../../../article.ts";
 import Article from "../../../components/Article.astro";
 import Layout from "../../../layouts/Layout.astro";
-import { articleFor, type WikiRoute, wikiRoutes } from "../../../routes.ts";
+import { pageFor, type WikiRoute, wikiRoutes } from "../../../routes.ts";
 import { getSite } from "../../../site.ts";
 
 export function getStaticPaths() {
@@ -14,9 +13,41 @@ interface Props {
 }
 
 const { route } = Astro.props;
-const site = getSite();
-const view = articleView(site, articleFor(site, route));
+const page = pageFor(getSite(), route);
 ---
-<Layout title={view.title}>
-  <Article view={view} indexed={true} />
-</Layout>
+{page.kind === "article" ? (
+  <Layout title={page.view.title}>
+    <Article view={page.view} indexed={true} />
+  </Layout>
+) : page.kind === "redirect" ? (
+  <Layout title={page.title}>
+    <Fragment slot="head">
+      {page.refresh !== null && <meta http-equiv="refresh" content={page.refresh} />}
+      {page.target.href !== null && <link rel="canonical" href={page.target.href} />}
+      <meta name="robots" content="noindex" />
+    </Fragment>
+    <h1 class="page-title">{page.title}</h1>
+    <p class="redirect-target">
+      Redirect to:
+      {page.target.href === null ? (
+        <span>{page.target.title}</span>
+      ) : (
+        <a class="wikilink" href={page.target.href}>{page.target.title}</a>
+      )}
+    </p>
+  </Layout>
+) : (
+  <Layout title={page.title}>
+    <h1 class="page-title">{page.title}</h1>
+    <p><b>{page.title}</b> may refer to:</p>
+    <ul class="dab-list">
+      {page.entries.map((entry) => (
+        <li>
+          {entry.href === null ? <span>{entry.title}</span> : <a class="wikilink" href={entry.href}>{entry.title}</a>}
+          {entry.summaryHtml !== null && <span class="dab-summary" set:html={entry.summaryHtml} />}
+        </li>
+      ))}
+    </ul>
+    <p class="dab-note">This disambiguation page lists articles associated with the title <i>{page.title}</i>.</p>
+  </Layout>
+)}

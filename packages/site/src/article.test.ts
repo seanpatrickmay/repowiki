@@ -57,7 +57,10 @@ describe("articleView", () => {
   });
 
   it("drops See also entries that have no page", () => {
-    expect(view.seeAlso).toEqual([{ href: "/wiki/deliverables/", title: "Deliverables" }]);
+    expect(view.seeAlso).toEqual([
+      { href: "/wiki/deliverables/", title: "Deliverables" },
+      { href: "/wiki/reports/", title: "Reports" },
+    ]);
   });
 
   it("fills the infobox from the revision and the feature's aliases", () => {
