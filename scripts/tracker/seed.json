@@ -345,6 +345,140 @@
       "labels": ["v1", "type:task", "area:engine"],
       "parent": "F04",
       "body": "**Deliverable:** pnpm index:repo dev command.\n\n**Done when:** next-chief-of-staff at 7247d28 indexes with 0 parse errors and 0 unresolved internal imports. Plan Task 10."
+    },
+    {
+      "key": "M3-1",
+      "title": "[M3] tracker: M3 tickets",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "closed": true,
+      "body": "**Deliverable:** M3 tickets in seed.json.\n\n**Done when:** the seed creates M3-1..M3-19. Plan: docs/superpowers/plans/2026-10-01-repowiki-m3-manifest.md Task 1."
+    },
+    {
+      "key": "M3-2",
+      "title": "[M3] core: two-way lineage and status",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F26",
+      "body": "**Deliverable:** Feature rejects lineage/status disagreements both ways (merge, split, retire, rename aliases) plus store migration 2 that repairs stored manifests (issue #53).\n\n**Done when:** lineage variant and migration tests pass. Plan Task 2."
+    },
+    {
+      "key": "M3-3",
+      "title": "[M3] store: token ledger",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** LlmRole, LedgerEntry, LlmConfigFile schemas; store migration 3 and appendLedger/listLedger.\n\n**Done when:** ledger round-trip tests pass. Plan Task 3."
+    },
+    {
+      "key": "M3-4",
+      "title": "[M3] store: drift baseline",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F05",
+      "body": "**Deliverable:** store migration 4, putManifest({ llmRevised }) and getDriftBaseline() (issue #53).\n\n**Done when:** baseline tests pass. Plan Task 4."
+    },
+    {
+      "key": "M3-5",
+      "title": "[M3] llm: package, pricing, and ledger",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** packages/llm with the Provider interface, per-role model config, Haiku 4.5 pricing, and TokenLedger.\n\n**Done when:** pricing and ledger tests pass. Plan Task 5."
+    },
+    {
+      "key": "M3-6",
+      "title": "[M3] llm: record/replay cassettes",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "body": "**Deliverable:** cassetteFetch (header-free recordings, replay by request) and pnpm cassettes:record.\n\n**Done when:** cassette tests pass. Plan Task 6."
+    },
+    {
+      "key": "M3-7",
+      "title": "[M3] llm: Message Batches client",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** createBatcher: same-tick requests share one Message Batch; per-item failures.\n\n**Done when:** batcher tests pass. Plan Task 7."
+    },
+    {
+      "key": "M3-8",
+      "title": "[M3] llm: Claude provider",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** createClaudeProvider: structured output, cache breakpoint per cacheKey, batching, ledger.\n\n**Done when:** provider tests pass. Plan Task 8."
+    },
+    {
+      "key": "M3-9",
+      "title": "[M3] llm: recorded Claude cassettes",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F25",
+      "body": "**Deliverable:** cassette tests for structured output, prompt caching, and batching, recorded live once.\n\n**Done when:** the cassettes replay green in CI. Plan Task 9."
+    },
+    {
+      "key": "M3-10",
+      "title": "[M3] cluster: file graph",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** buildFileGraph: import, co-change, and directory edges over every file.\n\n**Done when:** graph tests pass. Plan Task 10."
+    },
+    {
+      "key": "M3-11",
+      "title": "[M3] cluster: Louvain",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** deterministic Louvain in plain TypeScript.\n\n**Done when:** louvain tests pass. Plan Task 11."
+    },
+    {
+      "key": "M3-12",
+      "title": "[M3] cluster: clusters",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** clusterFiles: Louvain plus small-cluster absorption and stable ids.\n\n**Done when:** cluster tests pass. Plan Task 12."
+    },
+    {
+      "key": "M3-13",
+      "title": "[M3] cluster: summaries",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** summarizeClusters, the cluster module entry, and engine exports.\n\n**Done when:** summary tests pass. Plan Task 13."
+    },
+    {
+      "key": "M3-14",
+      "title": "[M3] manifest: proposal validation",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F26",
+      "body": "**Deliverable:** ManifestProposal schema and proposalProblems.\n\n**Done when:** proposal tests pass. Plan Task 14."
+    },
+    {
+      "key": "M3-15",
+      "title": "[M3] manifest: membership and weights",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** proposalToManifest: every file and symbol a member via memberId, weights by role and centrality.\n\n**Done when:** to-manifest tests pass. Plan Task 15."
+    },
+    {
+      "key": "M3-16",
+      "title": "[M3] manifest: prompt",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** the manifest instructions and cluster digest (the cached prefix).\n\n**Done when:** prompt tests pass. Plan Task 16."
+    },
+    {
+      "key": "M3-17",
+      "title": "[M3] manifest: buildManifest",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** buildManifest: clusters, budgeted prompt, one batched call, one retry with reasons.\n\n**Done when:** build tests pass. Plan Task 17."
+    },
+    {
+      "key": "M3-18",
+      "title": "[M3] manifest: store, summary, recorded run",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** ensureManifest, renderManifestSummary, engine exports, and a recorded Claude run on a sample index.\n\n**Done when:** tests pass, cassette included. Plan Task 18."
+    },
+    {
+      "key": "M3-19",
+      "title": "[M3] manifest: dev command and next-chief-of-staff run",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F04",
+      "body": "**Deliverable:** pnpm manifest:build.\n\n**Done when:** next-chief-of-staff at 7247d28 produces a stored manifest and a saved summary for review. Plan Task 19."
     }
   ]
 }
