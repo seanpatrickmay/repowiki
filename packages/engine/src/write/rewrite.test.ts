@@ -294,6 +294,50 @@ describe("rewritePages", () => {
     expect(outcome?.replaced.size).toBe(2);
   });
 
+  it("names at most 40 failing claims in the retry turn, then says how many more", async () => {
+    const bad = Array.from({ length: 42 }, (_, i) =>
+      claim({
+        id: `x${i}`,
+        section: "history",
+        text: `Paging change ${i}.`,
+        cite: ["commit:a111111"],
+      }),
+    );
+    const { requests } = await run((_f, call) =>
+      call === 1 ? answer(lead, overview, ...bad) : { claims: [] },
+    );
+    const turn = requests[1]?.messages.at(-1)?.content ?? "";
+    expect(turn.match(/^- "x\d+":/gm)).toHaveLength(40);
+    expect(turn).toContain("- and 2 more claims failed");
+  });
+
+  it("logs every claim it sets aside without a word to the model", async () => {
+    const { lines } = await run(() =>
+      answer(lead, overview, { ...overview, text: "A second c2." }, history),
+    );
+    expect(lines).toContain('signals: ignored a repeated claim "c2"');
+    const bad = claim({ id: "c2", section: "overview", cite: ["src/signals/ingest.py:90-99"] });
+    const stray = claim({ id: "z9", section: "history", cite: ["commit:b111111"] });
+    const retry = await run((_f, call) =>
+      call === 1 ? answer(lead, bad) : { claims: [overview, stray] },
+    );
+    expect(retry.lines).toContain('signals: ignored "z9" in the retry, which did not ask for it');
+  });
+
+  it("says a call that failed on the retry failed once, not twice", async () => {
+    const bad = claim({ id: "c2", section: "overview", cite: ["src/signals/ingest.py:90-99"] });
+    const fix = await run((_f, call) =>
+      call === 1 ? answer(lead, bad) : new LlmError("the batch expired"),
+    );
+    expect(fix.outcome?.failure).toBe(
+      "the update call failed on the retry: LlmError: the batch expired",
+    );
+    const whole = await run((_f, call) =>
+      call === 1 ? new LlmOutputError("model output is not JSON", "{oops") : new LlmError("gone"),
+    );
+    expect(whole.outcome?.failure).toBe("the update call failed on the retry: LlmError: gone");
+  });
+
   it("reports a call that failed, so the update can stop", async () => {
     const { outcome } = await run(() => new LlmError("the batch expired"));
     expect(outcome?.failure).toBe("the update call failed: LlmError: the batch expired");

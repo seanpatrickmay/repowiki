@@ -19,7 +19,7 @@ import {
   type Settled,
   settle,
 } from "./build.ts";
-import { rejectionOf, retryRequest } from "./rounds.ts";
+import { MAX_FIX_CLAIMS, MAX_PROBLEMS_PER_CLAIM, rejectionOf, retryRequest } from "./rounds.ts";
 import { buildUpdatePack, type PageRewrite, type UpdatePack } from "./update-pack.ts";
 import { updateSystemPrompt } from "./update-prompt.ts";
 
@@ -50,11 +50,11 @@ export interface RewriteOutcome {
   pack: UpdatePack;
   /** Verified rewrites of stale claims, by id. */
   replaced: Map<string, Claim>;
-  /** Stale claims left as they were: failed twice, given up, or never answered (spec §6.3). */
+  /** Stale claims left as they were: failed verification (after the one retry), given up, or never answered (spec §6.3). */
   keptStale: string[];
   /** New claims that verified, in the order written. */
   added: { key: SectionKey; claim: Claim }[];
-  /** New claims that failed twice, with the problems of the last try. */
+  /** New claims that failed verification and were not fixed by the one retry, with the problems. */
   dropped: { section: SectionKey; text: string; problems: string[] }[];
   /** The answer's diagram when the pack offered candidates, else null. */
   diagram: DraftDiagram | null;
@@ -178,8 +178,16 @@ function check(
     state.failing.set(claim.id, { key, claim, problems, target });
   for (const raw of claims) {
     const claim = { ...raw, id: raw.id.trim() };
-    if (only !== null && !only.has(claim.id)) continue;
-    if (seen.has(claim.id)) continue;
+    if (only !== null && !only.has(claim.id)) {
+      log(
+        `${state.rewrite.featureId}: ignored ${quote(claim.id)} in the retry, which did not ask for it`,
+      );
+      continue;
+    }
+    if (seen.has(claim.id)) {
+      log(`${state.rewrite.featureId}: ignored a repeated claim ${quote(claim.id)}`);
+      continue;
+    }
     seen.add(claim.id);
     const before = old.get(claim.id);
     if (before !== undefined && !targets.has(claim.id)) {
@@ -274,9 +282,17 @@ function check(
 
 /** The retry turn for failing claims: the pack, the first answer, and their problems. */
 function fixRequest(state: State): LlmMessage[] {
-  const listed = [...state.failing.values()].map(
-    ({ claim, problems }) => `- ${quote(claim.id)}: ${problems.slice(0, 3).join("; ")}`,
-  );
+  const failing = [...state.failing.values()];
+  const listed = failing.slice(0, MAX_FIX_CLAIMS).map(({ claim, problems }) => {
+    const shown = problems.slice(0, MAX_PROBLEMS_PER_CLAIM);
+    if (problems.length > MAX_PROBLEMS_PER_CLAIM) {
+      shown.push(`and ${problems.length - MAX_PROBLEMS_PER_CLAIM} more`);
+    }
+    return `- ${quote(claim.id)}: ${shown.join("; ")}`;
+  });
+  if (failing.length > MAX_FIX_CLAIMS) {
+    listed.push(`- and ${failing.length - MAX_FIX_CLAIMS} more claims failed`);
+  }
   return [
     { role: "user", content: state.pack.text },
     { role: "assistant", content: state.answer ?? "{}" },
@@ -351,7 +367,7 @@ export async function rewritePages(
         batch,
       }),
     );
-  const take = (state: State, outcome: Settled<UpdateDraft>) => {
+  const take = (state: State, outcome: Settled<UpdateDraft>, retry = false) => {
     recordCall(state, outcome);
     if ("result" in outcome) {
       const claims = assignNewIds(state.rewrite, outcome.result.output.claims);
@@ -367,7 +383,7 @@ export async function rewritePages(
     } else if (outcome.error instanceof LlmOutputError) {
       state.rejected = rejectionOf(outcome.error);
     } else {
-      state.failure = `the update call failed: ${callFailure(outcome.error)}`;
+      state.failure = `the update call failed${retry ? " on the retry" : ""}: ${callFailure(outcome.error)}`;
     }
   };
 
@@ -405,13 +421,13 @@ export async function rewritePages(
   second.forEach((outcome, i) => {
     const state = retrying[i] as State;
     if (state.rejected !== null) {
-      take(state, outcome as Settled<UpdateDraft>);
+      take(state, outcome as Settled<UpdateDraft>, true);
       return;
     }
     recordCall(state, outcome);
     if (!("result" in outcome)) {
       if (!(outcome.error instanceof LlmOutputError)) {
-        state.failure = `the update call failed twice: ${callFailure(outcome.error)}`;
+        state.failure = `the update call failed on the retry: ${callFailure(outcome.error)}`;
       }
       return;
     }
