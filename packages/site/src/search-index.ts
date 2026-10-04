@@ -1,0 +1,46 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import * as pagefind from "pagefind";
+
+/** The slice of the Pagefind Node API the site build uses (a seam so a test can stand in for it). */
+export interface SearchIndexApi {
+  createIndex(config: { forceLanguage: string }): Promise<{
+    index?: {
+      addDirectory(source: { path: string }): Promise<{ errors: string[]; page_count: number }>;
+      getFiles(): Promise<{ errors: string[]; files: { path: string; content: Uint8Array }[] }>;
+    };
+    errors: string[];
+  }>;
+  close(): Promise<unknown>;
+}
+
+/**
+ * Indexes the built HTML in outDir and writes the Pagefind bundle to outDir/pagefind.
+ *
+ * The bundle is fetched from the backend (getFiles) and written here, not written by the backend
+ * (writeFiles): the backend answers writeFiles before it has finished writing, so the files can
+ * still be empty when the promise resolves, and closing the backend then leaves them empty for
+ * good (issue #342). Every file is on disk, whole, by the time this returns.
+ */
+export async function writeSearchIndex(
+  outDir: string,
+  api: SearchIndexApi = pagefind,
+): Promise<{ htmlPages: number }> {
+  const { index, errors } = await api.createIndex({ forceLanguage: "en" });
+  try {
+    if (index === undefined) throw new Error(`pagefind: ${errors.join("; ")}`);
+    const added = await index.addDirectory({ path: outDir });
+    if (added.errors.length > 0) throw new Error(`pagefind: ${added.errors.join("; ")}`);
+    const bundle = await index.getFiles();
+    if (bundle.errors.length > 0) throw new Error(`pagefind: ${bundle.errors.join("; ")}`);
+    const target = join(outDir, "pagefind");
+    for (const file of bundle.files) {
+      const path = join(target, file.path);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, file.content);
+    }
+    return { htmlPages: added.page_count };
+  } finally {
+    await api.close();
+  }
+}

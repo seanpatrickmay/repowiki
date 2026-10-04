@@ -4,9 +4,9 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
-import * as pagefind from "pagefind";
 import { UsageError } from "./args.ts";
 import { loadExport } from "./load.ts";
+import { writeSearchIndex } from "./search-index.ts";
 import { writeSiteRoot } from "./site-root.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -121,17 +121,7 @@ export async function buildSite(
   writeFileSync(`${outDir}/.repowiki-site`, "");
   writeSiteRoot(outDir, wiki);
 
-  const { index, errors } = await pagefind.createIndex({ forceLanguage: "en" });
-  try {
-    if (index === undefined) throw new Error(`pagefind: ${errors.join("; ")}`);
-    const added = await index.addDirectory({ path: outDir });
-    if (added.errors.length > 0) throw new Error(`pagefind: ${added.errors.join("; ")}`);
-    const written = await index.writeFiles({ outputPath: `${outDir}/pagefind` });
-    if (written.errors.length > 0) throw new Error(`pagefind: ${written.errors.join("; ")}`);
-    return { htmlPages: added.page_count };
-  } finally {
-    await pagefind.close();
-  }
+  return writeSearchIndex(outDir);
 }
 
 /** Serves a built site on http://127.0.0.1:4321/ until the process is stopped. */
