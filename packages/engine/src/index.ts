@@ -14,6 +14,7 @@ export {
   type WeightedEdge,
 } from "./cluster/index.ts";
 export {
+  articleDue,
   DEFAULT_DRIFT_THRESHOLD,
   measureDrift,
   type PagePlan,

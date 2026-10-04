@@ -23,14 +23,7 @@ import {
   writeExport,
   writeSystemPrompt,
 } from "@repowiki/engine";
-import {
-  createClaudeProvider,
-  createLedger,
-  LlmError,
-  type ModelConfig,
-  type Provider,
-  totalsOf,
-} from "@repowiki/llm";
+import { createLedger, type ModelConfig, totalsOf } from "@repowiki/llm";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
@@ -38,7 +31,7 @@ import {
   describeError,
   estimateArchitecture,
   estimateBuild,
-  KEYLESS_MESSAGE,
+  lazyClaudeProvider,
   parseWikiArgs,
   renderBuildSummary,
   type WikiArgs,
@@ -147,31 +140,16 @@ async function runBuild(
     // Forgets a collected request only once buildWiki stores its page, so a kill never re-pays.
     const journal = buildJournal(store);
     // Built on the first call, so a run with nothing left to write needs no API key.
-    let claude: Provider | undefined;
-    const provider: Provider = {
-      generate: (request) => {
-        if (claude === undefined && !process.env.ANTHROPIC_API_KEY) {
-          throw new LlmError(KEYLESS_MESSAGE);
-        }
-        claude ??= createClaudeProvider({
-          models,
-          ledger,
-          runId,
-          run: { kind: "build", sha: index.sha },
-          batchJournal: journal,
-          onBatchRequest: journal.tag,
-          ...(args.deadlineMinutes === null
-            ? {}
-            : { batchDeadlineMs: args.deadlineMinutes * 60_000 }),
-          onBatchCreated: (b) => console.error(`batch ${b.id} created (${b.requests} requests)`),
-          onBatchProgress: (p) =>
-            console.error(
-              `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
-            ),
-        });
-        return claude.generate(request);
-      },
-    };
+    const provider = lazyClaudeProvider({
+      command: "wiki:build",
+      models,
+      ledger,
+      runId,
+      run: { kind: "build", sha: index.sha },
+      journal,
+      deadlineMinutes: args.deadlineMinutes,
+      log: (line) => console.error(line),
+    });
     const build = await buildWiki(
       store,
       { index, sources, history, graph },

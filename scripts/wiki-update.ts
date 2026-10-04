@@ -1,4 +1,4 @@
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
@@ -14,7 +14,7 @@ import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { estimateLine, parseUpdateArgs, renderUpdateSummary } from "./update-cli.ts";
 import { estimateFor, readInput, runUpdate } from "./update-run.ts";
-import { acquireBuildLock, describeError } from "./wiki-cli.ts";
+import { acquireBuildLock, describeError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:update <repo> <rev>: moves the wiki stored for <repo> from its head to <rev> (spec
@@ -46,6 +46,9 @@ async function main(): Promise<void> {
       const estimate = estimateFor(store, input, args, models, repoName);
       console.error(estimateLine(estimate, args.batch));
       if (args.dryRun) return;
+      // Calls are certain, so fail once here rather than once per page; an update that makes
+      // none (nothing cited changed) needs no key.
+      if (estimate.rewrites + estimate.whole + estimate.small > 0) requireApiKey("wiki:update");
       const log = (line: string) => console.error(line);
       const { update, runId } = await runUpdate(store, input, args, models, repoName, log);
       const exportPath = join(out, "export.json");
@@ -57,7 +60,7 @@ async function main(): Promise<void> {
         totalsOf(store.listLedger(runId)),
       );
       const summaryPath = join(out, `update-${sha.slice(0, 7)}.md`);
-      writeFileSync(summaryPath, summary);
+      writeFileAtomic(summaryPath, summary);
       console.log(summary);
       console.log(`Wrote ${exportPath} and ${summaryPath}; store: ${db}`);
     } finally {

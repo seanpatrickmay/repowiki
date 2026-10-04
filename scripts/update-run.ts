@@ -1,6 +1,7 @@
 import {
   addAliases,
   architectureSystemPrompt,
+  articleDue,
   buildFileGraph,
   buildJournal,
   buildPack,
@@ -23,15 +24,9 @@ import {
   type WikiUpdate,
   writeSystemPrompt,
 } from "@repowiki/engine";
-import {
-  createClaudeProvider,
-  createLedger,
-  LlmError,
-  type ModelConfig,
-  type Provider,
-} from "@repowiki/llm";
+import { createLedger, type ModelConfig } from "@repowiki/llm";
 import { estimateUpdate, type UpdateEstimate } from "./update-cli.ts";
-import { KEYLESS_MESSAGE, type RunFlags } from "./wiki-cli.ts";
+import { lazyClaudeProvider, type RunFlags } from "./wiki-cli.ts";
 
 /** The repository read at `sha`, as an update takes it. No call. */
 export async function readInput(repo: string, sha: string): Promise<UpdateInput> {
@@ -49,7 +44,8 @@ export async function readInput(repo: string, sha: string): Promise<UpdateInput>
  * What moving the store's wiki to input.index.sha would cost, from the plan the update makes
  * before its calls: the dirty pages' update packs, the whole pages of features with none, one
  * tie-break call if a new file is disputed, one drift call if a feature drifted, and the About
- * article if a page may change. Refuses (UpdateError) as the update would.
+ * article if a page may change or it is due as the store stands. Refuses (UpdateError) as the
+ * update would.
  */
 export function estimateFor(
   store: Store,
@@ -65,6 +61,15 @@ export function estimateFor(
   const pages = planPages(plan, store, input, manifest, new Set());
   const neighbours = featureNeighbours(plan.graph, manifest);
   const budgetTokens = flags.budgetTokens;
+  // The article is rewritten when a page may change (its lead may), and also when it is due as
+  // the store stands: none yet, or one that no longer matches the pages and the manifest.
+  const stored = manifest.features.flatMap((f) =>
+    f.status.kind === "active" ? (store.getCurrentRevision(f.id) ?? []) : [],
+  );
+  const dueNow =
+    articleDue(store.getCurrentArchitecture(), stored, manifest, (id) => store.getRevision(id)) !==
+    null;
+  const articleMayBeDue = pages.rewrites.length + pages.whole.length > 0 || dueNow;
   return estimateUpdate(
     {
       rewrites: pages.rewrites.map((rewrite) =>
@@ -85,13 +90,12 @@ export function estimateFor(
       writeSystem: writeSystemPrompt(repoName, manifest),
       disputed: plan.placement.disputed.length > 0,
       drifted: measured.drifted.length > 0,
-      article:
-        pages.rewrites.length + pages.whole.length > 0
-          ? {
-              system: architectureSystemPrompt(repoName, manifest),
-              budgetTokens: DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
-            }
-          : null,
+      article: articleMayBeDue
+        ? {
+            system: architectureSystemPrompt(repoName, manifest),
+            budgetTokens: DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
+          }
+        : null,
     },
     models,
     flags.batch,
@@ -116,29 +120,16 @@ export async function runUpdate(
   const runId = `wiki-update-${sha}-${new Date().toISOString()}`;
   const ledger = createLedger((entry) => store.appendLedger(entry));
   const journal = buildJournal(store);
-  let claude: Provider | undefined;
-  const provider: Provider = {
-    generate: (request) => {
-      if (claude === undefined && !process.env.ANTHROPIC_API_KEY) {
-        throw new LlmError(KEYLESS_MESSAGE);
-      }
-      claude ??= createClaudeProvider({
-        models,
-        ledger,
-        runId,
-        run: { kind: "update", sha },
-        batchJournal: journal,
-        onBatchRequest: journal.tag,
-        ...(flags.deadlineMinutes === null
-          ? {}
-          : { batchDeadlineMs: flags.deadlineMinutes * 60_000 }),
-        onBatchCreated: (b) => log(`batch ${b.id} created (${b.requests} requests)`),
-        onBatchProgress: (p) =>
-          log(`batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`),
-      });
-      return claude.generate(request);
-    },
-  };
+  const provider = lazyClaudeProvider({
+    command: "wiki:update",
+    models,
+    ledger,
+    runId,
+    run: { kind: "update", sha },
+    journal,
+    deadlineMinutes: flags.deadlineMinutes,
+    log,
+  });
   const update = await updateWiki(store, input, {
     provider,
     journal,

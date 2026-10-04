@@ -4,13 +4,22 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
   type ArchitectureOutcome,
+  type BuildJournal,
   type ContextPack,
   estimateTokens,
   markdownCodeSpan,
   type PageOutcome,
   WikiBuildError,
 } from "@repowiki/engine";
-import { callCostUsd, type LedgerTotals } from "@repowiki/llm";
+import {
+  callCostUsd,
+  createClaudeProvider,
+  type LedgerTotals,
+  LlmError,
+  type ModelConfig,
+  type Provider,
+  type TokenLedger,
+} from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 
 const USAGE =
@@ -139,9 +148,76 @@ function parse(argv: readonly string[], limit: boolean) {
   });
 }
 
-/** Why a build that needs a call cannot make one; `pnpm wiki:build` loads .env only if present. */
-export const KEYLESS_MESSAGE =
-  "ANTHROPIC_API_KEY is not set: pnpm wiki:build reads it from a .env file in the directory it runs in, if there is one (node --env-file-if-exists=.env); add it there, or run node --env-file=<path to .env> scripts/wiki-build.ts";
+/** The commands that make live calls and so need the key. */
+export type LiveCommand = "wiki:build" | "wiki:update";
+
+/** Why a run that needs a call cannot make one; the commands load .env only if present. */
+export function keylessMessage(command: LiveCommand): string {
+  return `ANTHROPIC_API_KEY is not set: pnpm ${command} reads it from a .env file in the directory it runs in, if there is one (node --env-file-if-exists=.env); add it there, or run node --env-file=<path to .env> scripts/${command.replace(":", "-")}.ts`;
+}
+
+/** Throws the one-line keyless LlmError when ANTHROPIC_API_KEY is unset or empty. */
+export function requireApiKey(command: LiveCommand): void {
+  if (!process.env.ANTHROPIC_API_KEY) throw new LlmError(keylessMessage(command));
+}
+
+export interface LazyClaudeOptions {
+  command: LiveCommand;
+  models: ModelConfig;
+  ledger: TokenLedger;
+  runId: string;
+  run: { kind: "build" | "update"; sha: string };
+  journal: BuildJournal;
+  deadlineMinutes: number | null;
+  log: (line: string) => void;
+}
+
+/**
+ * A Provider that builds the Claude provider on its first call, so a run that needs no call needs
+ * no API key; with no key that first call throws the command's keyless LlmError. Batch progress
+ * goes to `log`; the batch journal is the store's, so a killed run's batches are collected again.
+ */
+export function lazyClaudeProvider(options: LazyClaudeOptions): Provider {
+  let claude: Provider | undefined;
+  return {
+    generate: (request) => {
+      if (claude === undefined) requireApiKey(options.command);
+      claude ??= createClaudeProvider({
+        models: options.models,
+        ledger: options.ledger,
+        runId: options.runId,
+        run: options.run,
+        batchJournal: options.journal,
+        onBatchRequest: options.journal.tag,
+        ...(options.deadlineMinutes === null
+          ? {}
+          : { batchDeadlineMs: options.deadlineMinutes * 60_000 }),
+        onBatchCreated: (b) => options.log(`batch ${b.id} created (${b.requests} requests)`),
+        onBatchProgress: (p) =>
+          options.log(
+            `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
+          ),
+      });
+      return claude.generate(request);
+    },
+  };
+}
+
+/**
+ * Writes `text` to `path` as a whole or not at all: a temporary file beside it (created
+ * exclusively, so a planted link is never followed), then a rename, which replaces a symlink at
+ * `path` itself rather than writing through it.
+ */
+export function writeFileAtomic(path: string, text: string): void {
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, text, { flag: "wx" });
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}
 
 /** The advisory lock file a running wiki:build holds in its out dir. */
 export const BUILD_LOCK = "wiki-build.lock";
