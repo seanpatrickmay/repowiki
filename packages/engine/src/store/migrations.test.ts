@@ -297,7 +297,7 @@ describe("migration 2: two-way lineage and status", () => {
 
     // Reset user_version and rerun migration 2 to test idempotency
     db.pragma("user_version = 1");
-    runMigrations(db, MIGRATIONS);
+    runMigrations(db, MIGRATIONS.slice(0, 2));
     const after2 = db.prepare("SELECT body FROM manifests WHERE sha = ?").get(stored.sha) as {
       body: string;
     };

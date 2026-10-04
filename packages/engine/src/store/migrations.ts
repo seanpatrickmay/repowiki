@@ -41,6 +41,14 @@ export const MIGRATIONS: readonly Migration[] = [
   CREATE INDEX citation_ranges_lookup ON citation_ranges(path, start_line, end_line);
   `,
   repairLineageStatus,
+  `
+  CREATE TABLE ledger (
+    seq INTEGER PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    body TEXT NOT NULL
+  );
+  CREATE INDEX ledger_run ON ledger(run_id);
+  `,
 ];
 
 interface StoredFeature {
