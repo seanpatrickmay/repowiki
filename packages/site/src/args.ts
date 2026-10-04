@@ -46,16 +46,26 @@ export function parseSiteArgs(argv: readonly string[]): SiteArgs {
   return { command, exportFile, outDir, repoUrl: parseRepoUrl(flags.get("--repo-url")) };
 }
 
-function parseRepoUrl(value: string | undefined): string | null {
+/**
+ * Validates a repo web URL: absolute http(s), no credentials, no query or fragment. Trailing
+ * slashes are dropped. Error messages never echo the value, which may hold a token.
+ */
+export function parseRepoUrl(value: string | undefined, name = "--repo-url"): string | null {
   if (value === undefined) return null;
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new UsageError(`--repo-url must be an absolute http(s) URL, got ${value}`);
+    throw new UsageError(`${name} must be an absolute http(s) URL`);
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new UsageError(`--repo-url must be an absolute http(s) URL, got ${value}`);
+    throw new UsageError(`${name} must be an absolute http(s) URL, got scheme ${url.protocol}`);
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new UsageError(`${name} must not contain credentials (user or token before @)`);
+  }
+  if (url.search !== "" || url.hash !== "" || /[?#]/.test(value)) {
+    throw new UsageError(`${name} must not have a query or fragment`);
   }
   return url.href.replace(/\/+$/, "");
 }

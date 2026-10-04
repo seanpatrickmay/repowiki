@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport } from "./test-fixtures.ts";
 import {
@@ -98,11 +100,68 @@ describe("site build input validation", () => {
     expect(result.stderr).toContain("cannot read export");
   });
 
+  it("exits 2 and names the build command when previewing a site that was never built", () => {
+    const missing = runCli(["preview", "--out", join(dir, "never-built")]);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr.trim()).toBe(
+      `no built site in ${join(dir, "never-built")}; run \`pnpm site:build --export <file>\` first`,
+    );
+    mkdirSync(join(dir, "empty"));
+    const unmarked = runCli(["preview", "--out", join(dir, "empty")]);
+    expect(unmarked.status).toBe(2);
+    expect(unmarked.stderr).toContain("pnpm site:build --export");
+  }, 30_000);
+
   it("exits 2 with usage on bad arguments", () => {
     const result = runCli(["build"]);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("--export is required");
   }, 30_000);
+});
+
+describe("in-process rebuilds", () => {
+  it("renders each buildSite call's own export, even from the same path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-twice-"));
+    try {
+      const exportFile = join(dir, "export.json");
+      const second = { ...fixtureExport(), repo: "second-repo" };
+      const build = fileURLToPath(new URL("./build.ts", import.meta.url));
+      const script = [
+        `import { writeFileSync } from "node:fs";`,
+        `import { buildSite } from ${JSON.stringify(build)};`,
+        `const [file, a, b, next] = process.argv.slice(1);`,
+        `await buildSite(file, a, null);`,
+        `writeFileSync(file, next);`,
+        `await buildSite(file, b, null);`,
+      ].join("\n");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport()));
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          script,
+          exportFile,
+          join(dir, "a"),
+          join(dir, "b"),
+          JSON.stringify(second),
+        ],
+        {
+          encoding: "utf8",
+          timeout: 220_000,
+          cwd: dir,
+          env: { ...process.env, NODE_ENV: "production" },
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const titleOf = (out: string) =>
+        /<title>(.*?)<\/title>/.exec(readFileSync(join(dir, out, "index.html"), "utf8"))?.[1];
+      expect(titleOf("a")).toBe("Main page - demo-repo wiki");
+      expect(titleOf("b")).toBe("Main page - second-repo wiki");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 240_000);
 });
 
 describe("site build directory safety", () => {
@@ -295,6 +354,25 @@ describe("page shell", () => {
     expect(css).toContain("overflow-wrap:anywhere");
   });
 
+  it("underlines links in prose and lists, so they don't rely on colour alone", () => {
+    const html = site.read("index.html");
+    const sheet = /<link rel="stylesheet" href="(\/_astro\/[^"]+\.css)"/.exec(html)?.[1] ?? "";
+    const css = site.read(sheet);
+    const underlined = [...css.matchAll(/([^{}]+)\{text-decoration:underline\}/g)].flatMap(
+      (match) => (match[1] ?? "").split(","),
+    );
+    for (const selector of [
+      ".article p a",
+      ".article section li a",
+      ".dab-list a",
+      ".redirect-target a",
+      ".mp-box p a",
+      ".mp-box li a",
+    ]) {
+      expect(underlined).toContain(selector);
+    }
+  });
+
   it("has a skip link, a labelled site nav and a main landmark", () => {
     const html = site.read("index.html");
     expect(html).toContain('<a class="skip-link" href="#content">Jump to content</a>');
@@ -314,6 +392,23 @@ describe("page shell", () => {
 function normalized(path: string): string {
   return site.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
 }
+
+describe("not-found page", () => {
+  it("writes a 404.html that points the reader at All articles and search", () => {
+    const html = site.read("404.html");
+    expect(html).toContain("<title>Page not found - demo-repo wiki</title>");
+    expect(html).toContain('<h1 class="page-title">Page not found</h1>');
+    expect(html).toContain("There is no article at this address in the demo-repo wiki.");
+    expect(html).toContain('<a href="/special/all-pages/">All articles</a>');
+    expect(html).toContain('<a href="/search/">search</a>');
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).not.toContain("data-pagefind-body");
+  });
+
+  it("is one of the pages the every-page checks cover", () => {
+    expect(htmlFiles(site.outDir)).toContain("404.html");
+  });
+});
 
 describe("article page", () => {
   it("renders the lead, sections, references and infobox", () => {

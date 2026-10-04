@@ -28,9 +28,40 @@ describe("loadExport", () => {
     expect(() => loadExport(file)).toThrow(/invalid export .*bad\.json[\s\S]*commitDate/);
   });
 
-  it("rejects an export from an older schema version", () => {
-    const file = write("v1.json", JSON.stringify({ ...fixtureExport(), schemaVersion: 1 }));
-    expect(() => loadExport(file)).toThrow(/schemaVersion/);
+  it("rejects a v1 export with one line that names the file and says to re-export", () => {
+    // v1 history held { id, sha, commitDate, reason, pr } entries rather than whole revisions.
+    const wiki = fixtureExport();
+    const history = Object.fromEntries(
+      Object.entries(wiki.history).map(([id, revisions]) => [
+        id,
+        revisions.map(({ id, sha, commitDate, reason, pr }) => ({
+          id,
+          sha,
+          commitDate,
+          reason,
+          pr,
+        })),
+      ]),
+    );
+    const file = write("v1.json", JSON.stringify({ ...wiki, schemaVersion: 1, history }));
+    expect(() => loadExport(file)).toThrow(ExportError);
+    expect(() => loadExport(file)).toThrow(
+      new ExportError(
+        `export schema 1 in ${file} is older than this reader (2); re-run the export`,
+      ),
+    );
+  });
+
+  it("rejects an export from a newer schema version the same way", () => {
+    const file = write("v3.json", JSON.stringify({ ...fixtureExport(), schemaVersion: 3 }));
+    expect(() => loadExport(file)).toThrow(
+      new ExportError(`export schema 3 in ${file} is newer than this reader (2); upgrade RepoWiki`),
+    );
+  });
+
+  it("leaves a missing or non-numeric schemaVersion to the schema check", () => {
+    const file = write("v0.json", JSON.stringify({ ...fixtureExport(), schemaVersion: "2" }));
+    expect(() => loadExport(file)).toThrow(/invalid export [\s\S]*schemaVersion/);
   });
 
   it("reports unreadable and non-JSON files as ExportError", () => {

@@ -25,6 +25,18 @@ describe("previewData", () => {
     );
   });
 
+  it("computes each id's preview once per site and returns the same object after", () => {
+    const fresh = buildSiteModel(fixtureExport(), null);
+    const first = previewData(fresh, "deliverables");
+    expect(previewData(fresh, "deliverables")).toBe(first);
+    expect(first).toEqual(previewData(site, "deliverables"));
+    expect(previewData(fresh, "ghost")).toBeNull();
+    // Another site model gets its own previews, never this one's.
+    const other = buildSiteModel({ ...fixtureExport(), repo: "other" }, null);
+    expect(previewData(other, "deliverables")).not.toBe(first);
+    expect(previewData(other, "deliverables")).toEqual(first);
+  });
+
   it("has nothing for features without a page", () => {
     expect(previewData(site, "scheduler")).toBeNull();
     expect(previewData(site, "ghost")).toBeNull();
