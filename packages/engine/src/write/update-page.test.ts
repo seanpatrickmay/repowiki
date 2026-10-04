@@ -10,7 +10,7 @@ import {
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import type { RewriteOutcome } from "./rewrite.ts";
-import { signalsRewrite } from "./test-update.ts";
+import { REVERT_COMMIT, signalsRewrite, storedSignalsPage } from "./test-update.ts";
 import { testWiki } from "./test-wiki.ts";
 import { buildUpdatePack, type PageRewrite } from "./update-pack.ts";
 import { assembleUpdate } from "./update-page.ts";
@@ -26,15 +26,16 @@ const newLead: Claim = leadClaim({
   text: "**Signal ingestion** pages through chunks.",
   supports: ["c2", "n1"],
 });
+// A new history claim cites a commit of this update (R15): the revert signalsRewrite() carries.
 const added: Claim = bodyClaim({
   id: "n1",
   kind: "history",
   text: "A revert undid paging through long chunks.",
   citations: [
     commitCitation({
-      sha: `b${"1".repeat(39)}`,
-      subject: 'Revert "feat: page through long chunks"',
-      pr: 12,
+      sha: REVERT_COMMIT.sha,
+      subject: REVERT_COMMIT.subject,
+      pr: REVERT_COMMIT.pr,
     }),
   ],
 });
@@ -211,6 +212,68 @@ describe("assembleUpdate", () => {
     });
     expect(result.revision?.diagram).toContain("flowchart LR");
     expect(assemble().revision?.diagram).toBeNull();
+  });
+
+  it("keeps the stored diagram when the feature's files did not change", () => {
+    const drawn = 'flowchart LR\n  n1["ingest.py"]';
+    const rewrite = signalsRewrite({ revision: { ...storedSignalsPage(), diagram: drawn } });
+    const result = assemble(rewrite, {
+      diagram: { nodes: ["n1", "n2"], edges: [{ from: "n1", to: "n2", label: "saves signals" }] },
+    });
+    expect(result.revision?.diagram).toBe(drawn);
+  });
+
+  it("drops a redrawn diagram the verifier refuses, and returns its problems", () => {
+    const rewrite = signalsRewrite({ membershipChanged: true });
+    const base = outcomeOf(rewrite);
+    const node = (id: string) => ({ id, kind: "file" as const, ref: "src/a.py", label: "a.py" });
+    // A node id with a space cannot be a Mermaid statement the verifier accepts.
+    const pack = {
+      ...base.pack,
+      candidates: {
+        nodes: [node("n 1"), node("n2")],
+        edges: [{ from: "n 1", to: "n2", kind: "imports" as const }],
+      },
+    };
+    const result = assembleUpdate({
+      rewrite,
+      outcome: {
+        ...base,
+        pack,
+        diagram: { nodes: ["n 1", "n2"], edges: [{ from: "n 1", to: "n2", label: "x" }] },
+      },
+      index: wiki.index,
+      manifest: wiki.manifest,
+      history: wiki.history,
+      commitDate: "2026-02-03T10:00:00-05:00",
+      generatedAt: "2026-10-03T12:00:00Z",
+      pr: 12,
+      reason: "update",
+      neighbours: new Map(),
+      wikipedia: new Map(),
+    });
+    if (result.revision === null) throw new Error("expected a revision");
+    expect(result.revision.diagram).toBeNull();
+    expect("diagramProblems" in result && result.diagramProblems.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a lead the model gave up, marked stale, beside the claims it did rewrite", () => {
+    const result = assemble(signalsRewrite(), {
+      replaced: new Map([["c2", rewritten]]),
+      keptStale: ["c1"],
+      added: [],
+    });
+    expect(texts(result)?.slice(0, 2)).toEqual([
+      ["lead", [["c1", "**Signal ingestion** turns chunks into signals.", SHA_A]]],
+      ["overview", [["c2", "`ingest_chunk()` now pages through chunks.", null]]],
+    ]);
+  });
+
+  it("dates the revision by the new commit, and stamps when it was generated", () => {
+    expect(assemble().revision).toMatchObject({
+      commitDate: "2026-02-03T10:00:00-05:00",
+      generatedAt: "2026-10-03T12:00:00Z",
+    });
   });
 
   it("draws only candidate nodes and edges, whatever the answer names", () => {

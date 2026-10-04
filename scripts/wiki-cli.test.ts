@@ -360,6 +360,26 @@ describe("describeError", () => {
       });
     });
 
+    it("replaces a key inside JSON-escaped text, its dashes escaped or not", () => {
+      withKey("fake-key-not-a-real-secret-0123", () => {
+        const body = '{"error":{"message":"invalid x-api-key: \\"sk-ant-api03-FAKEJSON_x-y\\""}}';
+        const escaped = '{"key":"sk\\u002dant\\u002dapi03\\u002dFAKEUNI_x\\u002Dy"}';
+        const doubled =
+          '"{\\\\"key\\\\":\\\\"sk\\\\u002dant\\\\u002dapi03\\\\u002dFAKEDOUBLE\\\\"}"';
+        const tail = "sk-ant-api03\\u002dFAKETAIL-z";
+        const configured = '"fake\\u002dkey\\u002dnot\\u002da\\u002dreal\\u002dsecret\\u002d0123"';
+        const err = new Error(body, {
+          cause: new Error(`${escaped} ${doubled} ${tail} ${configured}`),
+        });
+        const text = describeError(err, true);
+        for (const leak of ["FAKEJSON", "FAKEUNI", "FAKEDOUBLE", "FAKETAIL", "secret", "0123"])
+          expect(text).not.toContain(leak);
+        expect(text.split("\n")[0]).toBe(
+          '{"error":{"message":"invalid x-api-key: \\"[redacted]\\""}}',
+        );
+      });
+    });
+
     it("redacts before cutting, so a cut never leaves a prefix of the key", () => {
       withKey("fake-key-not-a-real-secret-0123", () => {
         const err = new Error("top", {

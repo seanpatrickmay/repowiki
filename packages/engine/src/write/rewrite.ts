@@ -308,7 +308,8 @@ function fixRequest(state: State): LlmMessage[] {
 
 /**
  * Updates the dirty pages of an update (spec §6.1 step 5): one call per page, all issued in one
- * tick so they share one Message Batch (and a cached prefix when there are two or more), then
+ * tick so they share one Message Batch (or, unbatched, a cached prefix when there are two or
+ * more), then
  * one retry round, also one batch, for pages whose answer was unusable or had claims that
  * failed (§6.3: retry once with the verifier's problems). A stale claim that fails twice, or
  * that the model gives up, stays as it was and is marked out of date by the assembly; a new claim
@@ -323,7 +324,9 @@ export async function rewritePages(
   const batch = options.batch ?? true;
   const { index, manifest, sources, history } = input;
   const system = updateSystemPrompt(options.repoName, manifest);
-  const cacheKey = input.rewrites.length >= 2 ? updateCacheKey(index.sha, system) : null;
+  // Only unbatched calls share a cached prefix: a batch runs its requests concurrently, so most
+  // of them write the prefix rather than read it (M6 gate (a) lost more than it saved).
+  const cacheKey = !batch && input.rewrites.length >= 2 ? updateCacheKey(index.sha, system) : null;
   const symbols = new Map(index.files.map((f) => [f.path, f.symbols]));
   const ctx: VerifyContext = {
     sha: index.sha,
