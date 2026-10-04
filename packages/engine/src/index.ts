@@ -20,7 +20,10 @@ export {
   planUpdate,
   UpdateError,
   type UpdateInput,
+  type UpdateOptions,
   type UpdatePlan,
+  updateWiki,
+  type WikiUpdate,
 } from "./freshness/index.ts";
 export {
   type CallEdge,
