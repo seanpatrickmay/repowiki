@@ -286,7 +286,7 @@ export async function* streamBlobs(
   child.stdin.on("error", () => {});
   const closed = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     child.once("close", (code, signal) => resolve({ code, signal }));
-    child.once("error", (error) => {
+    child.on("error", (error) => {
       spawnFailure = error;
       resolve({ code: null, signal: null });
     });
@@ -353,6 +353,14 @@ export async function* streamBlobs(
       }
       if (count < oids.length) {
         throw new Truncated(`git cat-file output ended after ${count} of ${oids.length} blobs`);
+      }
+      // git exits at the end of its input, so anything further is output nobody asked for.
+      const extra = await reader.header();
+      if (extra !== null) {
+        const shown = extra.length > 80 ? `${extra.slice(0, 80)}...` : extra;
+        throw new GitError(
+          `unexpected cat-file output after ${oids.length} requested blobs: ${shown}`,
+        );
       }
     } catch (error) {
       if (!(error instanceof Truncated)) throw error;

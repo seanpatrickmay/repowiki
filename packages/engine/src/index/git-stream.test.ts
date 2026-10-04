@@ -118,6 +118,21 @@ describe("streamBlobs against a scripted cat-file", () => {
     );
   });
 
+  it("rejects output after the last requested blob instead of waiting on it", async () => {
+    const child = fakeChild();
+    spawn.mockReturnValue(child);
+    child.stdout.write(`${header(1, 1)}a\n${header(2, 1)}b\n`);
+    // the stream is left open: only the extra header may end the read
+    const seen: string[] = [];
+    const attempt = (async () => {
+      for await (const blob of streamBlobs("/repo", [OID(1)], 100)) seen.push(blob.oid);
+    })();
+    await expect(attempt).rejects.toThrow(GitError);
+    await expect(attempt).rejects.toThrow(/unexpected cat-file output after 1 requested blobs/);
+    expect(seen).toEqual([OID(1)]);
+    expect(child.kill).toHaveBeenCalled();
+  });
+
   it("reports a child that exits early with git's own one-line message", async () => {
     const child = fakeChild();
     spawn.mockReturnValue(child);

@@ -89,6 +89,9 @@ async function* withContents(
     holdLimit,
   )) {
     const blob = blobs[next++] as TreeBlob;
+    if (data.oid !== blob.oid) {
+      throw new GitError(`cat-file returned ${data.oid} for ${blob.path} (${blob.oid})`);
+    }
     yield [blob, data];
   }
   const missing = blobs[next];
@@ -108,6 +111,9 @@ export async function indexRepo(
   options: IndexOptions = {},
 ): Promise<RepoIndex> {
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  if (!Number.isFinite(maxFileBytes) || maxFileBytes < 0) {
+    throw new RangeError(`maxFileBytes must be a finite, non-negative number, got ${maxFileBytes}`);
+  }
   const sha = resolveCommit(repo, rev);
   const listed = listBlobs(repo, sha);
   const isValid = (blob: TreeBlob) => RepoPath.safeParse(blob.path).success;

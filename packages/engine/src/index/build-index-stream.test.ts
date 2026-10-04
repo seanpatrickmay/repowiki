@@ -61,4 +61,14 @@ describe("indexRepo reads blobs as a stream", () => {
     await indexRepo(repo.dir, "HEAD", { maxFileBytes: 50 });
     expect(seen.holdLimits).toEqual([Number.POSITIVE_INFINITY, 50]);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    "rejects maxFileBytes %s before reading anything",
+    async (maxFileBytes) => {
+      repo.write("a.py", "x = 1\n");
+      repo.commit("add a");
+      await expect(indexRepo(repo.dir, "HEAD", { maxFileBytes })).rejects.toThrow(RangeError);
+      expect(seen.holdLimits).toEqual([]);
+    },
+  );
 });
