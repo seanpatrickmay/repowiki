@@ -1,0 +1,28 @@
+---
+import Article from "../../../../components/Article.astro";
+import { oldRevisionRoutes, oldRevisionView } from "../../../../history.ts";
+import Layout from "../../../../layouts/Layout.astro";
+import { getSite } from "../../../../site.ts";
+import { articleUrl } from "../../../../urls.ts";
+
+export function getStaticPaths() {
+  return oldRevisionRoutes(getSite()).map(({ featureId, n }) => ({
+    params: { slug: featureId, n: String(n) },
+    props: { featureId, n },
+  }));
+}
+
+interface Props {
+  featureId: string;
+  n: number;
+}
+
+const { featureId, n } = Astro.props;
+const view = oldRevisionView(getSite(), featureId, n);
+---
+<Layout title={`${view.title} (old revision)`}>
+  <Fragment slot="head">
+    <link rel="canonical" href={articleUrl(featureId)} />
+  </Fragment>
+  <Article view={view} indexed={false} tab="history" />
+</Layout>

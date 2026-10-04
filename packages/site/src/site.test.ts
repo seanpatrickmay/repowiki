@@ -441,3 +441,103 @@ describe("redirect and disambiguation pages", () => {
     );
   });
 });
+
+describe("history pages", () => {
+  it("lists every revision newest first with links to each old revision", () => {
+    const html = site.read("wiki/signals/history/index.html");
+    expect(html).toContain('<h1 class="page-title">Signal ingestion: Revision history</h1>');
+    const second = html.indexOf('href="/wiki/signals/history/2/"');
+    const first = html.indexOf('href="/wiki/signals/history/1/"');
+    expect(second).toBeGreaterThan(-1);
+    expect(first).toBeGreaterThan(second);
+  });
+
+  it("renders old revisions with a banner and keeps them out of search", () => {
+    const html = site.read("wiki/signals/history/1/index.html");
+    expect(html).toContain("This is an old revision of this page, as of 3 February 2026");
+    expect(html).toContain("Signals are built from chunks.");
+    expect(html).not.toContain("data-pagefind-body");
+  });
+
+  it("gives every page with history a View history tab, redirects included", () => {
+    const article = site.read("wiki/signals/index.html");
+    expect(article).toContain('<a href="/wiki/signals/" aria-current="page">Article</a>');
+    expect(article).toContain('<a href="/wiki/signals/history/">View history</a>');
+    expect(site.read("wiki/signals/history/1/index.html")).toContain(
+      '<a href="/wiki/signals/history/" aria-current="page">View history</a>',
+    );
+    expect(site.read("wiki/legacy-signals/index.html")).toContain(
+      '<a href="/wiki/legacy-signals/history/">View history</a>',
+    );
+    expect(site.read("wiki/legacy-signals/history/index.html")).toContain("Legacy signals");
+  });
+
+  it("keeps the retired banner on old revisions of a retired feature", () => {
+    const html = site.read("wiki/exporter/history/1/index.html");
+    expect(html).toContain("This is the current revision of this page, as of 15 January 2026");
+    expect(html).toContain("This feature was retired at commit");
+    expect(html.indexOf("This is the current revision")).toBeLessThan(
+      html.indexOf("This feature was retired"),
+    );
+  });
+
+  it("points old revisions at the current article as canonical", () => {
+    expect(site.read("wiki/signals/history/1/index.html")).toContain(
+      '<link rel="canonical" href="/wiki/signals/">',
+    );
+    expect(site.read("wiki/signals/index.html")).not.toContain('rel="canonical"');
+  });
+
+  it("links history only where a history page exists", () => {
+    // `reports` is a disambiguation with no revisions; alias slugs are never feature ids.
+    for (const page of ["wiki/reports", "wiki/signal-pipeline", "wiki/i-x-i"]) {
+      expect(site.read(`${page}/index.html`), page).not.toContain("View history");
+    }
+    expect(existsSync(join(site.outDir, "wiki/reports/history/index.html"))).toBe(false);
+    expect(existsSync(join(site.outDir, "wiki/scheduler/history/index.html"))).toBe(false);
+  });
+
+  it("emits a history page and one old-revision page per revision", () => {
+    for (const path of [
+      "wiki/signals/history/2/index.html",
+      "wiki/exporter/history/1/index.html",
+      "wiki/hostile-title/history/1/index.html",
+    ]) {
+      expect(existsSync(join(site.outDir, path)), path).toBe(true);
+    }
+    expect(existsSync(join(site.outDir, "wiki/signals/history/3/index.html"))).toBe(false);
+  });
+
+  it("links the commit and PR of each revision to the repo", () => {
+    const html = site.read("wiki/signals/history/index.html");
+    expect(html).toContain(
+      `<a class="external" href="https://github.com/acme/demo-repo/pull/88">PR #88</a>`,
+    );
+    expect(html).toContain(
+      `<a class="external" href="https://github.com/acme/demo-repo/commit/${"a".repeat(40)}"><code>aaaaaaa</code></a>`,
+    );
+    expect(html).toContain("claude-haiku-4-5, 1,200 in / 300 out tokens");
+  });
+
+  it("escapes a hostile feature title on its history and old-revision pages", () => {
+    const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;";
+    expect(site.read("wiki/hostile-title/history/index.html")).toContain(
+      `<h1 class="page-title">${title}: Revision history</h1>`,
+    );
+    expect(site.read("wiki/hostile-title/history/1/index.html")).toContain(
+      `<title>${title} (old revision) - demo-repo wiki</title>`,
+    );
+  });
+
+  it("has no broken links from or to the new pages", () => {
+    const result = brokenLinks(site.outDir);
+    expect(result.broken).toEqual([]);
+    expect(result.checked).toBeGreaterThan(0);
+  });
+
+  it("matches the golden snapshots", async () => {
+    await expect(normalized("wiki/signals/history/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-signals-history.html",
+    );
+  });
+});

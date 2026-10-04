@@ -32,7 +32,7 @@ export interface ArticleView {
   featureId: string;
   /** Plain text. */
   title: string;
-  /** Trusted HTML. Banner above the article (retired feature), or null. */
+  /** Trusted HTML. Banner above the article (retired feature, old revision, or both), or null. */
   notice: string | null;
   /** Trusted HTML. */
   leadHtml: string;

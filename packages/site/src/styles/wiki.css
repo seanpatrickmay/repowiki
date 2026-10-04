@@ -328,3 +328,39 @@ a.external::after {
   font-size: 0.875rem;
   color: var(--text-muted);
 }
+
+/* Page tabs and history */
+.page-tabs {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.page-tabs a[aria-current="page"] {
+  color: var(--text);
+  font-weight: bold;
+}
+
+.history-help {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.history {
+  list-style: none;
+  padding: 0;
+}
+
+.history li {
+  margin: 0.4rem 0;
+}
+
+.history li > * + * {
+  margin-left: 0.5rem;
+}
+
+.history-cost {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
