@@ -1,4 +1,5 @@
-import { INGEST_PY } from "@repowiki/core/test-fixtures";
+import { contentHash, type Manifest, type Revision } from "@repowiki/core";
+import { INGEST_PY, sourceLines } from "@repowiki/core/test-fixtures";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TestRepo } from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
@@ -54,6 +55,23 @@ describe("planUpdate", () => {
     expect(planUpdate(store, await inputAt(repo, merge)).pr).toBeNull();
   });
 
+  it("reads the PR of a squash merge's trailing (#N)", async () => {
+    ({ repo, store, first } = await builtWiki());
+    repo.write("src/signals/store.py", "def save_signal(signal):\n    return None\n");
+    const squash = repo.commit("Drop the return (#12)");
+    expect(planUpdate(store, await inputAt(repo, squash)).pr).toBe(12);
+  });
+
+  it("refuses a target older than the head, saying an update only moves forward", async () => {
+    ({ repo, store, first } = await builtWiki());
+    const later = repo.commit("chore: nothing");
+    store.putManifest({ ...(store.getManifest(first) as Manifest), sha: later });
+    store.setHead(later);
+    await expect(async () => planUpdate(store, await inputAt(repo, first))).rejects.toThrow(
+      `${later} is not an ancestor of ${first}; an update only moves forward along history`,
+    );
+  });
+
   it("refuses an empty store, the head itself and a commit off the head's history", async () => {
     ({ repo, store, first } = await builtWiki());
     await expect(async () => planUpdate(store, await inputAt(repo, first))).rejects.toThrow(
@@ -63,7 +81,9 @@ describe("planUpdate", () => {
     repo.write("README.md", "other\n");
     const other = repo.commit("chore: unrelated root");
     await expect(async () => planUpdate(store, await inputAt(repo, other))).rejects.toThrow(
-      UpdateError,
+      new UpdateError(
+        `${first} is not an ancestor of ${other}; an update only moves forward along history`,
+      ),
     );
     const empty = openStore(":memory:");
     await expect(async () => planUpdate(empty, await inputAt(repo, other))).rejects.toThrow(
@@ -139,6 +159,88 @@ describe("planPages", () => {
     const next = planUpdate(store, quiet);
     const moved = measureDrift(next, quiet.index, next.placement.decided, 1).manifest;
     expect(planPages(next, store, quiet, moved, new Set()).carried).toContain("signals");
+  });
+
+  describe("makes a page dirty for each trigger alone", () => {
+    /** Plans the pages of an update to `to` with no drift and no operation. */
+    async function pagesAt(to: string) {
+      const input = await inputAt(repo, to);
+      const plan = planUpdate(store, input);
+      const { manifest } = measureDrift(plan, input.index, plan.placement.decided, 1);
+      return planPages(plan, store, input, manifest, new Set());
+    }
+
+    it("a changed member file, with no stale claim and no gap", async () => {
+      ({ repo, store, first } = await builtWiki());
+      repo.write("src/signals/store.py", "def save_signal(signal):\n    return None\n");
+      const pages = await pagesAt(repo.commit("fix: drop the return"));
+      expect(pages.carried).toEqual(["deliverables"]);
+      const [signals] = pages.rewrites;
+      expect(signals?.claims.every((c) => c.status === "fresh")).toBe(true);
+      expect(signals?.gaps).toEqual([]);
+      expect(signals?.changed.map((c) => c.newPath)).toEqual(["src/signals/store.py"]);
+    });
+
+    it("a stale claim citing another feature's file, with none of its own files changed", async () => {
+      ({ repo, store, first } = await builtWiki());
+      // deliverables' page also cites ingest.py, which belongs to signals.
+      const page = store.getCurrentRevision("deliverables") as Revision;
+      store.putRevision({
+        ...page,
+        id: "deliverables-cites-ingest",
+        parentId: page.id,
+        reason: "update",
+        sections: page.sections.map((s) =>
+          s.key === "overview"
+            ? {
+                ...s,
+                claims: s.claims.map((c) => ({
+                  ...c,
+                  citations: [
+                    ...c.citations,
+                    {
+                      kind: "code" as const,
+                      path: "src/signals/ingest.py",
+                      startLine: 13,
+                      endLine: 13,
+                      sha: first,
+                      symbol: "ingest_chunk",
+                      contentHash: contentHash(sourceLines(INGEST_PY, 13, 13)),
+                    },
+                  ],
+                })),
+              }
+            : s,
+        ),
+      });
+      mergePaging();
+      const merge = repo.git("rev-parse", "HEAD").trim();
+      const pages = await pagesAt(merge);
+      const deliverables = pages.rewrites.find((r) => r.featureId === "deliverables");
+      expect(deliverables?.changed).toEqual([]);
+      expect(deliverables?.gaps).toEqual([]);
+      expect(deliverables?.claims.map((c) => [c.claim.id, c.status])).toEqual([
+        ["c1", "stale"],
+        ["c2", "stale"],
+        ["c3", "fresh"],
+      ]);
+    });
+
+    it("a coverage gap, with no file changed and no stale claim", async () => {
+      ({ repo, store, first } = await builtWiki());
+      // A manifest at the head that never held the Signal class: the class is new code to it.
+      const later = repo.commit("chore: nothing");
+      const base = store.getManifest(first) as Manifest;
+      const { "src/signals/ingest.py#Signal": _gone, ...membership } = base.membership;
+      store.putManifest({ ...base, sha: later, membership });
+      store.setHead(later);
+      const pages = await pagesAt(repo.commit("chore: nothing again"));
+      expect(pages.carried).toEqual(["deliverables"]);
+      const [signals] = pages.rewrites;
+      expect(signals?.changed).toEqual([]);
+      expect(signals?.claims.every((c) => c.status === "fresh")).toBe(true);
+      expect(signals?.gaps.map((g) => g.symbol)).toEqual(["Signal"]);
+    });
   });
 
   it("refuses, as an UpdateError, to measure drift while a new file has no feature", async () => {
