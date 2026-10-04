@@ -6,6 +6,12 @@ export {
   placeNewFiles,
   renamesOf,
 } from "./membership.ts";
+export {
+  type AppliedOperations,
+  applyOperations,
+  ManifestOperation,
+  ManifestOperations,
+} from "./ops.ts";
 export { type LineRange, remapRange } from "./remap.ts";
 export {
   type CitationFate,
