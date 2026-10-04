@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { featureMapSource, mermaidLabel } from "./feature-map.ts";
+import { featureMapCaption, featureMapSource, mermaidLabel } from "./feature-map.ts";
 import { buildSiteModel } from "./model.ts";
 import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
+
+/** The fixture export without its project article, so the map draws See also pairs. */
+const seeAlsoOnly = () => ({ ...fixtureExport(), architecture: [] });
 
 /** The fixture export with one feature's title replaced. */
 function withTitle(id: string, title: string) {
@@ -11,10 +14,30 @@ function withTitle(id: string, title: string) {
 }
 
 describe("featureMapSource", () => {
-  it("draws one clickable node per active article and one edge per See also pair", () => {
+  it("draws one edge per pair the project article's cross-feature edges join", () => {
+    // deliverables -> signals and hostile-title -> signals: n0 --- n2 and n1 --- n2.
+    const site = buildSiteModel(fixtureExport(), null);
+    expect((featureMapSource(site) ?? "").split("\n").filter((l) => l.includes(" --- "))).toEqual([
+      "  n0 --- n2",
+      "  n1 --- n2",
+    ]);
+    expect(featureMapCaption(site)).toContain("calls or imports");
+  });
+
+  it("joins no pair when the Architecture article has no edge", () => {
+    const wiki = fixtureExport();
+    const architecture = wiki.architecture.map((a) => ({ ...a, edges: [] }));
+    const source = featureMapSource(buildSiteModel({ ...wiki, architecture }, null)) ?? "";
+    expect(source).not.toContain(" --- ");
+    expect(source.split("\n").filter((l) => l.startsWith("  click"))).toHaveLength(3);
+  });
+
+  it("draws one clickable node per active article and one edge per See also pair without one", () => {
     // Active articles with a page: deliverables, hostile-title and signals. Signals and
     // Deliverables list each other (one edge); Deliverables also lists the hostile article.
-    expect(featureMapSource(buildSiteModel(fixtureExport(), null))).toBe(
+    const site = buildSiteModel(seeAlsoOnly(), null);
+    expect(featureMapCaption(site)).toContain("See also");
+    expect(featureMapSource(site)).toBe(
       [
         "flowchart LR",
         '  n0["Deliverables"]',
@@ -31,7 +54,7 @@ describe("featureMapSource", () => {
 
   it("draws an edge to the final article when See also names a merged feature", () => {
     // legacy-signals is a redirect to signals, so a link to it joins the hostile article to signals.
-    const wiki = fixtureExport();
+    const wiki = seeAlsoOnly();
     const pages = wiki.pages.map((p) =>
       p.featureId === "hostile-title" ? { ...p, seeAlso: ["legacy-signals"] } : p,
     );

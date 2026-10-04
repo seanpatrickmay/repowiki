@@ -1,6 +1,6 @@
 ---
 import Diagram from "../components/Diagram.astro";
-import { featureMapSource } from "../feature-map.ts";
+import { featureMapCaption, featureMapSource } from "../feature-map.ts";
 import Layout from "../layouts/Layout.astro";
 import { articleCountText, mainPageView } from "../main-page.ts";
 import { getSite } from "../site.ts";
@@ -60,7 +60,7 @@ const map = featureMapSource(site);
       <h2 id="mp-map">Feature map</h2>
       <Diagram
         source={map}
-        caption="Each box is an article; a line joins two articles when one lists the other under See also."
+        caption={featureMapCaption(site)}
       />
       <p><a href="/special/all-pages/">All articles</a> lists every article as text.</p>
     </section>

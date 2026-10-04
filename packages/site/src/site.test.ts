@@ -948,6 +948,14 @@ describe("diagrams", () => {
     expect(site.read("index.html")).toContain('<h2 id="mp-map">Feature map</h2>');
   });
 
+  it("joins the map's articles by the project article's calls and imports", () => {
+    const html = site.read("index.html");
+    expect(html).toContain("  n0 --- n2\n  n1 --- n2\n  click n0");
+    expect(html).toContain(
+      "<figcaption>Each box is an article; a line joins two articles when code in one calls or imports code in the other.</figcaption>",
+    );
+  });
+
   it("keeps the hostile title inside its label in the Main Page's feature map", () => {
     const html = site.read("index.html");
     const block = html.match(/<pre class="mermaid">([\s\S]*?)<\/pre>/)?.[1] ?? "";
