@@ -61,7 +61,7 @@ a verdict. Each row becomes one GitHub feature issue titled `[Fnn] …`. Rows ma
 | F04 | Pages by feature, not folder | Features come from clustering a combined import/co-change graph, and are kept in a manifest with stable IDs. | v1 (core) |
 | F05 | Generated from each PR | `repowiki update` processes new commits. In v1 it is triggered locally; a GitHub Action comes later. | v1 (local) |
 | F06 | Versioned, dated pages | Each page revision is stored with its commit date and sha. Pages have a "View history" view with diffs. | v1 |
-| F07 | Ways an LLM can use the site | v1 ships `llms.txt` and a JSON export (the eval agent consumes these). The MCP server is part of #5. | v1 (partial) |
+| F07 | Ways an LLM can use the site | v1 ships `llms.txt` and a JSON export (the eval agent consumes these). The MCP server is part of #5. **M7:** `llms.txt` is written beside every export and at the site's root: the site title, the About article's lead, every active page with the first sentence of its lead and its relative URL, the About article, and the export. Every title and summary is one escaped line, and the file says they are data. The eval's wiki agent reads the JSON export. | v1 (partial) |
 | F08 | LLM reads past versions | Queries such as "how did X work on date D", answered from revision history. | v2 (#5) |
 | F09 | Ask-me-anything sidebar | Retrieval over the precomputed pages. Answers are a short reply plus page links. | v2 (#4) |
 | F10 | Diagrams | Mermaid flowcharts drawn from real import and call edges, with clickable nodes, plus a feature map on the Main Page. | v1 |
@@ -114,6 +114,7 @@ packages/
   - **Output.** Output is structured JSON through `output_config.format`, generated from the request's zod schema, and is validated again on receipt. No `thinking` parameter is sent.
   - **Retries.** The SDK retries failed requests itself (`maxRetries: 2`, so 3 attempts in all, per §6.3).
   - **Batch robustness (M4).** A batch item that errored (other than a permanent error such as an invalid request), expired or went missing is sent again in the next batch, up to three batches in all. A batch can have a deadline, past which it is canceled, and result downloads are retried. A journal in the store (migration 5) maps each request's key to its batch, so a rerun collects a batch it already submitted instead of paying for it again.
+  - **Tool use (M7).** The eval's agents use `ToolProvider.turn()`, a sibling of `generate` for tool-use conversations: native tool use, at most one tool call per turn, `tool_choice: none` on demand, a cache breakpoint at the end of the conversation, an optional temperature, and one ledger row per turn (role `evalAgent`). It is never batched: each turn needs the last one's answer. `generate` also takes an optional `temperature`.
   - **Ledger.** Each ledger entry records `runId`, `at`, `purpose`, `model`, `featureId`, `batch`, `cacheKey` and the four token counts, and is persisted in the store's `ledger` table. From M4, rows also carry `runKind` (`build` | `update`) and the run's `sha` (§6.4). Cost is computed from the entries, never stored: each token count times the model's price for that class, halved for batch entries. For Haiku 4.5 the prices per MTok are $1 input, $5 output, $1.25 cache write (5-minute TTL) and $0.10 cache read.
 - **Clustering (M3).** The file graph has these edges:
   - import edges of weight 1, scaled by `min(1, 4 / in-degree)` so barrels and shared fixtures don't glue the repo together;
@@ -136,7 +137,7 @@ packages/
 - `build <sha>`: index → cluster → manifest → write → verify → link → store revision → architecture → export. A store already built at another sha is refused (that is an `update`); one built at the same sha is resumed, writing only the pages it lacks (M4). The Architecture article (F27, §7.4) is written after the pages are stored, in a round of its own; a rerun rewrites it only when the set of current pages changed, so a finished rerun makes no call.
 - `update <shaB>`: runs the freshness algorithm (§6) from the last processed sha to `shaB`.
 - `replay <fromSha> <toSha>`: runs `update` once for each merge commit along `main`'s first-parent history.
-- `export`: writes the JSON for the current revisions plus `llms.txt`.
+- `export`: writes the JSON for the current revisions plus `llms.txt`. **M7:** the dev command is `pnpm wiki:export <repo>`, with no call; wiki:build, wiki:update and wiki:replay write both files themselves, and `site:build` copies both to the site's root.
 - `serve`: builds and serves the Astro site from the export.
 
 ### Reader (M5)
@@ -337,6 +338,8 @@ prompt-cached prefix for every write call.
 2. **Accuracy review.** The author reviews the pages for features he built. Each false claim is filed as an issue labelled `accuracy`. **Pass:** at most 1 false claim per 50 claims reviewed.
 3. **Rabbit-hole test.** Three sessions, each starting from a Random article, each going at least 5 hops. Notes are recorded in an issue. **Pass:** the author judges that each hop taught something real.
 
+**Harness (M7).** The author's question file is JSON (`"suite": "exit-criteria"`, `repo`, `writtenOn`, and 30 questions, each with an id, its set (`dev` or `held-out`), its kind (`where`, `how`, `why` or `what-changed`), the question and the reference answer), kept outside the documented repository. `pnpm eval:run <repo> --questions <file> --set dev|held-out` runs a set against the wiki in the out dir: each question goes to both agents on the `evalAgent` model at temperature 0, with a turn limit of 15 (at most one tool call a turn; the last turn forbids tools). The wiki agent's `search` ranks the export's active pages and the About article (BM25F over titles, aliases, leads, claims and cited paths); its `read_page` renders a page with numbered references and its dated history, following redirects and aliases as the site does. The repo agent's tools read git objects at the wiki's sha, never the working tree. An answer's tokens are all four token classes over its turns. The judge (`evalJudge`) lists the reference's facts, marks which are essential and which the answer states, and says whether the answer contradicts the reference; the 0/1 grade is computed from those fields. The held-out set runs in `<out>/eval/held-out`: a stopped run resumes without asking a question twice, and a complete one, or one against a changed question file, wiki, turn limit or model, is refused. Each run writes `report.md` (accuracy and tokens per question for each agent, the pass test, and the break-even point from the build's run in `WikiExport.runs`) and, once complete, `spot-check.json`: 10 judgments, 5 per agent, for the author to grade. `pnpm eval:accuracy` writes and tallies the accuracy review's sheet, and issue templates record false claims (label `accuracy`) and rabbit-hole sessions. A three-question smoke set about a test fixture checks the harness end to end and measures nothing.
+
 ## 10. Process
 
 ### 10.1 Tracking
@@ -368,7 +371,7 @@ prompt-cached prefix for every write call.
 | M4 | `write`, `verify`, `link`; the project's article (F27) | First full build of next-chief-of-staff, with its About article |
 | M5 | `site`: article, infobox, references, history, hover previews, Main Page, Pagefind search | The site is browsable locally |
 | M6 | `freshness`, `replay` | Replay invariants hold; RepoWiki builds its own wiki |
-| M7 | `eval` harness | Exit-criteria run is recorded |
+| M7 | `eval` harness, `llms.txt` | The harness and its smoke set are merged; the exit-criteria run is the author's (§9) and is recorded when he runs it |
 
 ## 12. Out of scope for v1
 
