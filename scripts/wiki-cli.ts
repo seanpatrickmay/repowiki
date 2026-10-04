@@ -558,13 +558,21 @@ const MAX_CAUSE_LENGTH = 300;
 /** How many causes deep --verbose follows the chain. */
 const MAX_CAUSES = 5;
 
+/** A dash as a key's text may hold it: plain, or JSON-escaped (`\u002d`, under any backslashes). */
+const DASH = "(?:-|\\\\+u002[dD])";
 /** The shape of an Anthropic key, redacted even when it is not the configured one. */
-const KEY_SHAPE = /sk-ant-[A-Za-z0-9_-]*/g;
+const KEY_SHAPE = new RegExp(`sk${DASH}ant${DASH}(?:[A-Za-z0-9_]|${DASH})*`, "g");
 
-/** Every occurrence of the configured API key, and of anything key-shaped, replaced. */
+/**
+ * Every occurrence of the configured API key, and of anything key-shaped, replaced, also where
+ * JSON escaped its dashes (an error body quoting a request).
+ */
 function redact(text: string): string {
   const key = process.env.ANTHROPIC_API_KEY;
-  const plain = key ? text.split(key).join("[redacted]") : text;
+  const configured = key
+    ? new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, DASH), "g")
+    : null;
+  const plain = configured === null ? text : text.replace(configured, "[redacted]");
   return plain.replace(KEY_SHAPE, "[redacted]");
 }
 
