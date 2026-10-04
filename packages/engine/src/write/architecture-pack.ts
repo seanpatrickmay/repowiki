@@ -30,7 +30,10 @@ export interface ArchitecturePackInput {
 /** The Architecture call's user turn (spec §7.4). */
 export interface ArchitecturePack {
   text: string;
-  /** Estimated tokens of `text`: at most the budget, unless the layout alone exceeds it. */
+  /**
+   * Estimated tokens of `text`: at most the budget plus EDGE_WINDOW_SHARE of it for the lines
+   * around edge sites, unless the layout alone exceeds the budget.
+   */
   tokens: number;
   /** Ids of the features it covers, sorted: the pages an Architecture claim may name. */
   features: string[];
@@ -55,7 +58,10 @@ interface Shown {
 export const DEFAULT_ARCHITECTURE_BUDGET_TOKENS = 50_000;
 /** Lines shown on each side of an edge's site, numbered so a claim can cite them. */
 const SITE_WINDOW_RADIUS = 3;
-/** The share of the pack's budget the lines around edge sites may take, all edges together. */
+/**
+ * The share of the pack's budget the lines around edge sites may take, all edges together, on
+ * top of the budget.
+ */
 export const EDGE_WINDOW_SHARE = 0.15;
 /** The README's first lines shown, and each other document's. */
 const MAX_README_LINES = 120;
@@ -209,12 +215,12 @@ const directoryOf = (path: string): string => path.slice(0, path.lastIndexOf("/"
  * top-level layout and languages; the README (its first 120 lines) and up to three other
  * documents (60 lines each, docs/ design documents first), numbered so a claim can cite them;
  * every covered feature with its file count, main directories and its page's lead; the
- * cross-feature edges, each with the lines that prove it and, while they fit EDGE_WINDOW_SHARE of
- * the budget, the numbered lines around them; the top-level lines of
- * infrastructure files; and the signatures of each feature's first entry point. Sections are
- * filled in that order, item by item, while the pack fits `budgetTokens`; what does not fit is
- * counted in an "and N more" line. Every repository- or model-derived string goes through
- * `clean`. Deterministic.
+ * cross-feature edges, each with the lines that prove it; the top-level lines of infrastructure
+ * files; and the signatures of each feature's first entry point. Sections are filled in that
+ * order, item by item, while the pack fits `budgetTokens`; what does not fit is counted in an
+ * "and N more" line. Then each edge shown gets the numbered lines around its sites while they fit
+ * EDGE_WINDOW_SHARE of the budget, on top of it, so they never crowd anything out. Every
+ * repository- or model-derived string goes through `clean`. Deterministic.
  */
 export function buildArchitecturePack(input: ArchitecturePackInput): ArchitecturePack {
   const { manifest, index, sources } = input;
@@ -226,10 +232,19 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   let used = tail.length;
   const shown = new Map<string, Set<number>>();
 
+  const show = (shows: Shown["shows"]) => {
+    for (const { path, lines: numbers } of shows) {
+      const set = shown.get(path) ?? new Set<number>();
+      for (const n of numbers) set.add(n);
+      shown.set(path, set);
+    }
+  };
+
   /**
    * Adds a section: each item that fits (one that does not is skipped, so a smaller one after it
    * can still fit), then "and N more" for the items left out plus `omitted`, the ones the caller
-   * has already left out; "(none)" when there is nothing at all.
+   * has already left out; "(none)" when there is nothing at all. Returns where the section's
+   * lines went, and the line each kept item took, by item index.
    */
   const section = (
     heading: string,
@@ -238,27 +253,26 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
     omitted = 0,
   ) => {
     const lines = [heading];
+    const placed = new Map<number, number>();
     let length = 2 + heading.length;
     let kept = 0;
-    for (const entry of items) {
+    for (const [i, entry] of items.entries()) {
       const item = typeof entry === "string" ? entry : entry.text;
       const rest = items.length - kept - 1 + omitted;
       const reserve = rest > 0 ? 1 + more(rest).length : 0;
       if (used + length + 1 + item.length + reserve > budgetChars) continue;
+      placed.set(i, lines.length);
       lines.push(item);
       length += 1 + item.length;
       kept += 1;
-      for (const { path, lines: numbers } of typeof entry === "string" ? [] : entry.shows) {
-        const set = shown.get(path) ?? new Set<number>();
-        for (const n of numbers) set.add(n);
-        shown.set(path, set);
-      }
+      if (typeof entry !== "string") show(entry.shows);
     }
     if (items.length === 0 && omitted === 0) lines.push("(none)");
     else if (kept < items.length || omitted > 0) lines.push(more(items.length - kept + omitted));
     const text = lines.join("\n");
     used += 2 + text.length;
     parts.push(text);
+    return { at: parts.length - 1, lines, placed };
   };
 
   const header = `# Project: ${clean(input.title)} (${pages.length} features with pages, ${index.files.length} files)`;
@@ -333,10 +347,11 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
   });
   section("## Features", features, (n) => `- and ${n} more features not shown`);
 
-  // The lines around the edges' sites, numbered so a request-path claim can cite the call it
-  // describes, within their share of the budget; past it, an edge gives its site lines alone.
-  let windowRoom = Math.floor(input.budgetTokens * CHARS_PER_TOKEN * EDGE_WINDOW_SHARE);
-  const edges = input.edges.map((edge): Shown => {
+  // Each edge gives the lines that prove it within the budget. The numbered lines around its
+  // sites, so a request-path claim can cite the call it describes, are added once every section
+  // is placed, for the edges shown, while they fit EDGE_WINDOW_SHARE of the budget on top of it:
+  // they never displace an edge or a later section.
+  const edges = input.edges.map((edge) => {
     // Each site on its own line, in the form a claim cites it, so the edge is never copied.
     const sites = edge.sites.map((s) => `\n  - ${clean(s.path)}:${s.line} (${s.kind})`).join("");
     const text = `- ${clean(edge.from)} -> ${clean(edge.to)}: ${edgeWeightLabel(edge)}${sites}`;
@@ -359,17 +374,11 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
         shows: [{ path, lines: sorted }],
       };
     });
-    const length = windows.reduce((n, w) => n + 1 + w.text.length, 0);
-    if (windows.length === 0 || length > windowRoom) return { text, shows: siteLines };
-    windowRoom -= length;
-    return {
-      text: [text, ...windows.map((w) => w.text)].join("\n"),
-      shows: [...siteLines, ...windows.flatMap((w) => w.shows)],
-    };
+    return { bare: { text, shows: siteLines }, windows };
   });
-  section(
+  const edgeSection = section(
     "## Cross-feature edges (heaviest first; from the feature that imports or calls)",
-    edges,
+    edges.map((e) => e.bare),
     (n) => `- and ${n} lighter edges`,
   );
 
@@ -429,6 +438,17 @@ export function buildArchitecturePack(input: ArchitecturePackInput): Architectur
     ];
   });
   section("## Entry points", entries, (n) => `- and ${n} more entry points not shown`);
+
+  let windowRoom = Math.floor(input.budgetTokens * CHARS_PER_TOKEN * EDGE_WINDOW_SHARE);
+  for (const [i, line] of edgeSection.placed) {
+    const { bare, windows } = edges[i] as (typeof edges)[number];
+    const length = windows.reduce((n, w) => n + 1 + w.text.length, 0);
+    if (windows.length === 0 || length > windowRoom) continue;
+    windowRoom -= length;
+    edgeSection.lines[line] = [bare.text, ...windows.map((w) => w.text)].join("\n");
+    for (const w of windows) show(w.shows);
+  }
+  parts[edgeSection.at] = edgeSection.lines.join("\n");
 
   const text = [...parts, tail].join("\n\n");
   return {

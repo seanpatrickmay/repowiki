@@ -558,12 +558,13 @@ setTimeout(() => {}, 5000);`;
 });
 
 describe("estimateArchitecture", () => {
-  it("prices the system prompt, the whole pack budget and the assumed answer", () => {
+  it("prices the system prompt, the whole pack budget with its edge windows and the assumed answer", () => {
     const system = "x".repeat(10_000); // 4,000 estimated tokens
+    // The lines around edge sites may add 15% of the 50,000-token budget on top of it.
     expect(estimateArchitecture(system, 50_000, "claude-haiku-4-5", true)).toEqual({
-      inputTokens: 54_000,
+      inputTokens: 61_500,
       outputTokens: ASSUMED_ARCHITECTURE_OUTPUT_TOKENS,
-      usd: ((54_000 * 1 + 5_000 * 5) / 1_000_000) * 0.5,
+      usd: ((61_500 * 1 + 5_000 * 5) / 1_000_000) * 0.5,
     });
   });
 
