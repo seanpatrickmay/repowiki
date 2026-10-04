@@ -13,7 +13,7 @@ import { callCostUsd, type LedgerTotals } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 
 const USAGE =
-  "usage: pnpm wiki:build <repo-path> [rev] [--out dir] [--config file.json] [--no-batch] [--dry-run] [--budget tokens] [--deadline minutes]";
+  "usage: pnpm wiki:build <repo-path> [rev] [--out dir] [--config file.json] [--no-batch] [--dry-run] [--budget tokens] [--deadline minutes] [--verbose]";
 
 /** A Message Batch can run for 24 hours; a longer deadline never fires. */
 const MAX_DEADLINE_MINUTES = 24 * 60;
@@ -28,6 +28,8 @@ export interface WikiArgs {
   budgetTokens: number;
   /** Cancel each Message Batch still running after this many minutes; null waits (at most 24 h). */
   deadlineMinutes: number | null;
+  /** Print an error's causes under its one line. */
+  verbose: boolean;
 }
 
 /** A usage error names the offending flag and never the value given with it. */
@@ -90,6 +92,7 @@ export function parseWikiArgs(argv: readonly string[]): WikiArgs {
     dryRun: once("--dry-run", v["dry-run"]) ?? false,
     budgetTokens: budgetTokens(once("--budget", v.budget)) ?? 30_000,
     deadlineMinutes: deadlineMinutes(once("--deadline", v.deadline)),
+    verbose: once("--verbose", v.verbose) ?? false,
   };
 }
 
@@ -104,6 +107,7 @@ function parse(argv: readonly string[]) {
       "dry-run": { type: "boolean", multiple: true },
       budget: { type: "string", multiple: true },
       deadline: { type: "string", multiple: true },
+      verbose: { type: "boolean", multiple: true },
     },
   });
 }
@@ -130,31 +134,57 @@ function holderAlive(path: string): boolean {
   }
 }
 
+/** Opens the lock file only if no other process has it; null when one does. */
+function openNew(path: string): number | null {
+  try {
+    return openSync(path, "wx");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return null;
+    throw err;
+  }
+}
+
 /**
- * Takes the out dir's build lock, so two builds never send the same batches twice, and returns
- * the function that frees it. The lock holds this process's pid and is freed on exit, SIGINT and
- * SIGTERM too. A lock another live build holds is a WikiBuildError; one older than 24 hours, or
- * whose pid no process has, is taken over with a line to `log`. Advisory: it guards wiki:build
- * against itself only.
+ * Why a lock someone holds can be taken over, or null while its holder runs. A lock that vanished
+ * while being looked at was freed: it can be taken too.
+ */
+function takeOverReason(path: string): string | null {
+  try {
+    if (Date.now() - statSync(path).mtimeMs >= STALE_LOCK_MS) {
+      return `ignoring a stale lock older than 24 hours: ${path}`;
+    }
+    return holderAlive(path)
+      ? null
+      : `ignoring the lock of a build that is no longer running: ${path}`;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return `the lock was freed: ${path}`;
+    throw err;
+  }
+}
+
+/**
+ * Takes the out dir's build lock, so two runs (wiki:build, wiki:update or wiki:replay) never send
+ * the same batches twice, and returns the function that frees it. The lock holds this process's
+ * pid and is freed on exit, SIGINT and SIGTERM too. A lock another live run holds is a
+ * WikiBuildError; one older than 24 hours, or whose pid no process has, is taken over with a line
+ * to `log`. Two runs taking over the same lock at once race to create it again, and the loser
+ * gets the same WikiBuildError, never a raw fs error. Advisory: it guards these scripts against
+ * each other only.
  */
 export function acquireBuildLock(out: string, log: (line: string) => void): () => void {
   const path = join(out, BUILD_LOCK);
-  let fd: number;
-  try {
-    fd = openSync(path, "wx");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    if (Date.now() - statSync(path).mtimeMs >= STALE_LOCK_MS) {
-      log(`ignoring a stale lock older than 24 hours: ${path}`);
-    } else if (!holderAlive(path)) {
-      log(`ignoring the lock of a build that is no longer running: ${path}`);
-    } else {
-      throw new WikiBuildError(
-        `another wiki:build is running on ${out} (${path}); if none is, delete the lock file`,
-      );
-    }
+  const busy = () =>
+    new WikiBuildError(
+      `another wiki:build, wiki:update or wiki:replay is running on ${out} (${path}); if none is, delete the lock file`,
+    );
+  let fd = openNew(path);
+  if (fd === null) {
+    const reason = takeOverReason(path);
+    if (reason === null) throw busy();
     rmSync(path, { force: true });
-    fd = openSync(path, "wx");
+    log(reason);
+    fd = openNew(path);
+    if (fd === null) throw busy();
   }
   try {
     writeSync(fd, `pid ${process.pid} since ${new Date().toISOString()}\n`);
@@ -318,4 +348,26 @@ export function renderBuildSummary(
     `Cost: $${totals.usd.toFixed(4)}${upFront}`,
   ];
   return `${lines.join("\n")}\n`;
+}
+
+/** The longest cause line --verbose prints: a cause can quote stored model output. */
+const MAX_CAUSE_LENGTH = 300;
+/** How many causes deep --verbose follows the chain. */
+const MAX_CAUSES = 5;
+
+/**
+ * An error as the scripts print it: its one-line message, and with `verbose` each cause in its
+ * chain on a line of its own ("caused by: Name: message"), printable ASCII only and cut short,
+ * since a cause such as a failed manifest verify on open quotes stored model output.
+ */
+export function describeError(err: unknown, verbose: boolean): string {
+  const lines = [err instanceof Error ? err.message : String(err)];
+  let cause = err instanceof Error ? err.cause : undefined;
+  for (let depth = 0; verbose && cause !== undefined && depth < MAX_CAUSES; depth++) {
+    const text = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+    const line = text.replace(/\s+/g, " ").replace(/[^\x20-\x7e]/g, "?");
+    lines.push(`caused by: ${line.slice(0, MAX_CAUSE_LENGTH)}`);
+    cause = cause instanceof Error ? cause.cause : undefined;
+  }
+  return lines.join("\n");
 }
