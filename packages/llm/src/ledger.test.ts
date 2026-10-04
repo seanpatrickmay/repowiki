@@ -1,6 +1,6 @@
-import { makeLedgerEntry } from "@repowiki/core/test-fixtures";
+import { makeLedgerEntry, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { createLedger } from "./ledger.ts";
+import { createLedger, runTotals } from "./ledger.ts";
 import { callCostUsd, priceFor } from "./pricing.ts";
 import { DEFAULT_MODELS, resolveModels } from "./provider.ts";
 
@@ -70,5 +70,36 @@ describe("resolveModels", () => {
 
   it("rejects an invalid config file", () => {
     expect(() => resolveModels({ models: { summarize: "x" } })).toThrow();
+  });
+});
+
+describe("runTotals (spec §6.4)", () => {
+  it("sums calls and tokens per run kind and sha, in the order runs first appear", () => {
+    const at = (runKind: "build" | "update" | undefined, sha: string | undefined, n: number) =>
+      makeLedgerEntry({
+        tokens: { in: n, out: 1, cacheRead: 2, cacheWrite: 3 },
+        ...(runKind === undefined ? {} : { runKind }),
+        ...(sha === undefined ? {} : { sha }),
+      });
+    const entries = [
+      at("build", SHA_A, 10),
+      at("update", SHA_B, 5),
+      at("build", SHA_A, 20),
+      at(undefined, undefined, 99),
+    ];
+    expect(runTotals(entries)).toEqual([
+      {
+        kind: "build",
+        sha: SHA_A,
+        calls: 2,
+        tokens: { in: 30, out: 2, cacheRead: 4, cacheWrite: 6 },
+      },
+      {
+        kind: "update",
+        sha: SHA_B,
+        calls: 1,
+        tokens: { in: 5, out: 1, cacheRead: 2, cacheWrite: 3 },
+      },
+    ]);
   });
 });

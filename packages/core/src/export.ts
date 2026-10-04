@@ -1,11 +1,25 @@
 import { z } from "zod";
 import { Architecture } from "./architecture.ts";
 import { FeatureId } from "./feature.ts";
+import { RunKind } from "./llm.ts";
 import { Manifest } from "./manifest.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
-import { Revision } from "./revision.ts";
+import { Revision, TokenUsage } from "./revision.ts";
 import { SCHEMA_VERSION } from "./version.ts";
 import { WikipediaSummary } from "./wikipedia.ts";
+
+/**
+ * One run's LLM spend (spec §6.4): a build or an update to a sha, with its calls and tokens summed
+ * over the ledger rows that carry that run kind and sha. Ledger rows written before M4 carry
+ * neither and are left out.
+ */
+export const RunTotal = z.object({
+  kind: RunKind,
+  sha: GitSha,
+  calls: z.int().nonnegative(),
+  tokens: TokenUsage,
+});
+export type RunTotal = z.infer<typeof RunTotal>;
 
 /** Everything the reader site and agents consume. Pages are the current revision of each feature. */
 export const WikiExport = z
@@ -29,6 +43,11 @@ export const WikiExport = z
      * so every earlier schema-3 export still parses.
      */
     architecture: z.array(Architecture).default([]),
+    /**
+     * Every run's token totals in the order the runs began (spec §6.4: each update's cost beside
+     * the last full build's). Added within schema version 3 with a default, like `architecture`.
+     */
+    runs: z.array(RunTotal).default([]),
   })
   .superRefine((wiki, ctx) => {
     const known = new Set(wiki.manifest.features.map((f) => f.id));

@@ -1,4 +1,4 @@
-import { LedgerEntry, type TokenUsage } from "@repowiki/core";
+import { LedgerEntry, type RunTotal, type TokenUsage } from "@repowiki/core";
 import { callCostUsd } from "./pricing.ts";
 
 export interface LedgerTotals {
@@ -52,4 +52,29 @@ export function totalsOf(entries: readonly LedgerEntry[]): LedgerTotals {
     else totals.usd += usd;
   }
   return totals;
+}
+
+/**
+ * Calls and tokens per run (spec §6.4), keyed by the run kind and sha the rows carry, in the order
+ * each run first appears. Rows without a run kind or sha (written before M4) are left out.
+ */
+export function runTotals(entries: readonly LedgerEntry[]): RunTotal[] {
+  const runs = new Map<string, RunTotal>();
+  for (const entry of entries) {
+    if (entry.runKind === undefined || entry.sha === undefined) continue;
+    const key = `${entry.runKind}\0${entry.sha}`;
+    const run = runs.get(key) ?? {
+      kind: entry.runKind,
+      sha: entry.sha,
+      calls: 0,
+      tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
+    };
+    run.calls++;
+    run.tokens.in += entry.tokens.in;
+    run.tokens.out += entry.tokens.out;
+    run.tokens.cacheRead += entry.tokens.cacheRead;
+    run.tokens.cacheWrite += entry.tokens.cacheWrite;
+    runs.set(key, run);
+  }
+  return [...runs.values()];
 }
