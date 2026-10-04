@@ -1,13 +1,17 @@
 import type { Revision } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
 import {
+  diffRoutes,
+  diffView,
   hasHistory,
   historyPage,
   historyRows,
   oldRevisionNotice,
   oldRevisionRoutes,
   oldRevisionView,
+  revisionLabelHtml,
 } from "./history.ts";
+import { escapeHtml } from "./inline.ts";
 import { buildSiteModel } from "./model.ts";
 import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
 
@@ -17,12 +21,13 @@ const [first, second] = site.history.get("signals") ?? [];
 if (first === undefined || second === undefined) throw new Error("fixture needs two revisions");
 
 describe("historyRows", () => {
-  it("lists revisions newest first, dated by commit", () => {
+  it("lists revisions newest first, dated by commit, with diff links after the first", () => {
     expect(historyRows(site, "signals")).toEqual([
       {
         n: 2,
         date: "10 March 2026",
         oldHref: "/wiki/signals/history/2/",
+        diffHref: "/wiki/signals/diff/2/",
         summaryHtml: `update (<a class="external" href="${REPO}/pull/88">PR #88</a>)`,
         commitHtml: `<a class="external" href="${REPO}/commit/${"b".repeat(40)}"><code>bbbbbbb</code></a>`,
         cost: "claude-haiku-4-5, 1,200 in / 300 out tokens",
@@ -31,6 +36,7 @@ describe("historyRows", () => {
         n: 1,
         date: "3 February 2026",
         oldHref: "/wiki/signals/history/1/",
+        diffHref: null,
         summaryHtml: "build",
         commitHtml: `<a class="external" href="${REPO}/commit/${"a".repeat(40)}"><code>aaaaaaa</code></a>`,
         cost: "claude-haiku-4-5, 1,200 in / 300 out tokens",
@@ -83,7 +89,7 @@ describe("historyRows with a hostile reason", () => {
   });
 });
 
-describe("oldRevisionNotice", () => {
+describe("oldRevisionNotice and revisionLabelHtml", () => {
   const plain = buildSiteModel(fixtureExport(), null);
 
   it("warns on an old revision and links the current one", () => {
@@ -95,6 +101,12 @@ describe("oldRevisionNotice", () => {
   it("says so when the revision is the current one", () => {
     expect(oldRevisionNotice(plain, second)).toBe(
       "This is the current revision of this page, as of 10 March 2026 (commit <code>bbbbbbb</code>).",
+    );
+  });
+
+  it("labels a revision for the diff header", () => {
+    expect(revisionLabelHtml(plain, first, 1)).toBe(
+      '<a href="/wiki/signals/history/1/">Revision as of 3 February 2026</a> (commit <code>aaaaaaa</code>)',
     );
   });
 });
@@ -166,5 +178,162 @@ describe("oldRevisionView", () => {
     expect(() => oldRevisionView(site, "signals", 0)).toThrow("no revision 0 of signals");
     expect(() => oldRevisionView(site, "signals", 3)).toThrow("no revision 3 of signals");
     expect(() => oldRevisionView(site, "scheduler", 1)).toThrow("no revision 1 of scheduler");
+  });
+});
+
+describe("diffRoutes", () => {
+  it("has one route per revision after the first, numbered from the oldest", () => {
+    const signals = diffRoutes(site).filter((route) => route.featureId === "signals");
+    expect(signals).toEqual([{ featureId: "signals", n: 2 }]);
+  });
+
+  it("covers every revision but the first of every feature with history", () => {
+    const expected = [...site.history.values()].reduce((sum, rows) => sum + rows.length - 1, 0);
+    expect(diffRoutes(site)).toHaveLength(expected);
+  });
+
+  it("skips a feature whose history page does not exist", () => {
+    const orphan = {
+      ...site,
+      history: new Map([["no-such-feature", [first, second]]]),
+    };
+    expect(diffRoutes(orphan)).toEqual([]);
+  });
+});
+
+describe("diffView", () => {
+  const template = first.sections.flatMap((section) => section.claims)[0];
+  if (template === undefined) throw new Error("fixture needs a claim");
+
+  it("diffs a revision against its parent under labelled headers", () => {
+    const view = diffView(site, "signals", 2);
+    expect(view.title).toBe("Signal ingestion");
+    expect(view.beforeHtml).toBe(revisionLabelHtml(site, first, 1));
+    expect(view.afterHtml).toBe(revisionLabelHtml(site, second, 2));
+    expect(view.sections.map((section) => section.title)).toEqual([
+      "Lead",
+      "Overview",
+      "How it works",
+      "Data flow",
+      "History",
+      "Known limitations",
+    ]);
+    const overview = view.sections[1];
+    expect(overview?.rows[0]).toEqual({
+      kind: "changed",
+      sign: "~",
+      label: "Changed",
+      html: expect.stringContaining("Signals are <del>built</del><ins>created</ins> from"),
+    });
+  });
+
+  it("gives each row a sign and a visually hidden label for its kind", () => {
+    const rows = diffView(site, "signals", 2).sections.flatMap((section) => section.rows);
+    expect(rows.find((row) => row.kind === "added")).toMatchObject({ sign: "+", label: "Added" });
+    // Reversing the history turns the additions into removals.
+    const reversed = { ...site, history: new Map([["signals", [second, first]]]) };
+    const reversedRows = diffView(reversed, "signals", 2).sections.flatMap((s) => s.rows);
+    expect(reversedRows.find((row) => row.kind === "removed")).toMatchObject({
+      sign: "-",
+      label: "Removed",
+    });
+  });
+
+  describe("with a hostile feature title and hostile claim text", () => {
+    const BEFORE_ONLY = "removed <img src=x onerror=alert(1)> \"q\" & 'p'";
+    const SHARED = "shared <script>alert(1)</script> \"q\" & 'p'";
+    const AFTER_ONLY = "added <iframe src=x></iframe> \"q\" & 'p'";
+    const claim = (text: string) => ({ ...template, text });
+    const revision = (base: Revision, sections: Revision["sections"]): Revision => ({
+      ...base,
+      featureId: "hostile-title",
+      sections,
+    });
+    const hostile = {
+      ...site,
+      history: new Map([
+        [
+          "hostile-title",
+          [
+            revision(first, [
+              { key: "lead", claims: [claim("plain <b>one</b>")] },
+              { key: "overview", claims: [claim(SHARED), claim(BEFORE_ONLY)] },
+            ]),
+            revision(second, [
+              { key: "lead", claims: [claim(HOSTILE_TITLE)] },
+              { key: "overview", claims: [claim(SHARED)] },
+              { key: "how-it-works", claims: [claim(AFTER_ONLY)] },
+            ]),
+          ],
+        ],
+      ]),
+    };
+    const view = diffView(hostile, "hostile-title", 2);
+    const rows = view.sections.flatMap((section) => section.rows);
+
+    it("keeps the title as plain text for the template to escape", () => {
+      expect(view.title).toBe(HOSTILE_TITLE);
+    });
+
+    it("escapes the text of every kind of row", () => {
+      expect(rows.map((row) => row.kind).sort()).toEqual([
+        "added",
+        "changed",
+        "context",
+        "removed",
+      ]);
+      const html = (kind: string) => rows.find((row) => row.kind === kind)?.html;
+      expect(html("context")).toBe(escapeHtml(SHARED));
+      expect(html("removed")).toBe(escapeHtml(BEFORE_ONLY));
+      expect(html("added")).toBe(escapeHtml(AFTER_ONLY));
+      // The word diff splits the text, so the escaped pieces are checked separately.
+      expect(html("changed")).toContain("<ins>&lt;img</ins>");
+      expect(html("changed")).toContain("alert(1)&gt;");
+    });
+
+    it("leaves no raw markup in any row", () => {
+      const all = rows.map((row) => row.html).join("");
+      expect(all.replace(/<\/?(del|ins)>/g, "")).not.toMatch(/[<>]/);
+    });
+  });
+
+  it("falls back to one deletion and one insertion for claims too large to word-diff", () => {
+    const words = (prefix: string, hostile: string) =>
+      [hostile, ...Array.from({ length: 3_000 }, (_, i) => `${prefix}${i}`)].join(" ");
+    const claimsOf = (revision: Revision, text: string): Revision => ({
+      ...revision,
+      sections: [{ key: "overview", claims: [{ ...template, text }] }],
+    });
+    const big = {
+      ...site,
+      history: new Map([
+        [
+          "signals",
+          [claimsOf(first, words("a", "<i>old</i>")), claimsOf(second, words("b", "<u>new</u>"))],
+        ],
+      ]),
+    };
+    const rows = diffView(big, "signals", 2).sections.flatMap((section) => section.rows);
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    expect(row?.kind).toBe("changed");
+    expect(row?.html.match(/<del>/g)).toHaveLength(1);
+    expect(row?.html.match(/<ins>/g)).toHaveLength(1);
+    expect(row?.html).toContain("&lt;i&gt;old&lt;/i&gt;");
+    expect(row?.html).toContain("&lt;u&gt;new&lt;/u&gt;");
+    expect(row?.html).not.toMatch(/<(i|u)>/);
+  });
+
+  it("has no sections when only the reason, sources or tokens differ", () => {
+    const view = diffView(site, "deliverables", 2);
+    expect(view.sections).toEqual([]);
+    expect(view.title).toBe("Deliverables");
+  });
+
+  it("throws before the second revision and on a revision that does not exist", () => {
+    expect(() => diffView(site, "signals", 1)).toThrow("no revision 1 to diff of signals");
+    expect(() => diffView(site, "signals", 0)).toThrow("no revision 0 to diff of signals");
+    expect(() => diffView(site, "signals", 3)).toThrow("no revision 3 to diff of signals");
+    expect(() => diffView(site, "scheduler", 2)).toThrow("no revision 2 to diff of scheduler");
   });
 });

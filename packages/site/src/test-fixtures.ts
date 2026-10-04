@@ -161,6 +161,8 @@ const signalsV2 = makeRevision({
 
 const deliverables = makeRevision({
   id: "deliverables-1",
+  parentId: "deliverables-0",
+  reason: "update",
   featureId: "deliverables",
   commitDate: "2026-02-20T11:00:00-05:00",
   seeAlso: ["signals", "hostile-title"],
@@ -196,6 +198,17 @@ const deliverables = makeRevision({
     },
   ],
 });
+
+/** Same claim text as `deliverables`; only tokens and infobox differ, so its diff is empty. */
+const deliverablesV0: Revision = {
+  ...deliverables,
+  id: "deliverables-0",
+  parentId: null,
+  reason: "build",
+  commitDate: "2026-02-10T11:00:00-05:00",
+  tokens: { in: 900, out: 200, cacheRead: 0, cacheWrite: 0 },
+  infobox: { ...deliverables.infobox, loc: 380, lastCommitDate: "2026-02-10T11:00:00-05:00" },
+};
 
 const legacy = makeRevision({
   id: "legacy-1",
@@ -303,7 +316,7 @@ export function fixtureExport(): WikiExport {
     },
     pages,
     history: {
-      deliverables: [deliverables],
+      deliverables: [deliverablesV0, deliverables],
       exporter: [exporter],
       "hostile-title": [hostile],
       "legacy-signals": [legacy],

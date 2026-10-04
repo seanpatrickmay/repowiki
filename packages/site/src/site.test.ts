@@ -443,13 +443,15 @@ describe("redirect and disambiguation pages", () => {
 });
 
 describe("history pages", () => {
-  it("lists every revision newest first with links to each old revision", () => {
+  it("lists every revision newest first with prev-diff and old-revision links", () => {
     const html = site.read("wiki/signals/history/index.html");
     expect(html).toContain('<h1 class="page-title">Signal ingestion: Revision history</h1>');
     const second = html.indexOf('href="/wiki/signals/history/2/"');
     const first = html.indexOf('href="/wiki/signals/history/1/"');
     expect(second).toBeGreaterThan(-1);
     expect(first).toBeGreaterThan(second);
+    expect(html).toContain('(<a href="/wiki/signals/diff/2/">prev</a>)');
+    expect(html).toContain("(<span>prev</span>)");
   });
 
   it("renders old revisions with a banner and keeps them out of search", () => {
@@ -457,6 +459,44 @@ describe("history pages", () => {
     expect(html).toContain("This is an old revision of this page, as of 3 February 2026");
     expect(html).toContain("Signals are built from chunks.");
     expect(html).not.toContain("data-pagefind-body");
+  });
+
+  it("diffs a revision against its parent", () => {
+    const html = site.read("wiki/signals/diff/2/index.html");
+    expect(html).toContain("Signals are <del>built</del><ins>created</ins> from");
+    expect(html).toContain('<div class="diff-row diff-added">');
+    expect(existsSync(join(site.outDir, "wiki", "signals", "diff", "1"))).toBe(false);
+  });
+
+  it("keeps diff pages out of search and points them at the current article", () => {
+    const html = site.read("wiki/signals/diff/2/index.html");
+    expect(html).not.toContain("data-pagefind-body");
+    expect(html).toContain('<link rel="canonical" href="/wiki/signals/">');
+    expect(html).toContain('<a href="/wiki/signals/history/" aria-current="page">View history</a>');
+    expect(html).toContain('<a href="/wiki/signals/history/1/">Revision as of 3 February 2026</a>');
+    expect(html).toContain('<a href="/wiki/signals/history/2/">Revision as of 10 March 2026</a>');
+  });
+
+  it("puts the older revision's label before the newer one's", () => {
+    const html = site.read("wiki/signals/diff/2/index.html");
+    const older = html.indexOf("Revision as of 3 February 2026");
+    const newer = html.indexOf("Revision as of 10 March 2026");
+    expect(older).toBeGreaterThan(-1);
+    expect(newer).toBeGreaterThan(older);
+  });
+
+  it("says so when two revisions have the same article text", () => {
+    const html = site.read("wiki/deliverables/diff/2/index.html");
+    expect(html).toContain("<p>No difference in the article text.</p>");
+    expect(html).not.toContain("diff-section");
+    expect(html).not.toContain("diff-row");
+  });
+
+  it("emits a diff page only for revisions after the first", () => {
+    // hostile-title and exporter have one revision each, so they get no diff page.
+    for (const feature of ["hostile-title", "exporter", "reports", "scheduler"]) {
+      expect(existsSync(join(site.outDir, "wiki", feature, "diff")), feature).toBe(false);
+    }
   });
 
   it("gives every page with history a View history tab, redirects included", () => {
@@ -538,6 +578,9 @@ describe("history pages", () => {
   it("matches the golden snapshots", async () => {
     await expect(normalized("wiki/signals/history/index.html")).toMatchFileSnapshot(
       "__snapshots__/wiki-signals-history.html",
+    );
+    await expect(normalized("wiki/signals/diff/2/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-signals-diff-2.html",
     );
   });
 });
