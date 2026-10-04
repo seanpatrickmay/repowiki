@@ -1,5 +1,6 @@
 import type { LedgerEntry, TokenUsage } from "@repowiki/core";
 import { markdownCodeSpan, pullRequestOf, type ReplayStep } from "@repowiki/engine";
+import { z } from "zod";
 import { estimateUpdate } from "./update-cli.ts";
 import { architectureSkipWhy, problemLine, WIKI_BUILD_RUN_PREFIX } from "./wiki-cli.ts";
 
@@ -49,7 +50,69 @@ export interface StepRecord {
   failures: readonly { featureId: string; failure: string }[];
   refused: readonly { featureId: string; why: string }[];
   architectureSkipped: "too few pages" | "current" | null;
+  /** The step's place in the full step list (1-based); absent when the list does not hold it. */
+  position?: number;
+  /**
+   * Set when an earlier run stored the step and stopped before recording it: the resumed replay
+   * checked it and measured its tokens from the ledger, but its update's counts are unknown.
+   */
+  recovered?: boolean;
 }
+
+/** Where a run stopped, and why: the summary says so, so a stop is never mistaken for a finish. */
+export interface StoppedAt {
+  position: number;
+  sha: string;
+  reason: string;
+}
+
+const StepRecordFile = z.object({
+  version: z.literal(1),
+  records: z.array(
+    z.object({
+      step: z.object({ sha: z.string(), subject: z.string(), merge: z.boolean() }),
+      stored: z.number(),
+      carried: z.number(),
+      staleClaims: z.number(),
+      tokens: z.number(),
+      usd: z.number(),
+      problems: z.number(),
+      failures: z.array(z.object({ featureId: z.string(), failure: z.string() })),
+      refused: z.array(z.object({ featureId: z.string(), why: z.string() })),
+      architectureSkipped: z.enum(["too few pages", "current"]).nullable(),
+      position: z.number().optional(),
+      recovered: z.boolean().optional(),
+    }),
+  ),
+});
+
+/** The records as saved beside the replay summary, so a later run renders every run's steps. */
+export const renderStepRecords = (records: readonly StepRecord[]): string =>
+  `${JSON.stringify({ version: 1, records }, null, 2)}\n`;
+
+/** The saved records, or an Error naming the file as not a replay record. */
+export function parseStepRecords(text: string): StepRecord[] {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error("not a replay record: it is not JSON");
+  }
+  const parsed = StepRecordFile.safeParse(json);
+  if (!parsed.success) throw new Error("not a replay record: it does not hold step records");
+  return parsed.data.records;
+}
+
+/**
+ * Spec §8's invariants over every record: no step left a problem (invariants 1 and 2), and none
+ * cost as many tokens as the last full build (3), when there is a build to compare with.
+ */
+export const invariantsHold = (
+  records: readonly StepRecord[],
+  buildTokens: number | null,
+): boolean =>
+  records.every((r) => r.problems === 0) &&
+  (buildTokens === null || records.every((r) => r.tokens < buildTokens));
 
 /** A step the dry run plans: how many files it changes and pages it may touch, and their cost. */
 export interface StepProjection {
@@ -123,6 +186,9 @@ export function renderProjection(projections: readonly StepProjection[], left: n
 function stepNote(index: number, r: StepRecord): string | null {
   const code = (text: string): string => markdownCodeSpan(problemLine(text));
   const parts = [
+    ...(r.recovered === true
+      ? ["stored by a run that stopped before recording it; checked when the replay resumed"]
+      : []),
     ...(r.failures.length === 0
       ? []
       : [
@@ -139,13 +205,14 @@ function stepNote(index: number, r: StepRecord): string | null {
   ];
   return parts.length === 0
     ? null
-    : `- Step ${index + 1} (${r.step.sha.slice(0, 7)}): ${parts.join("; ")}.`;
+    : `- Step ${r.position ?? index + 1} (${r.step.sha.slice(0, 7)}): ${parts.join("; ")}.`;
 }
 
 /**
  * The replay summary saved as replay-<from7>-<to7>.md after every step, so a killed replay
  * leaves its record: one row per step with spec §8's invariants (no problems after it, and fewer
- * tokens than the last full build), then the totals.
+ * tokens than the last full build), then the totals. `records` holds every run's steps, each
+ * numbered by its `position` in the full list, and `stopped` says where a run stopped.
  */
 export function renderReplaySummary(
   repoName: string,
@@ -154,6 +221,7 @@ export function renderReplaySummary(
   records: readonly StepRecord[],
   left: number,
   buildTokens: number | null,
+  stopped: StoppedAt | null = null,
 ): string {
   // Spec §8's third invariant ("every update costs fewer tokens than the last full build") is
   // compared here, in `under` and `holds`, against `buildTokens`: the newest build run's own
@@ -162,14 +230,19 @@ export function renderReplaySummary(
   const under = (tokens: number) =>
     buildTokens === null ? "n/a" : tokens < buildTokens ? "yes" : "**no**";
   const usd = records.reduce((n, r) => n + r.usd, 0);
-  const clean = records.every((r) => r.problems === 0);
-  const holds = clean && (buildTokens === null || records.every((r) => r.tokens < buildTokens));
+  const holds = invariantsHold(records, buildTokens);
   const verdict = !holds
     ? "**broken**; see the rows above and pnpm wiki:check"
-    : buildTokens === null
-      ? "no step left a problem; token invariant not checked (no build run in the ledger)"
-      : "hold for every step";
+    : records.length === 0
+      ? "no step has been replayed"
+      : buildTokens === null
+        ? "no step left a problem; token invariant not checked (no build run in the ledger)"
+        : stopped === null
+          ? "hold for every step"
+          : "hold for every step replayed; the replay then stopped";
   const notes = records.flatMap((r, i) => stepNote(i, r) ?? []);
+  const count = (n: number | undefined, r: StepRecord): string =>
+    r.recovered === true ? "n/a" : String(n);
   return `${[
     `# Replay: ${markdownCodeSpan(repoName)} ${from.slice(0, 7)} → ${to.slice(0, 7)}`,
     "",
@@ -179,9 +252,15 @@ export function renderReplaySummary(
     "|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---|",
     ...records.map(
       (r, i) =>
-        `| ${i + 1} | ${r.step.sha.slice(0, 7)} | ${pullRequestOf(r.step.subject) ?? ""} | ${subjectCell(r.step.subject)} | ${r.stored} | ${r.carried} | ${r.staleClaims} | ${r.tokens.toLocaleString("en-US")} | $${r.usd.toFixed(4)} | ${r.problems} | ${under(r.tokens)} |`,
+        `| ${r.position ?? i + 1} | ${r.step.sha.slice(0, 7)} | ${pullRequestOf(r.step.subject) ?? ""} | ${subjectCell(r.step.subject)} | ${count(r.stored, r)} | ${count(r.carried, r)} | ${count(r.staleClaims, r)} | ${r.tokens.toLocaleString("en-US")} | $${r.usd.toFixed(4)} | ${r.problems} | ${under(r.tokens)} |`,
     ),
     ...(notes.length === 0 ? [] : ["", "## Step notes", "", ...notes]),
+    ...(stopped === null
+      ? []
+      : [
+          "",
+          `Stopped at step ${stopped.position} (${stopped.sha.slice(0, 7)}): ${markdownCodeSpan(problemLine(stopped.reason))}.`,
+        ]),
     "",
     `Invariants: ${verdict}.`,
     "",

@@ -928,7 +928,8 @@ describe("wiki-replay.ts as a process (no network)", () => {
     // A claim whose citation no longer matches: the check's problem names its id, bidi included.
     const { repo, out, first, quiet } = replayable("c-\u202e1\u0007");
     const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
-    expect(result.status).toBe(0);
+    // The broken invariant is the exit code too.
+    expect(result.status).toBe(1);
     const problems = result.stderr.split("\n").filter((line) => line.startsWith(quiet.slice(0, 7)));
     expect(problems.length).toBeGreaterThan(0);
     for (const line of problems) {
@@ -961,6 +962,151 @@ describe("wiki-replay.ts as a process (no network)", () => {
     // The step was not half-applied, so a rerun still has it to do.
     const again = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out, "--dry-run");
     expect(again.stdout.split("\n").filter((line) => /^\| \d/.test(line))).toHaveLength(1);
+  });
+
+  /** The step rows of a replay summary: their numbers and short shas. */
+  const summaryRows = (text: string) =>
+    text
+      .split("\n")
+      .filter((line) => /^\| \d/.test(line))
+      .map((row) => row.split(" | ").slice(0, 2));
+
+  it("keeps every run's rows when --limit replays the range in pieces", () => {
+    const { repo, out, first, quiet, quiet2 } = replayable(null, { twoQuiet: true });
+    const summaryPath = join(out, `replay-${first.slice(0, 7)}-${(quiet2 ?? "").slice(0, 7)}.md`);
+    const one = run(
+      "scripts/wiki-replay.ts",
+      repo,
+      first,
+      quiet2 ?? "",
+      "--out",
+      out,
+      "--limit",
+      "1",
+    );
+    expect(one.status).toBe(0);
+    expect(summaryRows(readFileSync(summaryPath, "utf8"))).toEqual([["| 1", quiet.slice(0, 7)]]);
+    expect(readFileSync(summaryPath, "utf8")).toContain("1 steps replayed, 1 left");
+    const two = run(
+      "scripts/wiki-replay.ts",
+      repo,
+      first,
+      quiet2 ?? "",
+      "--out",
+      out,
+      "--limit",
+      "1",
+    );
+    expect(two.status).toBe(0);
+    for (const text of [readFileSync(summaryPath, "utf8"), two.stdout]) {
+      expect(summaryRows(text)).toEqual([
+        ["| 1", quiet.slice(0, 7)],
+        ["| 2", (quiet2 ?? "").slice(0, 7)],
+      ]);
+      expect(text).toContain("2 steps replayed;");
+      // Both steps' verdicts, and the gate's line, now that nothing is left.
+      expect(text.split("\n").filter((line) => /\| 0 \| n\/a \|$/.test(line))).toHaveLength(2);
+      expect(text).toContain("Invariants: no step left a problem; token invariant not checked");
+    }
+    expect(
+      existsSync(join(out, `replay-${first.slice(0, 7)}-${(quiet2 ?? "").slice(0, 7)}.json`)),
+    ).toBe(true);
+    expect(readdirSync(out).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("prints the gate's line when a build was there to compare and every step held", () => {
+    const { repo, out, first, quiet } = replayable();
+    // A wiki:build run in the ledger, larger than any update.
+    const store = openStore(join(out, "wiki.db"));
+    store.appendLedger({
+      runId: `wiki-build-${first}-2026-10-03T00:00:00.000Z`,
+      at: "2026-10-03T00:00:00.000Z",
+      purpose: "write",
+      model: "claude-haiku-4-5",
+      featureId: null,
+      batch: true,
+      cacheKey: null,
+      tokens: { in: 100_000, out: 5_000, cacheRead: 0, cacheWrite: 0 },
+      runKind: "build",
+      sha: first,
+    });
+    store.close();
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Invariants: hold for every step.");
+  });
+
+  it("exits 1 when a step leaves a problem, and says the invariants broke", () => {
+    const { repo, out, first, quiet } = replayable("c-\u202e1\u0007");
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("Invariants: **broken**");
+  });
+
+  it("records the step it stopped at and why, in a printable line", () => {
+    const { repo, out, first, quiet, loud } = replayable();
+    const result = run("scripts/wiki-replay.ts", repo, first, loud, "--out", out);
+    expect(result.status).toBe(1);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${loud.slice(0, 7)}.md`),
+      "utf8",
+    );
+    const line = summary.split("\n").find((l) => l.startsWith("Stopped at step 2")) ?? "";
+    expect(line).toMatch(
+      new RegExp(`^Stopped at step 2 \\(${loud.slice(0, 7)}\\): .*ANTHROPIC_API_KEY is not set`),
+    );
+    expect(line).toMatch(/^[\x20-\x7e]+$/);
+    expect(summaryRows(summary)).toEqual([["| 1", quiet.slice(0, 7)]]);
+  });
+
+  it("leaves a record even when the run stops at its very first step", () => {
+    const { repo, out, first, quiet } = replayable(null, { paged: true });
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status).toBe(1);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${quiet.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summary).toContain("0 steps replayed, 1 left");
+    expect(summary).toContain(`Stopped at step 1 (${quiet.slice(0, 7)}): `);
+    expect(summary).not.toContain("hold for every step");
+  });
+
+  it("checks and records a step an earlier run stored but never recorded, then continues", () => {
+    const { repo, out, first, quiet, quiet2 } = replayable(null, { twoQuiet: true });
+    const target = quiet2 ?? "";
+    // A run killed after storing `quiet`: the head is there, and no replay record exists.
+    const moved = run("scripts/wiki-update.ts", repo, quiet, "--out", out);
+    expect(moved.status).toBe(0);
+    rmSync(join(out, "export.json"), { force: true });
+    const result = run("scripts/wiki-replay.ts", repo, first, target, "--out", out);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(`${quiet.slice(0, 7)}: stored by a run that stopped`);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${target.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summaryRows(summary)).toEqual([
+      ["| 1", quiet.slice(0, 7)],
+      ["| 2", target.slice(0, 7)],
+    ]);
+    expect(summary).toMatch(/\| 1 \| [0-9a-f]{7} \| 4 \| [^|]+ \| n\/a \| n\/a \| n\/a \|/);
+    expect(existsSync(join(out, "export.json"))).toBe(true);
+  });
+
+  it("records an unrecorded last step and rewrites the export when nothing is left", () => {
+    const { repo, out, first, quiet } = replayable();
+    run("scripts/wiki-update.ts", repo, quiet, "--out", out);
+    rmSync(join(out, "export.json"), { force: true });
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(`the wiki is already at ${quiet}; nothing to replay`);
+    expect(existsSync(join(out, "export.json"))).toBe(true);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${quiet.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summaryRows(summary)).toEqual([["| 1", quiet.slice(0, 7)]]);
   });
 
   it("refuses a range the wiki's head is not on, in one line", () => {

@@ -3,10 +3,13 @@ import { SHA_A, SHA_B, SHA_C } from "@repowiki/core/test-fixtures";
 import { DEFAULT_MODELS } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import {
+  invariantsHold,
   newestBuildTokens,
+  parseStepRecords,
   projectStep,
   renderProjection,
   renderReplaySummary,
+  renderStepRecords,
   type StepRecord,
   tokensOf,
 } from "./replay-cli.ts";
@@ -233,5 +236,76 @@ describe("renderReplaySummary", () => {
       .split("\n")
       .find((line) => line.startsWith("| 1 |"));
     expect(row?.split(" | ")).toHaveLength(11);
+  });
+});
+
+describe("a replay record across runs", () => {
+  it("numbers each row by its position in the full step list", () => {
+    const summary = renderReplaySummary(
+      "r",
+      SHA_A,
+      SHA_C,
+      [
+        record({ position: 1 }),
+        record({ step: step(SHA_C, "Merge pull request #9 from me/y"), position: 3 }),
+      ],
+      1,
+      null,
+    );
+    expect(summary).toContain("2 steps replayed, 1 left");
+    const rows = summary.split("\n").filter((line) => /^\| \d/.test(line));
+    expect(rows.map((row) => row.split(" | ").slice(0, 2))).toEqual([
+      ["| 1", "bbbbbbb"],
+      ["| 3", "ccccccc"],
+    ]);
+  });
+
+  it("saves and loads records as JSON, and refuses a file that is not one", () => {
+    const records = [
+      record({ position: 2, failures: [{ featureId: "auth", failure: "no answer" }] }),
+      record({ position: 3, recovered: true }),
+    ];
+    expect(parseStepRecords(renderStepRecords(records))).toEqual(records);
+    expect(() => parseStepRecords("not json")).toThrow(/replay record/);
+    expect(() => parseStepRecords(JSON.stringify({ version: 1, records: [{ step: 1 }] }))).toThrow(
+      /replay record/,
+    );
+  });
+
+  it("shows a recovered step's unknown counts as n/a and says how it was recorded", () => {
+    const summary = renderReplaySummary(
+      "r",
+      SHA_A,
+      SHA_C,
+      [record({ position: 1, recovered: true })],
+      0,
+      null,
+    );
+    expect(summary).toContain(
+      "| 1 | bbbbbbb | 88 | `Merge pull request #88 from me/x` | n/a | n/a | n/a | 12,000 |",
+    );
+    expect(summary).toContain(
+      "- Step 1 (bbbbbbb): stored by a run that stopped before recording it; checked when the replay resumed.",
+    );
+  });
+
+  it("records where a run stopped and why, printable and without a key", () => {
+    const summary = renderReplaySummary("r", SHA_A, SHA_C, [record({ position: 1 })], 1, null, {
+      position: 2,
+      sha: SHA_C,
+      reason: "bad\u202e answer sk-ant-api03-SECRET_x-y\nnext",
+    });
+    const line = summary.split("\n").find((l) => l.startsWith("Stopped at step 2")) ?? "";
+    expect(line).toBe("Stopped at step 2 (ccccccc): `bad? answer [redacted] next`.");
+    expect(summary).not.toContain("SECRET");
+    expect(summary).toContain("Invariants: no step left a problem; token invariant not checked");
+    expect(summary).not.toContain("hold for every step");
+  });
+
+  it("holds only when no step left a problem and none outspent the build", () => {
+    expect(invariantsHold([record()], 500_000)).toBe(true);
+    expect(invariantsHold([record()], null)).toBe(true);
+    expect(invariantsHold([record({ problems: 2 })], 500_000)).toBe(false);
+    expect(invariantsHold([record({ tokens: 500_000 })], 500_000)).toBe(false);
   });
 });
