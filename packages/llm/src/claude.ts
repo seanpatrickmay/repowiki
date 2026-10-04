@@ -131,6 +131,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         ],
         messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
         output_config: { format: { type, schema } },
+        ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       };
       const batch = request.batch === true;
       if (batch && options.onBatchRequest !== undefined) {

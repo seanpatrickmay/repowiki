@@ -23,6 +23,8 @@ export interface GenerateRequest<T> {
   cacheKey?: string;
   /** Route through the Message Batches API (50% price, answer within 24h). */
   batch?: boolean;
+  /** Sampling temperature; the API's default when absent. */
+  temperature?: number;
 }
 
 export interface GenerateResult<T> {
