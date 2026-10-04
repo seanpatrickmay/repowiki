@@ -14,11 +14,34 @@ describe("accuracySheet", () => {
     expect(accuracySheet(sample.wiki, ["deliverables"]).split("\n").slice(-6)).toEqual([
       "## Deliverables (deliverables)",
       "",
-      "- [ ] `deliverables/d-lead` (Lead): **Deliverables** are the records sample builds from signals.",
-      `- [ ] \`deliverables/d-1\` (Overview): \`create_deliverable\` returns a deliverable: a title and the list of signals it is built from. (src/deliverables/crud.py:4-6@${sha7})`,
-      `- [ ] \`deliverables/d-h\` (History): Deliverables were added in pull request #7. (commit ${sha7})`,
+      "- [ ] `deliverables/d-lead` (Lead): \\*\\*Deliverables\\*\\* are the records sample builds from Signal ingestion.",
+      `- [ ] \`deliverables/d-1\` (Overview): \\\`create\\_deliverable\\\` returns a deliverable: a title and the list of signals it is built from. (src/deliverables/crud.py:4-6@${sha7})`,
+      `- [ ] \`deliverables/d-h\` (History): Deliverables were added in pull request \\#7. (commit ${sha7})`,
       "",
     ]);
+  });
+
+  it("writes claim text, titles, paths and ids as plain one-line text, in full", () => {
+    const wiki = structuredClone(sample.wiki);
+    const page = wiki.pages.find((p) => p.featureId === "deliverables");
+    const claim = page?.sections[0]?.claims[0];
+    const feature = wiki.manifest.features.find((f) => f.id === "deliverables");
+    if (claim === undefined || feature === undefined) throw new Error("the fixture has a claim");
+    claim.id = "c1`\n- [x] `p/forged";
+    claim.text = `See [x](https://e.example) <img src=x> \u200B\u{E0041}[[signals]] ${"w".repeat(1900)}`;
+    feature.title = "[t](https://e.example)\u202E";
+    const sheet = accuracySheet(wiki, ["deliverables", "deliverables"]);
+    expect(sheet).not.toMatch(/^- \[x\]/m);
+    expect(sheet).not.toMatch(/[\u200B\u202E]|\u{E0041}/u);
+    expect(sheet.match(/^## /gm)).toHaveLength(1);
+    expect(sheet).toContain("## \\[t\\]\\(https://e.example\\)\uFFFD (deliverables)");
+    const line = sheet.split("\n").find((l) => l.includes("forged")) ?? "";
+    expect(line.startsWith("- [ ] `deliverables/c1??-??x???p?forged` (Lead): See \\[x\\]")).toBe(
+      true,
+    );
+    expect(line).toContain("\\<img src=x\\> Signal ingestion www");
+    expect(line).toContain(`${"w".repeat(1900)}`);
+    expect(tallySheet(sheet).unmarked).toBe(3);
   });
 
   it("lists every active page when no page is named", () => {
@@ -46,10 +69,35 @@ describe("tallySheet", () => {
     expect(tallySheet(sheet([" ", " "])).pass).toBe(false);
   });
 
-  it("refuses a mark it does not know, and ignores other lines", () => {
+  it("refuses a mark it does not know, and ignores lines that are not marks", () => {
     expect(() => tallySheet(sheet(["x", "?"]))).toThrow(
       "line 2: mark a claim [x], [!] or [ ], not [?]",
     );
-    expect(tallySheet("# heading\n- [x] not a claim line\n").reviewed).toBe(0);
+    expect(tallySheet("# heading\n\nRead each claim `[x]`.\n").reviewed).toBe(0);
+  });
+
+  it("refuses a line that looks like a mark but is not one, so no false mark is lost", () => {
+    for (const bad of [
+      "- [!!] `a/2` (Overview): x",
+      "- [] `a/3` (Overview): x",
+      "- [ x] `a/4` (Overview): x",
+      "* [!] `a/5` (Overview): x",
+      "  - [!] `a/6` (Overview): x",
+      "- [!]`a/7` (Overview): x",
+      "-  [!] `a/9` (Overview): x",
+      "- [x] not a claim line",
+    ]) {
+      expect(() => tallySheet(`- [x] \`a/1\` (Lead): y\n${bad}\n`), bad).toThrow(
+        /^line 2: not a claim line as the sheet wrote it; change only the mark between \[ and \]$/,
+      );
+    }
+    expect(() => tallySheet("- [x] `a/1` (Lead): y\n- [!] `a/1` (Lead): y\n")).toThrow(
+      "line 2: claim a/1 is listed twice",
+    );
+  });
+
+  it("reads a sheet saved with a byte-order mark or CRLF line ends", () => {
+    const tally = tallySheet("\uFEFF- [!] `a/1` (Lead): y\r\n- [x] `a/2` (Lead): z\r\n");
+    expect(tally).toMatchObject({ reviewed: 2, false: 1, falseClaims: ["a/1"] });
   });
 });

@@ -3,7 +3,8 @@ import { count, cut, oneLine, toolText } from "./text.ts";
 import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
 import { ABOUT_PAGE_ID, reference, type WikiView } from "./wiki-view.ts";
 
-const SECTION_TITLES: Readonly<Record<string, string>> = {
+/** Every section key's title, a feature page's and the About article's. */
+export const SECTION_TITLES: Readonly<Record<string, string>> = {
   lead: "Lead",
   overview: "Overview",
   "how-it-works": "How it works",
