@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import {
@@ -34,6 +35,17 @@ describe("site build", () => {
     expect(site.read("index.html")).toContain("Welcome to the demo-repo wiki");
     expect(existsSync(join(site.outDir, "pagefind", "pagefind.js"))).toBe(true);
     expect(site.stdout).toMatch(/^built .+ \(\d+ HTML pages\)$/m);
+  });
+
+  it("serves the wiki's llms.txt and the export it lists at the site's root (F07)", () => {
+    const wiki = fixtureExport();
+    expect(site.read("llms.txt")).toBe(renderLlmsTxt(wiki));
+    expect(site.read("llms.txt")).toContain("- [JSON export](export.json): ");
+    expect(JSON.parse(site.read("export.json"))).toEqual(JSON.parse(JSON.stringify(wiki)));
+    for (const line of site.read("llms.txt").split("\n")) {
+      const page = /\]\((wiki\/[^)]+)\)/.exec(line)?.[1];
+      if (page !== undefined) expect(existsSync(join(site.outDir, page, "index.html"))).toBe(true);
+    }
   });
 
   it("has no same-site links to missing pages or anchors", () => {

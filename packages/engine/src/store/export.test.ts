@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WikiExport } from "@repowiki/core";
+import { renderLlmsTxt, WikiExport } from "@repowiki/core";
 import {
   bodyClaim,
   leadClaim,
@@ -84,7 +84,16 @@ describe("writeExport", () => {
     writeFileSync(out, "old");
     writeExport(store, out, options);
     expect(WikiExport.parse(JSON.parse(readFileSync(out, "utf8"))).head).toBe(SHA_B);
-    expect(readdirSync(dir)).toEqual(["export.json"]);
+    expect(readdirSync(dir).sort()).toEqual(["export.json", "llms.txt"]);
+  });
+
+  it("writes the wiki's llms.txt beside the export, linking the export by its name (F07)", () => {
+    seed();
+    const out = join(dir, "wiki.json");
+    writeExport(store, out, options);
+    const wiki = buildExport(store, options);
+    expect(readFileSync(join(dir, "llms.txt"), "utf8")).toBe(renderLlmsTxt(wiki, "wiki.json"));
+    expect(readFileSync(join(dir, "llms.txt"), "utf8")).toContain("- [JSON export](wiki.json): ");
   });
 
   it("removes its temporary file and throws when the export cannot be put in place", () => {

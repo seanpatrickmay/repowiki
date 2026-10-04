@@ -1200,3 +1200,49 @@ describe("wiki-replay.ts as a process (no network)", () => {
     );
   });
 });
+
+describe("wiki-export.ts as a process (no network)", () => {
+  it("writes export.json and llms.txt from the store with no key, and frees its lock", () => {
+    const { repo, sha } = gitRepo();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest({ sha }), { llmRevised: true });
+    store.putRevision(makeRevision({ sha, seeAlso: [] }));
+    store.setHead(sha);
+    store.close();
+    const result = run("scripts/wiki-export.ts", repo, "--out", out);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`Wrote ${join(out, "export.json")} and ${join(out, "llms.txt")}\n`);
+    expect(JSON.parse(readFileSync(join(out, "export.json"), "utf8")).repo).toBe("repo");
+    expect(readFileSync(join(out, "llms.txt"), "utf8")).toMatch(
+      /^# repo wiki\n[\s\S]*- \[Signal ingestion\]\(wiki\/signals\/\): /,
+    );
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  });
+
+  it("is a usage error, exit 2, for missing or extra arguments", () => {
+    for (const args of [
+      [],
+      ["repo", "--out"],
+      ["repo", "--outdir", "x"],
+      ["a", "--out", "o", "b"],
+    ]) {
+      const result = run("scripts/wiki-export.ts", ...args);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toBe("usage: pnpm wiki:export <repo-path> [--out dir]\n");
+    }
+  });
+
+  it("refuses an out dir inside the repository, and a store with no wiki", () => {
+    const { repo } = gitRepo();
+    const inside = run("scripts/wiki-export.ts", repo, "--out", join(repo, "wiki"));
+    expect(inside.status).toBe(2);
+    expect(inside.stderr).toContain("refusing to write inside the documented repository");
+    const out = join(dir, "empty");
+    const missing = run("scripts/wiki-export.ts", repo, "--out", out);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toBe(`no wiki at ${join(out, "wiki.db")}; run pnpm wiki:build first\n`);
+    expect(existsSync(join(repo, "wiki"))).toBe(false);
+  });
+});
