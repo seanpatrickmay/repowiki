@@ -15,6 +15,8 @@ export {
   architectureLinkViolations,
   linksWithoutPage,
   linkViolations,
+  storedArchitectureLinkViolations,
+  storedLinkViolations,
   textLinkViolations,
 } from "./violations.ts";
 export {

@@ -413,4 +413,23 @@ describe("buildJournal", () => {
     ]);
     store.close();
   });
+
+  it("forgets a later untagged request once an earlier flush settled another", () => {
+    const store = openStore(":memory:");
+    const journal = buildJournal(store);
+    const at = new Date().toISOString();
+    // An update's tie-break call is answered and flushed in the update's own transaction.
+    journal.record("msgbatch_1", at, [{ requestKey: "tie-break", customId: "req-1" }]);
+    journal.tag("tie-break", null);
+    journal.forget("msgbatch_1", ["tie-break"]);
+    store.transaction(() => journal.flush());
+    expect(store.findBatchRequest("tie-break")).toBeNull();
+    // The article's call, in the same untagged group, is answered and flushed after it.
+    journal.record("msgbatch_2", at, [{ requestKey: "article", customId: "req-2" }]);
+    journal.tag("article", null);
+    journal.forget("msgbatch_2", ["article"]);
+    store.transaction(() => journal.flush());
+    expect(store.findBatchRequest("article")).toBeNull();
+    store.close();
+  });
 });

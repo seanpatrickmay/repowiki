@@ -384,4 +384,91 @@ describe("wiki-check.ts as a process (no network)", () => {
       "2 code citations re-hashed and 1 commit citations resolved; 1 problems",
     );
   });
+
+  it("judges a carried page's links at its own sha, after a later merge made one a redirect", () => {
+    const { repo, sha } = gitRepo();
+    const out = pageOf(repo, sha, sha);
+    const store = openStore(join(out, "wiki.db"));
+    // An update at a later commit merged deliverables into signals; the page carried forward.
+    store.putManifest(
+      makeManifest({
+        sha: SHA_B,
+        features: [
+          makeFeature(),
+          makeFeature({
+            id: "deliverables",
+            title: "Deliverables",
+            aliases: [],
+            status: { kind: "redirect", to: "signals" },
+            lineage: [
+              { kind: "create", sha: SHA_A },
+              { kind: "merge", sha: SHA_B, into: "signals" },
+            ],
+          }),
+        ],
+        membership: { "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 } },
+      }),
+    );
+    store.close();
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
+
+  /** The page and article of withArticle, then a later manifest that retired deliverables. */
+  function retiredLater(text: string, pages: string[]): { repo: string; out: string } {
+    const { repo, sha } = gitRepo();
+    const out = withArticle(repo, sha, pages, text);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(
+      makeManifest({
+        sha: SHA_B,
+        features: [
+          makeFeature(),
+          makeFeature({
+            id: "deliverables",
+            title: "Deliverables",
+            aliases: [],
+            status: { kind: "retired" },
+            lineage: [
+              { kind: "create", sha: SHA_A },
+              { kind: "retire", sha: SHA_B },
+            ],
+          }),
+        ],
+        membership: { "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 } },
+      }),
+    );
+    store.close();
+    return { repo, out };
+  }
+
+  it("reports an article link to a feature that retired since, with no page", () => {
+    const { repo, out } = retiredLater("Signals feed [[deliverables]].", []);
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      'signals: See also lists "deliverables", which no longer leads to a page\n' +
+        'architecture "a-1": a link to "deliverables" no longer leads to a page\n',
+    );
+  });
+
+  it("reports an article page that retired since, with no page", () => {
+    const { repo, out } = retiredLater("Signals feed deliverables.", ["deliverables"]);
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      'signals: See also lists "deliverables", which no longer leads to a page\n' +
+        'architecture "a-1": names "deliverables", which no longer leads to a page\n',
+    );
+  });
+
+  it("counts, without failing, an article page that is still active with no page", () => {
+    const { repo, sha } = gitRepo();
+    const out = withArticle(repo, sha, ["deliverables"], "Signals feed [[deliverables]].");
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("3 links name an active feature with no stored page");
+  });
 });

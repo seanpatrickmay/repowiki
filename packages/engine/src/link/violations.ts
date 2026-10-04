@@ -121,3 +121,102 @@ export function architectureLinksWithoutPage(
   }
   return count;
 }
+
+/**
+ * Whether an id still leads to a page in `latest` (spec §8 "no links to nonexistent IDs"): a
+ * redirect or disambiguation page, an active feature (one with no page is counted by
+ * linksWithoutPage, not a problem), or a retired feature that has a stored page. An id the manifest
+ * no longer holds does not. A redirect whose target retired with no page still routes here.
+ */
+function routingIn(latest: Manifest, pages: ReadonlySet<string>): (id: string) => boolean {
+  const kindOf = new Map(latest.features.map((f) => [f.id, f.status.kind]));
+  return (id) => {
+    const kind = kindOf.get(id);
+    if (kind === "redirect" || kind === "disambiguation" || kind === "active") return true;
+    return kind === "retired" && pages.has(id);
+  };
+}
+
+/** The distinct ids of the [[id]] links in a text that point inside the wiki (not `wp:`). */
+function wikiTargetsIn(text: string): string[] {
+  const targets = linkTokensIn(text)
+    .map(({ target }) => target)
+    .filter((target) => !target.startsWith("wp:"));
+  return [...new Set(targets)];
+}
+
+/**
+ * linkViolations for a stored revision, which may be older than the latest manifest (an update
+ * carries a page forward, and a later merge can turn one of its [[id]] links into a redirect):
+ * its links are judged against `own`, the manifest at the revision's sha, as the linker wrote
+ * them, and each link that was valid there must still route today in `latest` (see routingIn).
+ * A link that was never valid is reported once, by linkViolations, and not again here.
+ */
+export function storedLinkViolations(
+  revision: Revision,
+  own: Manifest,
+  latest: Manifest,
+  pages: ReadonlySet<string>,
+): string[] {
+  const routes = routingIn(latest, pages);
+  const ownKind = new Map(own.features.map((f) => [f.id, f.status.kind]));
+  const problems = linkViolations(revision, own);
+  for (const id of revision.seeAlso) {
+    if (ownKind.get(id) === "active" && id !== revision.featureId && !routes(id)) {
+      problems.push(
+        `${revision.featureId}: See also lists ${quote(id)}, which no longer leads to a page`,
+      );
+    }
+  }
+  for (const section of revision.sections) {
+    for (const claim of section.claims) {
+      for (const id of wikiTargetsIn(claim.text)) {
+        const kind = ownKind.get(id);
+        if ((kind === "active" || kind === "disambiguation") && !routes(id)) {
+          problems.push(
+            `${revision.featureId} ${quote(claim.id)}: a link to ${quote(id)} no longer leads to a page`,
+          );
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * architectureLinkViolations for a stored article, which may be older than the latest manifest:
+ * judged against `own` (the manifest at its sha), and each [[id]] link and named page that was
+ * valid there must still route today in `latest` (see routingIn). Like storedLinkViolations, it
+ * counts an active feature with no page as routing (architectureLinksWithoutPage reports it) and
+ * reports a retired one with no page, or one `latest` no longer holds, as a problem.
+ */
+export function storedArchitectureLinkViolations(
+  article: Architecture,
+  own: Manifest,
+  latest: Manifest,
+  pages: ReadonlySet<string>,
+): string[] {
+  const routes = routingIn(latest, pages);
+  const ownKind = new Map(own.features.map((f) => [f.id, f.status.kind]));
+  const problems = architectureLinkViolations(article, own);
+  for (const section of article.sections) {
+    for (const claim of section.claims) {
+      for (const id of wikiTargetsIn(claim.text)) {
+        const kind = ownKind.get(id);
+        if ((kind === "active" || kind === "disambiguation") && !routes(id)) {
+          problems.push(
+            `architecture ${quote(claim.id)}: a link to ${quote(id)} no longer leads to a page`,
+          );
+        }
+      }
+      for (const id of claim.pages) {
+        if (ownKind.get(id) === "active" && !routes(id)) {
+          problems.push(
+            `architecture ${quote(claim.id)}: names ${quote(id)}, which no longer leads to a page`,
+          );
+        }
+      }
+    }
+  }
+  return problems;
+}

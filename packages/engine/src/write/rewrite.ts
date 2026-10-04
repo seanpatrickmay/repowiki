@@ -63,6 +63,8 @@ export interface RewriteOutcome {
   model: string | null;
   /** Set when a call failed (not an unusable answer): the update stops (spec §6.3). */
   failure: string | null;
+  /** True when `failure` is a failed call or batch, never an answer the model gave. */
+  callFailed?: boolean;
 }
 
 /** The most an update answer may take: corrected claims and a few new ones. */
@@ -93,6 +95,7 @@ interface State extends CallTally {
   >;
   diagram: DraftDiagram | null;
   failure: string | null;
+  callFailed: boolean;
 }
 
 /**
@@ -345,6 +348,7 @@ export async function rewritePages(
     failing: new Map(),
     diagram: null,
     failure: null,
+    callFailed: false,
     tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
     model: null,
     calls: 0,
@@ -384,6 +388,7 @@ export async function rewritePages(
       state.rejected = rejectionOf(outcome.error);
     } else {
       state.failure = `the update call failed${retry ? " on the retry" : ""}: ${callFailure(outcome.error)}`;
+      state.callFailed = true;
     }
   };
 
@@ -428,6 +433,7 @@ export async function rewritePages(
     if (!("result" in outcome)) {
       if (!(outcome.error instanceof LlmOutputError)) {
         state.failure = `the update call failed on the retry: ${callFailure(outcome.error)}`;
+        state.callFailed = true;
       }
       return;
     }
@@ -465,6 +471,7 @@ export async function rewritePages(
       tokens: state.tokens,
       model: state.model,
       failure: state.failure,
+      callFailed: state.callFailed,
     };
   });
   return { outcomes, system, cacheKey };

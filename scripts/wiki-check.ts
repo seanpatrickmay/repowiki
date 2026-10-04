@@ -1,31 +1,33 @@
 import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import type { Manifest } from "@repowiki/core";
 import {
   architectureLinksWithoutPage,
-  architectureLinkViolations,
   architectureProblems,
   commitCitationProblems,
   DEFAULT_MAX_FILE_BYTES,
   GitError,
   linksWithoutPage,
-  linkViolations,
   openStore,
   readHistory,
   readSources,
   revisionProblems,
+  storedArchitectureLinkViolations,
+  storedLinkViolations,
 } from "@repowiki/engine";
 
 /**
  * pnpm wiki:check <repo> [--out dir]: spec §8's first two invariants on the stored wiki. Every
  * code citation of every current page resolves at its sha with a matching hash, every commit
  * citation names a commit in the history of the wiki's sha (read-only git), every diagram is
- * safe, and every link and See also entry names an active feature (a link may name a
- * disambiguation page). It also counts, for information only, the links and See also entries
- * that name an active feature with no stored page. The project's article (the About page) is
- * checked the same way, and its links and named pages count with the pages' own when they name an
- * active feature with no stored page. Read-only; exits 1 on any problem, and 2 for a usage error:
- * bad arguments, or a repository that is missing or does not hold the wiki's sha.
+ * safe, and every link and See also entry was valid in the manifest at its page's own sha (a link
+ * may name a disambiguation page) and still leads to a page today: an update carries pages
+ * forward, and a later merge turns their links into redirects. The project's article (the About
+ * page) is judged the same way, at its own sha, for its [[id]] links and the pages its claims
+ * name. It also counts, for information only, the links and named pages that name an active
+ * feature with no stored page. Read-only; exits 1 on any problem, and 2 for a usage error: bad
+ * arguments, or a repository that is missing or does not hold the wiki's sha.
  *
  * openStore migrates and switches the file to WAL, so the check opens a throwaway copy of the
  * store (with its write-ahead log) and the wiki's own files are never opened for writing.
@@ -99,18 +101,36 @@ try {
         return sources;
       };
       const article = store.getCurrentArchitecture();
+      // The manifest a page or the article was written against, read and parsed once per sha.
+      // Manifests are append-only, so a sha with none means a damaged or imported store; the
+      // check then falls back to the current manifest, which judges the page as if it were
+      // current (a link the linker wrote correctly then may read as a violation).
+      const manifestBySha = new Map<string, Manifest>();
+      const manifestAt = (sha: string): Manifest => {
+        let at = manifestBySha.get(sha);
+        if (at === undefined) {
+          at = store.getManifest(sha) ?? manifest;
+          manifestBySha.set(sha, at);
+        }
+        return at;
+      };
       const withPage = new Set(pages.map((page) => page.featureId));
       const problems = [
         ...pages.flatMap((page) => [
           ...revisionProblems(page, sourcesAt),
           ...commitCitationProblems(page, history),
-          ...linkViolations(page, manifest),
+          ...storedLinkViolations(page, manifestAt(page.sha), manifest, withPage),
         ]),
         ...(article === null
           ? []
           : [
               ...architectureProblems(article, sourcesAt, history),
-              ...architectureLinkViolations(article, manifest),
+              ...storedArchitectureLinkViolations(
+                article,
+                manifestAt(article.sha),
+                manifest,
+                withPage,
+              ),
             ]),
       ];
       const citations = [...pages, ...(article === null ? [] : [article])].flatMap((p) =>

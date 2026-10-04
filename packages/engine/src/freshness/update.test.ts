@@ -1,10 +1,11 @@
+import { parseMemberId } from "@repowiki/core";
 import { INGEST_PY } from "@repowiki/core/test-fixtures";
-import { type GenerateRequest, LlmError } from "@repowiki/llm";
+import { type GenerateRequest, LlmError, LlmOutputError, type Provider } from "@repowiki/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TestRepo } from "../index/index.ts";
 import { buildExport, type Store } from "../store/index.ts";
-import { ArchitectureDraft, UpdateDraft, UpdateFixes } from "../verify/index.ts";
-import type { BuildJournal } from "../write/index.ts";
+import { ArchitectureDraft, PageDraft, UpdateDraft, UpdateFixes } from "../verify/index.ts";
+import { type BuildJournal, buildJournal } from "../write/index.ts";
 import { ManifestOperations } from "./ops.ts";
 import { UpdateError } from "./plan.ts";
 import { scriptedProvider } from "./test-provider.ts";
@@ -409,6 +410,275 @@ describe("updateWiki", () => {
       expect(purposes.indexOf("tieBreak")).toBeLessThan(purposes.indexOf("manifest"));
       expect(result.tieBreak.placed.get("notes.py")).toBe("deliverables");
       expect(store.getManifest(added)?.membership["notes.py"]?.featureId).toBe("deliverables");
+    });
+  });
+
+  describe("whole pages and failures", () => {
+    const diagram = { nodes: [], edges: [] };
+    /** A whole page for a feature whose one body claim cites `cite`. */
+    const wholePage = (title: string, text: string, cite: string): PageDraft => ({
+      sections: [
+        {
+          key: "lead",
+          claims: [
+            {
+              id: "l1",
+              text: `**${title}** is a feature.`,
+              cite: [],
+              supports: ["o1"],
+              hook: false,
+            },
+          ],
+        },
+        { key: "overview", claims: [{ id: "o1", text, cite: [cite], supports: [], hook: false }] },
+      ],
+      diagram,
+    });
+    const storagePage = () =>
+      wholePage(
+        "Signal storage",
+        "`save_signal()` returns its signal.",
+        "src/signals/store.py:1-2",
+      );
+    const unusable = () => new LlmOutputError("model output is not JSON", "nope");
+
+    /**
+     * Answers by schema and records the event-loop turn of each request (one setImmediate round,
+     * as in the write tests), so requests of one turn are one batch. With a journal it also does
+     * what the batcher does: records a row per request, tagged with its page, and forgets the row
+     * when the answer was read (an unusable answer was read; a failed call was not).
+     */
+    function turned(
+      answer: (request: GenerateRequest<unknown>) => unknown,
+      journal?: BuildJournal,
+    ) {
+      const requests: (GenerateRequest<unknown> & { turn: number })[] = [];
+      const keys: string[] = [];
+      let turn = 0;
+      let ticking = false;
+      const provider: Provider = {
+        async generate<T>(request: GenerateRequest<T>) {
+          if (!ticking) {
+            ticking = true;
+            setImmediate(() => {
+              turn += 1;
+              ticking = false;
+            });
+          }
+          const at = turn;
+          requests.push({ ...(request as GenerateRequest<unknown>), turn: at });
+          const key = `request-${requests.length}`;
+          keys.push(key);
+          journal?.record(`batch-${at}`, new Date().toISOString(), [
+            { requestKey: key, customId: key },
+          ]);
+          journal?.tag(key, request.featureId ?? null);
+          await new Promise((resolve) => setImmediate(resolve));
+          const output = answer(request as GenerateRequest<unknown>);
+          if (output instanceof Error) {
+            if (output instanceof LlmOutputError) journal?.forget(`batch-${at}`, [key]);
+            throw output;
+          }
+          journal?.forget(`batch-${at}`, [key]);
+          const usage = { in: 100, out: 10, cacheRead: 0, cacheWrite: 0 };
+          return { output: request.schema.parse(output), usage, model: "claude-haiku-4-5" };
+        },
+      };
+      return { provider, requests, keys };
+    }
+    const standard = (request: GenerateRequest<unknown>, page?: () => unknown): unknown => {
+      if (request.schema === TieBreakAnswer) return { files: [] };
+      if (request.schema === ManifestOperations) return { operations: [] };
+      if (request.schema === ArchitectureDraft) return articleAnswer();
+      if (request.schema === UpdateFixes) return { claims: [] };
+      if (request.schema === UpdateDraft) return { claims: [], diagram };
+      if (request.schema === PageDraft && page !== undefined) return page();
+      throw new Error(`unexpected ${request.purpose} call for ${request.featureId}`);
+    };
+
+    /** The wiki, moved on to an empty commit whose manifest gives storage.py to a new feature. */
+    async function withStorage(): Promise<void> {
+      ({ repo, store, first } = await builtWiki());
+      const base = store.getManifest(first);
+      if (base === null) throw new Error("no manifest");
+      const later = repo.commit("chore: nothing");
+      store.putManifest(
+        {
+          ...base,
+          sha: later,
+          features: [
+            ...base.features,
+            {
+              id: "storage",
+              title: "Signal storage",
+              aliases: ["signal store"],
+              status: { kind: "active" },
+              lineage: [{ kind: "create", sha: later }],
+            },
+          ],
+          membership: Object.fromEntries(
+            Object.entries(base.membership).map(([id, m]) => [
+              id,
+              parseMemberId(id)?.path === "src/signals/store.py"
+                ? { ...m, featureId: "storage" }
+                : m,
+            ]),
+          ),
+        },
+        { llmRevised: true },
+      );
+      store.setHead(later);
+    }
+
+    it("writes an active feature with no page whole, as a build, in the update's batch", async () => {
+      await withStorage();
+      const { merge } = mergePaging();
+      const { provider: p, requests } = turned((r) => standard(r, storagePage));
+      const result = await updateWiki(store, await inputAt(repo, merge), {
+        ...options,
+        provider: p,
+      });
+      const storage = result.stored.find((r) => r.featureId === "storage");
+      expect(storage).toMatchObject({ reason: "build", parentId: null, pr: 7, sha: merge });
+      expect(store.getCurrentRevision("storage")?.id).toBe(storage?.id);
+      expect(result.failures).toEqual([]);
+      // The whole page's call and the update call of signals (round 1) are one batch (one turn).
+      const writes = requests.filter((r) => r.schema === PageDraft || r.schema === UpdateDraft);
+      expect(
+        writes.map((r) => [r.featureId, r.schema === PageDraft ? "page" : "update"]).sort(),
+      ).toEqual([
+        ["signals", "update"],
+        ["storage", "page"],
+      ]);
+      expect(new Set(writes.map((r) => r.turn)).size).toBe(1);
+    });
+
+    it("writes a feature the operations changed whole, as a manifest change with its parent", async () => {
+      ({ repo, store, first } = await builtWiki());
+      const { merge } = mergePaging();
+      const parent = store.getCurrentRevision("deliverables");
+      const { provider: p } = turned((request) =>
+        request.schema === ManifestOperations
+          ? {
+              operations: [
+                {
+                  kind: "rename",
+                  feature: "deliverables",
+                  title: "Work records",
+                  aliases: [],
+                  clusters: [],
+                  into: "",
+                  targets: [],
+                },
+              ],
+            }
+          : standard(request, () =>
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+            ),
+      );
+      const result = await updateWiki(store, await inputAt(repo, merge), {
+        ...options,
+        driftThreshold: 0,
+        provider: p,
+      });
+      const page = result.stored.find((r) => r.featureId === "deliverables");
+      expect(page).toMatchObject({
+        reason: "manifest-change",
+        parentId: parent?.id,
+        pr: 7,
+        sha: merge,
+      });
+      expect(store.getCurrentRevision("deliverables")?.id).toBe(page?.id);
+    });
+
+    it("does not store a whole page that got two unusable answers, and settles its rows", async () => {
+      await withStorage();
+      const { merge } = mergePaging();
+      const journal = buildJournal(store);
+      const {
+        provider: p,
+        requests,
+        keys,
+      } = turned(
+        (request) => (request.schema === PageDraft ? unusable() : standard(request)),
+        journal,
+      );
+      const result = await updateWiki(store, await inputAt(repo, merge), {
+        ...options,
+        provider: p,
+        journal,
+      });
+      // The page was asked for twice, and the update still moved on with the rest.
+      expect(requests.filter((r) => r.schema === PageDraft)).toHaveLength(2);
+      expect(store.getHead()).toBe(merge);
+      expect(store.getCurrentRevision("storage")).toBeNull();
+      expect(result.stored.map((r) => r.featureId)).not.toContain("storage");
+      expect(result.failures).toEqual([
+        { featureId: "storage", failure: expect.stringContaining("failed twice") },
+      ]);
+      // Its rows are forgotten with the update, so nothing replays the same unusable answers.
+      expect(keys.map((k) => store.findBatchRequest(k))).toEqual(keys.map(() => null));
+      // The wiki is at the target now: a rerun there makes no call at all.
+      const before = requests.length;
+      await expect(
+        updateWiki(store, await inputAt(repo, merge), { ...options, provider: p, journal }),
+      ).rejects.toThrow(`the wiki is already at ${merge}`);
+      expect(requests).toHaveLength(before);
+    });
+
+    it("does not stop for an update call that got unusable answers", async () => {
+      ({ repo, store, first } = await builtWiki());
+      const { merge } = mergePaging();
+      const { provider: p } = turned((request) =>
+        request.schema === UpdateDraft || request.schema === UpdateFixes
+          ? unusable()
+          : standard(request),
+      );
+      const result = await updateWiki(store, await inputAt(repo, merge), {
+        ...options,
+        provider: p,
+      });
+      expect(store.getHead()).toBe(merge);
+      expect(result.rewrites[0]?.keptStale).toEqual(["c1", "c2"]);
+    });
+
+    it("stops, and leaves the rows, when a whole page's call fails", async () => {
+      await withStorage();
+      const { merge } = mergePaging();
+      const journal = buildJournal(store);
+      const { provider: p, keys } = turned(
+        (request) =>
+          request.schema === PageDraft ? new LlmError("the batch expired") : standard(request),
+        journal,
+      );
+      await expect(
+        updateWiki(store, await inputAt(repo, merge), { ...options, provider: p, journal }),
+      ).rejects.toThrow(UpdateError);
+      expect(store.getHead()).not.toBe(merge);
+      expect(keys.map((k) => store.findBatchRequest(k) !== null)).toContain(true);
+      expect(store.getManifest(merge)).toBeNull();
+    });
+
+    it("stops with nothing stored and no flush when the tie-break call fails", async () => {
+      ({ repo, store, first } = await builtWiki());
+      repo.write("notes.py", "def note():\n    return 1\n");
+      const added = repo.commit("feat: add notes");
+      const { journal, flush } = spyJournal();
+      const { provider: p } = turned((request) =>
+        request.schema === TieBreakAnswer
+          ? new LlmError("the batch was canceled")
+          : standard(request),
+      );
+      await expect(
+        updateWiki(store, await inputAt(repo, added), { ...options, provider: p, journal }),
+      ).rejects.toThrow(LlmError);
+      expect(flush).not.toHaveBeenCalled();
+      expect(store.getHead()).toBe(first);
+      expect(store.getManifest(added)).toBeNull();
     });
   });
 });
