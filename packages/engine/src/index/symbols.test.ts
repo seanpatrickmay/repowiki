@@ -239,20 +239,110 @@ describe("extractSymbols (typescript)", () => {
     ]);
   });
 
-  it("does not trust a chunk that starts inside a template literal", () => {
+  it("never cuts a chunk inside a template literal or a block comment", () => {
+    for (const [open, close] of [
+      ["const s = `", "`;"],
+      ["/*", "*/"],
+    ]) {
+      const source = [
+        "export function bad( {",
+        open,
+        "export function fake1() {}",
+        "export function fake2() {}",
+        close,
+        "export const real = 2;",
+      ].join("\n");
+      expect(names("typescript", source)).toEqual(["variable real"]);
+    }
+  });
+
+  it("keeps a broken declaration's own symbol, ending where the next chunk starts", () => {
     const source = [
-      "export function bad( {",
-      "const s = `",
-      "export const fake = 1;",
-      "`;",
-      "export const real = 2;",
+      "export function outer() {",
+      "  const s = 'abc';",
+      "  if ( {",
+      "export function after() {}",
+      "// c",
+      "export const k = 'x';",
     ].join("\n");
-    expect(names("typescript", source)).toEqual(["variable real"]);
+    expect(symbolsOf("typescript", source).symbols).toEqual([
+      { qualifiedName: "outer", kind: "function", startLine: 1, endLine: 3, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 4, endLine: 4, exported: true },
+      { qualifiedName: "k", kind: "variable", startLine: 6, endLine: 6, exported: true },
+    ]);
+  });
+
+  it("keeps a broken declaration whose template literal or comment holds column-0 lines", () => {
+    const build = [
+      "export function build() {",
+      "  const q = `",
+      "type Query { a: Int }",
+      "`;",
+      "  if (x) {",
+      "}",
+      "export function after() {}",
+    ].join("\n");
+    expect(symbolsOf("typescript", build).symbols).toEqual([
+      { qualifiedName: "build", kind: "function", startLine: 1, endLine: 6, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 7, endLine: 7, exported: true },
+    ]);
+    const svc = [
+      "export class Svc {",
+      "  /*",
+      "function old() {}",
+      "  */",
+      "  m() {",
+      "    if (x) {",
+      "  }",
+      "}",
+      "export function after() {}",
+    ].join("\n");
+    expect(symbolsOf("typescript", svc).symbols).toEqual([
+      { qualifiedName: "Svc", kind: "class", startLine: 1, endLine: 8, exported: true },
+      { qualifiedName: "Svc.m", kind: "method", startLine: 5, endLine: 8, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 9, endLine: 9, exported: true },
+    ]);
+  });
+
+  it("never cuts a chunk inside JSX text", () => {
+    const source = [
+      "export function C() {",
+      "  return (<div>",
+      "const a = 1;",
+      "function x() {}",
+      "</div>;",
+      "}",
+      "export const after = 1;",
+    ].join("\n");
+    expect(symbolsOf("tsx", source).symbols).toEqual([
+      { qualifiedName: "C", kind: "function", startLine: 1, endLine: 6, exported: true },
+      { qualifiedName: "after", kind: "variable", startLine: 7, endLine: 7, exported: true },
+    ]);
+  });
+
+  it("drops column-0 locals that a later stray closing brace shows were in a block", () => {
+    const source = [
+      "export function outer() {",
+      "foo( {",
+      "function loc1() {}",
+      "function loc2() {}",
+      "}",
+      "export function after() {}",
+    ].join("\n");
+    expect(names("typescript", source)).toEqual(["function after"]);
+  });
+
+  it("keeps a bare `export default` line with the declaration under it", () => {
+    const source = "foo( {\nexport default\nclass C {}\nexport const k = 1;\n";
+    expect(symbolsOf("typescript", source).symbols).toEqual([
+      { qualifiedName: "C", kind: "class", startLine: 2, endLine: 3, exported: true },
+      { qualifiedName: "k", kind: "variable", startLine: 4, endLine: 4, exported: true },
+    ]);
   });
 });
 
 describe("extractSymbols (python) after a syntax error", () => {
-  it("recovers the definitions after an unclosed paren and keeps the broken binding", () => {
+  it("recovers the definitions after an unclosed paren", () => {
     const source = [
       "x = foo(",
       "",
@@ -275,6 +365,43 @@ describe("extractSymbols (python) after a syntax error", () => {
       { qualifiedName: "_K.m", kind: "method", startLine: 8, endLine: 9, exported: true },
       { qualifiedName: "LIMIT", kind: "variable", startLine: 11, endLine: 11, exported: true },
     ]);
+  });
+
+  it("never cuts a chunk inside a triple-quoted string", () => {
+    const source = [
+      "x = foo(",
+      's = """',
+      "def fake1():",
+      "    pass",
+      "def fake2():",
+      "    pass",
+      '"""',
+      "def real():",
+      "    pass",
+    ].join("\n");
+    expect(names("python", source)).toEqual(["function real"]);
+    const docstring = [
+      "class Svc:",
+      '    """',
+      "def usage(): ...",
+      '    """',
+      "    def m(self):",
+      "        foo(",
+      "def after():",
+      "    pass",
+    ].join("\n");
+    expect(symbolsOf("python", docstring).symbols).toEqual([
+      { qualifiedName: "Svc", kind: "class", startLine: 1, endLine: 6, exported: true },
+      { qualifiedName: "Svc.m", kind: "method", startLine: 5, endLine: 6, exported: true },
+      { qualifiedName: "after", kind: "function", startLine: 7, endLine: 8, exported: true },
+    ]);
+  });
+
+  it("does not take column-0 keyword arguments for bindings", () => {
+    const source = ["setup(", "name='foo'", "version='1.0',", ")", "def real():", "    pass"].join(
+      "\n",
+    );
+    expect(names("python", source)).toEqual(["function real"]);
   });
 
   it("returns the same symbols for the same broken source", () => {
