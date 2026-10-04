@@ -1,6 +1,7 @@
 import { type Manifest, memberId } from "@repowiki/core";
 import { INGEST_PY, makeFeature, makeManifest, SHA_A } from "@repowiki/core/test-fixtures";
 import type { CommitInfo, IndexedFile, RepoIndex } from "../index/index.ts";
+import type { VerifyContext } from "../verify/index.ts";
 
 export const STORE_PY = "def save_signal(signal):\n    return signal\n";
 export const CRUD_PY = [
@@ -115,4 +116,16 @@ export function testWiki() {
     },
   ];
   return { index, manifest, sources, history };
+}
+
+/** testWiki() as verify sees it. Test-only. */
+export function testVerifyContext(): VerifyContext {
+  const { index, sources, history } = testWiki();
+  const symbols = new Map(index.files.map((f) => [f.path, f.symbols]));
+  return {
+    sha: index.sha,
+    sources,
+    symbolsOf: (path) => symbols.get(path) ?? [],
+    commits: history,
+  };
 }
