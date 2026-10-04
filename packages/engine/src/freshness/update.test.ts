@@ -1058,6 +1058,24 @@ describe("updateWiki", () => {
           expect(historyOf("storage")).toEqual(bothParents());
         });
 
+        it("carries the History of a chain of merges one update made, each page's in turn", async () => {
+          await withStorage();
+          const { merge } = mergePaging();
+          await updateWith(
+            merge,
+            [
+              op({ kind: "merge", feature: "deliverables", into: "signals" }),
+              op({ kind: "merge", feature: "signals", into: "storage" }),
+            ],
+            storagePage,
+          );
+          expect(store.getCurrentRevision("storage")?.reason).toBe("manifest-change");
+          expect(historyOf("storage")).toEqual([
+            ["Signal ingestion was added first.", [first]],
+            ["Deliverables was added first.", [first]],
+          ]);
+        });
+
         it("carries them once when a fill-in build and then an update write the page whole", async () => {
           await fillIn(await mergedIntoMissing());
           await renameStorage();

@@ -174,13 +174,7 @@ export async function buildWiki(
     const carry = new Map(
       missing.map((id) => [
         id,
-        carriedHistory(
-          manifest,
-          id,
-          null,
-          (f) => store.getCurrentRevision(f),
-          () => false,
-        ),
+        carriedHistory(manifest, id, null, (f) => store.getCurrentRevision(f), input.history),
       ]),
     );
     written = await writePages(

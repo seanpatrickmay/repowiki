@@ -1,7 +1,6 @@
 import type { Claim, Manifest, Revision } from "@repowiki/core";
 import type { FetchLike, Provider } from "@repowiki/llm";
 import type { ClusterOptions } from "../cluster/index.ts";
-import { isAncestor } from "../index/index.ts";
 import {
   codeAliases,
   featureNeighbours,
@@ -191,12 +190,11 @@ export async function updateWiki(
     ...(options.wikipediaFetch === undefined ? {} : { fetch: options.wikipediaFetch }),
     now,
   };
-  // A whole page carries its own History and that of every page merged into it (#357).
+  // A whole page carries its own History and that of every page merged into it, transitively.
   const carry = new Map(
     whole.map((id) => {
       const own = pages.get(id) ?? null;
-      const contains = (sha: string) => own !== null && isAncestor(input.repo, sha, own.sha);
-      return [id, carriedHistory(manifest, id, own, (f) => pages.get(f) ?? null, contains)];
+      return [id, carriedHistory(manifest, id, own, (f) => pages.get(f) ?? null, history)];
     }),
   );
   const budget = options.budgetTokens === undefined ? {} : { budgetTokens: options.budgetTokens };
