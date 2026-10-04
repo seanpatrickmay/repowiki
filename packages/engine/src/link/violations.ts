@@ -121,3 +121,39 @@ export function architectureLinksWithoutPage(
   }
   return count;
 }
+
+/**
+ * linkViolations for a stored revision, which may be older than the latest manifest (an update
+ * carries a page forward, and a later merge can turn one of its [[id]] links into a redirect):
+ * its links are judged against `own`, the manifest at the revision's sha, as the linker wrote
+ * them, and each target must still route today in `latest` (spec §8 "no links to nonexistent
+ * IDs"): a redirect or disambiguation page, or an active or retired feature with a stored page.
+ * An active feature with no page is not a problem here; linksWithoutPage counts it.
+ */
+export function storedLinkViolations(
+  revision: Revision,
+  own: Manifest,
+  latest: Manifest,
+  pages: ReadonlySet<string>,
+): string[] {
+  const kindOf = new Map(latest.features.map((f) => [f.id, f.status.kind]));
+  const routes = (id: string): boolean => {
+    const kind = kindOf.get(id);
+    if (kind === "redirect" || kind === "disambiguation" || kind === "active") return true;
+    return kind === "retired" && pages.has(id);
+  };
+  const targets = [
+    ...revision.seeAlso,
+    ...revision.sections.flatMap((s) =>
+      s.claims.flatMap((c) =>
+        linkTokensIn(c.text)
+          .map(({ target }) => target)
+          .filter((target) => !target.startsWith("wp:")),
+      ),
+    ),
+  ];
+  const unrouted = [...new Set(targets)]
+    .filter((id) => !routes(id))
+    .map((id) => `${revision.featureId}: a link to ${quote(id)} no longer leads to a page`);
+  return [...linkViolations(revision, own), ...unrouted];
+}

@@ -9,19 +9,20 @@ import {
   DEFAULT_MAX_FILE_BYTES,
   GitError,
   linksWithoutPage,
-  linkViolations,
   openStore,
   readHistory,
   readSources,
   revisionProblems,
+  storedLinkViolations,
 } from "@repowiki/engine";
 
 /**
  * pnpm wiki:check <repo> [--out dir]: spec §8's first two invariants on the stored wiki. Every
  * code citation of every current page resolves at its sha with a matching hash, every commit
  * citation names a commit in the history of the wiki's sha (read-only git), every diagram is
- * safe, and every link and See also entry names an active feature (a link may name a
- * disambiguation page). It also counts, for information only, the links and See also entries
+ * safe, and every link and See also entry named an active feature in the manifest at its page's own
+ * sha (a link may name a disambiguation page) and still leads to a page today (an update carries
+ * pages forward, and a later merge turns their links into redirects). It also counts, for information only, the links and See also entries
  * that name an active feature with no stored page. The project's article (the About page) is
  * checked the same way, and its links and named pages count with the pages' own when they name an
  * active feature with no stored page. Read-only; exits 1 on any problem, and 2 for a usage error:
@@ -104,13 +105,18 @@ try {
         ...pages.flatMap((page) => [
           ...revisionProblems(page, sourcesAt),
           ...commitCitationProblems(page, history),
-          ...linkViolations(page, manifest),
+          ...storedLinkViolations(
+            page,
+            store.getManifest(page.sha) ?? manifest,
+            manifest,
+            withPage,
+          ),
         ]),
         ...(article === null
           ? []
           : [
               ...architectureProblems(article, sourcesAt, history),
-              ...architectureLinkViolations(article, manifest),
+              ...architectureLinkViolations(article, store.getManifest(article.sha) ?? manifest),
             ]),
       ];
       const citations = [...pages, ...(article === null ? [] : [article])].flatMap((p) =>

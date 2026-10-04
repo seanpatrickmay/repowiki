@@ -384,4 +384,34 @@ describe("wiki-check.ts as a process (no network)", () => {
       "2 code citations re-hashed and 1 commit citations resolved; 1 problems",
     );
   });
+
+  it("judges a carried page's links at its own sha, after a later merge made one a redirect", () => {
+    const { repo, sha } = gitRepo();
+    const out = pageOf(repo, sha, sha);
+    const store = openStore(join(out, "wiki.db"));
+    // An update at a later commit merged deliverables into signals; the page carried forward.
+    store.putManifest(
+      makeManifest({
+        sha: SHA_B,
+        features: [
+          makeFeature(),
+          makeFeature({
+            id: "deliverables",
+            title: "Deliverables",
+            aliases: [],
+            status: { kind: "redirect", to: "signals" },
+            lineage: [
+              { kind: "create", sha: SHA_A },
+              { kind: "merge", sha: SHA_B, into: "signals" },
+            ],
+          }),
+        ],
+        membership: { "src/signals/ingest.py#ingest_chunk": { featureId: "signals", weight: 0.9 } },
+      }),
+    );
+    store.close();
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
 });
