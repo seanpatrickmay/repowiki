@@ -29,6 +29,14 @@ export {
   LineageEvent,
 } from "./feature.ts";
 export { LedgerEntry, LlmConfigFile, LlmRole, RunKind } from "./llm.ts";
+export {
+  LLMS_TXT_EXPORT_PATH,
+  LLMS_TXT_FILE,
+  LLMS_TXT_SUMMARY_MAX_LENGTH,
+  llmsTxtLine,
+  plainClaimText,
+  renderLlmsTxt,
+} from "./llms-txt.ts";
 export { Manifest, MemberId, Membership } from "./manifest.ts";
 export { memberId, parseMemberId } from "./member-id.ts";
 export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";
