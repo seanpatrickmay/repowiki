@@ -14,6 +14,15 @@ export {
   type WeightedEdge,
 } from "./cluster/index.ts";
 export {
+  measureDrift,
+  type PagePlan,
+  planPages,
+  planUpdate,
+  UpdateError,
+  type UpdateInput,
+  type UpdatePlan,
+} from "./freshness/index.ts";
+export {
   type CallEdge,
   type CoChange,
   type CoChangePair,
