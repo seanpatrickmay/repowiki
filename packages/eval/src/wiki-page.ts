@@ -1,5 +1,6 @@
 import type { Architecture, Citation, Claim, Revision } from "@repowiki/core";
 import { count, cut, oneLine, toolText } from "./text.ts";
+import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
 import { ABOUT_PAGE_ID, reference, type WikiView } from "./wiki-view.ts";
 
 const SECTION_TITLES: Readonly<Record<string, string>> = {
@@ -46,7 +47,51 @@ function renderSections(
   return lines;
 }
 
-function renderFeaturePage(view: WikiView, featureId: string, from: string | null): string {
+const codePoints = (lines: readonly string[]) => [...`${lines.join("\n")}\n`].length;
+
+/**
+ * A feature page as lines, fitted to `max` code points by leaving out whole parts, least useful
+ * first: the oldest history entries, then See also. The claims and their References always stay
+ * (a longer page is cut by the tool's cap); a last line says what was left out.
+ */
+function fitPage(
+  core: readonly string[],
+  seeAlso: string | null,
+  revisions: readonly string[],
+  max: number,
+): string[] {
+  const assemble = (dropped: number, withSeeAlso: boolean, note: string | null) => [
+    ...core,
+    ...(withSeeAlso && seeAlso !== null ? ["", seeAlso] : []),
+    ...(dropped < revisions.length
+      ? ["", `Page history, oldest first: ${revisions.slice(dropped).join("; ")}`]
+      : []),
+    ...(note === null ? [] : ["", note]),
+  ];
+  const whole = assemble(0, true, null);
+  if (codePoints(whole) <= max) return whole;
+  const noteFor = (dropped: number, withSeeAlso: boolean) => {
+    const parts = [
+      dropped === revisions.length
+        ? "the whole page history"
+        : `the ${dropped} oldest page history ${dropped === 1 ? "entry" : "entries"}`,
+      ...(withSeeAlso || seeAlso === null ? [] : ["the See also list"]),
+    ];
+    return `(Left out to fit the ${max}-character limit: ${parts.join(" and ")}.)`;
+  };
+  for (let dropped = 1; dropped <= revisions.length; dropped++) {
+    const lines = assemble(dropped, true, noteFor(dropped, true));
+    if (codePoints(lines) <= max) return lines;
+  }
+  return assemble(revisions.length, false, noteFor(revisions.length, false));
+}
+
+function renderFeaturePage(
+  view: WikiView,
+  featureId: string,
+  from: string | null,
+  max: number,
+): string {
   const page = view.pages.get(featureId) as Revision;
   const feature = view.features.get(featureId);
   const box = page.infobox;
@@ -66,18 +111,15 @@ function renderFeaturePage(view: WikiView, featureId: string, from: string | nul
     ...renderSections(view, page.sections),
   ];
   const seeAlso = page.seeAlso.filter((id) => view.hasRoute(id));
-  if (seeAlso.length > 0) {
-    lines.push(
-      "",
-      `See also: ${seeAlso.map((id) => `${id} (${oneLine(view.title(id))})`).join(", ")}`,
-    );
-  }
+  const seeAlsoLine =
+    seeAlso.length === 0
+      ? null
+      : `See also: ${seeAlso.map((id) => `${id} (${oneLine(view.title(id))})`).join(", ")}`;
   const revisions = history.map(
     (r) =>
       `${date(r.commitDate)} commit ${sha7(r.sha)} (${r.reason}${r.pr === null ? "" : `, pull request #${r.pr}`})`,
   );
-  lines.push("", `Page history, oldest first: ${revisions.join("; ")}`);
-  return `${lines.join("\n")}\n`;
+  return `${fitPage(lines, seeAlsoLine, revisions, max).join("\n")}\n`;
 }
 
 function renderAbout(view: WikiView): string {
@@ -105,11 +147,12 @@ function renderChoices(view: WikiView, from: string, targets: readonly string[])
  * One page as the wiki agent reads it (read_page): a feature page with its status, aliases,
  * infobox, claims, numbered references, See also and dated history; the About article; or the
  * choices of a disambiguation. Redirects and alias routes are followed as the site follows them.
+ * A feature page over `max` code points leaves out its oldest history, then its See also list.
  */
-export function readPage(view: WikiView, id: string): string {
+export function readPage(view: WikiView, id: string, max = MAX_TOOL_RESULT_CHARS): string {
   const resolved = view.resolve(id);
   if (resolved.kind === "about") return toolText(renderAbout(view));
   if (resolved.kind === "choices")
     return toolText(renderChoices(view, resolved.from, resolved.targets));
-  return toolText(renderFeaturePage(view, resolved.featureId, resolved.from));
+  return toolText(renderFeaturePage(view, resolved.featureId, resolved.from, max));
 }

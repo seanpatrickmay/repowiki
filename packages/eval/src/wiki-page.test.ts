@@ -99,6 +99,56 @@ describe("readPage", () => {
     expect(about).not.toMatch(/^Page history/m);
   });
 
+  it("fits a long page under the cap by leaving out the oldest history, then See also", () => {
+    const wiki = structuredClone(sample.wiki);
+    const page = wiki.pages.find((p) => p.featureId === "signals");
+    if (page === undefined) throw new Error("the fixture has signals");
+    const dates = ["2026-01-03", "2026-02-01", "2026-03-01", "2026-04-01", "2026-05-01"];
+    wiki.history.signals = dates.map((date, i) => ({
+      ...page,
+      sha: String(i + 1).repeat(40),
+      commitDate: `${date}T00:00:00Z`,
+      reason: i === 0 ? "build" : "update",
+      pr: i === 0 ? null : 10 + i,
+    }));
+    const view = new WikiView(wiki);
+    const full = readPage(view, "signals");
+    expect(readPage(view, "signals", full.length)).toBe(full);
+    const keeps = (text: string) => {
+      for (const part of [
+        "\nLead\n- **Signal ingestion**",
+        "\nKnown limitations\n",
+        "\n[5] src/",
+      ]) {
+        expect(text).toContain(part);
+      }
+    };
+
+    const trimmed = readPage(view, "signals", full.length - 1);
+    expect([...trimmed].length).toBeLessThanOrEqual(full.length - 1);
+    keeps(trimmed);
+    expect(trimmed).toContain("See also: deliverables (Deliverables)");
+    expect(trimmed).toContain("2026-05-01 commit 5555555 (update, pull request #14)");
+    expect(trimmed).not.toContain("2026-01-03 commit 1111111");
+    expect(trimmed).toMatch(
+      /\n\(Left out to fit the \d+-character limit: the [1-4] oldest page history entries\.\)\n$/,
+    );
+
+    const core = full.slice(0, full.indexOf("\nSee also:"));
+    const bare = readPage(view, "signals", core.length + 100);
+    keeps(bare);
+    expect(bare).not.toContain("See also:");
+    expect(bare).not.toContain("Page history");
+    expect(
+      bare.endsWith(
+        "\n(Left out to fit the " +
+          String(core.length + 100) +
+          "-character limit: the whole page history and the See also list.)\n",
+      ),
+    ).toBe(true);
+    expect([...bare].length).toBeLessThanOrEqual(core.length + 100);
+  });
+
   it("reads the About article, with the pages its claims rest on", () => {
     const text = readPage(new WikiView(extendedWiki(sample)), ABOUT_PAGE_ID);
     expect(text.split("\n")[0]).toBe(
