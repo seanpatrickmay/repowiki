@@ -19,13 +19,13 @@ import {
   TOKEN_SHARE,
   tokensOf,
 } from "./summary.ts";
-import { cut, oneLine } from "./text.ts";
+import { markdownText, oneLine } from "./text.ts";
 
 const count = (n: number) => Math.round(n).toLocaleString("en-US");
 const percent = (x: number) => `${Math.round(x * 1000) / 10}%`;
 const usd = (x: number) => `$${x.toFixed(4)}`;
-/** Model or author text in a table cell: one line, cut short, no pipe to split the row. */
-const cell = (text: string, max = 120) => cut(oneLine(text), max).replace(/\|/g, "\\|");
+/** Model or author text in the report: one line of plain text, cut short (markdownText). */
+const cell = (text: string, max = 120) => markdownText(text, max);
 const KINDS: readonly QuestionKind[] = ["where", "how", "why", "what-changed"];
 
 /** The run's report for the owner (spec §9): accuracy, tokens, the pass test and the break-even point. */

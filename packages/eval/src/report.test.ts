@@ -81,6 +81,28 @@ function judgedAs(entry: { entry: string; questionId: string }, recorded = recor
   throw new Error(`no agent for ${entry.entry}`);
 }
 
+describe("text from a model or the author in the report", () => {
+  it("is one line of plain text: no markdown, no HTML and no invisible characters", () => {
+    const hostile =
+      "See [x](https://e.example) ![p](https://e.example/p.png) <img src=x> `code` **b** _i_ ~~s~~ #h a\\b | c\u200B\u00AD\u{E0041}\u2060 end";
+    const recorded = records().map((r) =>
+      r.kind === "judgment" && r.questionId === "q1" && r.agent === "wiki"
+        ? { ...r, reason: hostile }
+        : r,
+    );
+    const text = renderReport(
+      summarize(info({ repo: "[evil](https://e.example)" }), recorded),
+      recorded,
+      null,
+    );
+    expect(text).toContain(
+      "  - wiki (1): See \\[x\\]\\(https://e.example\\) \\!\\[p\\]\\(https://e.example/p.png\\) \\<img src=x\\> \\`code\\` \\*\\*b\\*\\* \\_i\\_ \\~\\~s\\~\\~ \\#h a\\\\b \\| c end",
+    );
+    expect(text.split("\n")[0]).toBe("# Eval: \\[evil\\]\\(https://e.example\\), held-out set");
+    expect(text).not.toMatch(/[\u200B\u00AD\u2060]|\u{E0041}/u);
+  });
+});
+
 describe("the owner's agreement with the judge", () => {
   it("joins each entry to its judgment in results.jsonl and names the agent only there", () => {
     const check = spotCheckSample(info(), records());
@@ -114,6 +136,7 @@ describe("the owner's agreement with the judge", () => {
     const line = text.split("\n").find((l) => l.startsWith("- Disagrees on")) ?? "";
     expect(line).toContain("The judge's reason: Wrong file, see ");
     expect(line).not.toMatch(/[\u200B\u202E]/);
+    expect(line).toContain("see \\[x\\]\\(https://e.example\\) \\# heading");
   });
 
   it("does not count a marked entry that has no judgment in results.jsonl", () => {
