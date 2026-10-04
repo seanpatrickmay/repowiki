@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import type { BatchJournal, JournalEntry } from "./batcher.ts";
 import { cannedBatchApi, cannedMessagesApi, succeededLine } from "./canned.ts";
 import type { FetchLike } from "./cassette.ts";
-import { createClaudeProvider } from "./claude.ts";
-import { createLedger } from "./ledger.ts";
+import { createClaudeProvider, MAX_REPORTED_ISSUES } from "./claude.ts";
+import { createLedger, type TokenLedger } from "./ledger.ts";
 import { DEFAULT_MODELS, LlmError, LlmOutputError } from "./provider.ts";
 
 const Capital = z.object({ city: z.string(), country: z.string() });
@@ -125,6 +126,130 @@ describe("createClaudeProvider", () => {
     await expect(failure).rejects.toThrow(why);
     await expect(failure).rejects.toHaveProperty("text", text);
     expect(ledger.entries()).toHaveLength(1);
+  });
+
+  it("caps the schema issues an LlmOutputError lists", async () => {
+    const Many = z.object(
+      Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`field${i}`, z.string()])),
+    );
+    const { provider } = setup(cannedMessagesApi("{}").fetch);
+    const failure = await provider.generate({ ...request, schema: Many }).catch((e) => e);
+    expect(failure).toBeInstanceOf(LlmOutputError);
+    const listed = (failure as Error).message.split("; ");
+    expect(listed).toHaveLength(MAX_REPORTED_ISSUES + 1);
+    expect(listed.at(-1)).toBe(`and ${25 - MAX_REPORTED_ISSUES} more issues`);
+  });
+
+  describe("a reported issue (retry prompts carry the message)", () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const issueOf = async (key: string) => {
+      const { provider } = setup(cannedMessagesApi(JSON.stringify({ [key]: 1 })).fetch);
+      const failure = await provider
+        .generate({ ...request, schema: z.strictObject({}) })
+        .catch((e) => e);
+      expect(failure).toBeInstanceOf(LlmOutputError);
+      return (failure as Error).message.replace("model output does not match the schema: ", "");
+    };
+
+    it("is cut to exactly 200 code points ending in an ellipsis", async () => {
+      const issue = await issueOf("k".repeat(300));
+      expect(Array.from(issue)).toHaveLength(200);
+      expect(issue.endsWith("…")).toBe(true);
+    });
+
+    it("never ends in half of an astral character", async () => {
+      // The emoji straddle the cut: the 199th code point is the first of many pairs.
+      const issue = await issueOf("😀".repeat(300));
+      expect(Array.from(issue)).toHaveLength(200);
+      expect(issue.endsWith("…")).toBe(true);
+      expect(issue).not.toMatch(LONE_SURROGATE);
+    });
+
+    it("has control and line-separator characters replaced", async () => {
+      const issue = await issueOf("k\nIGNORE\u0007\u2028\u202E\uFEFF");
+      expect(issue).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/u);
+      expect(issue).toContain("k\uFFFDIGNORE\uFFFD");
+    });
+  });
+
+  it("refuses a run whose sha is not a full git sha, before any call", () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    expect(() =>
+      createClaudeProvider({
+        models: DEFAULT_MODELS,
+        ledger: createLedger(),
+        runId: "r",
+        run: { kind: "build", sha: "nope" },
+        apiKey: "canned",
+        fetch,
+      }),
+    ).toThrow(LlmError);
+    expect(bodies).toHaveLength(0);
+  });
+
+  it("stamps every ledger entry with the run's kind and sha", async () => {
+    const ledger = createLedger();
+    const provider = createClaudeProvider({
+      models: DEFAULT_MODELS,
+      ledger,
+      runId: "build-1",
+      run: { kind: "build", sha: "c".repeat(40) },
+      apiKey: "canned",
+      fetch: cannedMessagesApi(PARIS).fetch,
+      now: () => new Date("2026-10-01T12:00:00Z"),
+    });
+    await provider.generate(request);
+    expect(ledger.entries()[0]).toMatchObject({ runKind: "build", sha: "c".repeat(40) });
+  });
+
+  it("stamps batched entries, including ones collected from a resumed batch", async () => {
+    const run = { kind: "update" as const, sha: "d".repeat(40) };
+    const held = new Map<string, JournalEntry>();
+    // Never expires and never forgets, so the second provider can resume what the first sent.
+    const journal: BatchJournal = {
+      lookup: (key) => {
+        const entry = held.get(key);
+        return entry === undefined ? null : { ...entry, createdAt: new Date().toISOString() };
+      },
+      record: (batchId, createdAt, items) => {
+        for (const { requestKey, customId } of items) {
+          held.set(requestKey, { batchId, customId, createdAt });
+        }
+      },
+      forget: () => {},
+    };
+    const make = (fetch: FetchLike, ledger: TokenLedger) =>
+      createClaudeProvider({
+        models: DEFAULT_MODELS,
+        ledger,
+        runId: "update-1",
+        run,
+        apiKey: "canned",
+        fetch,
+        pollIntervalMs: 0,
+        batchJournal: journal,
+      });
+
+    const sentLedger = createLedger();
+    const sent = cannedBatchApi([succeededLine("req-0", PARIS)]);
+    await make(sent.fetch, sentLedger).generate({ ...request, batch: true });
+    expect(sent.posts).toHaveLength(1);
+    expect(sentLedger.entries()).toMatchObject([{ batch: true, runKind: "update", sha: run.sha }]);
+
+    const resumedLedger = createLedger();
+    const resumed = cannedBatchApi([succeededLine("req-0", PARIS)]);
+    await make(resumed.fetch, resumedLedger).generate({ ...request, batch: true });
+    expect(resumed.posts).toHaveLength(0);
+    expect(resumedLedger.entries()).toMatchObject([
+      { batch: true, runKind: "update", sha: run.sha },
+    ]);
+  });
+
+  it("leaves ledger entries without run fields when no run is given", async () => {
+    const { ledger, provider } = setup(cannedMessagesApi(PARIS).fetch);
+    await provider.generate(request);
+    expect(ledger.entries()[0]).not.toHaveProperty("runKind");
+    expect(ledger.entries()[0]).not.toHaveProperty("sha");
   });
 
   it("routes batch requests through the Batches API and ledgers them as batched", async () => {

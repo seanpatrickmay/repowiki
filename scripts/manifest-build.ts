@@ -42,6 +42,7 @@ async function main(): Promise<void> {
           models,
           ledger,
           runId,
+          run: { kind: "build", sha: index.sha },
           batchJournal: {
             lookup: (key) => store.findBatchRequest(key),
             record: (batchId, createdAt, items) =>

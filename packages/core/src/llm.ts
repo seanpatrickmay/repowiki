@@ -1,11 +1,18 @@
 import { z } from "zod";
 import { FeatureId } from "./feature.ts";
-import { IsoDateTime } from "./primitives.ts";
+import { GitSha, IsoDateTime } from "./primitives.ts";
 import { TokenUsage } from "./revision.ts";
 
 /** What an LLM call is for. Each role has its own model id in config (spec §4). */
 export const LlmRole = z.enum(["manifest", "write", "tieBreak", "evalAgent", "evalJudge"]);
 export type LlmRole = z.infer<typeof LlmRole>;
+
+/**
+ * What a run did: a full build (manifest and pages) or an update (spec §6.4 compares the two).
+ * Ledger rows written before M4 have no run kind.
+ */
+export const RunKind = z.enum(["build", "update"]);
+export type RunKind = z.infer<typeof RunKind>;
 
 /** One provider call, as recorded in the TokenLedger and stored by the store. */
 export const LedgerEntry = z.object({
@@ -20,6 +27,10 @@ export const LedgerEntry = z.object({
   batch: z.boolean(),
   cacheKey: z.string().min(1).nullable(),
   tokens: TokenUsage,
+  /** The kind of run that made the call; absent on rows written before M4. */
+  runKind: RunKind.optional(),
+  /** The commit the run built or updated to; absent on rows written before M4. */
+  sha: GitSha.optional(),
 });
 export type LedgerEntry = z.infer<typeof LedgerEntry>;
 

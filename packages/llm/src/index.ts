@@ -15,7 +15,7 @@ export {
   cassetteMode,
   type FetchLike,
 } from "./cassette.ts";
-export { type ClaudeProviderOptions, createClaudeProvider } from "./claude.ts";
+export { type ClaudeProviderOptions, createClaudeProvider, MAX_REPORTED_ISSUES } from "./claude.ts";
 export { createLedger, type LedgerTotals, type TokenLedger, totalsOf } from "./ledger.ts";
 export {
   BATCH_PRICE_FACTOR,

@@ -12,8 +12,23 @@ describe("LedgerEntry", () => {
     ["negative tokens", { tokens: { in: -1, out: 0, cacheRead: 0, cacheWrite: 0 } }],
     ["a timestamp without offset", { at: "2026-10-01 12:00" }],
     ["a non-slug feature id", { featureId: "Signals" }],
+    ["an unknown run kind", { runKind: "replay" }],
+    ["a short sha", { sha: "abc1234" }],
   ])("rejects %s", (_name, overrides) => {
     expect(LedgerEntry.safeParse({ ...makeLedgerEntry(), ...overrides }).success).toBe(false);
+  });
+});
+
+describe("LedgerEntry run fields (spec §6.4)", () => {
+  it("accepts a row that names its run kind and sha", () => {
+    const entry = makeLedgerEntry({ runKind: "build", sha: "a".repeat(40) });
+    expect(LedgerEntry.parse(entry)).toEqual(entry);
+  });
+
+  it("still reads a row written before runs had a kind or sha", () => {
+    const parsed = LedgerEntry.parse(JSON.parse(JSON.stringify(makeLedgerEntry())));
+    expect(parsed).not.toHaveProperty("runKind");
+    expect(parsed).not.toHaveProperty("sha");
   });
 });
 
