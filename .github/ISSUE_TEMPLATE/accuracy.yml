@@ -1,0 +1,43 @@
+name: False claim (accuracy review)
+description: A claim on a wiki page that the code at its revision does not support (spec section 9, exit criterion 2).
+title: "[accuracy] "
+labels: ["accuracy", "v1", "area:eval"]
+body:
+  - type: input
+    id: claim
+    attributes:
+      label: Page and claim
+      description: "The id from the review sheet, e.g. signals/s-2."
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Wiki commit
+      description: The commit in the review sheet's heading.
+    validations:
+      required: true
+  - type: textarea
+    id: text
+    attributes:
+      label: The claim, as the page states it
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What the code does instead
+      description: Cite path:line at the wiki commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: cause
+    attributes:
+      label: Likely cause
+      options:
+        - The claim misreads the lines it cites
+        - The cited lines do not say it
+        - It was true at an older commit
+        - Other
+    validations:
+      required: true
