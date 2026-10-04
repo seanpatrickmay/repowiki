@@ -77,15 +77,13 @@ export interface WikiUpdate {
   carried: string[];
   /** Claims this update marked out of date. */
   staleClaims: number;
+  /** Whole pages that could not be written (not stored; the update went on), sorted by feature. */
+  failures: { featureId: string; failure: string }[];
   /** Why the project's article was rewritten, or null when it carried forward. */
   articleDue: ArticleDue | null;
   /** The article's round, or null when it carried forward. */
   architecture: ArchitectureOutcome | null;
 }
-
-/** Only a call that failed, never a page the model could not support, stops an update. */
-const callFailed = (failure: string | null): boolean =>
-  failure !== null && /^the (write|update) call failed/.test(failure);
 
 /**
  * Moves the wiki from its head to index.sha (spec §6.1). planUpdate reads the diff and places
@@ -96,8 +94,10 @@ const callFailed = (failure: string | null): boolean =>
  * (`reason: "update"`, or `"manifest-change"` for a page written whole after the operations),
  * with the PR the new commit merged; every other page carries forward. The manifest at index.sha
  * (marked as the new drift baseline when an LLM revised it), the revisions and the head are
- * stored in one transaction, which also flushes `journal`. A call that fails stops the update
- * before anything is stored (spec §6.3).
+ * stored in one transaction, which also flushes `journal`. Only a call or batch that failed
+ * (`callFailed`, after the SDK's retries) stops the update before anything is stored (spec §6.3):
+ * a whole page the model's answers could not give is left out and listed in `failures`, and its
+ * journal rows are forgotten with the others.
  */
 export async function updateWiki(
   store: Store,
@@ -186,9 +186,9 @@ export async function updateWiki(
   ]);
   const outcomes = rewritten?.outcomes ?? [];
   const failed = [
-    ...outcomes.filter((o) => callFailed(o.failure)).map((o) => `${o.featureId}: ${o.failure}`),
+    ...outcomes.filter((o) => o.callFailed).map((o) => `${o.featureId}: ${o.failure}`),
     ...(written?.pages ?? [])
-      .filter((p) => callFailed(p.failure))
+      .filter((p) => p.callFailed)
       .map((p) => `${p.featureId}: ${p.failure}`),
   ];
   if (failed.length > 0)
@@ -240,8 +240,16 @@ export async function updateWiki(
     );
     stored.push(assembled.revision);
   }
+  const failures: { featureId: string; failure: string }[] = [];
   for (const page of written?.pages ?? []) {
-    if (page.revision === null) continue;
+    if (page.revision === null) {
+      // Not stored, and not an abort: only a failed call stops the update. Its journal rows are
+      // forgotten with the rest, so a rerun does not replay the same answers.
+      const failure = page.failure ?? "the page could not be written";
+      log(`${page.featureId}: not stored: ${failure}`);
+      failures.push({ featureId: page.featureId, failure });
+      continue;
+    }
     const parent = pages.get(page.featureId);
     const reason =
       affected.has(page.featureId) || parent !== undefined ? "manifest-change" : "build";
@@ -297,6 +305,9 @@ export async function updateWiki(
     stored,
     carried: kept.sort(),
     staleClaims,
+    failures: failures.sort((a, b) =>
+      a.featureId < b.featureId ? -1 : a.featureId > b.featureId ? 1 : 0,
+    ),
     articleDue: due,
     architecture,
   };

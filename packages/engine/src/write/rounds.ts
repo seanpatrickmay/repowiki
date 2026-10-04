@@ -82,6 +82,8 @@ export interface PageState {
   /** Raw answer text of an unusable first answer, and why it was unusable. */
   rejected: { text: string; reason: string } | null;
   failure: string | null;
+  /** True when `failure` is a failed call or batch, not an answer the model gave. */
+  callFailed: boolean;
   verified: Map<string, { key: SectionKey; claim: Claim }>;
   failing: Map<string, { key: SectionKey; claim: DraftClaim; problems: string[] }>;
   /** Failed claims no retry can fix, dropped without one (see setAsideUnfixable). */
@@ -97,6 +99,7 @@ export function newPageState(pack: ContextPack): PageState {
     draft: null,
     rejected: null,
     failure: null,
+    callFailed: false,
     verified: new Map(),
     failing: new Map(),
     unfixable: new Map(),

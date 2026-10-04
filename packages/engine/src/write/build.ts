@@ -72,6 +72,11 @@ export interface PageOutcome {
   /** Null when the page could not be written (see `failure`). */
   revision: Revision | null;
   failure: string | null;
+  /**
+   * True when `failure` is a call or batch that failed (a provider error, after the SDK's
+   * retries), false or absent for a page the model's answers could not give: an unusable answer, twice.
+   */
+  callFailed?: boolean;
   /** Claims dropped for failing verification, with the problems of the last attempt. */
   dropped: { section: SectionKey; text: string; problems: string[] }[];
   /** Write calls the model answered for the page: 1, or 2 with a retry. */
@@ -275,6 +280,7 @@ export async function writePages(
       state.rejected = { text: outcome.error.text, reason: outcome.error.message };
     } else {
       state.failure = `the write call failed: ${callFailure(outcome.error)}`;
+      state.callFailed = true;
     }
   });
 
@@ -321,6 +327,7 @@ export async function writePages(
     recordCall(state, answer.outcome);
     if (!("result" in answer.outcome)) {
       state.failure = `the write call failed twice: ${callFailure(answer.outcome.error)}`;
+      state.callFailed = !(answer.outcome.error instanceof LlmOutputError);
       return;
     }
     try {
@@ -368,7 +375,13 @@ export async function writePages(
     }));
     for (const d of dropped)
       log(`${featureId}: dropped a ${d.section} claim: ${d.problems.join("; ")}`);
-    const base = { featureId, dropped, calls: state.calls, tokens: state.tokens };
+    const base = {
+      featureId,
+      dropped,
+      calls: state.calls,
+      tokens: state.tokens,
+      callFailed: state.callFailed,
+    };
     let assembled: Assembled;
     if (state.failure !== null || state.draft === null) {
       assembled = {
