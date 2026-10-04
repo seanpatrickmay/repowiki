@@ -35,12 +35,13 @@ const answer = (...claims: UpdateClaim[]): UpdateDraft => ({
 async function run(
   respond: (featureId: string, call: number) => Answer,
   rewrites = [signalsRewrite()],
+  batch = true,
 ) {
   const { provider, requests } = pageProvider(respond);
   const lines: string[] = [];
   const { outcomes, cacheKey } = await rewritePages(
     { rewrites, ...testWiki() },
-    { provider, repoName: "sample", log: (l) => lines.push(l) },
+    { provider, repoName: "sample", log: (l) => lines.push(l), batch },
   );
   return { outcome: outcomes[0], outcomes, requests, lines, cacheKey };
 }
@@ -73,18 +74,27 @@ describe("rewritePages", () => {
     expect(cacheKey).toBeNull();
   });
 
-  it("sends every page's call in one turn, sharing a cached prefix", async () => {
-    const deliverables = signalsRewrite({
-      featureId: "deliverables",
-      claims: [],
-      changed: [],
-      commits: [],
-    });
+  const deliverables = () =>
+    signalsRewrite({ featureId: "deliverables", claims: [], changed: [], commits: [] });
+
+  it("sends every page's call in one turn, with no cached prefix when they are batched", async () => {
+    // A batch runs its requests concurrently, so most of them would each write the prefix.
     const { requests, cacheKey } = await run(
       (featureId) => (featureId === "signals" ? answer(lead, overview) : answer()),
-      [signalsRewrite(), deliverables],
+      [signalsRewrite(), deliverables()],
     );
     expect(requests.map((r) => r.turn)).toEqual([0, 0]);
+    expect(cacheKey).toBeNull();
+    expect(requests.map((r) => r.cacheKey)).toEqual([undefined, undefined]);
+  });
+
+  it("shares a cached prefix among two or more pages' calls with --no-batch", async () => {
+    const { requests, cacheKey } = await run(
+      (featureId) => (featureId === "signals" ? answer(lead, overview) : answer()),
+      [signalsRewrite(), deliverables()],
+      false,
+    );
+    expect(requests.map((r) => r.batch)).toEqual([false, false]);
     expect(cacheKey).toBe(updateCacheKey(testWiki().index.sha, requests[0]?.system ?? ""));
     expect(requests.every((r) => r.cacheKey === cacheKey)).toBe(true);
   });
