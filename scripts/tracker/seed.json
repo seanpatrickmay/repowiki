@@ -1105,6 +1105,161 @@
       "labels": ["v1", "type:task", "area:infra"],
       "parent": "F19",
       "body": "**Deliverable:** manifest:build and wiki:build of the RepoWiki repository into --out, never inside it.\n\n**Done when:** wiki:check passes on RepoWiki's own wiki and the cost is reported against the estimate. Plan: docs/superpowers/plans/2026-10-03-repowiki-m6-freshness.md Task 26."
+    },
+    {
+      "key": "M7-1",
+      "title": "[M7] tracker: M7 tickets",
+      "labels": ["v1", "type:task", "area:infra"],
+      "parent": "F19",
+      "closed": true,
+      "body": "**Deliverable:** M7 tickets in seed.json.\n\n**Done when:** the seed creates M7-2..M7-22 under their features. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 1."
+    },
+    {
+      "key": "M7-2",
+      "title": "[M7] core: render the wiki's llms.txt",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** renderLlmsTxt, llmsTxtLine, plainClaimText and the LLMS_TXT_* constants in @repowiki/core.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 2."
+    },
+    {
+      "key": "M7-3",
+      "title": "[M7] engine: llms.txt beside every export, on the site and with pnpm wiki:export",
+      "labels": ["v1", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** writeExport writes llms.txt beside the export; site:build writes llms.txt and export.json at the site's root; pnpm wiki:export rewrites both from the store with no call.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 3."
+    },
+    {
+      "key": "M7-4",
+      "title": "[M7] llm: the tool-use provider for the eval agents",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** createClaudeToolProvider (ToolProvider.turn: native tool use, one tool call per turn, tool_choice none on demand, a cache breakpoint at the conversation's end, one ledger row per turn) and an optional temperature on GenerateRequest.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 4."
+    },
+    {
+      "key": "M7-5",
+      "title": "[M7] eval: the eval package and the question file loader",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** packages/eval (@repowiki/eval); loadQuestions and selectQuestions for the author's exit-criteria file and the smoke file; the committed smoke questions about the fixture.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 5."
+    },
+    {
+      "key": "M7-6",
+      "title": "[M7] eval: the agents' tool framework, page search and the sample fixture",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** defineTool/toolSet (zod inputs, error results, a 12,000-character cap), toolText/oneLine/cut/count, the BM25F searchIndex, and the sampleWiki fixture (a two-commit repo and a wiki that cites its real lines).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 6."
+    },
+    {
+      "key": "M7-7",
+      "title": "[M7] eval: resolve the wiki agent's page ids as the site routes them",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** WikiView: the site's routes over an export (feature ids, redirects, alias slugs, titles, /wiki/<id>/ paths, disambiguations, the About article as special:about), claim text with linked page ids, page summaries, and citation references.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 7."
+    },
+    {
+      "key": "M7-8",
+      "title": "[M7] eval: render a wiki page for the agent",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** readPage: a feature page (status, aliases, infobox, claims with numbered references, stale marks, See also, dated history), the About article, or a disambiguation's choices.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 8."
+    },
+    {
+      "key": "M7-9",
+      "title": "[M7] eval: the wiki agent's search and read_page",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** createWikiTools: search(query) over every active page and the About article, and read_page(id).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 9."
+    },
+    {
+      "key": "M7-10",
+      "title": "[M7] eval: the repo agent's list_files, read_file and grep",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** createRepoTools(repo, sha): list_files, read_file and grep over git objects at the wiki's commit, never the working tree, with caps.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 10."
+    },
+    {
+      "key": "M7-11",
+      "title": "[M7] eval: an agent's tool-use loop under one turn limit",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** runAgent (at most one tool call per turn, the last turn forbids tools, tokens summed, the cache breakpoint on every turn, temperature 0) and both agents' system prompts.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 11."
+    },
+    {
+      "key": "M7-12",
+      "title": "[M7] eval: the judge",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** judgeAnswer: one blind evalJudge call per answer at temperature 0, a JSON-encoded user turn, a verdict of facts, and the 0/1 grade computed from them.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 12."
+    },
+    {
+      "key": "M7-13",
+      "title": "[M7] eval: a run's settings and records",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** RunInfo, AnswerRecord, JudgmentRecord and RunRecord schemas; openRun (refuses a run directory holding another run), readRunInfo, readRecords (a cut-short last line dropped).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 13."
+    },
+    {
+      "key": "M7-14",
+      "title": "[M7] eval: run a question set through both agents and the judge",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** runEval: each question to both agents side by side, each answer recorded at once, every unjudged answer judged in one go, resumable, stopped by --max-usd between questions.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 14."
+    },
+    {
+      "key": "M7-15",
+      "title": "[M7] eval: accuracy, tokens, the pass test and the break-even point",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** summarize: per-agent accuracy, tokens and cost per question, answers on the last turn, spec §9's pass test once complete, the break-even point from the export's build run.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 15."
+    },
+    {
+      "key": "M7-16",
+      "title": "[M7] eval: the author's spot-check sample",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** spotCheckSample: ten judgments, five per agent, in an order fixed by the run, with owner: null for the author to fill.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 16."
+    },
+    {
+      "key": "M7-17",
+      "title": "[M7] eval: a run's report",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** renderReport and writeReport: report.md with both agents' figures, the pass test, the break-even point, each question, the judge's reasons, the spot-check and the cost; spot-check.json written once complete and never over the author's grades.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 17."
+    },
+    {
+      "key": "M7-18",
+      "title": "[M7] eval: eval:run's arguments and cost estimate",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** parseEvalArgs, runDirFor, estimateEval and estimateLine in scripts/eval-cli.ts; the eval package's public entry.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 18."
+    },
+    {
+      "key": "M7-19",
+      "title": "[M7] eval: pnpm eval:run and pnpm eval:report",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** scripts/eval-run.ts (checks, the held-out guard, the estimate, the key, the lock, the run and the report) and scripts/eval-report.ts.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 19."
+    },
+    {
+      "key": "M7-20",
+      "title": "[M7] eval: the accuracy review sheet and tally",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** accuracySheet and tallySheet, and pnpm eval:accuracy sheet|tally.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 20."
+    },
+    {
+      "key": "M7-21",
+      "title": "[M7] eval: recorded smoke run and judge",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** eval.claude.test.ts and judge.claude.test.ts with their cassettes smoke-run.json and judge.json, recorded live once (about $0.06).\n\n**Done when:** both cassettes replay in CI with no network, the judge grades the hostile answer 0, and the secret scan passes. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 21."
+    },
+    {
+      "key": "M7-22",
+      "title": "[M7] eval: the author's exit-criteria kit",
+      "labels": ["v1", "type:task", "area:eval"],
+      "parent": "F25",
+      "body": "**Deliverable:** issue templates for false claims and rabbit-hole sessions; llms.txt regenerated for the stored wikis (no call); the author's runbook for spec section 9 posted on #29.\n\n**Done when:** the templates are merged and the runbook is on #29. The scored run is the author's. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 22."
     }
   ]
 }
