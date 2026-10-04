@@ -56,12 +56,23 @@ export function totalsOf(entries: readonly LedgerEntry[]): LedgerTotals {
 
 /**
  * Calls and tokens per run (spec §6.4), keyed by the run kind and sha the rows carry, in the order
- * each run first appears. Rows without a run kind or sha (written before M4) are left out.
+ * each run first appears. Rows without a run kind or sha (written before M4) are left out, and so
+ * is an answer a resumed run collected through the batch journal when an earlier run's row for
+ * the same request is already counted: that run paid for it, and it is counted once. A collected
+ * answer no earlier row has (its run was killed before reading it) is counted.
  */
 export function runTotals(entries: readonly LedgerEntry[]): RunTotal[] {
   const runs = new Map<string, RunTotal>();
+  /** Request key to the runs whose rows for it are counted. */
+  const counted = new Map<string, Set<string>>();
   for (const entry of entries) {
     if (entry.runKind === undefined || entry.sha === undefined) continue;
+    if (entry.requestKey !== undefined) {
+      const by = counted.get(entry.requestKey) ?? new Set<string>();
+      const paidEarlier = [...by].some((runId) => runId !== entry.runId);
+      if (entry.collected === true && paidEarlier) continue;
+      counted.set(entry.requestKey, by.add(entry.runId));
+    }
     const key = `${entry.runKind}\0${entry.sha}`;
     const run = runs.get(key) ?? {
       kind: entry.runKind,
