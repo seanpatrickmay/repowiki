@@ -71,6 +71,20 @@ describe("replaySteps", () => {
     }
   });
 
+  it("ends on the tagged commit when `to` is an annotated tag's own sha", () => {
+    repo = createTestRepo();
+    repo.write("a.py", "a = 1\n");
+    const root = repo.commit("feat: root");
+    repo.write("b.py", "b = 1\n");
+    const tip = repo.commit("chore: tip");
+    repo.git("tag", "-a", "v1", "-m", "release v1", tip);
+    const tag = repo.git("rev-parse", "v1").trim();
+    expect(tag).not.toBe(tip);
+    expect(replaySteps(repo.dir, root, tag)).toEqual([
+      { sha: tip, subject: "chore: tip", merge: false },
+    ]);
+  });
+
   it("takes each squash-merged pull request, a first-parent commit ending in (#N), as a step", () => {
     repo = createTestRepo();
     repo.write("a.py", "a = 1\n");

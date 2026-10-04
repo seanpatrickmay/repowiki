@@ -207,13 +207,18 @@ export function replaySteps(repo: string, from: string, to: string): ReplayStep[
     "--end-of-options",
     `${from}..${to}`,
   ]).toString("utf8");
-  const steps: ReplayStep[] = [];
-  for (const line of out.split("\n")) {
-    if (line === "" || line.startsWith("commit ")) continue;
-    const [shas = "", subject = ""] = line.split("\0");
-    const [sha = "", ...parents] = shas.trim().split(" ");
-    const merge = parents.length > 1;
-    if (merge || sha === to || pullRequestOf(subject) !== null) steps.push({ sha, subject, merge });
-  }
+  const commits = out
+    .split("\n")
+    .filter((line) => line !== "" && !line.startsWith("commit "))
+    .map((line) => {
+      const [shas = "", subject = ""] = line.split("\0");
+      const [sha = "", ...parents] = shas.trim().split(" ");
+      return { sha, subject, merge: parents.length > 1 };
+    });
+  // The last commit listed is `to`'s commit: compared by position, not by sha, since `to` may
+  // be an annotated tag's own id, which git peels to the commit it lists.
+  const steps = commits.filter(
+    (c, i) => c.merge || i === commits.length - 1 || pullRequestOf(c.subject) !== null,
+  );
   return steps;
 }
