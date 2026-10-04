@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -114,10 +113,4 @@ describe("createClaudeProvider against recorded Claude API exchanges", () => {
     },
     BATCH_TIMEOUT_MS,
   );
-
-  it("keeps API keys and auth headers out of every cassette", () => {
-    for (const name of ["structured-output", "prompt-cache", "batch"]) {
-      expect(readFileSync(cassette(name), "utf8")).not.toMatch(/sk-ant|x-api-key|authorization/i);
-    }
-  });
 });

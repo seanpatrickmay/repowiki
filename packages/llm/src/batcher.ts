@@ -49,11 +49,15 @@ export function createBatcher(client: Anthropic, options: BatcherOptions): Batch
   const run = async (items: Queued[]): Promise<void> => {
     let batch: Awaited<ReturnType<typeof client.messages.batches.create>>;
     try {
+      // The client's retries also cover this create and the SDK sends no idempotency key, so a
+      // timeout retry can create (and bill) a second batch; rare, since create returns fast.
       batch = await client.messages.batches.create({
         requests: items.map((item, i) => ({ custom_id: `req-${i}`, params: item.params })),
       });
     } catch (error) {
-      for (const item of items) item.reject(error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const llmError = new LlmError(`batch could not be created: ${errorMsg}`, { cause: error });
+      for (const item of items) item.reject(llmError);
       return;
     }
 

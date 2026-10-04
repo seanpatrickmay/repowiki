@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { type BatchProgress, createBatcher } from "./batcher.ts";
 import { cannedBatchApi, succeededLine } from "./canned.ts";
 import type { FetchLike } from "./cassette.ts";
+import { LlmError } from "./provider.ts";
 
 const params = (content: string): MessageCreateParamsNonStreaming => ({
   model: "claude-haiku-4-5",
@@ -116,6 +117,12 @@ describe("createBatcher", () => {
     const batcher = createBatcher(client, { sleep: async () => {} });
     const settled = await Promise.allSettled([batcher(params("a")), batcher(params("b"))]);
     expect(settled.map((s) => s.status)).toEqual(["rejected", "rejected"]);
+    for (const s of settled) {
+      const reason = s.status === "rejected" ? s.reason : null;
+      expect(reason).toBeInstanceOf(LlmError);
+      expect(String(reason)).toMatch(/batch could not be created: .*bad request/);
+      expect((reason as Error).cause).toBeInstanceOf(Anthropic.APIError);
+    }
   });
 
   it("backs off exponentially during polling with configurable max", async () => {

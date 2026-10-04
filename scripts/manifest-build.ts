@@ -2,8 +2,15 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { ensureManifest, indexRepo, openStore, renderManifestSummary } from "@repowiki/engine";
-import { createClaudeProvider, createLedger, totalsOf } from "@repowiki/llm";
-import { CliError, exitCodeFor, loadModels, parseManifestArgs } from "./manifest-cli.ts";
+import { createClaudeProvider, createLedger, type Provider, totalsOf } from "@repowiki/llm";
+import {
+  CliError,
+  exitCodeFor,
+  loadModels,
+  manifestLedgerRows,
+  manifestRunId,
+  parseManifestArgs,
+} from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 
 async function main(): Promise<void> {
@@ -25,17 +32,24 @@ async function main(): Promise<void> {
   mkdirSync(out, { recursive: true });
   const store = openStore(join(out, "wiki.db"));
   try {
-    const runId = `manifest-build-${new Date().toISOString()}`;
+    const runId = manifestRunId(index.sha, new Date());
     const ledger = createLedger((entry) => store.appendLedger(entry));
-    const provider = createClaudeProvider({
-      models,
-      ledger,
-      runId,
-      onBatchProgress: (p) =>
-        console.error(
-          `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
-        ),
-    });
+    // Built on the first call, so a run that reuses the stored manifest needs no API key.
+    let claude: Provider | undefined;
+    const provider: Provider = {
+      generate: (request) => {
+        claude ??= createClaudeProvider({
+          models,
+          ledger,
+          runId,
+          onBatchProgress: (p) =>
+            console.error(
+              `batch ${p.id}: ${p.status} (${p.processing} processing, ${p.succeeded} done)`,
+            ),
+        });
+        return claude.generate(request);
+      },
+    };
     const { manifest, build } = await ensureManifest(store, index, {
       provider,
       repoName,
@@ -48,8 +62,8 @@ async function main(): Promise<void> {
         console.error(`first answer rejected, retried once: ${build.rejected.join("; ")}`);
       }
     }
-    // The store's whole ledger, so a reuse run reproduces the cost section of the first run's summary.
-    const recorded = store.listLedger();
+    // Every stored manifest call for this sha, so a reuse run reproduces the first run's cost.
+    const recorded = manifestLedgerRows(store.listLedger(), index.sha);
     const summary = renderManifestSummary(
       repoName,
       manifest,

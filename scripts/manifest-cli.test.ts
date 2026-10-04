@@ -1,10 +1,19 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GitError, ManifestBuildError } from "@repowiki/engine";
+import { makeLedgerEntry, makeManifest } from "@repowiki/core/test-fixtures";
+import { GitError, ManifestBuildError, manifestCacheKey, openStore } from "@repowiki/engine";
+import { LlmError, LlmOutputError } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CliError, exitCodeFor, loadModels, parseManifestArgs } from "./manifest-cli.ts";
+import {
+  CliError,
+  exitCodeFor,
+  loadModels,
+  manifestLedgerRows,
+  manifestRunId,
+  parseManifestArgs,
+} from "./manifest-cli.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -56,11 +65,7 @@ describe("loadModels", () => {
   it.each([
     ["a missing file", () => join(dir, "missing.json"), /cannot read config .*missing\.json/],
     ["invalid JSON", () => write("{nope"), /not valid JSON/],
-    [
-      "an unknown key",
-      () => write('{"models":{},"extra":1}'),
-      /invalid config .*extra|invalid config/,
-    ],
+    ["an unknown key", () => write('{"models":{},"extra":1}'), /invalid config .*: .*"extra"/],
     [
       "an empty model id",
       () => write('{"models":{"manifest":""}}'),
@@ -87,22 +92,105 @@ describe("loadModels", () => {
   }
 });
 
+describe("manifestLedgerRows", () => {
+  it("keeps only this sha's manifest calls, whatever the prompt hash", () => {
+    const sha = "a".repeat(40);
+    const mine = makeLedgerEntry({ purpose: "manifest", cacheKey: manifestCacheKey(sha, "p") });
+    const legacy = makeLedgerEntry({ purpose: "manifest", cacheKey: `manifest-${sha}` });
+    const otherSha = makeLedgerEntry({
+      purpose: "manifest",
+      cacheKey: manifestCacheKey("b".repeat(40), "p"),
+    });
+    const write = makeLedgerEntry({ purpose: "write", cacheKey: manifestCacheKey(sha, "p") });
+    const uncached = makeLedgerEntry({ purpose: "write", cacheKey: null });
+    expect(manifestLedgerRows([mine, legacy, otherSha, write, uncached], sha)).toEqual([
+      mine,
+      legacy,
+    ]);
+  });
+
+  it("keeps a batched call, which has no cacheKey, by the sha in its run id", () => {
+    const sha = "a".repeat(40);
+    const at = new Date("2026-10-01T12:00:00Z");
+    const runId = manifestRunId(sha, at);
+    expect(runId).toBe(`manifest-build-${sha}-2026-10-01T12:00:00.000Z`);
+    const batched = makeLedgerEntry({ purpose: "manifest", cacheKey: null, runId });
+    const otherSha = makeLedgerEntry({
+      purpose: "manifest",
+      cacheKey: null,
+      runId: manifestRunId("b".repeat(40), at),
+    });
+    const write = makeLedgerEntry({ purpose: "write", cacheKey: null, runId });
+    expect(manifestLedgerRows([batched, otherSha, write], sha)).toEqual([batched]);
+  });
+});
+
 describe("exitCodeFor", () => {
-  it("maps usage errors to 2, build and git failures to 1, and leaves bugs alone", () => {
+  it("maps usage errors to 2, build, git and LLM failures to 1, and leaves bugs alone", () => {
     expect(exitCodeFor(new CliError("x"))).toBe(2);
     expect(exitCodeFor(new ManifestBuildError("x"))).toBe(1);
     expect(exitCodeFor(new GitError("x"))).toBe(1);
+    expect(exitCodeFor(new LlmError("x"))).toBe(1);
+    expect(exitCodeFor(new LlmOutputError("x", "text"))).toBe(1);
     expect(exitCodeFor(new TypeError("x"))).toBeNull();
     expect(exitCodeFor("x")).toBeNull();
   });
 });
 
 describe("manifest-build.ts as a process (no network)", () => {
-  const run = (...args: string[]) =>
-    spawnSync(process.execPath, ["scripts/manifest-build.ts", ...args], {
+  const run = (...args: string[]) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.REPOWIKI_CASSETTE;
+    return spawnSync(process.execPath, ["scripts/manifest-build.ts", ...args], {
       encoding: "utf8",
-      env: { ...process.env, HOME: dir },
+      env,
     });
+  };
+
+  /** A one-commit git repository under the scratch dir, isolated from the user's git config. */
+  function gitRepo(): string {
+    const repo = join(dir, "repo");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "app.ts"), "export const app = 1;\n");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: repo,
+        env: {
+          PATH: process.env.PATH,
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_AUTHOR_NAME: "Fixture",
+          GIT_AUTHOR_EMAIL: "fixture@example.com",
+          GIT_COMMITTER_NAME: "Fixture",
+          GIT_COMMITTER_EMAIL: "fixture@example.com",
+        },
+      });
+    git("init", "-q", "-b", "main");
+    git("add", "-A");
+    git("commit", "-q", "-m", "init");
+    return repo;
+  }
+
+  it("reuses a stored manifest without an API key", () => {
+    const repo = gitRepo();
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest({ sha }));
+    store.close();
+    const result = run(repo, "--out", out);
+    expect(result.stderr).toBe(`reusing the stored manifest for ${sha}\n`);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`manifest-${sha.slice(0, 7)}.md`);
+  });
+
+  it("reports a missing API key in one line, exit 1, before any call", () => {
+    const result = run(gitRepo(), "--out", join(dir, "o"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe("ANTHROPIC_API_KEY is not set; run with node --env-file=.env\n");
+  });
 
   it("prints one line and exits 2 for a bad flag", () => {
     const result = run("r", "--nope");

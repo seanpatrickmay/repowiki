@@ -39,6 +39,7 @@ export {
   ManifestBuildError,
   type ManifestBuildOptions,
   ManifestProposal,
+  manifestCacheKey,
   renderManifestSummary,
 } from "./manifest/index.ts";
 export {

@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { GitError, ManifestBuildError } from "@repowiki/engine";
-import { resolveModels } from "@repowiki/llm";
+import type { LedgerEntry } from "@repowiki/core";
+import { GitError, ManifestBuildError, manifestCacheKey } from "@repowiki/engine";
+import { LlmError, resolveModels } from "@repowiki/llm";
 
 const USAGE =
   "usage: pnpm manifest:build <repo-path> [rev] [--out dir] [--config file.json] [--no-batch]";
@@ -84,9 +85,34 @@ export function loadModels(configPath: string | null): ReturnType<typeof resolve
   }
 }
 
-/** The exit code for an expected failure (2 usage, 1 build or git), or null for a bug to surface. */
+/** The exit code for an expected failure (2 usage, 1 build, git or LLM), or null for a bug. */
 export function exitCodeFor(err: unknown): 1 | 2 | null {
   if (err instanceof CliError) return 2;
-  if (err instanceof ManifestBuildError || err instanceof GitError) return 1;
+  if (err instanceof ManifestBuildError || err instanceof GitError || err instanceof LlmError) {
+    return 1;
+  }
   return null;
+}
+
+const RUN_PREFIX = "manifest-build-";
+
+/** The run id of a manifest:build run; it names the sha because batched calls carry no cacheKey. */
+export function manifestRunId(sha: string, at: Date): string {
+  return `${RUN_PREFIX}${sha}-${at.toISOString()}`;
+}
+
+/**
+ * The ledger rows that paid for the manifest of `sha`: manifest calls from a run for that sha, or
+ * whose cacheKey belongs to it (rows written before run ids named the sha, and before the
+ * cacheKey carried a prompt hash). Other purposes, such as M4's write calls appended to the
+ * same store, are left out of the manifest's cost.
+ */
+export function manifestLedgerRows(entries: readonly LedgerEntry[], sha: string): LedgerEntry[] {
+  const key = manifestCacheKey(sha);
+  return entries.filter(
+    (e) =>
+      e.purpose === "manifest" &&
+      (e.runId.startsWith(`${RUN_PREFIX}${sha}-`) ||
+        (e.cacheKey !== null && (e.cacheKey === key || e.cacheKey.startsWith(`${key}-`)))),
+  );
 }

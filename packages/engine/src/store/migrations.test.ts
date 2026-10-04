@@ -5,7 +5,7 @@ import { makeFeature, makeManifest, SHA_A, SHA_B } from "@repowiki/core/test-fix
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { UnsupportedSchemaError } from "./errors.ts";
-import { MIGRATIONS, type Migration, runMigrations } from "./migrations.ts";
+import { MIGRATIONS, type Migration, runMigrations, verifyStoredManifests } from "./migrations.ts";
 import { openStore } from "./store.ts";
 
 const dirs: string[] = [];
@@ -98,6 +98,51 @@ describe("migrations", () => {
         },
       ];
       expect(() => runMigrations(db, migrations)).toThrow("rewrite failed");
+      expect(tableExists(db, "notes")).toBe(false);
+      expect(db.pragma("user_version", { simple: true })).toBe(0);
+      db.close();
+    });
+
+    it("verifies once, after the whole chain, so a later migration repairs a body first", () => {
+      const db = new Database(":memory:");
+      const seen: string[] = [];
+      const migrations: Migration[] = [
+        "CREATE TABLE notes (body TEXT NOT NULL)",
+        (handle) => {
+          handle.prepare("INSERT INTO notes (body) VALUES (?)").run("broken");
+        },
+        (handle) => {
+          handle.prepare("UPDATE notes SET body = ?").run("repaired");
+        },
+      ];
+      runMigrations(db, migrations, (handle) => {
+        const row = handle.prepare("SELECT body FROM notes").get() as { body: string };
+        seen.push(row.body);
+      });
+      expect(seen).toEqual(["repaired"]);
+      db.close();
+    });
+
+    it("skips verification when the database is already up to date", () => {
+      const db = new Database(":memory:");
+      const migrations: Migration[] = ["CREATE TABLE notes (body TEXT NOT NULL)"];
+      runMigrations(db, migrations);
+      let calls = 0;
+      runMigrations(db, migrations, () => {
+        calls++;
+      });
+      expect(calls).toBe(0);
+      db.close();
+    });
+
+    it("rolls back every migration and the version when verification throws", () => {
+      const db = new Database(":memory:");
+      const migrations: Migration[] = ["CREATE TABLE notes (body TEXT NOT NULL)"];
+      expect(() =>
+        runMigrations(db, migrations, () => {
+          throw new Error("verify failed");
+        }),
+      ).toThrow("verify failed");
       expect(tableExists(db, "notes")).toBe(false);
       expect(db.pragma("user_version", { simple: true })).toBe(0);
       db.close();
@@ -289,11 +334,14 @@ describe("migration 2: two-way lineage and status", () => {
       JSON.stringify(stored),
     );
 
-    // Run migration 1 + 2 (which includes the repair)
-    runMigrations(db, MIGRATIONS);
+    // First pass: migration 2 only (migration 1 already ran above)
+    runMigrations(db, MIGRATIONS.slice(0, 2));
     const after1 = db.prepare("SELECT body FROM manifests WHERE sha = ?").get(stored.sha) as {
       body: string;
     };
+    // The first pass must have repaired something (the rename's fromTitle joins the aliases),
+    // or the idempotency check below compares two untouched bodies.
+    expect(after1.body).not.toBe(JSON.stringify(stored));
 
     // Reset user_version and rerun migration 2 to test idempotency
     db.pragma("user_version = 1");
@@ -482,8 +530,10 @@ describe("migration 2: two-way lineage and status", () => {
     const versionBefore = db.pragma("user_version", { simple: true }) as number;
     db.close();
 
-    // Attempt to open the store should throw during migration 2
-    expect(() => openStore(path)).toThrow(/Migration 2: manifest .* failed to parse/);
+    // Opening the store fails the post-chain check, after every migration has run
+    expect(() => openStore(path)).toThrow(
+      /manifest 3{40} does not match the current schema after migrating/,
+    );
 
     // Verify that user_version is still 1 (rollback happened)
     const db2 = new Database(path);
@@ -499,4 +549,54 @@ describe("migration 2: two-way lineage and status", () => {
     expect(afterRaw.body).toBe(beforeRaw.body);
     db2.close();
   });
+
+  it("(j) migration 2 touches no core schema: alone, it leaves an invalid body in place", () => {
+    const db = new Database(":memory:");
+    runMigrations(db, MIGRATIONS.slice(0, 1));
+    const invalid = brokenRedirect();
+    db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run(
+      invalid.sha,
+      JSON.stringify(invalid),
+    );
+    expect(() => runMigrations(db, MIGRATIONS.slice(0, 2))).not.toThrow();
+    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    db.close();
+  });
+
+  it("(k) a later repair migration runs before the current-schema check", () => {
+    const db = new Database(":memory:");
+    runMigrations(db, MIGRATIONS.slice(0, 1));
+    const invalid = brokenRedirect();
+    db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run(
+      invalid.sha,
+      JSON.stringify(invalid),
+    );
+    // A future migration that rewrites bodies the current schema would otherwise reject.
+    const addTarget: Migration = (handle) => {
+      const row = handle.prepare("SELECT body FROM manifests").get() as { body: string };
+      const body = JSON.parse(row.body) as { features: unknown[] };
+      body.features.push(makeFeature({ id: "nonexistent-feature", aliases: [] }));
+      handle.prepare("UPDATE manifests SET body = ?").run(JSON.stringify(body));
+    };
+    runMigrations(db, [...MIGRATIONS, addTarget], verifyStoredManifests);
+    expect(db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length + 1);
+    db.close();
+  });
 });
+
+/** A manifest whose redirect target does not exist: no migration can repair it today. */
+function brokenRedirect() {
+  return {
+    sha: "3".repeat(40),
+    features: [
+      {
+        id: "broken",
+        title: "Broken",
+        aliases: [],
+        status: { kind: "redirect", to: "nonexistent-feature" },
+        lineage: [{ kind: "create", sha: SHA_A }],
+      },
+    ],
+    membership: {},
+  };
+}

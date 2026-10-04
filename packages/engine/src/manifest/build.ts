@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Manifest } from "@repowiki/core";
 import { type LlmMessage, LlmOutputError, type Provider } from "@repowiki/llm";
 import {
@@ -21,7 +22,10 @@ import { proposalToManifest } from "./to-manifest.ts";
 export interface ManifestBuildOptions {
   provider: Provider;
   repoName: string;
-  /** Use the Message Batches API (half price). Default true: no one waits on a build. */
+  /**
+   * Use the Message Batches API (half price). Default true: no one waits on a build. Only an
+   * unbatched build caches its prompt prefix.
+   */
   batch?: boolean;
   /** Haiku 4.5 has a 200K context; the prompt must leave room for the answer. */
   maxPromptTokens?: number;
@@ -49,6 +53,16 @@ export class ManifestBuildError extends Error {
 export const DEFAULT_MAX_PROMPT_TOKENS = 150_000;
 const MAX_ATTEMPTS = 2;
 const MAX_OUTPUT_TOKENS = 16_000;
+
+/**
+ * The manifest call's cacheKey: the sha plus a hash of the prompt, so builds of one sha with
+ * different options (weights, clustering, budget) never share a key. Without `system`, the
+ * prefix that every key for this sha starts with, for matching ledger rows.
+ */
+export function manifestCacheKey(sha: string, system?: string): string {
+  if (system === undefined) return `manifest-${sha}`;
+  return `manifest-${sha}-${createHash("sha256").update(system).digest("hex").slice(0, 12)}`;
+}
 
 /** index → clusters → one LLM call (plus at most one retry) → a validated new manifest. */
 export async function buildManifest(
@@ -80,8 +94,12 @@ export async function buildManifest(
     system = manifestSystemPrompt(options.repoName, index.sha, summaries);
   }
 
-  // The retry reuses `system` and the cacheKey unchanged: the provider requires a cached prefix
-  // to be byte-identical, and only the messages after it carry the rejection.
+  // Cache the prefix only off the Batches API, where a retry follows within seconds. A batched
+  // retry arrives long after the 5-minute TTL, so a batched cache write (1.25x input) is never
+  // read. The retry reuses `system` and the cacheKey unchanged: the provider requires a cached
+  // prefix to be byte-identical, and only the messages after it carry the rejection.
+  const batch = options.batch ?? true;
+  const cacheKey = batch ? undefined : manifestCacheKey(index.sha, system);
   let messages: LlmMessage[] = [{ role: "user", content: MANIFEST_REQUEST }];
   let rejected: string[] = [];
   for (let attempt = 1; ; attempt++) {
@@ -95,8 +113,8 @@ export async function buildManifest(
         messages,
         schema: ManifestProposal,
         maxTokens: MAX_OUTPUT_TOKENS,
-        cacheKey: `manifest-${index.sha}`,
-        batch: options.batch ?? true,
+        ...(cacheKey === undefined ? {} : { cacheKey }),
+        batch,
       });
       problems = proposalProblems(output, clusters);
       if (problems.length === 0) {
