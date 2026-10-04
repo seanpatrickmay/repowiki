@@ -70,6 +70,44 @@ describe("placeNewFiles", () => {
     ]);
   });
 
+  it("disputes a new file whose one signal ties between two features", () => {
+    const index = indexOf(
+      [ingest, crud, indexedFile("lib/bridge.py")],
+      [
+        ["lib/bridge.py", "src/signals/ingest.py"],
+        ["lib/bridge.py", "src/deliverables/crud.py"],
+      ],
+    );
+    expect(placeNewFiles(previous, index, []).disputed).toEqual([
+      { path: "lib/bridge.py", candidates: ["deliverables", "signals"] },
+    ]);
+  });
+
+  it("reads an import either way: a new file a member imports goes to the member's feature", () => {
+    const index = indexOf(
+      [ingest, crud, indexedFile("lib/helpers.py")],
+      [["src/deliverables/crud.py", "lib/helpers.py"]],
+    );
+    expect(placeNewFiles(previous, index, []).decided).toEqual(
+      new Map([["lib/helpers.py", "deliverables"]]),
+    );
+  });
+
+  it("lists the disputed files in path order", () => {
+    const index = indexOf([
+      ingest,
+      crud,
+      indexedFile("z.md"),
+      indexedFile("a.md"),
+      indexedFile("m.md"),
+    ]);
+    expect(placeNewFiles(previous, index, []).disputed.map((d) => d.path)).toEqual([
+      "a.md",
+      "m.md",
+      "z.md",
+    ]);
+  });
+
   it("leaves a renamed member file alone", () => {
     const moved = indexedFile("src/signals/chunks.py", [["ingest_chunk", 10, 24]]);
     const rename: FileChange = {
@@ -145,6 +183,81 @@ describe("nextMembership", () => {
 });
 
 describe("coverageGaps", () => {
+  const noGraph = { nodes: [], edges: [] };
+
+  it("lists a renamed file's new symbols, not the ones it had under its old path", () => {
+    const moved = indexedFile("src/signals/chunks.py", [
+      ["ingest_chunk", 10, 24],
+      ["split", 30, 40],
+    ]);
+    const changes: FileChange[] = [
+      {
+        status: "renamed",
+        oldPath: "src/signals/ingest.py",
+        newPath: "src/signals/chunks.py",
+        hunks: [],
+        binary: false,
+      },
+    ];
+    const index = indexOf([moved, crud]);
+    const membership = nextMembership(previous, index, changes, noGraph, new Map());
+    expect(coverageGaps(previous, index, changes, membership, new Map())).toEqual(
+      new Map([
+        [
+          "signals",
+          [{ path: "src/signals/chunks.py", symbol: "split", startLine: 30, endLine: 40 }],
+        ],
+      ]),
+    );
+  });
+
+  it("counts a public module-level constant of a Python file as a gap, as R23 reads", () => {
+    const grown = indexedFile("src/signals/ingest.py", [["ingest_chunk", 10, 24]]);
+    grown.symbols.push({
+      id: "src/signals/ingest.py#MAX_SIGNALS",
+      qualifiedName: "MAX_SIGNALS",
+      kind: "variable",
+      startLine: 3,
+      endLine: 3,
+      exported: true,
+    });
+    const index = indexOf([grown, crud]);
+    const membership = nextMembership(previous, index, [], noGraph, new Map());
+    expect(coverageGaps(previous, index, [], membership, new Map()).get("signals")).toEqual([
+      { path: "src/signals/ingest.py", symbol: "MAX_SIGNALS", startLine: 3, endLine: 3 },
+    ]);
+  });
+
+  it("gives each feature its gaps in path, then line order", () => {
+    const index = indexOf([
+      indexedFile("src/signals/ingest.py", [
+        ["ingest_chunk", 10, 24],
+        ["early", 30, 35],
+        ["late", 90, 95],
+      ]),
+      indexedFile("src/signals/b.py", [["b_one", 1, 2]]),
+      indexedFile("src/deliverables/crud.py", [["complete", 4, 7]]),
+      indexedFile("src/deliverables/a.py", [["a_one", 1, 2]]),
+    ]);
+    const placed = new Map([
+      ["src/signals/b.py", "signals"],
+      ["src/deliverables/a.py", "deliverables"],
+    ]);
+    const membership = nextMembership(previous, index, [], noGraph, placed);
+    const gaps = coverageGaps(previous, index, [], membership, new Map());
+    const listed = (id: string) => gaps.get(id)?.map((g) => `${g.path}#${g.symbol}`);
+    expect(listed("deliverables")).toEqual([
+      "src/deliverables/a.py#a_one",
+      "src/deliverables/crud.py#complete",
+    ]);
+    // The indexer gives a file's symbols in line order, and the gaps keep it.
+    expect(listed("signals")).toEqual([
+      "src/signals/b.py#b_one",
+      "src/signals/ingest.py#early",
+      "src/signals/ingest.py#late",
+    ]);
+  });
+
   it("lists new top-level exported symbols of source files that no fresh citation covers", () => {
     const grown = indexedFile("src/signals/ingest.py", [
       ["ingest_chunk", 10, 24],

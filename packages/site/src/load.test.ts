@@ -21,6 +21,12 @@ describe("loadExport", () => {
     expect(loadExport(dir)).toEqual(fixtureExport());
   });
 
+  it("loads an export written before runs were exported, with no runs", () => {
+    const { runs: _runs, ...older } = fixtureExport();
+    const file = write("no-runs.json", JSON.stringify(older));
+    expect(loadExport(file).runs).toEqual([]);
+  });
+
   it("names the file and the failing field for a schema violation", () => {
     const pages = fixtureExport().pages.map((page) => ({ ...page, commitDate: "yesterday" }));
     const file = write("bad.json", JSON.stringify({ ...fixtureExport(), pages }));
