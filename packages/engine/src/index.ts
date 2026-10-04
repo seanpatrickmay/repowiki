@@ -48,6 +48,7 @@ export {
   type CitingClaim,
   DroppedFeatureError,
   DuplicateManifestError,
+  DuplicateRevisionError,
   EmptyStoreError,
   type ExportOptions,
   openStore,

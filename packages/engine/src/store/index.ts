@@ -1,6 +1,7 @@
 export {
   DroppedFeatureError,
   DuplicateManifestError,
+  DuplicateRevisionError,
   EmptyStoreError,
   StaleParentError,
   StoreError,

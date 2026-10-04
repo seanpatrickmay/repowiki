@@ -10,6 +10,49 @@ export const SHA_A = "a".repeat(40);
 export const SHA_B = "b".repeat(40);
 export const SHA_C = "c".repeat(40);
 
+/** src/signals/ingest.py as the fixtures cite it: 31 lines, with ingest_chunk on lines 10-24. */
+export const INGEST_PY = `${[
+  '"""Turns ingested chunks into signals."""',
+  "",
+  "from dataclasses import dataclass",
+  "",
+  "from .store import save_signal",
+  "",
+  "MAX_SIGNALS = 50",
+  "",
+  "",
+  "def ingest_chunk(chunk):",
+  '    """Creates one signal per sentence in the chunk."""',
+  "    signals = []",
+  "    # Blank sentences make no signal.",
+  "    for sentence in chunk.sentences:",
+  "        if not sentence.text.strip():",
+  "            continue",
+  "        signal = Signal(text=sentence.text, source=chunk.source)",
+  "        signals.append(signal)",
+  "        if len(signals) >= MAX_SIGNALS:",
+  "            # TODO: page through long chunks instead of truncating",
+  "            break",
+  "    for signal in signals:",
+  "        save_signal(signal)",
+  "    return signals",
+  "",
+  "",
+  "@dataclass",
+  "class Signal:",
+  "    text: str",
+  "    source: str",
+  "",
+].join("\n")}\n`;
+
+/** Lines start..end (1-based, inclusive) of a source text, without the final newline. */
+export function sourceLines(source: string, start: number, end: number): string {
+  return source
+    .split("\n")
+    .slice(start - 1, end)
+    .join("\n");
+}
+
 export function codeCitation(overrides: Partial<CodeCitation> = {}): CodeCitation {
   return {
     kind: "code",
@@ -18,7 +61,7 @@ export function codeCitation(overrides: Partial<CodeCitation> = {}): CodeCitatio
     endLine: 24,
     sha: SHA_A,
     symbol: "ingest_chunk",
-    contentHash: contentHash("def ingest_chunk(chunk):\n    ..."),
+    contentHash: contentHash(sourceLines(INGEST_PY, 10, 24)),
     ...overrides,
   };
 }

@@ -5,7 +5,9 @@ import { z } from "zod";
 import {
   DroppedFeatureError,
   DuplicateManifestError,
+  DuplicateRevisionError,
   StaleParentError,
+  StoreError,
   UnknownFeatureError,
 } from "./errors.ts";
 import { migrate } from "./migrations.ts";
@@ -89,12 +91,33 @@ export interface PutManifestOptions {
   llmRevised?: boolean;
 }
 
+/**
+ * A failure while opening or migrating as a CLI-facing StoreError. A driver error (not a
+ * database, unreadable, locked, or the TypeError the driver throws for a missing directory)
+ * gives its first line as the reason. Anything else (a migration's own error, a SyntaxError or
+ * ZodError from stored data) may quote that data, so only its class name is given. The full
+ * error is always the cause.
+ */
+function cannotOpen(path: string, error: unknown, opening: boolean): StoreError {
+  const isDriverError =
+    error instanceof Database.SqliteError || (opening && error instanceof TypeError);
+  const reason = isDriverError
+    ? error.message.split("\n")[0]
+    : `stored data failed to migrate (${error instanceof Error ? error.name : "unknown error"})`;
+  return new StoreError(`cannot open ${path} as a RepoWiki store: ${reason}`, { cause: error });
+}
+
 interface BodyRow {
   body: string;
 }
 
 export function openStore(path: string): Store {
-  const db = new Database(path);
+  let db: Database.Database;
+  try {
+    db = new Database(path);
+  } catch (error) {
+    throw cannotOpen(path, error, true);
+  }
   try {
     // Migrate before switching to WAL: refusing a newer schema must not touch the file.
     migrate(db);
@@ -102,7 +125,7 @@ export function openStore(path: string): Store {
     db.pragma("foreign_keys = ON");
   } catch (error) {
     db.close();
-    throw error;
+    throw error instanceof StoreError ? error : cannotOpen(path, error, false);
   }
 
   const readManifest = (row: BodyRow | undefined): Manifest | null =>
@@ -230,6 +253,9 @@ export function openStore(path: string): Store {
       db.transaction(() => {
         if (!latestManifest()?.features.some((feature) => feature.id === parsed.featureId)) {
           throw new UnknownFeatureError(parsed.featureId);
+        }
+        if (db.prepare("SELECT 1 FROM revisions WHERE id = ?").get(parsed.id) !== undefined) {
+          throw new DuplicateRevisionError(parsed.id);
         }
         const current = currentRevisionId(parsed.featureId);
         if (current !== parsed.parentId) {

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { makeFeature, makeManifest, SHA_A, SHA_B } from "@repowiki/core/test-fixtures";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { UnsupportedSchemaError } from "./errors.ts";
+import { StoreError, UnsupportedSchemaError } from "./errors.ts";
 import { MIGRATIONS, type Migration, runMigrations, verifyStoredManifests } from "./migrations.ts";
 import { openStore } from "./store.ts";
 
@@ -495,6 +495,28 @@ describe("migration 2: two-way lineage and status", () => {
     store.close();
   });
 
+  it("reports a non-driver migration failure as a StoreError with a fixed reason and the cause", () => {
+    const path = tempDbPath();
+    const db = new Database(path);
+    runMigrations(db, MIGRATIONS.slice(0, 1));
+    db.prepare("INSERT INTO manifests (sha, seq, body) VALUES (?, 1, ?)").run("4".repeat(40), "[");
+    db.close();
+
+    const failure = (() => {
+      try {
+        openStore(path);
+      } catch (caught) {
+        return caught as Error;
+      }
+    })();
+    expect(failure).toBeInstanceOf(StoreError);
+    expect((failure as Error).message).toBe(
+      `cannot open ${path} as a RepoWiki store: stored data failed to migrate (SyntaxError)`,
+    );
+    expect((failure as Error).message).not.toMatch(/\[$/);
+    expect((failure as Error).cause).toBeInstanceOf(SyntaxError);
+  });
+
   it("(i) unrepairable manifest causes openStore to throw, user_version stays 1, raw row unchanged", () => {
     const path = tempDbPath();
     const db = new Database(path);
@@ -530,8 +552,20 @@ describe("migration 2: two-way lineage and status", () => {
     const versionBefore = db.pragma("user_version", { simple: true }) as number;
     db.close();
 
-    // Opening the store fails the post-chain check, after every migration has run
-    expect(() => openStore(path)).toThrow(
+    // Opening the store fails the post-chain check, after every migration has run. It is not a
+    // driver error, so the message names only the error class; the detail rides as the cause.
+    const failure = (() => {
+      try {
+        openStore(path);
+      } catch (caught) {
+        return caught as Error;
+      }
+    })();
+    expect(failure).toBeInstanceOf(StoreError);
+    expect((failure as Error).message).toBe(
+      `cannot open ${path} as a RepoWiki store: stored data failed to migrate (Error)`,
+    );
+    expect(((failure as Error).cause as Error).message).toMatch(
       /manifest 3{40} does not match the current schema after migrating/,
     );
 
