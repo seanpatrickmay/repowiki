@@ -1,3 +1,4 @@
+export type { BatchProgress } from "./batcher.ts";
 export {
   type CassetteEntry,
   CassetteMissError,
