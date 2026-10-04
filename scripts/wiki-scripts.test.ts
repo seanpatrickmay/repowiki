@@ -1139,6 +1139,9 @@ describe("wiki-replay.ts as a process (no network)", () => {
     );
     expect(line).toMatch(/^[\x20-\x7e]+$/);
     expect(summaryRows(summary)).toEqual([["| 1", quiet.slice(0, 7)]]);
+    // The export follows the store to the step it stored, though the run stopped after it.
+    const exported = JSON.parse(readFileSync(join(out, "export.json"), "utf8"));
+    expect(exported.head).toBe(quiet);
   });
 
   it("leaves a record even when the run stops at its very first step", () => {

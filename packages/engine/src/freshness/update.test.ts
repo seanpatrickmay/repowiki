@@ -12,7 +12,7 @@ import { UpdateError } from "./plan.ts";
 import { scriptedProvider } from "./test-provider.ts";
 import { articleAnswer, builtWiki, inputAt } from "./test-wiki-repo.ts";
 import { TieBreakAnswer } from "./tiebreak.ts";
-import { updateWiki } from "./update.ts";
+import { UpdateArticleError, updateWiki } from "./update.ts";
 
 let repo: TestRepo;
 let store: Store;
@@ -251,6 +251,38 @@ describe("updateWiki", () => {
     expect(result.carried).toEqual(["deliverables", "signals"]);
     expect(result.refused).toEqual([{ featureId: "signals", why: "nothing changed" }]);
     expect(result.architectureSkipped).toBe("current");
+  });
+
+  it("keeps the stored update when its article cannot be stored, and hands it over with the error", async () => {
+    ({ repo, store, first } = await builtWiki());
+    const { merge } = mergePaging();
+    const { provider: p } = provider(() => ({
+      claims: [claim("c1", "lead", "**Signal ingestion** turns chunks into signals.", [], ["c2"])],
+      diagram: { nodes: [], edges: [] },
+    }));
+    const failing: Store = {
+      ...store,
+      putArchitecture: () => {
+        throw new Error("disk I/O error");
+      },
+    };
+    const error = await updateWiki(failing, await inputAt(repo, merge), {
+      ...options,
+      provider: p,
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(UpdateArticleError);
+    expect((error as UpdateArticleError).message).toBe(
+      `the update to ${merge} is stored, but its About article could not be: disk I/O error`,
+    );
+    const { update } = error as UpdateArticleError;
+    expect(update.to).toBe(merge);
+    expect(update.stored.map((r) => r.featureId)).toEqual(["signals"]);
+    expect(update.architecture).toBeNull();
+    expect(store.getHead()).toBe(merge);
+    expect(store.getCurrentRevision("signals")?.sha).toBe(merge);
   });
 
   it("stops before storing anything when a call fails", async () => {

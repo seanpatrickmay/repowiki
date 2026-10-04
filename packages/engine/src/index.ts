@@ -22,6 +22,7 @@ export {
   planPages,
   planUpdate,
   provisionalPlacement,
+  UpdateArticleError,
   UpdateError,
   type UpdateInput,
   type UpdateOptions,

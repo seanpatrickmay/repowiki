@@ -241,7 +241,7 @@ async function replay(
       // commits anything; a step that makes none (nothing cited changed, no article due) needs no
       // key.
       if (needsKey(estimate)) requireApiKey("wiki:replay");
-      const { update, runId } = await runUpdate(
+      const { update, runId, articleError } = await runUpdate(
         store,
         input,
         args,
@@ -273,6 +273,8 @@ async function replay(
       });
       done++;
       save(null);
+      // The step is stored and recorded; its article's failure still stops the run.
+      if (articleError !== null) throw articleError;
     } catch (err) {
       // Say where the run stopped and why, so the record is never read as a finished replay; the
       // original error still ends the run.
@@ -284,6 +286,14 @@ async function replay(
         });
       } catch {
         // The stop is already being reported by the original error.
+      }
+      // The steps this run stored are in the store: the export must not stay behind them.
+      if (done > 0 || store.getHead() !== head) {
+        try {
+          writeExports();
+        } catch {
+          // The stop is already being reported by the original error.
+        }
       }
       throw err;
     }
