@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { MAX_TURN_OUTPUT_TOKENS, runAgent } from "./agent.ts";
-import { agentSystemPrompt } from "./prompts.ts";
+import { agentSystemPrompt, LAST_TURN_NOTE } from "./prompts.ts";
 import { SCRIPTED_MODEL, scriptedToolProvider, TURN_USAGE } from "./test-provider.ts";
 import { defineTool, ToolError, toolSet } from "./tools.ts";
 
@@ -92,6 +92,30 @@ describe("runAgent", () => {
       turnLimit: 1,
     });
     expect(one).toMatchObject({ stop: "turn-limit", turns: 1 });
+  });
+
+  it("tells the agent on its last turn, after the tool results, that it must answer now", async () => {
+    const { provider, requests } = scriptedToolProvider([
+      { tool: "lookup", input: { word: "a" } },
+      { tool: "lookup", input: { word: "b" } },
+      { answer: "Best guess: a thing." },
+    ]);
+    await runAgent({ ...base, provider, turnLimit: 3 });
+    const note = { type: "text", text: LAST_TURN_NOTE };
+    expect(LAST_TURN_NOTE).toBe(
+      "This is your last turn: answer the question now with what you have found.",
+    );
+    expect(JSON.stringify(requests.slice(0, 2))).not.toContain(LAST_TURN_NOTE);
+    expect(requests[2]?.messages.at(-1)?.content).toEqual([
+      { type: "tool_result", toolUseId: "tu_2", content: "b means a thing", isError: false },
+      note,
+    ]);
+    expect(requests[2]?.messages).toHaveLength(5);
+    const one = scriptedToolProvider([{ answer: "x" }]);
+    await runAgent({ ...base, provider: one.provider, turnLimit: 1 });
+    expect(one.requests[0]?.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "Question: What is a widget?" }, note] },
+    ]);
   });
 
   it("caches every turn but the last, where changing tool_choice would void the cache", async () => {

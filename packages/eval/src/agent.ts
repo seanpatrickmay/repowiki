@@ -5,7 +5,7 @@ import {
   type ToolResultBlock,
   type TurnMessage,
 } from "@repowiki/llm";
-import { questionTurn } from "./prompts.ts";
+import { LAST_TURN_NOTE, questionTurn } from "./prompts.ts";
 import type { ToolSet } from "./tools.ts";
 
 /** The output cap of one agent turn: a tool call, or an answer of ANSWER_WORDS words. */
@@ -57,13 +57,21 @@ const sum = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
   cacheWrite: a.cacheWrite + b.cacheWrite,
 });
 
+/** The conversation with LAST_TURN_NOTE after the last user turn's blocks (a copy). */
+function withLastTurnNote(messages: readonly TurnMessage[]): TurnMessage[] {
+  const final = messages.at(-1) as TurnMessage;
+  const note = { type: "text" as const, text: LAST_TURN_NOTE };
+  return [...messages.slice(0, -1), { role: final.role, content: [...final.content, note] }];
+}
+
 /**
  * Runs one agent on one question: a tool-use loop of at most `turnLimit` model turns, each with
  * at most one tool call. The last turn forbids tools, so every run ends with an answer. Each
  * turn but the last puts a cache breakpoint at the end of the conversation, so the next turn
  * reads what came before from the cache once it passes the model's minimum. The last turn sets
  * no breakpoint: changing tool_choice invalidates the message cache, so a write there would
- * cost something no later turn reads.
+ * cost something no later turn reads. The last turn also ends with LAST_TURN_NOTE, telling the
+ * agent to answer now.
  */
 export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
   const { provider, system, tools, turnLimit } = options;
@@ -81,7 +89,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
       purpose: "evalAgent",
       system,
       tools: tools.definitions,
-      messages,
+      messages: last ? withLastTurnNote(messages) : messages,
       maxTokens: MAX_TURN_OUTPUT_TOKENS,
       toolChoice: last ? "none" : "auto",
       cache: !last,
