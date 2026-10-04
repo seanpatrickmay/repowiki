@@ -194,21 +194,12 @@ export function applyOperations(
           problems.push(`${where}: ${quote(title)} is already its title`);
           return;
         }
-        // The old title becomes an alias (spec §5 rule 1), so it must be one M3 would accept.
+        // Spec §5 rule 1: the old title always becomes an alias. M3's 8-alias and 60-character
+        // limits govern model-proposed aliases only; core caps neither, and code aliases already
+        // fill many features' lists, so the only check is that no other feature holds the name.
         const keep = !feature.aliases.includes(feature.title);
         const before = problems.length;
-        const unusable = aliasProblem(feature.title);
-        if (keep && unusable !== null) {
-          problems.push(
-            `${where}: its old title ${quote(feature.title)} cannot be kept as an alias: it ${unusable}`,
-          );
-        }
-        if (keep && feature.aliases.length + 1 > MAX_ALIASES) {
-          problems.push(
-            `${where}: it would have ${feature.aliases.length + 1} aliases; at most ${MAX_ALIASES}`,
-          );
-        }
-        if (keep && unusable === null) checkName(where, "alias", feature.title, feature.id);
+        if (keep) checkName(where, "alias", feature.title, feature.id);
         const titleOk = checkTitle(where, title, feature.id);
         if (!titleOk || problems.length > before) return;
         feature.lineage.push({ kind: "rename", sha, fromTitle: feature.title });

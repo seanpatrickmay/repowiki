@@ -309,8 +309,26 @@ describe("applyOperations", () => {
     );
   });
 
-  it("refuses a rename whose old title cannot be an alias", () => {
-    const long = "L".repeat(70);
+  it("renames a feature that already holds more aliases than M3 allows a model", () => {
+    const aliases = Array.from({ length: 17 }, (_, i) => `alias ${i}`);
+    const held = manifestWith([
+      makeFeature({ aliases }),
+      makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
+    ]);
+    const result = applyOperations(
+      held,
+      [op({ kind: "rename", feature: "signals", title: "Signals" })],
+      clusters,
+      SHA_B,
+    );
+    expect(result.problems).toEqual([]);
+    const signals = result.manifest?.features.find((f) => f.id === "signals");
+    expect(signals?.aliases).toEqual([...aliases, "Signal ingestion"]);
+    expect(signals?.title).toBe("Signals");
+  });
+
+  it("renames a feature whose title is longer than an alias may be, keeping it as an alias", () => {
+    const long = "L".repeat(75);
     const held = manifestWith([
       makeFeature({ title: long }),
       makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
@@ -321,24 +339,10 @@ describe("applyOperations", () => {
       clusters,
       SHA_B,
     );
-    expect(result.manifest).toBeNull();
-    expect(result.problems.join("\n")).toContain("cannot be kept as an alias");
-  });
-
-  it("refuses a rename that would pass the alias cap", () => {
-    const full = Array.from({ length: 8 }, (_, i) => `alias ${i}`);
-    const held = manifestWith([
-      makeFeature({ aliases: full }),
-      makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
-    ]);
-    const result = applyOperations(
-      held,
-      [op({ kind: "rename", feature: "signals", title: "Signals" })],
-      clusters,
-      SHA_B,
-    );
-    expect(result.manifest).toBeNull();
-    expect(result.problems.join("\n")).toContain("would have 9 aliases; at most 8");
+    expect(result.problems).toEqual([]);
+    const signals = result.manifest?.features.find((f) => f.id === "signals");
+    expect(signals?.aliases).toEqual(["signal pipeline", long]);
+    expect(signals?.lineage.at(-1)).toEqual({ kind: "rename", sha: SHA_B, fromTitle: long });
   });
 
   it("refuses a title with a control character and names it", () => {
