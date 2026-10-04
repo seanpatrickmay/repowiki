@@ -32,3 +32,18 @@ export type PageDraft = z.infer<typeof PageDraft>;
 /** The retry call's answer: corrected versions of the claims that failed, under their old ids. */
 export const ClaimFixes = z.object({ claims: z.array(DraftClaim) });
 export type ClaimFixes = z.infer<typeof ClaimFixes>;
+
+/**
+ * A claim an update call returns (spec §6.1 step 5): a draft claim and the section it belongs in.
+ * A rewritten claim keeps its id and section; a new one has a new id.
+ */
+export const UpdateClaim = DraftClaim.extend({ section: SectionKey });
+export type UpdateClaim = z.infer<typeof UpdateClaim>;
+
+/** What one update call returns: the claims it writes, and the diagram when it is drawn again. */
+export const UpdateDraft = z.object({ claims: z.array(UpdateClaim), diagram: DraftDiagram });
+export type UpdateDraft = z.infer<typeof UpdateDraft>;
+
+/** The update's retry answer: corrected versions of the claims that failed, under their ids. */
+export const UpdateFixes = z.object({ claims: z.array(UpdateClaim) });
+export type UpdateFixes = z.infer<typeof UpdateFixes>;

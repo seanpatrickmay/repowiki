@@ -19,6 +19,13 @@ export {
 export { buildPack, type ContextPack, DEFAULT_CONTEXT_BUDGET_TOKENS } from "./pack.ts";
 export { STYLE_GUIDE, writeSystemPrompt } from "./prompt.ts";
 export {
+  buildUpdatePack,
+  type PageRewrite,
+  type PlannedClaim,
+  type UpdatePack,
+} from "./update-pack.ts";
+export { UPDATE_INSTRUCTIONS, updateSystemPrompt } from "./update-prompt.ts";
+export {
   type BuildJournal,
   buildJournal,
   buildWiki,

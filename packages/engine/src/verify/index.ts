@@ -25,7 +25,16 @@ export {
   verifyClaim,
 } from "./claims.ts";
 export { diagramProblems, MAX_DIAGRAM_CHARS, MAX_DIAGRAM_EDGES } from "./diagram.ts";
-export { ClaimFixes, DraftClaim, DraftDiagram, DraftSection, PageDraft } from "./draft.ts";
+export {
+  ClaimFixes,
+  DraftClaim,
+  DraftDiagram,
+  DraftSection,
+  PageDraft,
+  UpdateClaim,
+  UpdateDraft,
+  UpdateFixes,
+} from "./draft.ts";
 export { isLimitationEvidence, REVERT_SUBJECT, SKIPPED_TEST, TODO_MARKER } from "./evidence.ts";
 export { mermaidLabel } from "./mermaid-label.ts";
 export { architectureProblems, commitCitationProblems, revisionProblems } from "./revision.ts";
