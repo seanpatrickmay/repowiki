@@ -20,14 +20,32 @@ const REDIRECTING_GIT_ENV = [
 /** Variables that change how git writes a diff: hunk context, or a tool in place of git's own. */
 const DIFF_SHAPING_GIT_ENV = ["GIT_DIFF_OPTS", "GIT_EXTERNAL_DIFF"] as const;
 
+/** Variables that change how git reads every pathspec; the pinned calls give their own rule. */
+const PATHSPEC_GIT_ENV = [
+  "GIT_GLOB_PATHSPECS",
+  "GIT_NOGLOB_PATHSPECS",
+  "GIT_ICASE_PATHSPECS",
+  "GIT_LITERAL_PATHSPECS",
+] as const;
+
+/** Config given through the environment (`git -c` and GIT_CONFIG_COUNT's numbered pairs). */
+const CONFIG_INJECTING_GIT_ENV = /^GIT_CONFIG_(?:COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/;
+
 /**
- * The process environment (plus `extra`) without anything that would redirect `git -C <repo>` or
- * reshape its diff output.
+ * The process environment (plus `extra`) without anything that would redirect `git -C <repo>`,
+ * reshape its diff output or its pathspecs, or inject config (a hook, an output format) through
+ * the environment; and with GIT_NO_LAZY_FETCH=1, so a partial clone's missing object is an error,
+ * never a fetch that runs the remote's upload-pack command.
  */
 export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
   for (const name of REDIRECTING_GIT_ENV) delete env[name];
   for (const name of DIFF_SHAPING_GIT_ENV) delete env[name];
+  for (const name of PATHSPEC_GIT_ENV) delete env[name];
+  for (const name of Object.keys(env)) {
+    if (CONFIG_INJECTING_GIT_ENV.test(name)) delete env[name];
+  }
+  env.GIT_NO_LAZY_FETCH = "1";
   return env;
 }
 

@@ -2,7 +2,14 @@ import { symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { commitFiles, GitError, listBlobs, readBlobs, resolveCommit } from "./git.ts";
+import {
+  commitFiles,
+  GitError,
+  listBlobs,
+  readBlobs,
+  resolveCommit,
+  scrubbedGitEnv,
+} from "./git.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
 let repo: TestRepo;
@@ -56,6 +63,41 @@ describe("inherited git environment", () => {
     } finally {
       if (saved === undefined) delete process.env[name];
       else process.env[name] = saved;
+    }
+  });
+});
+
+describe("scrubbedGitEnv", () => {
+  const INJECTED = {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "core.fsmonitor",
+    GIT_CONFIG_VALUE_0: "touch /tmp/x",
+    GIT_CONFIG_PARAMETERS: "'core.fsmonitor=touch /tmp/x'",
+    GIT_GLOB_PATHSPECS: "1",
+    GIT_NOGLOB_PATHSPECS: "1",
+    GIT_ICASE_PATHSPECS: "1",
+    GIT_LITERAL_PATHSPECS: "1",
+  };
+
+  it("drops config and pathspec rules set through the environment, and forbids lazy fetches", () => {
+    const saved = Object.fromEntries(Object.keys(INJECTED).map((n) => [n, process.env[n]]));
+    try {
+      Object.assign(process.env, INJECTED, { GIT_NO_LAZY_FETCH: "0" });
+      const env = scrubbedGitEnv();
+      for (const name of Object.keys(INJECTED)) expect(env[name], name).toBeUndefined();
+      expect(env.GIT_NO_LAZY_FETCH).toBe("1");
+      expect(scrubbedGitEnv({ GIT_CONFIG_GLOBAL: "/dev/null" }).GIT_CONFIG_GLOBAL).toBe(
+        "/dev/null",
+      );
+      repo.write("a.py", "x = 1\n");
+      const sha = repo.commit("add a");
+      expect(listBlobs(repo.dir, sha).map((b) => b.path)).toEqual(["a.py"]);
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      delete process.env.GIT_NO_LAZY_FETCH;
     }
   });
 });
