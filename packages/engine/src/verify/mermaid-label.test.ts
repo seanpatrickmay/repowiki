@@ -16,9 +16,9 @@ const HOSTILE = [
   "ﬂ°°x3C¶ßimg src=x ﬂ°°x3E¶ß ﬂ°quot¶ß",
   'n1@{ img: "https://evil.example/x.png" }',
   "a; b # c #58; d",
-  "‮rtl‬ ​zero width  ﻿",
+  "\u202Ertl\u202C \u200Bzero\u2028width\u2029 \uFEFF",
   "nul\u0000 del\u007F nel\u0085",
-  "lone \uD800 surrogate, private , unassigned ͸",
+  "lone \uD800 surrogate, private \uE000, unassigned ͸",
   "emoji 🙂 and 日本語 and naïve",
   "back`tick \\ slash | pipe [ ] { }",
   "a    lot   of   space   ",
@@ -38,6 +38,16 @@ describe("the engine's copy of the site's mermaidLabel", () => {
     expect(site).toContain("const NAMED_ENTITIES");
     expect(site.length).toBeGreaterThan(500);
     expect(engine).toBe(site);
+  });
+
+  it("writes the letters of Mermaid's entity placeholders as entities, in both copies", async () => {
+    const site = (await import(SITE_FILE.href)) as { mermaidLabel: (text: string) => string };
+    // Mermaid hides an entity as U+FB02 U+00B0 U+00B0, the code, U+00B6 U+00DF while it parses, then
+    // decodes them back: a literal U+00DF or U+FB02 could forge a placeholder and show other text.
+    for (const label of [mermaidLabel, site.mermaidLabel]) {
+      expect(label("Stra\u00DFe \uFB02ow")).toBe("Stra#223;e #64258;ow");
+      expect(label("\uFB02\u00B0\u00B0x3C\u00B6\u00DF")).toBe("#64258;#176;#176;x3C#182;#223;");
+    }
   });
 
   it("writes the same label as the site's function for every hostile string", async () => {

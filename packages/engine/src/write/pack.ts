@@ -1,4 +1,4 @@
-import type { Manifest } from "@repowiki/core";
+import { INVISIBLE_CHARACTERS, type Manifest } from "@repowiki/core";
 import type { CommitInfo, IndexedSymbol, RepoIndex, SourceLanguage } from "../index/index.ts";
 import { estimateTokens } from "../manifest/index.ts";
 import { REVERT_SUBJECT, SKIPPED_TEST, sourceLines, TODO_MARKER } from "../verify/index.ts";
@@ -56,13 +56,11 @@ const moreFiles = (count: number) => `- and ${count} more files`;
 const OTHER_FILES_RESERVE = 2 + OTHER_FILES_HEADING.length + 1 + moreFiles(9_999_999).length;
 
 /**
- * Characters that can forge or hide structure in a prompt, other than tab: control characters
- * (C0, DEL, C1, so newline too), line and paragraph separators, and every format character
- * (bidi embeddings, overrides and isolates U+202A-E and U+2066-9, the byte order mark,
- * zero-width spaces) except ZWJ (U+200D) and ZWNJ (U+200C), which emoji sequences and several
- * scripts need. Written as escapes: this file must not carry the characters it guards against.
+ * Characters that can forge or hide structure in a prompt, other than tab: core's
+ * INVISIBLE_CHARACTERS (control characters, so newline too, line and paragraph separators, and
+ * every format character except ZWJ and ZWNJ, which emoji sequences and several scripts need).
  */
-const UNSAFE = /(?![\t\u200C\u200D])[\p{Cc}\p{Zl}\p{Zp}\p{Cf}\u202A-\u202E\u2066-\u2069]/gu;
+const UNSAFE = new RegExp(`(?!\\t)${INVISIBLE_CHARACTERS.source}`, "gu");
 
 /** A repository- or model-derived string, safe to put in the prompt: unsafe characters become U+FFFD. */
 const clean = (text: string): string => text.replace(UNSAFE, "\uFFFD");
@@ -333,7 +331,7 @@ export function buildPack(input: PackInput): ContextPack {
           : `- ${omittedEvidence} evidence items not listed`;
     return [
       `## Commits that touched this feature (newest first)\n${commitLines.slice(0, nc).join("\n") || (commits.length === 0 ? "(none)" : "")}${commitNote}`,
-      `## Evidence for known limitations\n${evidence.slice(0, ne).join("\n") || (evidence.length === 0 ? "(none)" : "")}${evidenceNote}`,
+      `## Evidence for known limitations\n${evidence.slice(0, ne).join("\n") || (evidence.length === 0 ? "(none: write no known-limitations claims)" : "")}${evidenceNote}`,
       diagrams,
       "Write the page.",
     ].join("\n\n");

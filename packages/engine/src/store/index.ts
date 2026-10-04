@@ -11,6 +11,7 @@ export {
 } from "./errors.ts";
 export { buildExport, type ExportOptions, writeExport } from "./export.ts";
 export {
+  addAliases,
   type BatchRequestRow,
   type CitingClaim,
   openStore,

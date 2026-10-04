@@ -2,6 +2,7 @@ import {
   type Citation,
   type Claim,
   type ClaimKind,
+  CONTROL_CHARACTERS,
   claimRuleViolations,
   contentHash,
   RepoPath,
@@ -33,11 +34,11 @@ const MIN_COMMIT_PREFIX = 7;
 const MAX_QUOTED_LENGTH = 80;
 
 /**
- * Characters that can forge or hide structure in a prompt or a page: control characters (C0, DEL
- * and C1), line and paragraph separators, bidirectional controls and the byte order mark.
+ * Characters that can forge or hide structure in a prompt or a page: core's CONTROL_CHARACTERS
+ * (control characters, line and paragraph separators, bidirectional controls and the BOM).
  */
-const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]/u;
-const UNSAFE_TEXT_EACH = new RegExp(UNSAFE_TEXT.source, "gu");
+const UNSAFE_TEXT = new RegExp(CONTROL_CHARACTERS.source, "u");
+const UNSAFE_TEXT_EACH = CONTROL_CHARACTERS;
 
 const hex4 = (char: string): string => (char.codePointAt(0) ?? 0).toString(16).padStart(4, "0");
 
@@ -139,8 +140,13 @@ function resolveCommit(ref: string, prefix: string, ctx: VerifyContext): Resolve
     const why = found === undefined ? "names no commit in this history" : "is ambiguous";
     return { problem: `citation ${quote(ref)} ${why}` };
   }
-  const subject = found.subject.trim() === "" ? "(no subject)" : found.subject;
+  const subject = citedSubject(found.subject);
   return { citation: { kind: "commit", sha: found.sha, subject, pr: found.pr }, lines: null };
+}
+
+/** A commit's subject as a commit citation holds it: a blank subject is "(no subject)". */
+export function citedSubject(subject: string): string {
+  return subject.trim() === "" ? "(no subject)" : subject;
 }
 
 /** The reader's own tokenizer: a code span or a [[link]] token is held aside before anything else. */
@@ -181,7 +187,9 @@ function hasHtmlTag(text: string): boolean {
  * `code` and [[link]] tokens, in one paragraph. Anything else would show as literal text. Code
  * spans and link tokens are blanked first, as the reader tokenizes them, so markup characters
  * inside a code span are fine and `[[ingest]](the stage)` is a link followed by text. A line break
- * is refused by verifyClaim's control-character check, which names it once. Every scan is linear.
+ * is refused by verifyClaim's control-character check, which names it once. The link and tag
+ * scans are linear, but blanking READER_TOKEN is quadratic on runs of "[[": verifyClaim calls this
+ * only on text within MAX_CLAIM_LENGTH, and that gate is what bounds it.
  */
 function markupProblems(text: string): string[] {
   const plain = text.replace(READER_TOKEN, " ");
@@ -207,6 +215,22 @@ const COMMIT_IN_TEXT = /(?<![\p{L}\p{N}_/.@~+-])commit:[0-9a-f]{7,64}\b/giu;
 const FILE_EXTENSION = /(?:^|[^.])\.[A-Za-z][A-Za-z0-9]{0,9}$/;
 const MAX_NAMED_TOKENS = 3;
 
+/** The basenames of the source files under a directory, built once per (read-only) sources map. */
+const basenames = new WeakMap<ReadonlyMap<string, string>, Set<string>>();
+
+function basenamesOf(sources: ReadonlyMap<string, string>): Set<string> {
+  let names = basenames.get(sources);
+  if (names === undefined) {
+    names = new Set();
+    for (const file of sources.keys()) {
+      const slash = file.lastIndexOf("/");
+      if (slash !== -1) names.add(file.slice(slash + 1));
+    }
+    basenames.set(sources, names);
+  }
+  return names;
+}
+
 /**
  * Whether "path" in "path:12" names a repository file. With a "/" it does when its last segment
  * has an extension; without one ("Node.js:18", "redis.internal:6379") only when it is a file of
@@ -215,8 +239,7 @@ const MAX_NAMED_TOKENS = 3;
 function looksLikeFile(path: string, ctx: VerifyContext): boolean {
   if (ctx.sources.has(path)) return true;
   if (path.includes("/")) return FILE_EXTENSION.test(path.slice(path.lastIndexOf("/") + 1));
-  for (const file of ctx.sources.keys()) if (file.endsWith(`/${path}`)) return true;
-  return false;
+  return basenamesOf(ctx.sources).has(path);
 }
 
 /**
@@ -245,6 +268,13 @@ function kindOf(key: SectionKey): ClaimKind {
 }
 
 export type Verified = { claim: Claim; problems: [] } | { claim: null; problems: string[] };
+
+/**
+ * The problem of a limitation claim whose citations resolve and follow the rules but show no
+ * evidence. No retry can fix it when the pack lists none, so the write round drops it at once.
+ */
+export const LIMITATION_EVIDENCE_PROBLEM =
+  "limitation claims must cite evidence: lines with a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit";
 
 /**
  * Checks one draft claim of a section: every reference resolves at ctx.sha, the section's
@@ -308,9 +338,7 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
     const violations = claimRuleViolations(key, claim);
     problems.push(...violations);
     if (violations.length === 0 && key === "known-limitations" && !evidence) {
-      problems.push(
-        "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
-      );
+      problems.push(LIMITATION_EVIDENCE_PROBLEM);
     }
   }
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };

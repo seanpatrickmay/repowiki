@@ -1,9 +1,4 @@
-import {
-  FEATURE_ID_MAX_LENGTH,
-  type Feature,
-  type Revision,
-  type WikiExport,
-} from "@repowiki/core";
+import { aliasSlug, type Feature, type Revision, type WikiExport } from "@repowiki/core";
 import { articleUrl } from "./urls.ts";
 
 /** An alias URL /wiki/<slug>/: a redirect when it has one target, a disambiguation page otherwise. */
@@ -25,18 +20,6 @@ export interface SiteModel {
   history: ReadonlyMap<string, readonly Revision[]>;
   /** Sorted by slug. Never shadows a feature id. */
   aliases: readonly AliasRoute[];
-}
-
-/** URL slug for an alias: ASCII lowercase kebab-case, at most FEATURE_ID_MAX_LENGTH characters. */
-export function aliasSlug(alias: string): string {
-  return alias
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, FEATURE_ID_MAX_LENGTH)
-    .replace(/-+$/, "");
 }
 
 /** True when /wiki/<id>/ is a page: a redirect, a disambiguation, or a feature with a revision. */

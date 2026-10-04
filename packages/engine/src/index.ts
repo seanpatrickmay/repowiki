@@ -30,6 +30,7 @@ export {
   type RepoIndex,
   readHistory,
   readSources,
+  resolveCommit,
   type SourceLanguage,
   type SymbolDef,
   type SymbolKind,
@@ -39,6 +40,7 @@ export {
 export {
   codeAliases,
   featureNeighbours,
+  linksWithoutPage,
   linkViolations,
   WIKIPEDIA_USER_AGENT,
 } from "./link/index.ts";
@@ -57,6 +59,7 @@ export {
   renderManifestSummary,
 } from "./manifest/index.ts";
 export {
+  addAliases,
   type BatchRequestRow,
   buildExport,
   type CitingClaim,
@@ -75,8 +78,10 @@ export {
   UnsupportedSchemaError,
   writeExport,
 } from "./store/index.ts";
-export { diagramProblems, revisionProblems } from "./verify/index.ts";
+export { commitCitationProblems, diagramProblems, revisionProblems } from "./verify/index.ts";
 export {
+  type BuildJournal,
+  buildJournal,
   buildPack,
   buildWiki,
   type ContextPack,

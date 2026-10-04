@@ -1,0 +1,196 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { contentHash } from "@repowiki/core";
+import {
+  bodyClaim,
+  codeCitation,
+  commitCitation,
+  leadClaim,
+  makeManifest,
+  makeRevision,
+  SHA_A,
+  SHA_B,
+} from "@repowiki/core/test-fixtures";
+import { openStore } from "@repowiki/engine";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BUILD_LOCK } from "./wiki-cli.ts";
+
+let dir: string;
+beforeEach(() => {
+  dir = realpathSync.native(mkdtempSync(join(tmpdir(), "repowiki-wiki-")));
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+/** Runs a script with no API key and HOME in the scratch dir; nothing reaches the network. */
+function run(script: string, ...args: string[]) {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.REPOWIKI_CASSETTE;
+  return spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env });
+}
+
+/** A one-commit git repository under the scratch dir, and its sha. */
+function gitRepo(): { repo: string; sha: string } {
+  const repo = join(dir, "repo");
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "app.ts"), "export const app = 1;\n");
+  const git = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_AUTHOR_NAME: "Fixture",
+        GIT_AUTHOR_EMAIL: "fixture@example.com",
+        GIT_COMMITTER_NAME: "Fixture",
+        GIT_COMMITTER_EMAIL: "fixture@example.com",
+      },
+    });
+  git("init", "-q", "-b", "main");
+  git("add", "-A");
+  git("commit", "-q", "-m", "init");
+  return { repo, sha: git("rev-parse", "HEAD").trim() };
+}
+
+describe("wiki-build.ts as a process (no network)", () => {
+  /** A repo whose store holds a manifest at its head, so the build reaches its first call. */
+  function storedRepo() {
+    const { repo, sha } = gitRepo();
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest({ sha }), { llmRevised: true });
+    store.close();
+    return { repo, out };
+  }
+
+  it("names the pnpm command and --env-file when the key is missing, and frees its lock", () => {
+    const { repo, out } = storedRepo();
+    const result = run("scripts/wiki-build.ts", repo, "--out", out);
+    expect(result.status).toBe(1);
+    const last = result.stderr.trimEnd().split("\n").at(-1) ?? "";
+    expect(last).toContain("ANTHROPIC_API_KEY is not set");
+    expect(last).toContain("pnpm wiki:build");
+    expect(last).toContain("--env-file");
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(false);
+  });
+
+  it("creates no out dir for a rev that names no commit", () => {
+    const { repo } = gitRepo();
+    const out = join(dir, "never");
+    const result = run("scripts/wiki-build.ts", repo, "no-such-rev", "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('"no-such-rev" does not name a commit');
+    expect(existsSync(out)).toBe(false);
+  });
+
+  it("refuses to start while another build holds the lock, before any work", () => {
+    const { repo, out } = storedRepo();
+    writeFileSync(join(out, BUILD_LOCK), "pid 1 since 2026-10-01T00:00:00.000Z\n");
+    const result = run("scripts/wiki-build.ts", repo, "--out", out);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      `another wiki:build is running on ${out} (${join(out, BUILD_LOCK)}); if none is, delete the lock file\n`,
+    );
+    expect(existsSync(join(out, BUILD_LOCK))).toBe(true);
+  });
+});
+
+describe("wiki-check.ts as a process (no network)", () => {
+  /** A store under `out` holding one page and the head, both at SHA_A. */
+  function builtStore(): string {
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest(), { llmRevised: true });
+    store.putRevision(makeRevision());
+    store.setHead(SHA_A);
+    store.close();
+    return out;
+  }
+
+  it("is a one-line usage error, exit 2, for a repository that does not exist", () => {
+    const out = builtStore();
+    const missing = join(dir, "nope");
+    const result = run("scripts/wiki-check.ts", missing, "--out", out);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe(
+      `no such repository: ${missing}; usage: pnpm wiki:check <repo-path> [--out dir]\n`,
+    );
+  });
+
+  it("is a one-line usage error, exit 2, for a repository without the wiki's sha", () => {
+    const out = builtStore();
+    const { repo } = gitRepo();
+    const result = run("scripts/wiki-check.ts", repo, "--out", out);
+    expect(result.status).toBe(2);
+    expect(result.stderr.split("\n")).toHaveLength(2);
+    expect(result.stderr).toMatch(
+      new RegExp(`^${repo} does not hold ${SHA_A}, the sha the wiki was built at`),
+    );
+  });
+
+  /** A store whose one page, at the repo's sha, cites a line of it and its commit `cited`. */
+  function pageOf(repo: string, sha: string, cited: string): string {
+    const out = join(dir, "o");
+    mkdirSync(out);
+    const store = openStore(join(out, "wiki.db"));
+    store.putManifest(makeManifest({ sha }), { llmRevised: true });
+    const code = codeCitation({
+      path: "src/app.ts",
+      startLine: 1,
+      endLine: 1,
+      sha,
+      symbol: null,
+      contentHash: contentHash("export const app = 1;\n"),
+    });
+    store.putRevision(
+      makeRevision({
+        sha,
+        sections: [
+          { key: "lead", claims: [leadClaim({ supports: ["c-1", "h-1"] })] },
+          { key: "overview", claims: [bodyClaim({ citations: [code] })] },
+          {
+            key: "history",
+            claims: [
+              bodyClaim({
+                id: "h-1",
+                kind: "history",
+                citations: [commitCitation({ sha: cited, subject: "init", pr: null })],
+              }),
+            ],
+          },
+        ],
+      }),
+    );
+    store.setHead(sha);
+    store.close();
+    return out;
+  }
+
+  it("counts the code citations it re-hashed and the commit citations it resolved", () => {
+    const { repo, sha } = gitRepo();
+    const result = run("scripts/wiki-check.ts", repo, "--out", pageOf(repo, sha, sha));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    // The page's See also names deliverables, an active feature with no page.
+    expect(result.stdout).toBe(
+      "1 pages: 1 code citations re-hashed and 1 commit citations resolved; no problems\n" +
+        "1 links name an active feature with no stored page (the site shows them as plain text)\n",
+    );
+  });
+
+  it("reports a commit citation the repository's history does not hold", () => {
+    const { repo, sha } = gitRepo();
+    const result = run("scripts/wiki-check.ts", repo, "--out", pageOf(repo, sha, SHA_B));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "signals h-1 commit:bbbbbbb: no such commit in the history of the wiki's sha\n",
+    );
+    expect(result.stdout).toContain("1 problems");
+  });
+});

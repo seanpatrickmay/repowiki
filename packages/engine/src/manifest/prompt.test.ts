@@ -138,7 +138,10 @@ describe("manifestSystemPrompt with untrusted strings", () => {
   });
 
   it("replaces bidi controls and the byte order mark, one for one", () => {
-    const codes = [0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff];
+    const codes = [
+      0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff, 0x200e,
+      0x200f, 0x061c,
+    ];
     for (const code of codes) {
       const ch = String.fromCodePoint(code);
       const prompt = hostile({ files: [`a${ch}b`], fileCount: 1 });

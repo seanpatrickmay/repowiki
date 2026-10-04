@@ -9,7 +9,7 @@ import {
   wikipediaTitlesIn,
 } from "./links.ts";
 import { linkManifest } from "./test-manifest.ts";
-import { linkViolations } from "./violations.ts";
+import { linksWithoutPage, linkViolations } from "./violations.ts";
 
 const NO_WP = new Map<string, string | null>();
 
@@ -335,5 +335,17 @@ describe("unlinkText", () => {
     const out = unlinkText("[[[ ]][x]]", titles);
     expect(linkTokensIn(out)).toEqual([]);
     expect(out).not.toContain("[[");
+  });
+});
+
+describe("linksWithoutPage", () => {
+  it("counts links and See also entries to active features that have no stored page", () => {
+    const signals = makeRevision({ seeAlso: ["deliverables", "billing"] });
+    const lead = signals.sections[0]?.claims[0];
+    if (lead) lead.text = "[[billing|Bills]], [[deliverables]], [[wp:Cron]] and [[signals]].";
+    const billing = makeRevision({ id: "rev-2", featureId: "billing", seeAlso: ["signals"] });
+    // deliverables has no page: once in See also, once as a link. A Wikipedia link is not counted.
+    expect(linksWithoutPage([signals, billing], linkManifest())).toBe(2);
+    expect(linksWithoutPage([signals], linkManifest())).toBe(4);
   });
 });

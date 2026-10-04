@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { openStore } from "../store/index.ts";
 import { deliverablesDraft, fakeWikipedia, pageProvider, signalsDraft } from "./test-provider.ts";
 import { testWiki } from "./test-wiki.ts";
-import { buildWiki, WikiBuildError } from "./wiki.ts";
+import { buildJournal, buildWiki, WikiBuildError } from "./wiki.ts";
 
 function setup(fail: string[] = [], extraFeatures: Feature[] = []) {
   const wiki = testWiki();
@@ -173,5 +173,45 @@ describe("buildWiki", () => {
     const build = await buildWiki(store, input, options);
     expect(build.stored.map((r) => r.featureId)).toEqual(["deliverables", "signals"]);
     expect(store.getHead()).toBe(input.index.sha);
+  });
+
+  it("forgets journal rows only in the transaction that settles the pages, failed ones too", async () => {
+    const { store, input, options } = setup(["signals", "deliverables"]);
+    const journal = buildJournal(store);
+    const at = new Date().toISOString();
+    const keys = ["deliverables", "signals"];
+    journal.record(
+      "msgbatch_1",
+      at,
+      keys.map((key, i) => ({ requestKey: key, customId: `req-${i}` })),
+    );
+    // The batcher forgets a request as soon as its answer is read, as this provider does.
+    const forgetting = (inner: Provider): Provider => ({
+      generate(request) {
+        journal.forget("msgbatch_1", [request.featureId ?? ""]);
+        return inner.generate(request);
+      },
+    });
+    const failing = {
+      ...store,
+      putRevision() {
+        throw new Error("disk full");
+      },
+    };
+    const passing = setup().options;
+    await expect(
+      buildWiki(failing, input, { ...passing, provider: forgetting(passing.provider), journal }),
+    ).rejects.toThrow("disk full");
+    expect(keys.map((key) => store.findBatchRequest(key)?.batchId)).toEqual([
+      "msgbatch_1",
+      "msgbatch_1",
+    ]);
+
+    // Every page failed: the rows are forgotten all the same, so a rerun asks afresh.
+    const provider = forgetting(options.provider);
+    await expect(buildWiki(store, input, { ...options, provider, journal })).rejects.toThrow(
+      /no page could be written/,
+    );
+    expect(keys.map((key) => store.findBatchRequest(key))).toEqual([null, null]);
   });
 });

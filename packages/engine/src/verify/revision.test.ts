@@ -11,7 +11,8 @@ import {
   SHA_C,
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { revisionProblems } from "./revision.ts";
+import type { CommitInfo } from "../index/index.ts";
+import { commitCitationProblems, revisionProblems } from "./revision.ts";
 
 const at = (files: Record<string, string>) => (sha: string) =>
   new Map(sha === SHA_A ? Object.entries(files) : []);
@@ -125,5 +126,76 @@ describe("revisionProblems", () => {
       expect(revisionProblems(revision, bySha(calls))).toEqual([]);
       expect(calls).toEqual([]);
     });
+  });
+});
+
+describe("commitCitationProblems", () => {
+  const commit = (sha: string, subject: string): CommitInfo => ({
+    sha,
+    parents: [],
+    date: "2026-02-03T10:00:00-05:00",
+    subject,
+    files: [],
+    pr: null,
+  });
+  const revision = makeRevision({
+    sections: [
+      { key: "lead", claims: [leadClaim({ supports: ["c-1", "h-1", "h-2", "h-3"] })] },
+      { key: "overview", claims: [bodyClaim()] },
+      {
+        key: "history",
+        claims: [
+          bodyClaim({ id: "h-1", kind: "history", citations: [commitCitation()] }),
+          bodyClaim({
+            id: "h-2",
+            kind: "history",
+            citations: [commitCitation({ sha: SHA_B, subject: "feat: b" })],
+          }),
+          bodyClaim({
+            id: "h-3",
+            kind: "history",
+            citations: [commitCitation({ sha: SHA_C, subject: "feat: c" })],
+          }),
+        ],
+      },
+    ],
+  });
+
+  it("passes commit citations that name a reachable commit with its subject", () => {
+    const history = [
+      commit(SHA_A, "feat: add signal ingestion"),
+      commit(SHA_B, "feat: b"),
+      commit(SHA_C, "feat: c"),
+    ];
+    expect(commitCitationProblems(revision, history)).toEqual([]);
+  });
+
+  it('matches a blank commit subject with the "(no subject)" the write step cites it as', () => {
+    const blank = makeRevision({
+      sections: [
+        { key: "lead", claims: [leadClaim({ supports: ["c-1", "h-1"] })] },
+        { key: "overview", claims: [bodyClaim()] },
+        {
+          key: "history",
+          claims: [
+            bodyClaim({
+              id: "h-1",
+              kind: "history",
+              citations: [commitCitation({ subject: "(no subject)" })],
+            }),
+          ],
+        },
+      ],
+    });
+    expect(commitCitationProblems(blank, [commit(SHA_A, "")])).toEqual([]);
+    expect(commitCitationProblems(blank, [commit(SHA_A, "  ")])).toEqual([]);
+  });
+
+  it("reports a commit the history does not hold and one cited under another subject", () => {
+    const history = [commit(SHA_A, "feat: add signal ingestion"), commit(SHA_B, "feat: other")];
+    expect(commitCitationProblems(revision, history)).toEqual([
+      "signals h-2 commit:bbbbbbb: the commit's subject is not the one cited",
+      "signals h-3 commit:ccccccc: no such commit in the history of the wiki's sha",
+    ]);
   });
 });

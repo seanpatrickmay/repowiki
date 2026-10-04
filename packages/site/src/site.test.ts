@@ -676,7 +676,7 @@ describe("history pages", () => {
   });
 
   it("escapes a hostile feature title on its history and old-revision pages", () => {
-    const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;";
+    const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
     expect(site.read("wiki/hostile-title/history/index.html")).toContain(
       `<h1 class="page-title">${title}: Revision history</h1>`,
     );

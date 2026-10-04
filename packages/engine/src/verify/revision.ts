@@ -1,5 +1,6 @@
 import { contentHash, type Revision } from "@repowiki/core";
-import { citedLines } from "./claims.ts";
+import type { CommitInfo } from "../index/index.ts";
+import { citedLines, citedSubject } from "./claims.ts";
 import { diagramProblems } from "./diagram.ts";
 
 /**
@@ -48,6 +49,34 @@ export function revisionProblems(
   if (revision.diagram !== null) {
     for (const problem of diagramProblems(revision.diagram)) {
       problems.push(`${revision.featureId}: ${problem}`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Re-resolves a stored revision's commit citations against `commits`, the history of the wiki's
+ * sha (readHistory): each must name a commit there, under the subject it was cited with (a blank
+ * subject is cited as "(no subject)").
+ */
+export function commitCitationProblems(
+  revision: Revision,
+  commits: readonly CommitInfo[],
+): string[] {
+  const subjects = new Map(commits.map((c) => [c.sha, citedSubject(c.subject)]));
+  const problems: string[] = [];
+  for (const section of revision.sections) {
+    for (const claim of section.claims) {
+      for (const citation of claim.citations) {
+        if (citation.kind !== "commit") continue;
+        const where = `${revision.featureId} ${claim.id} commit:${citation.sha.slice(0, 7)}`;
+        const subject = subjects.get(citation.sha);
+        if (subject === undefined) {
+          problems.push(`${where}: no such commit in the history of the wiki's sha`);
+        } else if (subject !== citation.subject) {
+          problems.push(`${where}: the commit's subject is not the one cited`);
+        }
+      }
     }
   }
   return problems;

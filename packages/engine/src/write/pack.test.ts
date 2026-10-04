@@ -93,6 +93,13 @@ describe("buildPack", () => {
     expect(pack.text.endsWith("Write the page.")).toBe(true);
   });
 
+  it("tells the model to write no limitation claims when there is no evidence", () => {
+    const deliverables = buildPack({ ...input(), featureId: "deliverables", history: [] });
+    expect(deliverables.text).toContain(
+      "## Evidence for known limitations\n(none: write no known-limitations claims)\n\n",
+    );
+  });
+
   it("falls back to signatures past 70% of the budget, then to listing the path", () => {
     expect(buildPack(input({ budgetTokens: 900 })).shown.map((s) => s.mode)).toEqual([
       "full",

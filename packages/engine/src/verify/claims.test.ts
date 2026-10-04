@@ -145,6 +145,7 @@ describe("quote", () => {
       '"a\\u0085b\\u202ec\\u2028d\\u2069e\\ufeff\\u007f"',
     );
     expect(quote("tab\there\nnew")).toBe('"tab\\there\\nnew"');
+    expect(quote("a\u200Eb\u200Fc\u061Cd")).toBe('"a\\u200eb\\u200fc\\u061cd"');
     expect(quote("plain 汉字")).toBe('"plain 汉字"');
   });
 });
@@ -266,6 +267,8 @@ describe("verifyClaim", () => {
     ["a bidi override", "Sig\u202enal."],
     ["a bidi isolate", "Sig\u2066nal."],
     ["a BOM", "Sig\ufeffnal."],
+    ["a left-to-right mark", "Sig\u200enal."],
+    ["an Arabic letter mark", "Sig\u061cnal."],
   ])("refuses claim text holding %s", (_name, text) => {
     const verified = verifyClaim("overview", draft({ text }), testContext());
     expect(verified.claim).toBeNull();
@@ -392,6 +395,22 @@ describe("verifyClaim citation-shaped text", () => {
     expect(problemsOf("See nope.js:3 for it.")).toEqual([]);
   });
 
+  it("lists the sources' basenames once per context, not once per bare file name", () => {
+    const base = testContext();
+    let listed = 0;
+    const sources = new Map(base.sources);
+    const keys = sources.keys.bind(sources);
+    sources.keys = () => {
+      listed += 1;
+      return keys();
+    };
+    const ctx = { ...base, sources };
+    const text = "See a.py:1, b.py:2, c.py:3 and missing.py:4.";
+    for (let i = 0; i < 3; i++) expect(problemsOf(text, ctx)).toEqual([]);
+    expect(listed).toBe(1);
+    expect(problemsOf("See ingest.py:3 for it.", ctx)).toHaveLength(1);
+  });
+
   it("refuses a citation that follows a colon", () => {
     expect(problemsOf("see:src/signals/ingest.py:10")).toHaveLength(1);
     expect(problemsOf("see:commit:abcdef1")).toHaveLength(1);
@@ -512,7 +531,7 @@ describe("verifyClaim on known limitations (issue #53)", () => {
   ])("refuses a limitation that cites only %s", (_name, ref) => {
     const verified = verifyClaim("known-limitations", draft({ cite: [ref] }), testContext());
     expect(verified.problems).toEqual([
-      "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
+      "limitation claims must cite evidence: lines with a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit",
     ]);
   });
 });

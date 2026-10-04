@@ -261,9 +261,8 @@ describe("retry turns", () => {
     });
     const body = fixRequest(page)[2]?.content ?? "";
     expect(body).toContain(
-      "To give up a body claim the pack cannot support, return it with an empty cite list",
+      "You may give up any claim you cannot support from the pack: return a body claim with an empty cite list, or a lead claim with an empty supports list.",
     );
-    expect(body).toContain("to give up a lead claim, return it with an empty supports list");
   });
 
   it("list at most 40 failing claims and 3 problems each, under 64 KB beyond the pack", () => {
@@ -318,7 +317,10 @@ describe("retry turns", () => {
 
   it("collapse whitespace in the reason and cut it to 500 code points", () => {
     const page = state();
-    page.rejected = { text: "{", reason: `bad\n\nthing\t\u0085\u2028 here ${"😀".repeat(900)}` };
+    page.rejected = {
+      text: "{",
+      reason: `bad\n\nthing\t\u0085\u2028\u200E\u061C here ${"😀".repeat(900)}`,
+    };
     const ask = retryRequest(page)[2]?.content ?? "";
     expect(ask.startsWith("That answer was rejected: bad thing here 😀")).toBe(true);
     const [first, second] = ask.split("\n");

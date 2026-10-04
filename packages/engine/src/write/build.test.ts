@@ -2,6 +2,7 @@ import { Revision } from "@repowiki/core";
 import { makeFeature } from "@repowiki/core/test-fixtures";
 import { CassetteMissError, LlmError, LlmOutputError } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
+import { LIMITATION_EVIDENCE_PROBLEM } from "../verify/index.ts";
 import { type WritePagesOptions, writeCacheKey, writePages } from "./build.ts";
 import { memoryWikipediaCache } from "./test-cache.ts";
 import {
@@ -74,6 +75,16 @@ describe("writePages", () => {
     ).toBe(true);
   });
 
+  it("still writes the pages when the build commit's date is not ISO 8601", async () => {
+    const wiki = testWiki();
+    const at = { ...(wiki.history[0] as (typeof wiki.history)[0]), sha: wiki.index.sha };
+    wiki.history.unshift({ ...at, date: "last tuesday", files: ["README.md"] });
+    const { written } = run(answers, {}, wiki);
+    const { pages } = await written;
+    expect(pages.map((p) => p.failure)).toEqual([null, null]);
+    expect(pages[0]?.revision?.infobox.lastCommitDate).toBe("2026-01-26T09:00:00-05:00");
+  });
+
   it("issues every page's first call in one event-loop turn, so they share one batch", async () => {
     const { written, requests } = run(answers);
     await written;
@@ -105,6 +116,7 @@ describe("writePages", () => {
     const retry = requests[2];
     expect(retry?.turn).toBe(1);
     expect(retry?.cacheKey).toBeUndefined();
+    expect(requests.map((r) => r.maxTokens)).toEqual([8000, 8000, 4000]);
     expect(retry?.messages.at(-1)?.content).toContain(
       '- "o1": citation "src/signals/ingest.py:90-99" is outside the file\'s lines 1-31',
     );
@@ -116,29 +128,76 @@ describe("writePages", () => {
 
   it("drops a claim that fails twice, logs it, and keeps the rest of the page", async () => {
     const broken = signalsDraft();
-    const limitation = broken.sections[3]?.claims[0];
-    if (limitation) limitation.cite = ["src/signals/ingest.py:10-14"];
+    const overview = broken.sections[1]?.claims[0];
+    if (overview) overview.cite = ["src/signals/ingest.py:90-99"];
     const { written, lines } = run((featureId, call) =>
       featureId !== "signals"
         ? deliverablesDraft()
         : call === 1
           ? broken
-          : ({ claims: [limitation] } as Answer),
+          : ({ claims: [overview] } as Answer),
     );
     const { pages } = await written;
+    expect(pages[1]?.calls).toBe(2);
+    expect(pages[1]?.dropped).toEqual([
+      {
+        section: "overview",
+        text: "`ingest_chunk()` keeps at most 50 signals, like a [[wp:Message queue]] would.",
+        problems: ['citation "src/signals/ingest.py:90-99" is outside the file\'s lines 1-31'],
+      },
+    ]);
+    expect(pages[1]?.revision?.sections.map((s) => s.key)).toEqual([
+      "lead",
+      "history",
+      "known-limitations",
+    ]);
+    expect(lines).toEqual([
+      expect.stringMatching(/^signals: dropped an? overview claim: citation/),
+    ]);
+  });
+
+  it("drops a limitation claim that lacks only evidence at once: no retry can give it one", async () => {
+    const broken = signalsDraft();
+    const limitation = broken.sections[3]?.claims[0];
+    if (limitation) limitation.cite = ["src/signals/ingest.py:10-14"];
+    const { written, requests, lines } = run((featureId) =>
+      featureId !== "signals" ? deliverablesDraft() : broken,
+    );
+    const { pages } = await written;
+    expect(requests).toHaveLength(2);
+    expect(pages[1]?.calls).toBe(1);
     expect(pages[1]?.dropped).toEqual([
       {
         section: "known-limitations",
         text: "A TODO notes that long chunks are truncated.",
-        problems: [
-          "limitation claims must cite evidence: lines with a TODO or FIXME, a skipped test, or a reverting commit",
-        ],
+        problems: [LIMITATION_EVIDENCE_PROBLEM],
       },
     ]);
     expect(pages[1]?.revision?.sections.map((s) => s.key)).toEqual(["lead", "overview", "history"]);
     expect(lines).toEqual([
       expect.stringMatching(/^signals: dropped a known-limitations claim: limitation claims/),
     ]);
+  });
+
+  it("retries a page's other failing claims without the evidence-less limitation claim", async () => {
+    const broken = signalsDraft();
+    const overview = broken.sections[1]?.claims[0];
+    if (overview) overview.cite = ["src/signals/ingest.py:90-99"];
+    const limitation = broken.sections[3]?.claims[0];
+    if (limitation) limitation.cite = ["src/signals/ingest.py:10-14"];
+    const { written, requests } = run((featureId, call) =>
+      featureId !== "signals"
+        ? deliverablesDraft()
+        : call === 1
+          ? broken
+          : ({ claims: [{ ...overview, cite: ["src/signals/ingest.py:10-24"] }] } as Answer),
+    );
+    const { pages } = await written;
+    const turn = requests[2]?.messages.at(-1)?.content ?? "";
+    expect(turn).toContain('- "o1": ');
+    expect(turn).not.toContain('"k1"');
+    expect(pages[1]?.dropped.map((d) => d.section)).toEqual(["known-limitations"]);
+    expect(pages[1]?.revision?.sections.map((s) => s.key)).toEqual(["lead", "overview", "history"]);
   });
 
   it("asks again for the whole page when the first answer is unusable", async () => {
@@ -149,6 +208,7 @@ describe("writePages", () => {
     );
     const { pages } = await written;
     expect(pages[1]?.failure).toBeNull();
+    expect(requests.map((r) => r.maxTokens)).toEqual([8000, 8000, 8000]);
     expect(requests[2]?.messages.slice(1)).toEqual([
       { role: "assistant", content: "{oops" },
       {
@@ -514,6 +574,66 @@ describe("writePages", () => {
       ["signals", "verifying the claims failed: TypeError", true],
     ]);
     expect(lines).toEqual(["signals: not written: verifying the claims failed: TypeError"]);
+  });
+
+  it("fails one page, not the build, when verifying its fixed claims throws", async () => {
+    const wiki = testWiki();
+    const broken = signalsDraft();
+    const history = broken.sections[2]?.claims[0];
+    if (history) history.cite = ["src/signals/ingest.py:90-99"];
+    let armed = false;
+    class Sources extends Map<string, string> {
+      override get(path: string) {
+        if (armed && path === "src/signals/ingest.py") throw new TypeError("private source text");
+        return super.get(path);
+      }
+    }
+    const sources = new Sources(wiki.sources);
+    const { written, lines } = run(
+      (featureId, call) => {
+        if (featureId !== "signals") return deliverablesDraft();
+        if (call === 1) return broken;
+        armed = true;
+        return { claims: [{ ...history, cite: ["src/signals/ingest.py:10-24"] }] } as Answer;
+      },
+      {},
+      { ...wiki, sources },
+    );
+    const { pages } = await written;
+    expect(pages.map((p) => [p.featureId, p.failure, p.calls])).toEqual([
+      ["deliverables", null, 1],
+      ["signals", "verifying the claims failed: TypeError", 2],
+    ]);
+    expect(lines).toContain("signals: not written: verifying the claims failed: TypeError");
+  });
+
+  it("checks no Wikipedia title of a page that will not be written", async () => {
+    const broken = signalsDraft();
+    const history = broken.sections[2]?.claims[0];
+    if (history) history.cite = ["src/signals/ingest.py:90-99"];
+    const urls: string[] = [];
+    const { written } = run(
+      (featureId, call) =>
+        featureId !== "signals"
+          ? deliverablesDraft()
+          : call === 1
+            ? broken
+            : new LlmError("expired"),
+      {
+        wikipedia: {
+          cache: memoryWikipediaCache(),
+          fetch: async (input) => {
+            urls.push(String(input));
+            return fakeWikipedia(input);
+          },
+        },
+      },
+    );
+    const { pages, wikipedia } = await written;
+    // The overview claim, with its [[wp:Message queue]], verified before the retry failed.
+    expect(pages[1]?.failure).toBe("the write call failed twice: LlmError: expired");
+    expect(urls).toEqual([]);
+    expect([...wikipedia.links.keys()]).toEqual([]);
   });
 
   it("writes every page with plain Wikipedia text when the title check throws", async () => {

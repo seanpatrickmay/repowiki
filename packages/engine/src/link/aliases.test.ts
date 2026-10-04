@@ -1,4 +1,5 @@
 import type { Manifest } from "@repowiki/core";
+import { makeFeature, makeManifest } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { codeAliases, IDENTIFIER_PATTERNS, MAX_CODE_ALIASES } from "./aliases.ts";
 import { linkManifest } from "./test-manifest.ts";
@@ -52,7 +53,8 @@ describe("codeAliases (F01)", () => {
     expect(codeAliases(linkManifest(), sources)).toEqual({
       billing: ["STRIPE_KEY", "VITE_API_URL"],
       deliverables: ["/deliverables/:id"],
-      signals: ["/api/signals", "SIGNALS_URL", "ingest-signals", "scores", "signals_table"],
+      // "scores" shares no word with Signal ingestion's names, so it is no table alias of it.
+      signals: ["/api/signals", "SIGNALS_URL", "ingest-signals", "signals_table"],
     });
   });
 
@@ -110,28 +112,41 @@ describe("codeAliases (F01)", () => {
     expect(billingFrom(text)).toEqual(["/fine", "OTHER_KEY"]);
   });
 
-  it("finishes fast on a 200 KB line of repeated decorator prefixes", () => {
+  it("scans adversarial lines in linear time: 8 times the text costs far less than 64 times", () => {
+    // Each line at n units of its adversarial shape. A backtracking pattern is at least quadratic
+    // on one of them, so its 8x line would cost about 64x; a linear one costs about 8x. The bound
+    // is that growth, not a wall-clock ceiling, so a slow or loaded machine does not fail it.
     const unit = "@a.b.c.d.e.f.g.h";
-    const lines = [
-      unit.repeat(Math.ceil(200_000 / unit.length)),
-      "@a".repeat(100_000),
-      `@${"a.".repeat(100_000)}`,
-      `@${"a".repeat(200_000)}`,
-      "CREATE ".repeat(30_000),
-      `CREATE${" ".repeat(200_000)}TABLE${" ".repeat(10)}`,
-      `CREATE TABLE${" ".repeat(200_000)}`,
-      `os.getenv(${" ".repeat(200_000)}`,
-      `app.get(${" ".repeat(200_000)}`,
-      "a.".repeat(100_000),
-      `CREATE TABLE ${"a.".repeat(100_000)}`,
-      `CREATE TEMP TABLE IF NOT EXISTS ${"[a].".repeat(50_000)}`,
-      `process.env[${" ".repeat(200_000)}`,
-      `@a.get("/${"a".repeat(200_000)}`,
+    const shapes: ((n: number) => string)[] = [
+      (n) => unit.repeat(Math.ceil((2 * n) / unit.length)),
+      (n) => "@a".repeat(n),
+      (n) => `@${"a.".repeat(n)}`,
+      (n) => `@${"a".repeat(2 * n)}`,
+      (n) => "CREATE ".repeat(Math.ceil((3 * n) / 10)),
+      (n) => `CREATE${" ".repeat(2 * n)}TABLE${" ".repeat(10)}`,
+      (n) => `CREATE TABLE${" ".repeat(2 * n)}`,
+      (n) => `os.getenv(${" ".repeat(2 * n)}`,
+      (n) => `app.get(${" ".repeat(2 * n)}`,
+      (n) => "a.".repeat(n),
+      (n) => `CREATE TABLE ${"a.".repeat(n)}`,
+      (n) => `CREATE TEMP TABLE IF NOT EXISTS ${"[a].".repeat(Math.ceil(n / 2))}`,
+      (n) => `process.env[${" ".repeat(2 * n)}`,
+      (n) => `@a.get("/${"a".repeat(2 * n)}`,
     ];
-    for (const line of lines) {
-      const started = performance.now();
-      expect(billingFrom(line)).toBeUndefined();
-      expect(performance.now() - started).toBeLessThan(500);
+    /** The fastest of three scans, so one pause of the machine is not counted. */
+    const cost = (line: string) =>
+      Math.min(
+        ...[1, 2, 3].map(() => {
+          const started = performance.now();
+          expect(billingFrom(line)).toBeUndefined();
+          return performance.now() - started;
+        }),
+      );
+    for (const shape of shapes) {
+      const small = cost(shape(2_500));
+      const large = cost(shape(20_000));
+      // 32x is 4 times the linear growth and half the quadratic; 20 ms absorbs timer noise.
+      expect(large).toBeLessThan(32 * small + 20);
     }
   });
 
@@ -197,21 +212,22 @@ describe("codeAliases (F01)", () => {
     const text = [
       "-- create table if needed",
       "See: create table of contents (below)",
-      "CREATE TABLE IF NOT EXISTS public.orders (",
-      'CREATE TABLE "public"."line_items" (',
-      "CREATE TEMP TABLE tmp_stage(",
-      "CREATE UNLOGGED TABLE [dbo].[audit_log] (",
-      "CREATE TEMPORARY TABLE IF NOT EXISTS `ev`.`events_x` (",
-      "CREATE TABLE no_column_list",
-      "create table lower_case (",
+      "CREATE TABLE IF NOT EXISTS public.invoices (",
+      'CREATE TABLE "public"."invoice_items" (',
+      "CREATE TEMP TABLE tmp_invoice(",
+      "CREATE UNLOGGED TABLE [dbo].[billing_log] (",
+      "CREATE TEMPORARY TABLE IF NOT EXISTS `ev`.`billing_events` (",
+      "CREATE TABLE billing_no_column_list",
+      "create table lower_invoice (",
     ].join("\n");
+    // Every name shares a word with Billing's own names, so only the parsing decides.
     expect(billingFrom(text)).toEqual([
-      "audit_log",
-      "events_x",
-      "line_items",
-      "lower_case",
-      "orders",
-      "tmp_stage",
+      "billing_events",
+      "billing_log",
+      "invoice_items",
+      "invoices",
+      "lower_invoice",
+      "tmp_invoice",
     ]);
   });
 
@@ -354,6 +370,63 @@ describe("codeAliases (F01)", () => {
       ["src/deliverables/crud.py", '@router.get("/shared-table")'],
     ]);
     expect(codeAliases(linkManifest(), files)).toEqual({});
+  });
+
+  it("never gives a feature a table named after another feature's subject", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-sources", title: "Signal sources", aliases: [] }),
+        makeFeature({ id: "deliverables-management", title: "Deliverables management" }),
+        makeFeature({ id: "ai-agents", title: "AI agents", aliases: [] }),
+        makeFeature({ id: "planning", title: "Milestone tracking", aliases: [] }),
+      ],
+      membership: { "app/models.py": { featureId: "signal-sources", weight: 1 } },
+    });
+    // The shared models file belongs to one feature, but most of its tables name the others.
+    const models = ["deliverables", "agents", "milestones", "signal_rows"]
+      .map((table) => `    __tablename__ = "${table}"`)
+      .join("\n");
+    const found = codeAliases(manifest, new Map([["app/models.py", models]]));
+    expect(found).toEqual({ "signal-sources": ["signal_rows"] });
+  });
+
+  it("gives a feature a table only when the name shares a word with the feature's own names", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-sources", title: "Signal sources", aliases: ["feeds"] }),
+        makeFeature({ id: "planning", title: "Milestone tracking", aliases: [] }),
+      ],
+      membership: { "app/models.py": { featureId: "signal-sources", weight: 1 } },
+    });
+    const models = [
+      '__tablename__ = "project_members"',
+      '__tablename__ = "feed_items"',
+      "CREATE TABLE source_runs (id int)",
+      'op.create_table("audit_log")',
+      'URL = os.getenv("PROJECT_MEMBERS_URL")',
+    ].join("\n");
+    // Tables of a shared models file name other subjects unless they share a word (feeds, sources).
+    expect(codeAliases(manifest, new Map([["app/models.py", models]]))).toEqual({
+      "signal-sources": ["PROJECT_MEMBERS_URL", "feed_items", "source_runs"],
+    });
+  });
+
+  it("keeps an identifier that only shares a word with another feature, or names its own", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-sources", title: "Signal sources", aliases: [] }),
+        makeFeature({ id: "ai-agents", title: "AI agents", aliases: [] }),
+      ],
+      membership: { "app/sources.py": { featureId: "signal-sources", weight: 1 } },
+    });
+    const text = [
+      '__tablename__ = "source_agent_runs"',
+      '__tablename__ = "sources"',
+      'URL = os.getenv("AI_AGENTS_URL")',
+    ].join("\n");
+    expect(codeAliases(manifest, new Map([["app/sources.py", text]]))).toEqual({
+      "signal-sources": ["AI_AGENTS_URL", "source_agent_runs", "sources"],
+    });
   });
 
   it("lets only active features own identifiers", () => {

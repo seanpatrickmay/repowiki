@@ -140,6 +140,40 @@ interface BodyRow {
   body: string;
 }
 
+/**
+ * The manifest with `additions` added as aliases, as amendManifestAliases stores it, computed in
+ * memory: an alias already present (case-insensitively, or equal to the title) or blank is
+ * skipped, and one that fails core's aliasProblem is a StoreError. Lets a caller price the build
+ * that will run on the amended manifest before anything is stored.
+ */
+export function addAliases(
+  manifest: Manifest,
+  additions: Readonly<Record<string, readonly string[]>>,
+): Manifest {
+  const features = manifest.features.map((feature) => {
+    // hasOwn: a feature id such as "constructor" must not read Object.prototype.
+    const wanted = Object.hasOwn(additions, feature.id) ? (additions[feature.id] ?? []) : [];
+    const names = new Set([feature.title, ...feature.aliases].map((n) => n.toLowerCase()));
+    const added: string[] = [];
+    for (const alias of wanted) {
+      const trimmed = alias.trim();
+      if (trimmed === "") continue;
+      const problem = aliasProblem(trimmed);
+      if (problem !== null) {
+        const shown = [...trimmed].slice(0, 40).join("");
+        throw new StoreError(
+          `alias ${JSON.stringify(trimmed === shown ? shown : `${shown}…`)} for feature ${feature.id} ${problem}`,
+        );
+      }
+      if (names.has(trimmed.toLowerCase())) continue;
+      names.add(trimmed.toLowerCase());
+      added.push(trimmed);
+    }
+    return added.length === 0 ? feature : { ...feature, aliases: [...feature.aliases, ...added] };
+  });
+  return Manifest.parse({ ...manifest, features });
+}
+
 export function openStore(path: string): Store {
   let db: Database.Database;
   try {
@@ -276,30 +310,7 @@ export function openStore(path: string): Store {
           db.prepare("SELECT body FROM manifests WHERE sha = ?").get(sha) as BodyRow | undefined,
         );
         if (stored === null) throw new UnknownManifestError(sha);
-        const features = stored.features.map((feature) => {
-          // hasOwn: a feature id such as "constructor" must not read Object.prototype.
-          const wanted = Object.hasOwn(additions, feature.id) ? (additions[feature.id] ?? []) : [];
-          const names = new Set([feature.title, ...feature.aliases].map((n) => n.toLowerCase()));
-          const added: string[] = [];
-          for (const alias of wanted) {
-            const trimmed = alias.trim();
-            if (trimmed === "") continue;
-            const problem = aliasProblem(trimmed);
-            if (problem !== null) {
-              const shown = [...trimmed].slice(0, 40).join("");
-              throw new StoreError(
-                `alias ${JSON.stringify(trimmed === shown ? shown : `${shown}…`)} for feature ${feature.id} ${problem}`,
-              );
-            }
-            if (names.has(trimmed.toLowerCase())) continue;
-            names.add(trimmed.toLowerCase());
-            added.push(trimmed);
-          }
-          return added.length === 0
-            ? feature
-            : { ...feature, aliases: [...feature.aliases, ...added] };
-        });
-        const amended = Manifest.parse({ ...stored, features });
+        const amended = addAliases(stored, additions);
         db.prepare("UPDATE manifests SET body = ? WHERE sha = ?").run(JSON.stringify(amended), sha);
         return amended;
       })();

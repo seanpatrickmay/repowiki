@@ -46,3 +46,26 @@ export function linkViolations(revision: Revision, manifest: Manifest): string[]
   }
   return problems;
 }
+
+/**
+ * How many [[id]] links and See also entries of `revisions` (the current pages) name an active
+ * feature that has no page among them, such as one whose page failed to write. Not a violation:
+ * the site shows such a link as plain text (spec §7.3's stored-page rule, reported only).
+ */
+export function linksWithoutPage(revisions: readonly Revision[], manifest: Manifest): number {
+  const active = new Set(
+    manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id),
+  );
+  const written = new Set(revisions.map((r) => r.featureId));
+  const missing = (id: string) => active.has(id) && !written.has(id);
+  let count = 0;
+  for (const revision of revisions) {
+    count += revision.seeAlso.filter(missing).length;
+    for (const section of revision.sections) {
+      for (const claim of section.claims) {
+        count += linkTokensIn(claim.text).filter(({ target }) => missing(target)).length;
+      }
+    }
+  }
+  return count;
+}

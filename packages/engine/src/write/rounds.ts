@@ -1,7 +1,8 @@
-import type { Claim, SectionKey, TokenUsage } from "@repowiki/core";
+import { type Claim, CONTROL_CHARACTERS, type SectionKey, type TokenUsage } from "@repowiki/core";
 import type { LlmMessage } from "@repowiki/llm";
 import {
   type DraftClaim,
+  LIMITATION_EVIDENCE_PROBLEM,
   type PageDraft,
   quote,
   type VerifyContext,
@@ -19,8 +20,8 @@ export const MAX_FIX_CLAIMS = 40;
 export const MAX_PROBLEMS_PER_CLAIM = 3;
 /** The longest rejection reason the retry turn quotes, in code points. */
 const MAX_REASON_LENGTH = 500;
-/** Whitespace, control, line-break and bidirectional characters: a reason shows them as a space. */
-const REASON_BREAKS = /[\s\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069\uFEFF]+/gu;
+/** Whitespace and core's CONTROL_CHARACTERS: a reason shows a run of them as a space. */
+const REASON_BREAKS = new RegExp(`(?:\\s|${CONTROL_CHARACTERS.source})+`, "gu");
 
 /** The first `max` characters of an id, never splitting a surrogate pair. */
 function cut(id: string, max: number): string {
@@ -78,6 +79,8 @@ export interface PageState {
   failure: string | null;
   verified: Map<string, { key: SectionKey; claim: Claim }>;
   failing: Map<string, { key: SectionKey; claim: DraftClaim; problems: string[] }>;
+  /** Failed claims no retry can fix, dropped without one (see setAsideUnfixable). */
+  unfixable: Map<string, { key: SectionKey; claim: DraftClaim; problems: string[] }>;
   tokens: TokenUsage;
   model: string | null;
   calls: number;
@@ -91,6 +94,7 @@ export function newPageState(pack: ContextPack): PageState {
     failure: null,
     verified: new Map(),
     failing: new Map(),
+    unfixable: new Map(),
     tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
     model: null,
     calls: 0,
@@ -102,7 +106,7 @@ function unknownSupports(state: PageState, supports: readonly string[]): string[
   const unknown = [
     ...new Set(
       supports.filter((id) => {
-        const target = state.verified.get(id) ?? state.failing.get(id);
+        const target = state.verified.get(id) ?? state.failing.get(id) ?? state.unfixable.get(id);
         return target === undefined || target.key === "lead";
       }),
     ),
@@ -136,6 +140,25 @@ export function verifyAll(
   }
 }
 
+/**
+ * Moves each limitation claim whose only problem is missing evidence out of the retry round: a
+ * retry cannot make the repository show a limitation, and re-sending the pack for it is most of
+ * a build's retry cost. A page left with no other failing claim skips the retry.
+ */
+export function setAsideUnfixable(state: PageState): void {
+  for (const [id, failed] of state.failing) {
+    const [only, ...more] = failed.problems;
+    if (
+      failed.key === "known-limitations" &&
+      only === LIMITATION_EVIDENCE_PROBLEM &&
+      more.length === 0
+    ) {
+      state.failing.delete(id);
+      state.unfixable.set(id, failed);
+    }
+  }
+}
+
 /** The retry turn for a page with failing claims: the pack, the draft, and the first problems. */
 export function fixRequest(state: PageState): LlmMessage[] {
   if (state.draft === null) throw new Error("fixRequest needs the page's draft");
@@ -156,7 +179,7 @@ export function fixRequest(state: PageState): LlmMessage[] {
     { role: "assistant", content: JSON.stringify(uniqueDraft(state.draft)) },
     {
       role: "user",
-      content: `These claims failed verification:\n${listed.join("\n")}\nReturn corrected versions of only these claims, under the same ids, citing only lines and commits the pack shows. To give up a body claim the pack cannot support, return it with an empty cite list; to give up a lead claim, return it with an empty supports list.`,
+      content: `These claims failed verification:\n${listed.join("\n")}\nReturn corrected versions of only these claims, under the same ids, citing only lines and commits the pack shows. You may give up any claim you cannot support from the pack: return a body claim with an empty cite list, or a lead claim with an empty supports list.`,
     },
   ];
 }

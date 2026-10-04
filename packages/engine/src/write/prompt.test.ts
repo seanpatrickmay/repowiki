@@ -12,6 +12,16 @@ import {
 import { testWiki } from "./test-wiki.ts";
 
 describe("the write call's shared prefix", () => {
+  it("names every evidence marker verify accepts for a limitation", () => {
+    const line = WRITE_INSTRUCTIONS.split("\n").find((l) => l.startsWith('- "known-limitations"'));
+    expect(line).toContain(
+      "a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit",
+    );
+    expect(STYLE_GUIDE).toContain(
+      "a TODO, FIXME, XXX or HACK comment, a skipped test or a reverting",
+    );
+  });
+
   it("loads the checked-in style guide", () => {
     expect(STYLE_GUIDE).toMatch(/^# RepoWiki style guide/);
     for (const word of [

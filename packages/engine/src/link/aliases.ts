@@ -1,4 +1,4 @@
-import { aliasProblem, FEATURE_ID_MAX_LENGTH, type Manifest, parseMemberId } from "@repowiki/core";
+import { aliasProblem, aliasSlug, type Manifest, parseMemberId } from "@repowiki/core";
 
 /** A pattern for one kind of code identifier; group 1 is the identifier as written. */
 interface IdentifierPattern {
@@ -128,7 +128,7 @@ function isClientCall(matched: string): boolean {
  * tests/, __tests__/, fixtures/ and __fixtures__/ directories, *.test.* and *.spec.* files,
  * test_*.py, *_test.py, tests.py and conftest.py.
  */
-function isTestFile(path: string): boolean {
+export function isTestFile(path: string): boolean {
   const segments = path.split("/");
   const name = segments.pop() ?? "";
   return (
@@ -141,19 +141,59 @@ function isTestFile(path: string): boolean {
   );
 }
 
+/** Core's aliasSlug, the slug the reader site routes an alias by: one slug is one route. */
+const slugOf = aliasSlug;
+
+/** True when `run` occurs in `tokens` as consecutive tokens. */
+function isTokenRun(run: readonly string[], tokens: readonly string[]): boolean {
+  for (let i = 0; i + run.length <= tokens.length; i++) {
+    if (run.every((token, j) => tokens[i + j] === token)) return true;
+  }
+  return false;
+}
+
+/** A word in its plain English singular: ies → y, (s|x|z|ch|sh)es → -es, s → -s (not ss). */
+function singularOf(word: string): string {
+  if (/[^aeiou]ies$/.test(word)) return `${word.slice(0, -3)}y`;
+  if (/(?:s|x|z|ch|sh)es$/.test(word)) return word.slice(0, -2);
+  if (/[^s]s$/.test(word)) return word.slice(0, -1);
+  return word;
+}
+
 /**
- * The URL slug the reader site gives an alias (a copy of aliasSlug in packages/site/src/model.ts,
- * which the engine cannot import): two names with one slug are one page's route.
+ * True when a table name shares a word, singular or plural, with one of its feature's own
+ * names. A shared models file declares every feature's tables, so a table that shares none
+ * names some other subject and is no alias of the file's feature.
  */
-function slugOf(name: string): string {
-  return name
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, FEATURE_ID_MAX_LENGTH)
-    .replace(/-+$/, "");
+function sharesOwnWord(identifier: string, own: readonly (readonly string[])[]): boolean {
+  const words = new Set(own.flat().map(singularOf));
+  return slugOf(identifier)
+    .split("-")
+    .some((token) => words.has(singularOf(token)));
+}
+
+/** The plain English plurals of a word: +s, +es, and y → ies. */
+function pluralsOf(word: string): string[] {
+  return [`${word}s`, `${word}es`, ...(/[^aeiou]y$/.test(word) ? [`${word.slice(0, -1)}ies`] : [])];
+}
+
+/**
+ * True when an identifier names another feature's subject (spec §7.3 aliases point at one page):
+ * its slug is a run of whole tokens in that feature's id, title slug or an alias slug
+ * ("deliverables" in deliverables-management, "agents" in ai-agents), or, for a one-word table
+ * name, a plural of one of their tokens ("milestones" for milestone-tracking).
+ */
+function namesOtherSubject(
+  identifier: string,
+  table: boolean,
+  others: readonly (readonly string[])[],
+): boolean {
+  const run = slugOf(identifier).split("-");
+  return others.some(
+    (tokens) =>
+      isTokenRun(run, tokens) ||
+      (table && run.length === 1 && tokens.some((t) => pluralsOf(t).includes(run[0] ?? ""))),
+  );
 }
 
 /** The forms a name is compared in: lowercased and slugified (empty slugs left out). */
@@ -180,13 +220,17 @@ function cleanIdentifier(kind: IdentifierPattern["kind"], raw: string): string |
 /**
  * Code identifiers to add as aliases, per active feature: those found in its (non-test) member
  * files and in no other feature's, that collide with no feature's id or title and no other
- * feature's alias (compared lowercased and as site slugs), most frequent first, at most
+ * feature's alias (compared lowercased and as site slugs), that name no other active feature's
+ * subject (`namesOtherSubject`: a shared models file's tables), and, for a table name, that share
+ * a word with the feature's own names (`sharesOwnWord`), most frequent first, at most
  * MAX_CODE_ALIASES. An identifier two features share names neither, so it is left out, which keeps
  * every alias pointing at one page. One that could not be a manifest alias (core's aliasProblem:
  * too long, or holding a control or bidi character) is skipped, never cut.
  *
- * A feature's own aliases do not count against it, so running this on an amended manifest returns
- * the same list again and adding it again changes nothing.
+ * A feature's own aliases do not count against it, but every other feature's do, code aliases
+ * included, so on an amended manifest this can return a shorter list than the first run did (an
+ * identifier that names another feature's new alias drops out). Adding it again changes nothing,
+ * because aliases are only ever added.
  */
 export function codeAliases(
   manifest: Manifest,
@@ -205,6 +249,19 @@ export function codeAliases(
   const active = new Set(
     manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id),
   );
+  // Each active feature's id, title and alias slugs, as token lists.
+  const subjects = new Map(
+    manifest.features
+      .filter((f) => active.has(f.id))
+      .map((f) => [
+        f.id,
+        [f.id, f.title, ...f.aliases]
+          .map(slugOf)
+          .filter((slug) => slug !== "")
+          .map((slug) => slug.split("-")),
+      ]),
+  );
+  const tables = new Set<string>();
   // identifier -> feature -> occurrences; key -> features using any spelling of it.
   const counts = new Map<string, Map<string, number>>();
   const users = new Map<string, Set<string>>();
@@ -220,6 +277,7 @@ export function codeAliases(
         const identifier = cleanIdentifier(kind, match[1] ?? "");
         if (identifier === null || identifier.length < MIN_IDENTIFIER_LENGTH) continue;
         if (aliasProblem(identifier) !== null || slugOf(identifier) === "") continue;
+        if (kind === "table") tables.add(identifier);
         const perFeature = counts.get(identifier) ?? new Map<string, number>();
         perFeature.set(featureId, (perFeature.get(featureId) ?? 0) + 1);
         counts.set(identifier, perFeature);
@@ -240,6 +298,11 @@ export function codeAliases(
       continue;
     }
     if (keys.some((key) => users.get(key)?.size !== 1)) continue;
+    const others = [...subjects].flatMap(([id, names]) => (id === featureId ? [] : names));
+    if (namesOtherSubject(identifier, tables.has(identifier), others)) continue;
+    if (tables.has(identifier) && !sharesOwnWord(identifier, subjects.get(featureId) ?? [])) {
+      continue;
+    }
     const list = perFeature.get(featureId) ?? [];
     list.push({ identifier, count: byFeature.get(featureId) ?? 0 });
     perFeature.set(featureId, list);
