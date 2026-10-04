@@ -1,4 +1,19 @@
 export {
+  buildFileGraph,
+  type Cluster,
+  type ClusterOptions,
+  type ClusterSummary,
+  clusterFiles,
+  DEFAULT_CLUSTER_OPTIONS,
+  DEFAULT_GRAPH_WEIGHTS,
+  DEFAULT_SUMMARY_LIMITS,
+  type FileGraph,
+  type GraphWeights,
+  type SummaryLimits,
+  summarizeClusters,
+  type WeightedEdge,
+} from "./cluster/index.ts";
+export {
   type CoChange,
   type CoChangePair,
   DEFAULT_MAX_FILE_BYTES,
