@@ -81,13 +81,18 @@ export {
 } from "./store/index.ts";
 export { commitCitationProblems, diagramProblems, revisionProblems } from "./verify/index.ts";
 export {
+  type ArchitectureOutcome,
+  architectureSystemPrompt,
   type BuildJournal,
   buildJournal,
   buildPack,
   buildWiki,
   type ContextPack,
+  DEFAULT_ARCHITECTURE_BUDGET_TOKENS,
   DEFAULT_CONTEXT_BUDGET_TOKENS,
+  MAX_ARCHITECTURE_OUTPUT_TOKENS,
   MAX_PAGE_OUTPUT_TOKENS,
+  MIN_ARCHITECTURE_PAGES,
   type PageOutcome,
   type WikiBuild,
   WikiBuildError,
