@@ -33,32 +33,39 @@ export interface WikiArgs {
 }
 
 /** A usage error names the offending flag and never the value given with it. */
-const flagError = (flag: string, problem: string): CliError =>
-  new CliError(`${flag} ${problem}; ${USAGE}`);
+const flagError = (flag: string, problem: string, usage: string): CliError =>
+  new CliError(`${flag} ${problem}; ${usage}`);
 
 /** The one value of a flag given at most once; an empty or repeated one is a usage error. */
-function once<T extends string | boolean>(flag: string, values: T[] | undefined): T | undefined {
-  if (values !== undefined && values.length > 1) throw flagError(flag, "was given more than once");
+function once<T extends string | boolean>(
+  flag: string,
+  values: T[] | undefined,
+  usage: string,
+): T | undefined {
+  if (values !== undefined && values.length > 1)
+    throw flagError(flag, "was given more than once", usage);
   const [value] = values ?? [];
-  if (value === "") throw flagError(flag, "must not be empty");
+  if (value === "") throw flagError(flag, "must not be empty", usage);
   return value;
 }
 
-const budgetTokens = (value: string | undefined): number | null => {
+/** A flag's positive integer value, or null when the flag is absent. */
+const positive = (flag: string, value: string | undefined, usage: string): number | null => {
   if (value === undefined) return null;
   const n = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(n) || n <= 0)
-    throw flagError("--budget", "must be a positive integer");
+    throw flagError(flag, "must be a positive integer", usage);
   return n;
 };
 
-const deadlineMinutes = (value: string | undefined): number | null => {
+const deadlineMinutes = (value: string | undefined, usage: string): number | null => {
   if (value === undefined) return null;
   const n = Number(value);
   if (!/^\d+(\.\d+)?$/.test(value) || !(n > 0 && n <= MAX_DEADLINE_MINUTES))
     throw flagError(
       "--deadline",
       `must be a number of minutes above 0 and up to ${MAX_DEADLINE_MINUTES}`,
+      usage,
     );
   return n;
 };
@@ -66,37 +73,55 @@ const deadlineMinutes = (value: string | undefined): number | null => {
 /** The longest unknown flag a usage error echoes. */
 const MAX_ECHOED_FLAG = 40;
 
-/** `<repo> [rev]` plus flags in any order; throws a CliError for any other usage. */
-export function parseWikiArgs(argv: readonly string[]): WikiArgs {
+/** The flags wiki:build, wiki:update and wiki:replay share. */
+export type RunFlags = Omit<WikiArgs, "repo" | "rev">;
+
+/**
+ * Parses `argv` into positionals and the shared flags, plus `--limit N` when `limit` is set;
+ * every usage error is a CliError ending in `usage`.
+ */
+export function parseRunArgs(
+  argv: readonly string[],
+  usage: string,
+  limit = false,
+): { positionals: string[]; flags: RunFlags; limit: number | null } {
   let parsed: ReturnType<typeof parse>;
   try {
-    parsed = parse(argv);
+    parsed = parse(argv, limit);
   } catch (err) {
     // node's message quotes the whole argument, `--flag=secret` included: keep the flag, cut short
     const flag = /'(-[^'=\s]*)/.exec((err as Error).message)?.[1];
     const shown = flag?.slice(0, MAX_ECHOED_FLAG).replace(/[^\x21-\x7e]/g, "?");
-    throw new CliError(`${shown === undefined ? "bad option" : `bad option ${shown}`}; ${USAGE}`, {
+    throw new CliError(`${shown === undefined ? "bad option" : `bad option ${shown}`}; ${usage}`, {
       cause: err,
     });
   }
-  const [repo, rev = "HEAD", ...extra] = parsed.positionals;
-  if (repo === undefined || extra.length > 0) throw new CliError(USAGE);
-  if (repo === "") throw new CliError(`<repo-path> must not be empty; ${USAGE}`);
   const v = parsed.values;
   return {
-    repo,
-    rev,
-    out: once("--out", v.out) ?? null,
-    config: once("--config", v.config) ?? null,
-    batch: !once("--no-batch", v["no-batch"]),
-    dryRun: once("--dry-run", v["dry-run"]) ?? false,
-    budgetTokens: budgetTokens(once("--budget", v.budget)) ?? 30_000,
-    deadlineMinutes: deadlineMinutes(once("--deadline", v.deadline)),
-    verbose: once("--verbose", v.verbose) ?? false,
+    positionals: parsed.positionals,
+    flags: {
+      out: once("--out", v.out, usage) ?? null,
+      config: once("--config", v.config, usage) ?? null,
+      batch: !once("--no-batch", v["no-batch"], usage),
+      dryRun: once("--dry-run", v["dry-run"], usage) ?? false,
+      budgetTokens: positive("--budget", once("--budget", v.budget, usage), usage) ?? 30_000,
+      deadlineMinutes: deadlineMinutes(once("--deadline", v.deadline, usage), usage),
+      verbose: once("--verbose", v.verbose, usage) ?? false,
+    },
+    limit: positive("--limit", once("--limit", v.limit as string[] | undefined, usage), usage),
   };
 }
 
-function parse(argv: readonly string[]) {
+/** `<repo> [rev]` plus flags in any order; throws a CliError for any other usage. */
+export function parseWikiArgs(argv: readonly string[]): WikiArgs {
+  const { positionals, flags } = parseRunArgs(argv, USAGE);
+  const [repo, rev = "HEAD", ...extra] = positionals;
+  if (repo === undefined || extra.length > 0) throw new CliError(USAGE);
+  if (repo === "") throw new CliError(`<repo-path> must not be empty; ${USAGE}`);
+  return { repo, rev, ...flags };
+}
+
+function parse(argv: readonly string[], limit: boolean) {
   return parseArgs({
     args: [...argv],
     allowPositionals: true,
@@ -108,6 +133,7 @@ function parse(argv: readonly string[]) {
       budget: { type: "string", multiple: true },
       deadline: { type: "string", multiple: true },
       verbose: { type: "boolean", multiple: true },
+      ...(limit ? { limit: { type: "string", multiple: true } as const } : {}),
     },
   });
 }
@@ -228,7 +254,12 @@ export interface BuildEstimate {
 export const ASSUMED_ARCHITECTURE_OUTPUT_TOKENS = 5000;
 
 /** The cost of some tokens at a model's rates; a CliError for a model with no price. */
-function priced(model: string, inputTokens: number, outputTokens: number, batch: boolean): number {
+export function priced(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  batch: boolean,
+): number {
   const usd = callCostUsd(
     model,
     { in: inputTokens, out: outputTokens, cacheRead: 0, cacheWrite: 0 },
@@ -283,13 +314,13 @@ export interface ArchitectureRow {
   skipped: "current" | "too few pages" | null;
 }
 
-const count = (n: number): string => n.toLocaleString("en-US");
+export const count = (n: number): string => n.toLocaleString("en-US");
 
 /** A feature id or failure message in a table cell: a code span whose pipes cannot split the row. */
-const cell = (text: string): string => markdownCodeSpan(text).replace(/\|/g, "\\|");
+export const cell = (text: string): string => markdownCodeSpan(text).replace(/\|/g, "\\|");
 
 /** The summary's row for the project's article (the About page). */
-function architectureRow({ outcome, skipped }: ArchitectureRow): string {
+export function architectureRow({ outcome, skipped }: ArchitectureRow): string {
   if (outcome === null) {
     const why =
       skipped === "current" ? "already current; no call" : "skipped: fewer than two pages";
@@ -312,7 +343,6 @@ export function renderBuildSummary(
   totals: LedgerTotals,
   architecture?: ArchitectureRow,
 ): string {
-  const t = totals.tokens;
   const upFront =
     estimate === null
       ? "."
@@ -331,6 +361,18 @@ export function renderBuildSummary(
     }),
     ...(architecture === undefined ? [] : [architectureRow(architecture)]),
     "",
+    ...costLines(totals, upFront, estimate !== null),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * A summary's "LLM cost" section: the ledger's calls and tokens, unpriced calls, and the cost
+ * with `upFront` (the estimate's sentence ending, or ".") after it.
+ */
+export function costLines(totals: LedgerTotals, upFront: string, estimated: boolean): string[] {
+  const t = totals.tokens;
+  return [
     "## LLM cost",
     "",
     ...(totals.calls === 0 ? ["This run: no LLM call made.", ""] : []),
@@ -342,12 +384,9 @@ export function renderBuildSummary(
           "",
         ]
       : []),
-    ...(estimate === null
-      ? []
-      : ["The estimate is an upper-side estimate with no cache hits.", ""]),
+    ...(estimated ? ["The estimate is an upper-side estimate with no cache hits.", ""] : []),
     `Cost: $${totals.usd.toFixed(4)}${upFront}`,
   ];
-  return `${lines.join("\n")}\n`;
 }
 
 /** The longest cause line --verbose prints: a cause can quote stored model output. */
