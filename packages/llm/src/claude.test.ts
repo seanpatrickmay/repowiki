@@ -33,6 +33,15 @@ const request = {
 };
 
 describe("createClaudeProvider", () => {
+  it("sends a temperature only when the request gives one", async () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    const { provider } = setup(fetch);
+    await provider.generate({ ...request, temperature: 0 });
+    await provider.generate(request);
+    expect(bodies[0]?.temperature).toBe(0);
+    expect(bodies[1]).not.toHaveProperty("temperature");
+  });
+
   it("asks for JSON matching the schema with the role's model, and ledgers the call", async () => {
     const { bodies, fetch } = cannedMessagesApi(PARIS);
     const { ledger, provider } = setup(fetch, { ...DEFAULT_MODELS, write: "claude-sonnet-5-5" });

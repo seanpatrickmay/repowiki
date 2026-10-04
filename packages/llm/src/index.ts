@@ -43,3 +43,16 @@ export {
   type Provider,
   resolveModels,
 } from "./provider.ts";
+export {
+  createClaudeToolProvider,
+  type TextBlock,
+  type ToolDefinition,
+  type ToolProvider,
+  type ToolProviderOptions,
+  type ToolResultBlock,
+  type ToolUseBlock,
+  type TurnBlock,
+  type TurnMessage,
+  type TurnRequest,
+  type TurnResult,
+} from "./tools.ts";
