@@ -100,31 +100,46 @@ export class WikiView {
     return lead === undefined ? "" : cut(this.text(lead.text), SUMMARY_LENGTH);
   }
 
+  /**
+   * Where a page id leads. The id is read as the site reads a path: the "wiki/" prefix and slashes
+   * go, and a title or a differently cased or spelled id matches by its slug. An unknown id throws
+   * a `ToolError`.
+   */
   resolve(raw: string): Resolved {
-    const id = raw
-      .trim()
-      .replace(/^\/?wiki\//, "")
-      .replace(/\/+$/, "");
-    if (id === ABOUT_PAGE_ID && this.article !== undefined) return { kind: "about" };
-    const feature = this.features.get(id);
-    if (feature !== undefined && this.hasRoute(id)) {
-      const target = this.finalTarget(id);
-      const status = this.features.get(target)?.status;
-      if (status?.kind === "disambiguation")
-        return { kind: "choices", from: id, targets: status.to };
-      if (this.pages.has(target))
-        return { kind: "page", featureId: target, from: target === id ? null : id };
+    const line = oneLine(raw);
+    const id = line.replace(/^\/?wiki\//, "").replace(/\/+$/, "");
+    // The About article by its id or its site path, in any case; no feature can take the name.
+    if (/^special[:/]about$/i.test(id.replace(/^\//, ""))) {
+      if (this.article !== undefined) return { kind: "about" };
+    } else {
+      const slug = aliasSlug(id);
+      // `from` is the agent's own text, so it is one printable line and capped.
+      const from = cut(id, 80);
+      if (this.hasRoute(slug)) {
+        const found = this.reach(slug, slug === this.finalTarget(slug) ? null : from, from);
+        if (found !== undefined) return found;
+      }
+      const targets = this.aliasRoutes.get(slug);
+      if (targets?.length === 1) {
+        const found = this.reach(targets[0] ?? slug, from, from);
+        if (found !== undefined) return found;
+      } else if (targets !== undefined && targets.length > 1) {
+        return { kind: "choices", from, targets };
+      }
     }
-    const targets = this.aliasRoutes.get(aliasSlug(id));
-    if (targets !== undefined && targets.length === 1 && targets[0] !== undefined) {
-      return this.resolve(targets[0]).kind === "page"
-        ? { kind: "page", featureId: targets[0], from: id }
-        : this.resolve(targets[0]);
+    throw new ToolError(`no page ${JSON.stringify(cut(line, 80))}; use search to find a page's id`);
+  }
+
+  /** The page or choices a routed feature id ends at, or undefined when its target has no page. */
+  private reach(id: string, pageFrom: string | null, choicesFrom: string): Resolved | undefined {
+    const target = this.finalTarget(id);
+    const status = this.features.get(target)?.status;
+    if (status?.kind === "disambiguation") {
+      // As the site lists them: each target at its final article, once.
+      const targets = [...new Set(status.to.map((to) => this.finalTarget(to)))];
+      return { kind: "choices", from: choicesFrom, targets };
     }
-    if (targets !== undefined && targets.length > 1) return { kind: "choices", from: id, targets };
-    throw new ToolError(
-      `no page ${JSON.stringify(cut(oneLine(raw), 80))}; use search to find a page's id`,
-    );
+    return this.pages.has(target) ? { kind: "page", featureId: target, from: pageFrom } : undefined;
   }
 }
 
