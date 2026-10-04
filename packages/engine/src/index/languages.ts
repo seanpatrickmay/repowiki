@@ -17,6 +17,40 @@ export function languageForPath(path: string): SourceLanguage | null {
   return null;
 }
 
+/**
+ * tree-sitter-typescript 0.23.2 (the latest release) cannot parse an import type as the only
+ * type argument of a call with no arguments: `f<typeof import("x")>()` becomes the comparison
+ * `f < typeof import("x")` followed by an ERROR node holding `>()`. The source is valid
+ * TypeScript, so that one ERROR shape is not a syntax error. It sits next to the comparison, not
+ * inside a call's type arguments, because the grammar never builds the call.
+ */
+function isImportTypeArgsMisparse(error: Node): boolean {
+  if (!/^>\s*\(\s*\)$/.test(error.text)) return false;
+  const prev = error.previousSibling;
+  if (prev === null) return false;
+  const importsIn = (node: Node): boolean =>
+    [node, ...node.descendantsOfType("call_expression")].some(
+      (n) => n.type === "call_expression" && n.childForFieldName("function")?.type === "import",
+    );
+  return [prev, ...prev.descendantsOfType("binary_expression")].some((n) => {
+    if (n.type !== "binary_expression" || n.childForFieldName("operator")?.type !== "<") {
+      return false;
+    }
+    const right = n.childForFieldName("right");
+    return right !== null && importsIn(right);
+  });
+}
+
+/** True when the tree holds a syntax error other than the tolerated import-type misparse. */
+function hasSyntaxError(node: Node): boolean {
+  if (node.isMissing) return true;
+  if (node.isError) return !isImportTypeArgsMisparse(node);
+  if (!node.hasError) return false;
+  const bad = node.children.filter((c) => c.hasError || c.isMissing);
+  // An error flag with no flagged child cannot be explained, so it counts.
+  return bad.length === 0 || bad.some(hasSyntaxError);
+}
+
 export interface ParsedSource {
   root: Node;
   hasError: boolean;
@@ -49,7 +83,7 @@ export async function createSourceParser(): Promise<SourceParser> {
       if (tree === null) throw new Error(`tree-sitter produced no tree for ${language} source`);
       return {
         root: tree.rootNode,
-        hasError: tree.rootNode.hasError,
+        hasError: hasSyntaxError(tree.rootNode),
         dispose: () => tree.delete(),
       };
     },
