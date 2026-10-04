@@ -1179,6 +1179,55 @@ describe("wiki-replay.ts as a process (no network)", () => {
     expect(existsSync(join(out, "export.json"))).toBe(true);
   });
 
+  it("keeps the earlier records when the wiki's head is a commit between steps", () => {
+    const { repo, out, first, quiet, git } = replayable();
+    // Off `quiet`: a direct commit (no step), then a merge with no net change (a step).
+    git("switch", "-q", "-c", "alt", quiet);
+    git("commit", "-q", "--allow-empty", "-m", "chore: direct");
+    const direct = git("rev-parse", "HEAD").trim();
+    git("switch", "-q", "-c", "scratch3");
+    writeFileSync(join(repo, "scratch3.txt"), "tmp\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "add scratch3");
+    git("rm", "-q", "scratch3.txt");
+    git("commit", "-q", "-m", "remove scratch3");
+    git("switch", "-q", "alt");
+    git("merge", "-q", "--no-ff", "-m", "Merge pull request #9 from me/scratch3", "scratch3");
+    const last = git("rev-parse", "HEAD").trim();
+    const summaryPath = join(out, `replay-${first.slice(0, 7)}-${last.slice(0, 7)}.md`);
+
+    expect(
+      run("scripts/wiki-replay.ts", repo, first, last, "--out", out, "--limit", "1").status,
+    ).toBe(0);
+    expect(run("scripts/wiki-update.ts", repo, direct, "--out", out).status).toBe(0);
+    const result = run("scripts/wiki-replay.ts", repo, first, last, "--out", out);
+    expect(result.status).toBe(0);
+    expect(summaryRows(readFileSync(summaryPath, "utf8"))).toEqual([
+      ["| 1", quiet.slice(0, 7)],
+      ["| 2", last.slice(0, 7)],
+    ]);
+  });
+
+  it("checks and records every step stored without a record, not only the head's", () => {
+    const { repo, out, first, quiet, quiet2 } = replayable(null, { twoQuiet: true });
+    const target = quiet2 ?? "";
+    // Two steps moved by wiki:update, neither recorded by a replay.
+    expect(run("scripts/wiki-update.ts", repo, quiet, "--out", out).status).toBe(0);
+    expect(run("scripts/wiki-update.ts", repo, target, "--out", out).status).toBe(0);
+    const result = run("scripts/wiki-replay.ts", repo, first, target, "--out", out);
+    expect(result.status).toBe(0);
+    for (const sha of [quiet, target])
+      expect(result.stderr).toContain(`${sha.slice(0, 7)}: stored by a run that stopped`);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${target.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summaryRows(summary)).toEqual([
+      ["| 1", quiet.slice(0, 7)],
+      ["| 2", target.slice(0, 7)],
+    ]);
+  });
+
   it("records an unrecorded last step and rewrites the export when nothing is left", () => {
     const { repo, out, first, quiet } = replayable();
     run("scripts/wiki-update.ts", repo, quiet, "--out", out);

@@ -48,6 +48,7 @@ export {
   pullRequestOf,
   type ReplayStep,
   type RepoIndex,
+  reachableCommits,
   readHistory,
   readSources,
   replaySteps,
