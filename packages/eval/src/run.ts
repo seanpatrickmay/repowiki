@@ -7,6 +7,7 @@ import {
   AGENTS,
   type AnswerRecord,
   appendRecord,
+  checkRecords,
   EvalRunError,
   openRun,
   type RunInfo,
@@ -94,6 +95,7 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   const log = options.log ?? (() => {});
   const info = openRun(runDir, options.info);
   const records = readRecords(runDir);
+  checkRecords(runDir, info, records);
   const append = (record: RunRecord) => {
     appendRecord(runDir, record);
     records.push(record);

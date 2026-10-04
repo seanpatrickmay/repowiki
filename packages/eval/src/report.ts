@@ -1,9 +1,17 @@
-import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import type { QuestionKind } from "./questions.ts";
-import { AGENTS, EvalRunError, type RunRecord, readRecords, readRunInfo } from "./records.ts";
+import {
+  AGENTS,
+  checkRecords,
+  createOnce,
+  EvalRunError,
+  type RunRecord,
+  readRecords,
+  readRunInfo,
+} from "./records.ts";
 import {
   SPOT_CHECK_FILE,
   SPOT_CHECK_SIZE,
@@ -225,21 +233,6 @@ export function renderReport(
 export const REPORT_FILE = "report.md";
 
 /**
- * Creates `path` with `text` atomically, never over a file that exists: written to a temporary
- * file, then linked to its name (which fails when the file exists) and the temporary removed, so a
- * kill never leaves a half-written file that would then be refused.
- */
-function createOnce(path: string, text: string): void {
-  const temporary = `${path}.${process.pid}.tmp`;
-  try {
-    writeFileSync(temporary, text);
-    linkSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-/**
  * Writes a run directory's report.md from its run.json, results and spot-check.json, first
  * writing spot-check.json once every answer is judged; a spot-check file that exists is never
  * written over, since it holds the owner's grades. report.md is replaced atomically.
@@ -247,6 +240,7 @@ function createOnce(path: string, text: string): void {
 export function writeReport(runDir: string): { summary: EvalSummary; reportPath: string } {
   const info = readRunInfo(runDir);
   const records = readRecords(runDir);
+  checkRecords(runDir, info, records);
   const summary = summarize(info, records);
   const spotPath = join(runDir, SPOT_CHECK_FILE);
   if (summary.complete && !existsSync(spotPath)) {

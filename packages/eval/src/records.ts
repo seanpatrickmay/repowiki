@@ -3,7 +3,9 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   truncateSync,
   writeFileSync,
@@ -15,8 +17,8 @@ import { JudgeVerdict } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import { EvalQuestion, QuestionSet } from "./questions.ts";
 
-export const AGENTS: readonly AgentKind[] = ["wiki", "repo"];
-const Agent = z.enum(["wiki", "repo"]);
+const Agent = z.enum(["wiki", "repo"] satisfies AgentKind[]);
+export const AGENTS: readonly AgentKind[] = Agent.options;
 
 /** What a run is: the questions, the wiki and repository, and the settings both agents share. */
 export const RunInfo = z.object({
@@ -119,6 +121,7 @@ const IDENTITY = ["set", "repo", "head", "exportHash", "questionsHash", "turnLim
  * and a held-out run cannot be repeated against a changed question file or wiki.
  */
 export function openRun(runDir: string, info: RunInfo): RunInfo {
+  removeStaleTemporaries(runDir);
   if (!existsSync(join(runDir, RUN_INFO_FILE)) && createRunInfo(runDir, info)) return info;
   const stored = readRunInfo(runDir);
   for (const field of IDENTITY) {
@@ -135,24 +138,74 @@ export function openRun(runDir: string, info: RunInfo): RunInfo {
   return stored;
 }
 
+const codeOf = (error: unknown) =>
+  error instanceof Error && "code" in error ? String(error.code) : undefined;
+
 /**
- * Writes run.json atomically: to a temporary file, linked to its name (which fails when another
- * process created it first) and then removed, so a kill never leaves a half-written run.json.
- * Returns false when run.json already exists.
+ * Creates `path` with `text` atomically, never over a file that exists: written to a temporary
+ * file, then linked to its name (which fails when the file exists) and the temporary removed, so a
+ * kill never leaves a half-written file. Where the file system has no hard links (exFAT, some
+ * network shares), the temporary is renamed to the name if nothing holds it yet. Returns false when
+ * the file already exists.
  */
-function createRunInfo(runDir: string, info: RunInfo): boolean {
-  mkdirSync(runDir, { recursive: true });
-  const path = join(runDir, RUN_INFO_FILE);
+export function createOnce(path: string, text: string, link = linkSync): boolean {
   const temporary = `${path}.${process.pid}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(info, null, 2)}\n`);
-    linkSync(temporary, path);
+    writeFileSync(temporary, text);
+    try {
+      link(temporary, path);
+    } catch (error) {
+      const code = codeOf(error);
+      if (code === "EEXIST") return false;
+      if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EOPNOTSUPP" && code !== "ENOSYS") {
+        throw error;
+      }
+      if (existsSync(path)) return false;
+      renameSync(temporary, path);
+    }
     return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
-    throw error;
   } finally {
     rmSync(temporary, { force: true });
+  }
+}
+
+/** Removes the temporary files a killed run left in `runDir` (`<name>.<pid>.tmp`). */
+function removeStaleTemporaries(runDir: string): void {
+  if (!existsSync(runDir)) return;
+  for (const name of readdirSync(runDir)) {
+    if (/\.\d+\.tmp$/.test(name)) rmSync(join(runDir, name), { force: true });
+  }
+}
+
+/** Writes run.json once, atomically (createOnce); false when it already exists. */
+function createRunInfo(runDir: string, info: RunInfo): boolean {
+  mkdirSync(runDir, { recursive: true });
+  return createOnce(join(runDir, RUN_INFO_FILE), `${JSON.stringify(info, null, 2)}\n`);
+}
+
+/**
+ * Refuses records that no run of `info` writes: a record of a question the run does not hold, or
+ * a second answer or judgment of one question by one agent (a run appends each once; a hand-edited
+ * or doubly appended file would otherwise be read with the last one winning).
+ */
+export function checkRecords(runDir: string, info: RunInfo, records: readonly RunRecord[]): void {
+  const path = join(runDir, RESULTS_FILE);
+  const ids = new Set(info.questions.map((q) => q.id));
+  const seen = new Set<string>();
+  for (const r of records) {
+    if (!ids.has(r.questionId)) {
+      throw new EvalRunError(
+        `${path} holds a record of ${JSON.stringify(r.questionId)}, which is not one of this run's questions`,
+      );
+    }
+    if (r.kind === "judge-failure") continue;
+    const key = `${r.kind}\0${r.questionId}\0${r.agent}`;
+    if (seen.has(key)) {
+      throw new EvalRunError(
+        `${path} holds a second ${r.kind} of ${JSON.stringify(r.questionId)} (${r.agent})`,
+      );
+    }
+    seen.add(key);
   }
 }
 
