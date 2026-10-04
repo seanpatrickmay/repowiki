@@ -33,6 +33,15 @@ export interface Tool {
   run(input: unknown): ToolOutput;
 }
 
+/** A tool result cut at MAX_TOOL_RESULT_CHARS code points, so no astral character is split. */
+function capped(text: string): string {
+  if (text.length <= MAX_TOOL_RESULT_CHARS) return text;
+  const chars = [...text];
+  return chars.length <= MAX_TOOL_RESULT_CHARS
+    ? text
+    : `${chars.slice(0, MAX_TOOL_RESULT_CHARS).join("")}\n\u2026 (result cut at ${MAX_TOOL_RESULT_CHARS} characters)`;
+}
+
 /** A tool whose input is checked with `input` before `run` sees it. */
 export function defineTool<S extends z.ZodType>(
   name: string,
@@ -57,13 +66,7 @@ export function defineTool<S extends z.ZodType>(
       }
       try {
         const text = run(parsed.data);
-        return {
-          text:
-            text.length <= MAX_TOOL_RESULT_CHARS
-              ? text
-              : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… (result cut at ${MAX_TOOL_RESULT_CHARS} characters)`,
-          isError: false,
-        };
+        return { text: capped(text), isError: false };
       } catch (error) {
         if (error instanceof ToolError) return { text: error.message, isError: true };
         throw error;

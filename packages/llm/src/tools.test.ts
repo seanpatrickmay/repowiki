@@ -63,6 +63,35 @@ const request: TurnRequest = {
 };
 
 describe("createClaudeToolProvider", () => {
+  it("sends every text well formed: a lone surrogate becomes U+FFFD", async () => {
+    const { bodies, fetch } = cannedTurns([{ type: "text", text: "ok" }], "end_turn");
+    const { provider } = setup(fetch);
+    const lone = "cut \uD83D";
+    await provider.turn({
+      ...request,
+      system: lone,
+      tools: [{ ...search, description: lone }],
+      messages: [
+        { role: "user", content: [{ type: "text", text: lone }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: lone },
+            { type: "tool_use", id: "tu_1", name: "search", input: { query: "q" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolUseId: "tu_1", content: lone, isError: false }],
+        },
+      ],
+    });
+    // JSON.stringify writes a lone surrogate as a \uD8xx escape, which the API refuses.
+    const body = JSON.stringify(bodies[0]);
+    expect(body).not.toMatch(/\\ud[89ab]/i);
+    expect(body.split("cut \uFFFD")).toHaveLength(6);
+  });
+
   it("sends the tools, one tool call per turn and a cache breakpoint on the last block", async () => {
     const { bodies, fetch } = cannedTurns([
       { type: "text", text: "Reading the page." },

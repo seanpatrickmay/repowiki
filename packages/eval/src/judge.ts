@@ -53,12 +53,16 @@ export function visibleText(text: string): string {
   );
 }
 
-/** An answer as the judge reads it: `visibleText`, then cut at MAX_JUDGED_ANSWER_CHARS. */
+/**
+ * An answer as the judge reads it: `visibleText`, then cut at MAX_JUDGED_ANSWER_CHARS code points,
+ * so the cut never leaves half of an astral character (a lone surrogate the API refuses).
+ */
 export function judgedAnswer(answer: string): string {
   const seen = visibleText(answer);
-  return seen.length <= MAX_JUDGED_ANSWER_CHARS
+  const chars = [...seen];
+  return chars.length <= MAX_JUDGED_ANSWER_CHARS
     ? seen
-    : `${seen.slice(0, MAX_JUDGED_ANSWER_CHARS)} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`;
+    : `${chars.slice(0, MAX_JUDGED_ANSWER_CHARS).join("")} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`;
 }
 
 /** The judge's user turn: the three texts as JSON strings, so no answer can leave its string. */

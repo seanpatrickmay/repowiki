@@ -89,17 +89,21 @@ export interface ToolProviderOptions {
   now?: () => Date;
 }
 
+/**
+ * Every text the provider sends goes through `toWellFormed()`: a lone surrogate (half of an astral
+ * character, left by a cut that counted UTF-16 units) becomes U+FFFD, as the API refuses it.
+ */
 function blockParam(block: TurnBlock): ContentBlockParam {
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text };
+      return { type: "text", text: block.text.toWellFormed() };
     case "tool_use":
       return { type: "tool_use", id: block.id, name: block.name, input: block.input };
     case "tool_result":
       return {
         type: "tool_result",
         tool_use_id: block.toolUseId,
-        content: block.content,
+        content: block.content.toWellFormed(),
         ...(block.isError ? { is_error: true } : {}),
       };
   }
@@ -138,10 +142,10 @@ export function createClaudeToolProvider(options: ToolProviderOptions): ToolProv
       const params: MessageCreateParamsNonStreaming = {
         model: options.models[request.purpose],
         max_tokens: request.maxTokens,
-        system: [{ type: "text", text: request.system }],
+        system: [{ type: "text", text: request.system.toWellFormed() }],
         tools: request.tools.map((tool) => ({
           name: tool.name,
-          description: tool.description,
+          description: tool.description.toWellFormed(),
           input_schema: tool.inputSchema,
         })),
         tool_choice:

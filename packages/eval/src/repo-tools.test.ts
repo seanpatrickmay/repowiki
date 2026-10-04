@@ -252,6 +252,20 @@ describe("createRepoTools against hostile config and content", () => {
     );
   });
 
+  it("never splits an astral character where it cuts a line", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write("src/astral.txt", `${"w".repeat(1998)}\u{1F680}tail\n`);
+      const text = createRepoTools(repo.dir, repo.commit("init")).run("read_file", {
+        path: "src/astral.txt",
+      }).text;
+      expect(text.isWellFormed()).toBe(true);
+      expect(text).toContain(`1\t${"w".repeat(1998)}\u{1F680}\u2026\n`);
+    } finally {
+      repo.remove();
+    }
+  });
+
   it("refuses to read a blob over 2 MB, by its size from the tree", () => {
     expect(createRepoTools(hostile.dir, sha).run("read_file", { path: "src/huge.txt" })).toEqual({
       text: '"src/huge.txt" is 2097153 bytes, over the 2097152-byte limit for read_file; grep it instead',

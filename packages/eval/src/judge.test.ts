@@ -7,6 +7,7 @@ import {
   JudgeError,
   JudgeVerdict,
   judgeAnswer,
+  judgedAnswer,
   judgeTurn,
   MAX_JUDGED_ANSWER_CHARS,
   scoreOf,
@@ -52,6 +53,16 @@ function scriptedJudge(answers: (JudgeVerdict | Error)[]) {
   };
   return { provider, requests };
 }
+
+describe("judgedAnswer", () => {
+  it("cuts by code point, so an astral character at the cut is never split", () => {
+    const head = "x".repeat(MAX_JUDGED_ANSWER_CHARS - 1);
+    const seen = judgedAnswer(`${head}\u{1F680} launch`);
+    expect(seen.isWellFormed()).toBe(true);
+    expect(seen).toBe(`${head}\u{1F680} [cut at ${MAX_JUDGED_ANSWER_CHARS} characters]`);
+    expect(judgeTurn(question, `${head}\u{1F680} launch`).isWellFormed()).toBe(true);
+  });
+});
 
 describe("scoreOf", () => {
   it("is 1 only when every essential fact is present and nothing contradicts the reference", () => {

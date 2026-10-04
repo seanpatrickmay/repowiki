@@ -15,6 +15,18 @@ const echo = defineTool(
 );
 
 describe("defineTool and toolSet", () => {
+  it("caps a long result by code point, so an astral character at the cap is never split", () => {
+    const head = "x".repeat(MAX_TOOL_RESULT_CHARS - 1);
+    const astral = defineTool("astral", "Says a lot.", z.strictObject({}), () => {
+      return `${head}\u{1F680}${"y".repeat(10)}`;
+    });
+    const { text } = astral.run({});
+    expect(text.isWellFormed()).toBe(true);
+    expect(text).toBe(
+      `${head}\u{1F680}\n\u2026 (result cut at ${MAX_TOOL_RESULT_CHARS} characters)`,
+    );
+  });
+
   it("describes a tool with its input's JSON schema", () => {
     expect(toolSet([echo]).definitions).toEqual([
       {
