@@ -1,3 +1,13 @@
+export { DEFAULT_DRIFT_THRESHOLD, driftedFeatures, featureChurn } from "./drift.ts";
+export {
+  DRIFT_INSTRUCTIONS,
+  DRIFT_REQUEST,
+  type DriftInput,
+  type DriftOptions,
+  type DriftOutcome,
+  driftSystemPrompt,
+  reviseManifest,
+} from "./drift-call.ts";
 export {
   coverageGaps,
   type Gap,

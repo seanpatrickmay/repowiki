@@ -7,7 +7,7 @@ export {
   manifestCacheKey,
 } from "./build.ts";
 export { ensureManifest } from "./ensure.ts";
-export { estimateTokens, plain } from "./prompt.ts";
+export { estimateTokens, plain, retryMessages } from "./prompt.ts";
 export {
   cleanAliases,
   MAX_ALIASES,
