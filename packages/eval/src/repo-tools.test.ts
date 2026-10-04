@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createTestRepo, type TestRepo } from "@repowiki/engine/test-repo";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRepoTools, MAX_GREP_MATCHES } from "./repo-tools.ts";
@@ -150,5 +153,120 @@ describe("createRepoTools", () => {
 
   it("refuses a sha that is not a full commit id", () => {
     expect(() => createRepoTools(sample.repo.dir, "HEAD")).toThrow("not a 40-hex commit sha");
+  });
+});
+
+describe("createRepoTools against hostile config and content", () => {
+  let hostile: TestRepo;
+  let sub: TestRepo;
+  let sha: string;
+  let scratch: string;
+  let marker: string;
+  beforeAll(() => {
+    scratch = mkdtempSync(join(tmpdir(), "repowiki-tools-"));
+    marker = join(scratch, "fsmonitor-ran");
+    writeFileSync(join(scratch, "hook.sh"), `touch ${marker}\n`);
+    sub = createTestRepo();
+    sub.write("s.txt", "subtext\n");
+    sub.commit("sub");
+    hostile = createTestRepo();
+    hostile.write("docs/a.md", "hello secret\n");
+    hostile.write("src/wide.txt", `${"w".repeat(30_000)}\n`.repeat(10));
+    hostile.write("src/huge.txt", `${"z".repeat(2 * 1024 * 1024)}\n`);
+    hostile.write("src/flood.txt", "a\n".repeat(1_000_000));
+    hostile.write("src/many.txt", "hit\n".repeat(150));
+    hostile.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", sub.dir, "sm");
+    sha = hostile.commit("init");
+  });
+  afterAll(() => {
+    hostile.remove();
+    sub.remove();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+  const withEnv = (env: Record<string, string>, fn: () => void) => {
+    Object.assign(process.env, env);
+    try {
+      fn();
+    } finally {
+      for (const name of Object.keys(env)) delete process.env[name];
+    }
+  };
+
+  it("does not recurse into a submodule or run an fsmonitor hook when the config asks to", () => {
+    hostile.git("config", "submodule.recurse", "true");
+    hostile.git("config", "core.fsmonitor", `sh ${join(scratch, "hook.sh")}`);
+    try {
+      const tools = createRepoTools(hostile.dir, sha);
+      expect(tools.run("grep", { pattern: "subtext" }).text).toBe("No matches.\n");
+      expect(tools.run("grep", { pattern: "hello" }).text).toBe(
+        "1 matching line:\ndocs/a.md:1: hello secret\n",
+      );
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      hostile.git("config", "--unset", "submodule.recurse");
+      hostile.git("config", "--unset", "core.fsmonitor");
+    }
+  });
+
+  it("keeps grep's output shape when grep.column is set by config or by the environment", () => {
+    const clean = "1 matching line:\ndocs/a.md:1: hello secret\n";
+    hostile.git("config", "grep.column", "true");
+    try {
+      expect(createRepoTools(hostile.dir, sha).run("grep", { pattern: "hello" }).text).toBe(clean);
+    } finally {
+      hostile.git("config", "--unset", "grep.column");
+    }
+    const env = {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "grep.column",
+      GIT_CONFIG_VALUE_0: "true",
+    };
+    withEnv(env, () => {
+      expect(createRepoTools(hostile.dir, sha).run("grep", { pattern: "hello" }).text).toBe(clean);
+    });
+    withEnv({ GIT_CONFIG_PARAMETERS: "'grep.column=true'" }, () => {
+      expect(createRepoTools(hostile.dir, sha).run("grep", { pattern: "hello" }).text).toBe(clean);
+    });
+  });
+
+  it("ignores an uncommitted .gitattributes when deciding what is binary", () => {
+    hostile.write(".gitattributes", "*.md binary\n");
+    try {
+      expect(createRepoTools(hostile.dir, sha).run("grep", { pattern: "hello" }).text).toBe(
+        "1 matching line:\ndocs/a.md:1: hello secret\n",
+      );
+    } finally {
+      rmSync(join(hostile.dir, ".gitattributes"));
+    }
+  });
+
+  it("cuts an over-long line by code point and keeps the footer", () => {
+    const text = createRepoTools(hostile.dir, sha).run("read_file", { path: "src/wide.txt" }).text;
+    const lines = text.split("\n");
+    expect(lines[0]).toBe('"src/wide.txt", lines 1-5 of 10:');
+    expect(lines[1]?.startsWith(`1\t${"w".repeat(100)}`)).toBe(true);
+    expect(lines[1]?.endsWith("w…")).toBe(true);
+    expect(text.length).toBeLessThan(MAX_TOOL_RESULT_CHARS);
+    expect(lines.at(-2)).toBe(
+      "… lines 6-10 not shown; call read_file with start_line 6 to read on",
+    );
+  });
+
+  it("refuses to read a blob over 2 MB, by its size from the tree", () => {
+    expect(createRepoTools(hostile.dir, sha).run("read_file", { path: "src/huge.txt" })).toEqual({
+      text: '"src/huge.txt" is 2097153 bytes, over the 2097152-byte limit for read_file; grep it instead',
+      isError: true,
+    });
+  });
+
+  it("stops at the match cap, and reports a flood of output as too much output", () => {
+    const tools = createRepoTools(hostile.dir, sha);
+    const text = tools.run("grep", { pattern: "^hit$" }).text;
+    expect(text.split("\n")[0]).toBe("150 matching lines:");
+    expect(text).toContain("… and 50 more matches; narrow the pattern or the path");
+    expect(tools.run("grep", { pattern: "^a$" })).toEqual({
+      text: "grep produced too much output; narrow the pattern or the path",
+      isError: true,
+    });
   });
 });
