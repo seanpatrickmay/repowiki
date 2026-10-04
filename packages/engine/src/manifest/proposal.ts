@@ -30,7 +30,7 @@ const MAX_QUOTED_LENGTH = 80;
  * A model-supplied string, safe to put in a retry prompt: JSON-escaped (so a newline cannot start
  * a forged bullet) and cut to 80 characters, with "…" inside the quotes when it was cut.
  */
-function quote(text: string): string {
+export function quote(text: string): string {
   const chars = [...text];
   if (chars.length <= MAX_QUOTED_LENGTH) return JSON.stringify(text);
   return JSON.stringify(`${chars.slice(0, MAX_QUOTED_LENGTH).join("")}…`);
@@ -47,6 +47,52 @@ export function cleanAliases(title: string, aliases: readonly string[]): string[
     out.push(trimmed);
   }
   return out;
+}
+
+/** Why a title cannot be used: empty, too long, or holding a control or invisible character. */
+export function titleProblems(who: string, title: string): string[] {
+  const trimmed = title.trim();
+  const problems: string[] = [];
+  if (trimmed === "") problems.push(`${who} has an empty title`);
+  const length = [...trimmed].length;
+  if (length > MAX_TITLE_LENGTH) {
+    problems.push(`${who} has a title of ${length} characters; use at most ${MAX_TITLE_LENGTH}`);
+  }
+  const controls = controlCharacters(trimmed);
+  if (controls.length > 0) {
+    problems.push(
+      `${who} has a control or invisible character in its title (${controls.join(", ")})`,
+    );
+  }
+  return problems;
+}
+
+/** Why aliases cannot be used: any over-long, and any control or invisible character. */
+export function aliasProblems(who: string, aliases: readonly string[]): string[] {
+  const problems: string[] = [];
+  const bad = aliases.filter((alias) => aliasProblem(alias) !== null);
+  for (const alias of bad) {
+    const length = [...alias].length;
+    if (length > MAX_ALIAS_LENGTH) {
+      problems.push(
+        `${who} has an alias ${quote(alias)} of ${length} characters; use at most ${MAX_ALIAS_LENGTH}`,
+      );
+    }
+  }
+  const controls = [...new Set(bad.flatMap(controlCharacters))];
+  if (controls.length > 0) {
+    problems.push(
+      `${who} has a control or invisible character in an alias (${controls.join(", ")})`,
+    );
+  }
+  return problems;
+}
+
+/** At most MAX_REPORTED_PROBLEMS problems, then a final "and N more problems" entry. */
+export function limitProblems(problems: readonly string[]): string[] {
+  if (problems.length <= MAX_REPORTED_PROBLEMS) return [...problems];
+  const rest = problems.length - MAX_REPORTED_PROBLEMS;
+  return [...problems.slice(0, MAX_REPORTED_PROBLEMS), `and ${rest} more problems`];
 }
 
 /**
@@ -69,22 +115,10 @@ export function proposalProblems(
     if (ids.has(feature.id)) problems.push(`feature id ${quote(feature.id)} is used twice`);
     ids.add(feature.id);
     const title = feature.title.trim();
-    if (title === "") problems.push(`feature ${quote(feature.id)} has an empty title`);
-    else {
+    problems.push(...titleProblems(`feature ${quote(feature.id)}`, title));
+    if (title !== "") {
       if (titles.has(title.toLowerCase())) problems.push(`title ${quote(title)} is used twice`);
       titles.add(title.toLowerCase());
-    }
-    const titleLength = [...title].length;
-    if (titleLength > MAX_TITLE_LENGTH) {
-      problems.push(
-        `feature ${quote(feature.id)} has a title of ${titleLength} characters; use at most ${MAX_TITLE_LENGTH}`,
-      );
-    }
-    const titleControls = controlCharacters(title);
-    if (titleControls.length > 0) {
-      problems.push(
-        `feature ${quote(feature.id)} has a control or invisible character in its title (${titleControls.join(", ")})`,
-      );
     }
     const aliases = cleanAliases(title, feature.aliases);
     if (aliases.length < MIN_ALIASES) {
@@ -92,21 +126,7 @@ export function proposalProblems(
         `feature ${quote(feature.id)} has ${aliases.length} distinct aliases; give ${MIN_ALIASES} to ${MAX_ALIASES}`,
       );
     }
-    const badAliases = aliases.filter((alias) => aliasProblem(alias) !== null);
-    for (const alias of badAliases) {
-      const length = [...alias].length;
-      if (length > MAX_ALIAS_LENGTH) {
-        problems.push(
-          `feature ${quote(feature.id)} has an alias ${quote(alias)} of ${length} characters; use at most ${MAX_ALIAS_LENGTH}`,
-        );
-      }
-    }
-    const aliasControls = [...new Set(badAliases.flatMap(controlCharacters))];
-    if (aliasControls.length > 0) {
-      problems.push(
-        `feature ${quote(feature.id)} has a control or invisible character in an alias (${aliasControls.join(", ")})`,
-      );
-    }
+    problems.push(...aliasProblems(`feature ${quote(feature.id)}`, aliases));
   }
   const known = new Set(clusters.map((c) => c.id));
   const assigned = new Set<string>();
@@ -119,7 +139,5 @@ export function proposalProblems(
   }
   for (const id of known)
     if (!assigned.has(id)) problems.push(`cluster ${quote(id)} is not assigned`);
-  if (problems.length <= MAX_REPORTED_PROBLEMS) return problems;
-  const rest = problems.length - MAX_REPORTED_PROBLEMS;
-  return [...problems.slice(0, MAX_REPORTED_PROBLEMS), `and ${rest} more problems`];
+  return limitProblems(problems);
 }

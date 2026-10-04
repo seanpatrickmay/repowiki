@@ -9,12 +9,16 @@ export {
 export { ensureManifest } from "./ensure.ts";
 export { estimateTokens, plain, retryMessages } from "./prompt.ts";
 export {
+  aliasProblems,
   cleanAliases,
+  limitProblems,
   MAX_ALIASES,
   MAX_FEATURE_ID_LENGTH,
   MAX_TITLE_LENGTH,
   ManifestProposal,
   MIN_ALIASES,
+  quote,
+  titleProblems,
 } from "./proposal.ts";
 export {
   codeSpan as markdownCodeSpan,

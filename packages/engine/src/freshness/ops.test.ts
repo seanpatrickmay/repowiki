@@ -220,6 +220,64 @@ describe("applyOperations", () => {
       [op({ kind: "merge", feature: "signals", into: "signals" })],
       "is not another active feature",
     ],
+    [
+      "an alias that is another feature's title",
+      [
+        op({
+          kind: "create",
+          feature: "web-app",
+          title: "Web app",
+          aliases: ["UI", "frontend", " SIGNAL INGESTION "],
+          clusters: ["c04"],
+        }),
+      ],
+      'the alias "SIGNAL INGESTION" is taken by "signals" as its title',
+    ],
+    [
+      "a title that is another feature's id",
+      [
+        op({
+          kind: "create",
+          feature: "web-app",
+          title: "signals",
+          aliases: ["UI", "frontend", "SPA"],
+          clusters: ["c04"],
+        }),
+      ],
+      'the title "signals" is taken by "signals" as its id',
+    ],
+    [
+      "a split part whose alias is another feature's alias",
+      [
+        op({
+          kind: "split",
+          feature: "signals",
+          targets: [
+            { id: "ingestion", title: "Ingestion", aliases: ["a", "b", "c"], clusters: ["c01"] },
+            {
+              id: "queueing",
+              title: "Queueing",
+              aliases: ["d", "Work Items", "f"],
+              clusters: ["c02"],
+            },
+          ],
+        }),
+      ],
+      'the alias "Work Items" is taken by "deliverables" as its alias',
+    ],
+    [
+      "a rename that gives another feature the old title of a renamed one",
+      [
+        op({ kind: "rename", feature: "signals", title: "Signal pipeline v2" }),
+        op({ kind: "rename", feature: "deliverables", title: "Signal ingestion" }),
+      ],
+      'the title "Signal ingestion" is taken by "signals" as its alias',
+    ],
+    [
+      "a rename to the current title in other letters",
+      [op({ kind: "rename", feature: "signals", title: " signal INGESTION " })],
+      "is already its title",
+    ],
   ] as [string, ManifestOperation[], string][])(
     "refuses %s and applies nothing",
     (_name, ops, problem) => {
@@ -228,6 +286,114 @@ describe("applyOperations", () => {
       expect(result.problems.join("\n")).toContain(problem);
     },
   );
+
+  const manifestWith = (features: Manifest["features"]): Manifest => ({
+    ...manifest,
+    features,
+  });
+
+  it("refuses a rename whose old title another feature already holds as an alias", () => {
+    const held = manifestWith([
+      makeFeature(),
+      makeFeature({ id: "deliverables", title: "Deliverables", aliases: ["signal INGESTION"] }),
+    ]);
+    const result = applyOperations(
+      held,
+      [op({ kind: "rename", feature: "signals", title: "Signal pipeline v2" })],
+      clusters,
+      SHA_B,
+    );
+    expect(result.manifest).toBeNull();
+    expect(result.problems.join("\n")).toContain(
+      'the alias "Signal ingestion" is taken by "deliverables" as its alias',
+    );
+  });
+
+  it("refuses a rename whose old title cannot be an alias", () => {
+    const long = "L".repeat(70);
+    const held = manifestWith([
+      makeFeature({ title: long }),
+      makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
+    ]);
+    const result = applyOperations(
+      held,
+      [op({ kind: "rename", feature: "signals", title: "Signals" })],
+      clusters,
+      SHA_B,
+    );
+    expect(result.manifest).toBeNull();
+    expect(result.problems.join("\n")).toContain("cannot be kept as an alias");
+  });
+
+  it("refuses a rename that would pass the alias cap", () => {
+    const full = Array.from({ length: 8 }, (_, i) => `alias ${i}`);
+    const held = manifestWith([
+      makeFeature({ aliases: full }),
+      makeFeature({ id: "deliverables", title: "Deliverables", aliases: [] }),
+    ]);
+    const result = applyOperations(
+      held,
+      [op({ kind: "rename", feature: "signals", title: "Signals" })],
+      clusters,
+      SHA_B,
+    );
+    expect(result.manifest).toBeNull();
+    expect(result.problems.join("\n")).toContain("would have 9 aliases; at most 8");
+  });
+
+  it("refuses a title with a control character and names it", () => {
+    const result = apply(op({ kind: "rename", feature: "signals", title: "Sig\u202enals" }));
+    expect(result.manifest).toBeNull();
+    expect(result.problems.join("\n")).toContain("control or invisible character in its title");
+  });
+
+  it("reports an alias M3 would refuse instead of dropping it", () => {
+    const result = apply(
+      op({
+        kind: "create",
+        feature: "web-app",
+        title: "Web app",
+        aliases: ["UI", "frontend", "SPA", "x".repeat(70)],
+        clusters: ["c04"],
+      }),
+    );
+    expect(result.manifest).toBeNull();
+    expect(result.problems.join("\n")).toContain("of 70 characters; use at most");
+  });
+
+  it("does not refuse an empty list over a feature that was already empty", () => {
+    const orphaned = manifestWith([
+      ...manifest.features,
+      makeFeature({ id: "orphan", title: "Orphan", aliases: [] }),
+    ]);
+    expect(applyOperations(orphaned, [], clusters, SHA_B)).toEqual({
+      manifest: orphaned,
+      affected: [],
+      problems: [],
+    });
+    const unrelated = applyOperations(
+      orphaned,
+      [op({ kind: "move", feature: "signals", clusters: ["c04"] })],
+      clusters,
+      SHA_B,
+    );
+    expect(unrelated.problems).toEqual([]);
+    expect(unrelated.affected).toEqual(["deliverables", "signals"]);
+  });
+
+  it("still refuses an operation that touches an already-empty feature and leaves it empty", () => {
+    const orphaned = manifestWith([
+      ...manifest.features,
+      makeFeature({ id: "orphan", title: "Orphan", aliases: [] }),
+    ]);
+    const result = applyOperations(
+      orphaned,
+      [op({ kind: "rename", feature: "orphan", title: "Orphans" })],
+      clusters,
+      SHA_B,
+    );
+    expect(result.problems.join("\n")).toContain('"orphan" would have no files');
+  });
 
   it("applies an empty list as the manifest unchanged", () => {
     expect(apply()).toEqual({ manifest, affected: [], problems: [] });
