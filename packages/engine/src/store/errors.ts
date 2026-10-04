@@ -46,7 +46,7 @@ export class UnknownFeatureError extends StoreError {
 export class EmptyStoreError extends StoreError {
   constructor() {
     super(
-      "nothing to export: the store has no head sha or manifest yet; run `repowiki build` first",
+      "nothing to export: the store has no head sha or manifest yet; run pnpm wiki:build first",
     );
   }
 }
