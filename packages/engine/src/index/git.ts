@@ -17,10 +17,17 @@ const REDIRECTING_GIT_ENV = [
   "GIT_COMMON_DIR",
 ] as const;
 
-/** The process environment (plus `extra`) without anything that would redirect `git -C <repo>`. */
+/** Variables that change how git writes a diff: hunk context, or a tool in place of git's own. */
+const DIFF_SHAPING_GIT_ENV = ["GIT_DIFF_OPTS", "GIT_EXTERNAL_DIFF"] as const;
+
+/**
+ * The process environment (plus `extra`) without anything that would redirect `git -C <repo>` or
+ * reshape its diff output.
+ */
 export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
   for (const name of REDIRECTING_GIT_ENV) delete env[name];
+  for (const name of DIFF_SHAPING_GIT_ENV) delete env[name];
   return env;
 }
 
