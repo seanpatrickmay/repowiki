@@ -1,3 +1,4 @@
+import type { Architecture, ArchitectureClaim } from "./architecture.ts";
 import type { CodeCitation, CommitCitation } from "./citation.ts";
 import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
@@ -167,6 +168,54 @@ export function makeRevision(overrides: Partial<Revision> = {}): Revision {
     sections: [
       { key: "lead", claims: [leadClaim()] },
       { key: "overview", claims: [bodyClaim()] },
+    ],
+    ...overrides,
+  };
+}
+
+/** A body claim of the Architecture article: a cited claim that names no page. */
+export function architectureClaim(overrides: Partial<ArchitectureClaim> = {}): ArchitectureClaim {
+  return {
+    ...bodyClaim({ id: "a-1", text: "Signals feed deliverables." }),
+    pages: [],
+    ...overrides,
+  };
+}
+
+/** An Architecture article over makeManifest()'s two features, written at SHA_A. */
+export function makeArchitecture(overrides: Partial<Architecture> = {}): Architecture {
+  return {
+    id: "architecture-aaaaaaaaaaaa-1",
+    sha: SHA_A,
+    commitDate: "2026-02-03T10:00:00-05:00",
+    generatedAt: "2026-09-30T20:00:00Z",
+    parentId: null,
+    reason: "build",
+    pr: null,
+    model: "claude-haiku-4-5",
+    tokens: { in: 4000, out: 900, cacheRead: 0, cacheWrite: 0 },
+    basis: ["rev-1"],
+    edges: [{ from: "deliverables", to: "signals", imports: 1, calls: 2 }],
+    diagram: null,
+    sections: [
+      {
+        key: "lead",
+        claims: [
+          {
+            ...leadClaim({
+              id: "lead-1",
+              text: "**demo** is built from signals and deliverables.",
+            }),
+            supports: ["a-1"],
+            pages: [],
+          },
+        ],
+      },
+      { key: "layers", claims: [architectureClaim()] },
+      {
+        key: "dependencies",
+        claims: [architectureClaim({ id: "a-2", citations: [], pages: ["signals"] })],
+      },
     ],
     ...overrides,
   };

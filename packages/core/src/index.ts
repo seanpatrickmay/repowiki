@@ -6,6 +6,15 @@ export {
   controlCharacters,
   INVISIBLE_CHARACTERS,
 } from "./alias.ts";
+export {
+  Architecture,
+  ArchitectureClaim,
+  ArchitectureSection,
+  ArchitectureSectionKey,
+  architectureClaimViolations,
+  FeatureEdge,
+  MAX_CLAIM_PAGES,
+} from "./architecture.ts";
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
 export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind } from "./claim.ts";
 export { contentHash } from "./content-hash.ts";
