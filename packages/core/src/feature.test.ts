@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Feature, FeatureId, LineageEvent } from "./feature.ts";
+import { FEATURE_ID_MAX_LENGTH, Feature, FeatureId, LineageEvent } from "./feature.ts";
 import { makeFeature, SHA_A, SHA_B } from "./test-fixtures.ts";
 
 describe("FeatureId", () => {
@@ -13,6 +13,17 @@ describe("FeatureId", () => {
       expect(FeatureId.safeParse(id).success).toBe(false);
     },
   );
+
+  it("accepts an id of exactly FEATURE_ID_MAX_LENGTH characters", () => {
+    expect(FEATURE_ID_MAX_LENGTH).toBe(64);
+    expect(FeatureId.safeParse(`a-${"b".repeat(62)}`).success).toBe(true);
+  });
+
+  it("rejects an id one character longer, with a message naming the limit", () => {
+    const result = FeatureId.safeParse(`a-${"b".repeat(63)}`);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toBe("feature ids are at most 64 characters");
+  });
 });
 
 describe("Feature", () => {
