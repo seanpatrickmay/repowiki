@@ -56,6 +56,7 @@ export {
   featureNeighbours,
   linksWithoutPage,
   linkViolations,
+  storedArchitectureLinkViolations,
   storedLinkViolations,
   WIKIPEDIA_USER_AGENT,
 } from "./link/index.ts";

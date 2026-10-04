@@ -1,7 +1,18 @@
 import type { Manifest } from "@repowiki/core";
-import { bodyClaim, makeFeature, makeManifest, makeRevision } from "@repowiki/core/test-fixtures";
+import {
+  architectureClaim,
+  bodyClaim,
+  makeArchitecture,
+  makeFeature,
+  makeManifest,
+  makeRevision,
+} from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { linkViolations, storedLinkViolations } from "./violations.ts";
+import {
+  linkViolations,
+  storedArchitectureLinkViolations,
+  storedLinkViolations,
+} from "./violations.ts";
 
 /** A signals page written when deliverables was active, linking to it twice. */
 const page = makeRevision({
@@ -37,7 +48,7 @@ describe("storedLinkViolations", () => {
     expect(storedLinkViolations(page, own, merged, withPages)).toEqual([]);
   });
 
-  it("still reports a link that names no feature of its own manifest", () => {
+  it("reports a link that names no feature of its own manifest once, with its claim id", () => {
     const crafted = makeRevision({
       featureId: "signals",
       sections: [
@@ -47,7 +58,6 @@ describe("storedLinkViolations", () => {
     });
     expect(storedLinkViolations(crafted, own, merged, withPages)).toEqual([
       'signals "c-1": a link to "nowhere" is not a feature id',
-      'signals: a link to "nowhere" no longer leads to a page',
     ]);
   });
 
@@ -59,10 +69,56 @@ describe("storedLinkViolations", () => {
       ],
     });
     expect(storedLinkViolations(page, own, retired, new Set(["signals"]))).toEqual([
-      'signals: a link to "deliverables" no longer leads to a page',
+      'signals: See also lists "deliverables", which no longer leads to a page',
+      'signals "c-1": a link to "deliverables" no longer leads to a page',
     ]);
     expect(storedLinkViolations(page, own, retired, new Set(["signals", "deliverables"]))).toEqual(
       [],
     );
+  });
+});
+
+describe("storedArchitectureLinkViolations", () => {
+  const article = (text: string, pages: string[]) =>
+    makeArchitecture({
+      sections: [{ key: "purpose", claims: [architectureClaim({ id: "a-1", text, pages })] }],
+    });
+  const retired = makeManifest({
+    features: [
+      makeFeature(),
+      makeFeature({ id: "deliverables", title: "Deliverables", status: { kind: "retired" } }),
+    ],
+  });
+
+  it("accepts a link and a named page that merged into a redirect, or that are active without a page", () => {
+    const old = article("Signals feed [[deliverables]].", ["deliverables"]);
+    expect(storedArchitectureLinkViolations(old, own, merged, withPages)).toEqual([]);
+    expect(storedArchitectureLinkViolations(old, own, own, new Set())).toEqual([]);
+  });
+
+  it("reports a link and a named page that retired with no page, and accepts them with one", () => {
+    const old = article("Signals feed [[deliverables]].", ["deliverables"]);
+    expect(storedArchitectureLinkViolations(old, own, retired, new Set(["signals"]))).toEqual([
+      'architecture "a-1": a link to "deliverables" no longer leads to a page',
+      'architecture "a-1": names "deliverables", which no longer leads to a page',
+    ]);
+    expect(
+      storedArchitectureLinkViolations(old, own, retired, new Set(["signals", "deliverables"])),
+    ).toEqual([]);
+  });
+
+  it("reports a named page the latest manifest no longer holds, and a never-valid link once", () => {
+    const gone = makeManifest({ features: [makeFeature()] });
+    expect(
+      storedArchitectureLinkViolations(
+        article("See [[nowhere]].", ["deliverables"]),
+        own,
+        gone,
+        withPages,
+      ),
+    ).toEqual([
+      'architecture "a-1": a link to "nowhere" is not a feature id',
+      'architecture "a-1": names "deliverables", which no longer leads to a page',
+    ]);
   });
 });
