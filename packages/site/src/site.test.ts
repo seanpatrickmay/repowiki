@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
+import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -25,6 +25,15 @@ import {
 } from "./test-site.ts";
 
 let site: BuiltSite;
+
+/** Where the built site keeps a data-preview id's file: Wikipedia ids ("wp:<hash>") have a folder. */
+const previewFile = (id: string): string =>
+  join(
+    site.outDir,
+    "api",
+    "preview",
+    id.startsWith("wp:") ? `wp/${id.slice(3)}.json` : `${id}.json`,
+  );
 beforeAll(() => {
   site = buildFixtureSite(["--repo-url", "https://github.com/acme/demo-repo"]);
 }, 120_000);
@@ -714,6 +723,7 @@ describe("history pages", () => {
 });
 
 describe("hover previews", () => {
+  const WP_HASH = "bc5383acbe963e3deb31c1ff3a4b9a03";
   /** Every data-preview value on every built page, with the pages that carry it. */
   function previewRequests(): Map<string, string[]> {
     const requests = new Map<string, string[]>();
@@ -729,12 +739,31 @@ describe("hover previews", () => {
     // Redirect and disambiguation ids get previews of their own, so a link to
     // `legacy-signals` needs no resolving in the page markup.
     const requests = previewRequests();
-    expect([...requests.keys()].sort()).toEqual(["deliverables", "legacy-signals", "signals"]);
+    expect([...requests.keys()].sort()).toEqual([
+      "deliverables",
+      "legacy-signals",
+      "signals",
+      `wp:${WP_HASH}`,
+    ]);
     for (const [id, pages] of requests) {
-      const file = join(site.outDir, "api", "preview", `${id}.json`);
+      const file = previewFile(id);
       expect(existsSync(file), `${id} (asked for by ${pages.join(", ")})`).toBe(true);
       expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ url: expect.any(String) });
     }
+  });
+
+  it("shows a wp: link's summary card from a file built from the export", () => {
+    const html = site.read("wiki/signals/index.html");
+    expect(html).toContain(
+      `<a class="external" href="https://en.wikipedia.org/wiki/Exponential_backoff" title="Wikipedia: Exponential backoff" data-preview="wp:${WP_HASH}">Exponential backoff</a>`,
+    );
+    expect(JSON.parse(readFileSync(previewFile(`wp:${WP_HASH}`), "utf8"))).toEqual({
+      title: "Exponential backoff",
+      url: "https://en.wikipedia.org/wiki/Exponential_backoff",
+      html: `<p>${EXPONENTIAL_BACKOFF.extract}</p><p class="preview-facts">From Wikipedia</p>`,
+    });
+    // One file per Wikipedia title in the export, and no other.
+    expect(readdirSync(join(site.outDir, "api", "preview", "wp"))).toEqual([`${WP_HASH}.json`]);
   });
 
   it("serves the target's lead for a redirect", () => {
@@ -795,7 +824,7 @@ describe("Main Page, Random article and All articles", () => {
     // The previews test crawls every data-preview on every page; the Main Page must stay in it.
     const html = site.read("index.html");
     for (const [, id = ""] of html.matchAll(/data-preview="([^"]*)"/g)) {
-      expect(existsSync(join(site.outDir, "api", "preview", `${id}.json`)), id).toBe(true);
+      expect(existsSync(previewFile(id)), id).toBe(true);
     }
   });
 
