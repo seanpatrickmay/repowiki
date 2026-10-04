@@ -187,7 +187,8 @@ export interface PagePlan {
  * `remapCitation` asks per citation; a sha git cannot diff aborts the plan with an UpdateError
  * naming it, since its citations cannot be moved), the coverage gaps are
  * found against every fresh citation, and a page is dirty when a claim went stale, it has a gap,
- * or one of its member files (before or after) changed. A feature `affected`, or pending in the
+ * or one of its member files (before or after) changed; a dirty page's lead claims marked out of
+ * date earlier are rewritten with it. A feature `affected`, or pending in the
  * store, is written whole instead, and so is one with no page. Features that are not active keep
  * their pages as they are.
  */
@@ -267,7 +268,16 @@ export function planPages(
     rewrites.push({
       featureId,
       revision,
-      claims,
+      // The page gets a call anyway, so a lead marked out of date earlier is a target of it too.
+      claims: claims.map((c) =>
+        c.key === "lead" && c.status === "stale-kept" && c.claim.staleSince !== null
+          ? {
+              ...c,
+              status: "stale" as const,
+              reasons: [`it was marked out of date at ${c.claim.staleSince.slice(0, 7)}`],
+            }
+          : c,
+      ),
       gaps: featureGaps,
       changed,
       commits: plan.commits.filter((c) => c.files.some(mine)),

@@ -2,6 +2,7 @@ import { INGEST_PY } from "@repowiki/core/test-fixtures";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TestRepo } from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
+import { buildUpdatePack, type PageRewrite } from "../write/index.ts";
 import { knownFeature, measureDrift, planPages, planUpdate, UpdateError } from "./plan.ts";
 import { builtWiki, inputAt } from "./test-wiki-repo.ts";
 
@@ -95,6 +96,49 @@ describe("planPages", () => {
       ["src/signals/batch.py", "drain"],
     ]);
     expect(signals?.membershipChanged).toBe(true);
+  });
+
+  it("makes a lead marked out of date a target of its page's call when the page is dirty anyway", async () => {
+    ({ repo, store, first } = await builtWiki());
+    const page = store.getCurrentRevision("signals");
+    if (page === null) throw new Error("no page");
+    store.putRevision({
+      ...page,
+      id: "signals-stale-lead",
+      reason: "update",
+      parentId: page.id,
+      sections: page.sections.map((s) => ({
+        ...s,
+        claims: s.claims.map((c) => (s.key === "lead" ? { ...c, staleSince: first } : c)),
+      })),
+    });
+    // A new file and nothing the page cites: the page is dirty for its gap alone.
+    repo.write("src/signals/batch.py", "def drain(queue):\n    return list(queue)\n");
+    const added = repo.commit("feat: drain signals");
+    const input = await inputAt(repo, added);
+    const plan = planUpdate(store, input);
+    const { manifest } = measureDrift(plan, input.index, plan.placement.decided, 1);
+    const [signals] = planPages(plan, store, input, manifest, new Set()).rewrites;
+    expect(signals?.claims.map((c) => [c.claim.id, c.status])).toEqual([
+      ["c1", "stale"],
+      ["c2", "fresh"],
+      ["c3", "fresh"],
+    ]);
+    expect(signals?.claims[0]?.reasons).toEqual([
+      `it was marked out of date at ${first.slice(0, 7)}`,
+    ]);
+    expect(
+      buildUpdatePack({ rewrite: signals as PageRewrite, manifest, ...input }).targets,
+    ).toEqual(["c1"]);
+
+    // A page nothing makes dirty keeps its marked lead as it is, and costs no call.
+    const empty = repo.commit("chore: nothing");
+    store.setHead(added);
+    store.putManifest({ ...manifest, sha: added });
+    const quiet = await inputAt(repo, empty);
+    const next = planUpdate(store, quiet);
+    const moved = measureDrift(next, quiet.index, next.placement.decided, 1).manifest;
+    expect(planPages(next, store, quiet, moved, new Set()).carried).toContain("signals");
   });
 
   it("refuses, as an UpdateError, to measure drift while a new file has no feature", async () => {
