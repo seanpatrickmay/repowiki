@@ -1,7 +1,7 @@
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
 export { Claim, ClaimId, ClaimKind } from "./claim.ts";
 export { contentHash } from "./content-hash.ts";
-export { HistoryEntry, WikiExport } from "./export.ts";
+export { WikiExport } from "./export.ts";
 export {
   FEATURE_ID_MAX_LENGTH,
   Feature,

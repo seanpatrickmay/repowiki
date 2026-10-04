@@ -42,25 +42,21 @@ describe("buildExport", () => {
   it("exports current pages with oldest-first history", () => {
     seed();
     const wiki = buildExport(store, options);
+    expect(wiki.schemaVersion).toBe(2);
     expect(wiki.head).toBe(SHA_B);
     expect(wiki.manifest.sha).toBe(SHA_A);
     expect(wiki.pages.map((p) => p.id)).toEqual(["rev-2"]);
-    expect(wiki.history.signals).toEqual([
-      {
-        id: "rev-1",
-        sha: SHA_A,
-        commitDate: "2026-02-03T10:00:00-05:00",
-        reason: "build",
-        pr: null,
-      },
-      {
-        id: "rev-2",
-        sha: SHA_B,
-        commitDate: "2026-02-03T10:00:00-05:00",
-        reason: "update",
-        pr: 88,
-      },
+    expect(wiki.history.signals?.map((r) => [r.id, r.sha, r.reason, r.pr])).toEqual([
+      ["rev-1", SHA_A, "build", null],
+      ["rev-2", SHA_B, "update", 88],
     ]);
+  });
+
+  it("exports full revision bodies, so past versions can be read and diffed", () => {
+    seed();
+    const wiki = buildExport(store, options);
+    expect(wiki.history.signals?.[0]).toEqual(store.getRevision("rev-1"));
+    expect(wiki.history.signals?.at(-1)).toEqual(wiki.pages[0]);
   });
 });
 
