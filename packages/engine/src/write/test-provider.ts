@@ -4,6 +4,8 @@ import type {
   ArchitectureFixes,
   ClaimFixes,
   PageDraft,
+  UpdateDraft,
+  UpdateFixes,
 } from "../verify/index.ts";
 
 /** A page draft for testWiki()'s signals feature that verifies cleanly. Test-only. */
@@ -96,7 +98,14 @@ export function deliverablesDraft(): PageDraft {
   };
 }
 
-export type Answer = PageDraft | ClaimFixes | ArchitectureDraft | ArchitectureFixes | Error;
+export type Answer =
+  | PageDraft
+  | ClaimFixes
+  | ArchitectureDraft
+  | ArchitectureFixes
+  | UpdateDraft
+  | UpdateFixes
+  | Error;
 
 /**
  * Answers write calls from `answer(featureId, call)`, where call counts that feature's calls from
