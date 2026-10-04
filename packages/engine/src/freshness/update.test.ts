@@ -844,6 +844,62 @@ describe("updateWiki", () => {
         expect(historyOf("deliverables")).toEqual([[linked, [first]]]);
       });
 
+      it("drops a new History claim whose commits a carried one already cites, and repoints the lead", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { branch, merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () =>
+            withHistory(
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Both commits shaped it.", [first, branch]],
+            ),
+        );
+        // A second whole write regroups what the first one already said, and adds one new fact;
+        // its lead summarizes only the regrouped claim.
+        repo.write("src/deliverables/log.py", "def log(entry):\n    return entry\n");
+        const later = repo.commit("feat: keep a work log");
+        await updateWith(
+          later,
+          [op({ kind: "rename", feature: "deliverables", title: "Work log" })],
+          () => {
+            const page = withHistory(
+              wholePage(
+                "Work log",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Paging arrived in PR 7.", [branch]],
+              ["It was renamed Work log later.", [later]],
+            );
+            return {
+              ...page,
+              sections: page.sections.map((s) =>
+                s.key === "lead"
+                  ? { ...s, claims: s.claims.map((c) => ({ ...c, supports: ["h1"] })) }
+                  : s,
+              ),
+            };
+          },
+        );
+        expect(historyOf("deliverables")).toEqual([
+          ["Deliverables was added first.", [first]],
+          ["Both commits shaped it.", [first, branch]],
+          ["It was renamed Work log later.", [later]],
+        ]);
+        const page = store.getCurrentRevision("deliverables");
+        const both = page?.sections
+          .find((s) => s.key === "history")
+          ?.claims.find((c) => c.text === "Both commits shaped it.");
+        const lead = page?.sections.find((s) => s.key === "lead")?.claims;
+        expect(lead?.map((c) => c.supports)).toEqual([[both?.id]]);
+      });
+
       it("writes a page whose manifest-change write failed whole again on the next update", async () => {
         ({ repo, store, first } = await builtWiki());
         const { merge } = mergePaging();
