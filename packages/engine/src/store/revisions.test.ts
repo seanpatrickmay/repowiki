@@ -123,3 +123,18 @@ describe("a run's transaction (issue #53)", () => {
     ]);
   });
 });
+
+describe("pending whole pages", () => {
+  it("is empty at first, and round-trips a sorted list of feature ids", () => {
+    expect(store.getPendingWhole()).toEqual([]);
+    store.setPendingWhole(["signals", "deliverables", "signals"]);
+    expect(store.getPendingWhole()).toEqual(["deliverables", "signals"]);
+    store.setPendingWhole([]);
+    expect(store.getPendingWhole()).toEqual([]);
+  });
+
+  it("refuses an entry that is not a feature id", () => {
+    expect(() => store.setPendingWhole(["Not An Id"])).toThrow();
+    expect(store.getPendingWhole()).toEqual([]);
+  });
+});

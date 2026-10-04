@@ -1,4 +1,4 @@
-import { contentHash } from "@repowiki/core";
+import { type Citation, contentHash } from "@repowiki/core";
 import {
   bodyClaim,
   codeCitation,
@@ -8,6 +8,7 @@ import {
   makeRevision,
   SHA_A,
   SHA_B,
+  SHA_C,
   sourceLines,
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
@@ -95,6 +96,25 @@ describe("remapCitation", () => {
     });
   });
 
+  it("reads the diff from the citation's own sha, not the wiki's head", () => {
+    // From SHA_A nothing changed; from SHA_C two lines went on top.
+    const ctx: RemapContext = {
+      ...context([], { [PATH]: TWO_LINES_ON_TOP }),
+      changesSince: (from) => (from === SHA_C ? [modified([insertTwoOnTop])] : []),
+    };
+    expect(remapCitation(codeCitation({ sha: SHA_C }), ctx)).toEqual({
+      fresh: codeCitation({ startLine: 12, endLine: 26, sha: SHA_B, symbol: "ingest_chunk" }),
+    });
+  });
+
+  it("is stale when the cited range runs past the end of the file at the new sha", () => {
+    const cut = INGEST_PY.split("\n").slice(0, 20).join("\n");
+    expect(remapCitation(codeCitation(), context([], { [PATH]: cut }))).toEqual({
+      stale: "its file cannot be read at this commit",
+      path: PATH,
+    });
+  });
+
   it("is stale when the file cannot be read at the new sha", () => {
     expect(remapCitation(codeCitation(), context([], {}))).toEqual({
       stale: "its file cannot be read at this commit",
@@ -161,6 +181,57 @@ describe("remapClaims", () => {
     expect(untouched.map((c) => c.status)).toEqual(["stale-kept", "stale-kept"]);
     const touched = remapClaims(old.sections, editLine12, new Set([PATH]));
     expect(touched.map((c) => c.status)).toEqual(["stale", "stale"]);
+  });
+
+  it("tries a stale claim again when only its file's new path is touched, or only a deleted file's old one", () => {
+    const old = makeRevision({
+      sections: [
+        { key: "lead", claims: [leadClaim()] },
+        { key: "overview", claims: [bodyClaim({ staleSince: SHA_A })] },
+      ],
+    });
+    const renamed = "src/signals/chunks.py";
+    // Renamed with its lines intact: touched through the new path, it heals there.
+    const [, moved] = remapClaims(
+      old.sections,
+      context([modified([], renamed)], { [renamed]: INGEST_PY }),
+      new Set([renamed]),
+    );
+    expect(moved).toMatchObject({ status: "fresh", claim: { staleSince: null } });
+    expect(moved?.claim.citations[0]).toMatchObject({ path: renamed, sha: SHA_B });
+    const deleted = context(
+      [{ status: "deleted", oldPath: PATH, newPath: null, hunks: [], binary: false }],
+      {},
+    );
+    const [, gone] = remapClaims(old.sections, deleted, new Set([PATH]));
+    expect(gone).toMatchObject({
+      status: "stale",
+      reasons: [`${PATH}:10-24 at aaaaaaa: its file was deleted`],
+    });
+  });
+
+  it("moves the code citation of a claim that also cites a commit, and keeps the commit as it is", () => {
+    const mixed = bodyClaim({ citations: [codeCitation(), commitCitation()] });
+    const [claim] = remapClaims(
+      [{ key: "history", claims: [{ ...mixed, kind: "history" }] }],
+      context([modified([insertTwoOnTop])], { [PATH]: TWO_LINES_ON_TOP }),
+      new Set([PATH]),
+    );
+    expect(claim?.status).toBe("fresh");
+    expect(claim?.claim.citations).toEqual([
+      codeCitation({ startLine: 12, endLine: 26, sha: SHA_B, symbol: "ingest_chunk" }),
+      commitCitation(),
+    ]);
+  });
+
+  it("marks a claim stale when one of its citations changed, keeping every citation as stored", () => {
+    const both = bodyClaim({ citations: [codeCitation(), other.citations[0] as Citation] });
+    const [claim] = remapClaims([{ key: "overview", claims: [both] }], editLine12, new Set([PATH]));
+    expect(claim).toMatchObject({
+      status: "stale",
+      reasons: [`${PATH}:10-24 at aaaaaaa: the cited lines changed`],
+    });
+    expect(claim?.claim).toEqual(both);
   });
 
   it("clears staleSince from a claim whose code came back", () => {

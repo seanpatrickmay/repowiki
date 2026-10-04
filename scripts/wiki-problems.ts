@@ -26,6 +26,45 @@ export interface WikiCheck {
   pageless: number;
 }
 
+/** readSources at each sha it is asked for, read once per sha. */
+function sourcesReader(repo: string): (sha: string) => ReadonlyMap<string, string> {
+  const bySha = new Map<string, ReadonlyMap<string, string>>();
+  return (sha) => {
+    let sources = bySha.get(sha);
+    if (sources === undefined) {
+      sources = readSources(repo, sha, DEFAULT_MAX_FILE_BYTES);
+      bySha.set(sha, sources);
+    }
+    return sources;
+  };
+}
+
+/**
+ * Spec §8's first invariant for what an update stored at `sha`, read-only, for a step the wiki has
+ * since moved past: every code citation of each page revision and article revision written at
+ * `sha` resolves at its sha with a matching hash, every commit citation is in `history` (the
+ * commits reachable from `sha`), and every diagram is safe. Links are checked on the current
+ * wiki only (checkWiki), since the pages that held them may have changed since.
+ */
+export function checkStoredAt(
+  store: Store,
+  repo: string,
+  sha: string,
+  history: ReturnType<typeof readHistory>,
+): string[] {
+  const sourcesAt = sourcesReader(repo);
+  const features = store.getLatestManifest()?.features ?? [];
+  const pages = features.flatMap((f) => store.listHistory(f.id).filter((r) => r.sha === sha));
+  const articles = store.listArchitectureHistory().filter((a) => a.sha === sha);
+  return [
+    ...pages.flatMap((page) => [
+      ...revisionProblems(page, sourcesAt),
+      ...commitCitationProblems(page, history),
+    ]),
+    ...articles.flatMap((article) => architectureProblems(article, sourcesAt, history)),
+  ];
+}
+
 /**
  * Spec §8's first two invariants on the stored wiki, read-only: every code citation of every
  * current page and of the About article resolves at its sha with a matching hash, every commit
@@ -43,15 +82,7 @@ export function checkWiki(
   if (manifest === null) {
     return { pages: 0, article: false, code: 0, commits: 0, problems: [], pageless: 0 };
   }
-  const bySha = new Map<string, ReadonlyMap<string, string>>();
-  const sourcesAt = (sha: string) => {
-    let sources = bySha.get(sha);
-    if (sources === undefined) {
-      sources = readSources(repo, sha, DEFAULT_MAX_FILE_BYTES);
-      bySha.set(sha, sources);
-    }
-    return sources;
-  };
+  const sourcesAt = sourcesReader(repo);
   const article = store.getCurrentArchitecture();
   // The manifest a page or the article was written against, read and parsed once per sha.
   // Manifests are append-only, so a sha with none means a damaged or imported store; the

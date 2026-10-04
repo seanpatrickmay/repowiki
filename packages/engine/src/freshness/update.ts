@@ -1,6 +1,7 @@
 import type { Claim, Manifest, Revision } from "@repowiki/core";
 import type { FetchLike, Provider } from "@repowiki/llm";
 import type { ClusterOptions } from "../cluster/index.ts";
+import { isAncestor } from "../index/index.ts";
 import {
   codeAliases,
   featureNeighbours,
@@ -77,7 +78,10 @@ export interface WikiUpdate {
   carried: string[];
   /** Claims this update marked out of date. */
   staleClaims: number;
-  /** Whole pages that could not be written (not stored; the update went on), sorted by feature. */
+  /**
+   * Whole pages that could not be written (not stored; the update went on), sorted by feature. A
+   * manifest-change one stays pending in the store, so the next update writes it whole again.
+   */
   failures: { featureId: string; failure: string }[];
   /** Dirty pages whose rewrite stored nothing, with the assembler's reason, sorted by feature. */
   refused: { featureId: string; why: string }[];
@@ -87,6 +91,56 @@ export interface WikiUpdate {
   architectureSkipped: "too few pages" | "current" | null;
   /** The article's round, or null when it carried forward. */
   architecture: ArchitectureOutcome | null;
+}
+
+/**
+ * The update stored its pages and moved the head, then its About article round threw: `update`
+ * says what was stored (its `architecture` is null), and `cause` is what the round threw.
+ */
+export class UpdateArticleError extends UpdateError {
+  readonly update: WikiUpdate;
+  constructor(update: WikiUpdate, cause: unknown) {
+    const why = cause instanceof Error ? cause.message : typeof cause;
+    super(`the update to ${update.to} is stored, but its About article could not be: ${why}`, {
+      cause,
+    });
+    this.update = update;
+  }
+}
+
+/**
+ * The History claims each whole-written feature carries forward (spec §5 rule 4, §6.3): those of
+ * its own current page, then those of every page merged into it since that page was written (a
+ * merge whose event its page's commit does not already contain), by feature id. Commit citations
+ * never go stale, so the claims are carried as stored.
+ */
+function carriedHistory(
+  repo: string,
+  manifest: Manifest,
+  whole: readonly string[],
+  pages: ReadonlyMap<string, Revision>,
+): Map<string, Claim[]> {
+  const historyOf = (page: Revision | undefined): Claim[] =>
+    page?.sections.find((s) => s.key === "history")?.claims ?? [];
+  const carry = new Map<string, Claim[]>();
+  for (const featureId of whole) {
+    const own = pages.get(featureId);
+    const merged = manifest.features
+      .filter((f) => f.status.kind === "redirect" && f.status.to === featureId)
+      .filter((f) =>
+        f.lineage.some(
+          (e) =>
+            e.kind === "merge" &&
+            e.into === featureId &&
+            (own === undefined || !isAncestor(repo, e.sha, own.sha)),
+        ),
+      )
+      .map((f) => f.id)
+      .sort();
+    const claims = [own, ...merged.map((id) => pages.get(id))].flatMap(historyOf);
+    if (claims.length > 0) carry.set(featureId, claims);
+  }
+  return carry;
 }
 
 /**
@@ -154,7 +208,14 @@ export async function updateWiki(
   const revisedManifest = drift?.manifest ?? measured.manifest;
   const manifest = addAliases(revisedManifest, codeAliases(revisedManifest, sources));
   const affected = new Set(drift?.affected ?? []);
-  const { rewrites, whole, carried, pages } = planPages(plan, store, input, manifest, affected);
+  const { rewrites, whole, pending, carried, pages } = planPages(
+    plan,
+    store,
+    input,
+    manifest,
+    affected,
+  );
+  const changedBefore = new Set(pending);
 
   const wikipedia: WikipediaOptions = {
     cache: {
@@ -164,13 +225,14 @@ export async function updateWiki(
     ...(options.wikipediaFetch === undefined ? {} : { fetch: options.wikipediaFetch }),
     now,
   };
+  const carry = carriedHistory(input.repo, manifest, whole, pages);
   const budget = options.budgetTokens === undefined ? {} : { budgetTokens: options.budgetTokens };
   // Both rounds issue their first calls in this tick, so they share one Message Batch.
   const [written, rewritten] = await Promise.all([
     whole.length === 0
       ? null
       : writePages(
-          { index, manifest, sources, history, graph: plan.graph, only: whole },
+          { index, manifest, sources, history, graph: plan.graph, only: whole, carry },
           {
             provider: options.provider,
             repoName: options.repoName,
@@ -258,7 +320,9 @@ export async function updateWiki(
     }
     const parent = pages.get(page.featureId);
     const reason =
-      affected.has(page.featureId) || parent !== undefined ? "manifest-change" : "build";
+      affected.has(page.featureId) || changedBefore.has(page.featureId) || parent !== undefined
+        ? "manifest-change"
+        : "build";
     stored.push({ ...page.revision, parentId: parent?.id ?? null, reason, pr: plan.pr });
   }
   stored.sort((a, b) => (a.featureId < b.featureId ? -1 : a.featureId > b.featureId ? 1 : 0));
@@ -267,6 +331,10 @@ export async function updateWiki(
   store.transaction(() => {
     store.putManifest(manifest, { llmRevised: revised });
     for (const revision of stored) store.putRevision(revision);
+    // A manifest-change page that could not be written is written whole by the next update too.
+    store.setPendingWhole(
+      failures.map((f) => f.featureId).filter((id) => affected.has(id) || changedBefore.has(id)),
+    );
     store.setHead(plan.to);
     options.journal?.flush();
   });
@@ -278,25 +346,7 @@ export async function updateWiki(
   const article = store.getCurrentArchitecture();
   const due = articleDue(article, current, manifest, (id) => store.getRevision(id));
   let architecture: ArchitectureOutcome | null = null;
-  if (due !== null) {
-    log(`architecture: rewritten: ${due}`);
-    architecture = await writeArchitecture(
-      {
-        index,
-        manifest,
-        sources,
-        history,
-        pages: current,
-        parent: article,
-        number: store.countArchitectureRevisions() + 1,
-        reason: article === null ? "build" : "update",
-        pr: plan.pr,
-      },
-      { provider: options.provider, repoName: options.repoName, batch, wikipedia, now, log },
-    );
-    storeArticle(store, architecture, options.journal);
-  }
-  return {
+  const result = (): WikiUpdate => ({
     from: plan.from,
     to: plan.to,
     pr: plan.pr,
@@ -320,5 +370,30 @@ export async function updateWiki(
     articleDue: due,
     architectureSkipped: articleSkipped(due, current.length),
     architecture,
-  };
+  });
+  if (due !== null) {
+    log(`architecture: rewritten: ${due}`);
+    try {
+      architecture = await writeArchitecture(
+        {
+          index,
+          manifest,
+          sources,
+          history,
+          pages: current,
+          parent: article,
+          number: store.countArchitectureRevisions() + 1,
+          reason: article === null ? "build" : "update",
+          pr: plan.pr,
+        },
+        { provider: options.provider, repoName: options.repoName, batch, wikipedia, now, log },
+      );
+      storeArticle(store, architecture, options.journal);
+    } catch (error) {
+      // The pages and the head are already stored: the caller must still see what was.
+      architecture = null;
+      throw new UpdateArticleError(result(), error);
+    }
+  }
+  return result();
 }
