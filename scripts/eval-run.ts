@@ -1,0 +1,179 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { WikiExport } from "@repowiki/core";
+import {
+  buildJournal,
+  openStore,
+  resolveCommit,
+  type Store,
+  WikiBuildError,
+} from "@repowiki/engine";
+import {
+  buildTokensOf,
+  createRepoTools,
+  createWikiTools,
+  EvalRunError,
+  loadQuestions,
+  QuestionFileError,
+  RUN_INFO_FILE,
+  type RunInfo,
+  readRecords,
+  readRunInfo,
+  selectQuestions,
+  summarize,
+  writeReport,
+} from "@repowiki/eval";
+import { createClaudeToolProvider, createLedger } from "@repowiki/llm";
+import {
+  createJudgeProvider,
+  estimateEval,
+  estimateLine,
+  logLine,
+  parseEvalArgs,
+  runDirFor,
+  runEvalJournaled,
+} from "./eval-cli.ts";
+import { CliError, loadModels } from "./manifest-cli.ts";
+import { resolveOutDir } from "./out-dir.ts";
+import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
+
+/**
+ * pnpm eval:run <repo> --questions <file> --set <set>: spec §9's Q&A eval. Asks each question of
+ * the set to the wiki agent (the export in the out dir) and the repo agent (the repository at the
+ * wiki's commit), judges every answer, and writes run.json, results.jsonl, report.md and, once
+ * every answer is judged, spot-check.json in the run directory (writeReport). States its estimate before any
+ * call; --dry-run stops there. The held-out set runs once: a second run resumes an unfinished one
+ * and refuses a finished one. Holds the out dir's lock, and never writes in <repo>. The judge's
+ * Message Batch is journaled in the wiki store (<out>/wiki.db, as wiki:build does), so a run
+ * killed while it is in flight collects that batch on a rerun (with --run-dir, for the dev set).
+ */
+async function main(): Promise<void> {
+  const args = parseEvalArgs(process.argv.slice(2));
+  const repo = resolve(args.repo);
+  if (!existsSync(repo) || !statSync(repo).isDirectory()) {
+    throw new CliError(`no such repository: ${args.repo}`);
+  }
+  const out = resolveOutDir(repo, args.out ?? join(homedir(), ".repowiki", basename(repo)));
+  if (out === null) {
+    throw new CliError(
+      "refusing to write inside the documented repository; choose an --out path elsewhere",
+    );
+  }
+  const exportPath = join(out, "export.json");
+  if (!existsSync(exportPath))
+    throw new WikiBuildError(`no export at ${exportPath}; run pnpm wiki:build first`);
+  const exportBytes = readFileSync(exportPath);
+  const wiki = WikiExport.parse(JSON.parse(exportBytes.toString("utf8")));
+
+  // The repo agent reads the repository: a question file inside it could be read back.
+  let questionsPath: string;
+  try {
+    questionsPath = realpathSync(args.questions);
+  } catch {
+    throw new CliError(`cannot read question file ${args.questions}`);
+  }
+  if (resolveOutDir(repo, dirname(questionsPath)) === null) {
+    throw new CliError(
+      "the question file is inside the documented repository, where the repo agent could read it; keep it elsewhere",
+    );
+  }
+  let loaded: ReturnType<typeof loadQuestions>;
+  let questions: ReturnType<typeof selectQuestions>;
+  try {
+    loaded = loadQuestions(questionsPath);
+    questions = selectQuestions(loaded.file, args.set);
+  } catch (err) {
+    if (err instanceof QuestionFileError) throw new CliError(err.message, { cause: err });
+    throw err;
+  }
+  if (loaded.file.repo !== wiki.repo) {
+    throw new CliError(
+      `the question file is about ${JSON.stringify(loaded.file.repo)}, but the wiki in ${out} is ${JSON.stringify(wiki.repo)}`,
+    );
+  }
+  const models = loadModels(args.config);
+  if (resolveCommit(repo, wiki.head) !== wiki.head)
+    throw new CliError(`${repo} does not hold ${wiki.head}`);
+  const wikiTools = createWikiTools(wiki);
+  const repoTools = createRepoTools(repo, wiki.head);
+  const now = new Date();
+  const runDir = runDirFor(out, args.set, args.runDir, now);
+  if (args.set === "held-out" && existsSync(join(runDir, RUN_INFO_FILE))) {
+    const stored = readRunInfo(runDir);
+    if (summarize(stored, readRecords(runDir)).complete) {
+      throw new EvalRunError(
+        `the held-out set has run once already (begun ${stored.startedAt}): its report is ${join(runDir, "report.md")}`,
+      );
+    }
+  }
+  const estimate = estimateEval({
+    questions,
+    repoName: wiki.repo,
+    turnLimit: args.turnLimit,
+    tools: { wiki: wikiTools.definitions, repo: repoTools.definitions },
+    models,
+    batchJudge: args.batch,
+  });
+  console.error(estimateLine(estimate, args));
+  if (args.dryRun) return;
+  requireApiKey("eval:run");
+  const release = acquireBuildLock(out, (line) => console.error(line));
+  let store: Store | undefined;
+  try {
+    // The wiki store is only opened, never created: the journal rows go in the build's own file.
+    const storePath = join(out, "wiki.db");
+    if (!existsSync(storePath)) {
+      throw new WikiBuildError(
+        `no wiki store at ${storePath}; run pnpm wiki:build first (eval:run keeps its batch journal there)`,
+      );
+    }
+    store = openStore(storePath);
+    const ledger = createLedger();
+    const runId = `eval-${args.set}-${now.toISOString()}`;
+    const log = logLine;
+    const info: RunInfo = {
+      set: args.set,
+      repo: wiki.repo,
+      head: wiki.head,
+      exportHash: createHash("sha256").update(exportBytes).digest("hex"),
+      questionsHash: loaded.hash,
+      writtenOn: loaded.file.suite === "exit-criteria" ? loaded.file.writtenOn : null,
+      turnLimit: args.turnLimit,
+      models: { evalAgent: models.evalAgent, evalJudge: models.evalJudge },
+      buildTokens: buildTokensOf(wiki),
+      questions,
+      startedAt: now.toISOString(),
+    };
+    // Forgets a collected judge request only once its judgment is in results.jsonl.
+    const journal = buildJournal(store);
+    const result = await runEvalJournaled(journal, {
+      runDir,
+      info,
+      wikiTools,
+      repoTools,
+      agents: createClaudeToolProvider({ models, ledger, runId }),
+      judge: createJudgeProvider({ models, ledger, runId, journal, log }),
+      batchJudge: args.batch,
+      maxUsd: args.maxUsd,
+      log,
+    });
+    const { summary, reportPath } = writeReport(runDir);
+    const { wiki: w, repo: r } = summary.agents;
+    const n = summary.info.questions.length;
+    console.log(
+      `wiki ${w.correct} of ${n}, repo ${r.correct} of ${n}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
+    );
+    console.log(`Wrote ${reportPath}`);
+  } finally {
+    store?.close();
+    release();
+  }
+}
+
+try {
+  await main();
+} catch (err) {
+  exitWithError(err);
+}
