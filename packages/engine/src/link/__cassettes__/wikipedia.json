@@ -1,0 +1,38 @@
+[
+  {
+    "request": {
+      "method": "GET",
+      "path": "/api/rest_v1/page/summary/Mercury",
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "contentType": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+      "body": "{\"type\":\"disambiguation\",\"title\":\"Mercury\",\"displaytitle\":\"<span lang=\\\"en\\\" dir=\\\"ltr\\\"><span class=\\\"mw-page-title-main\\\">Mercury</span></span>\",\"namespace\":{\"id\":0,\"text\":\"\"},\"wikibase_item\":\"Q48397\",\"titles\":{\"canonical\":\"Mercury\",\"normalized\":\"Mercury\",\"display\":\"<span lang=\\\"en\\\" dir=\\\"ltr\\\"><span class=\\\"mw-page-title-main\\\">Mercury</span></span>\"},\"pageid\":19007,\"lang\":\"en\",\"dir\":\"ltr\",\"revision\":\"1376049828\",\"tid\":\"dd01fce1-b5ec-11f1-91a6-7ccf4b724ae2\",\"timestamp\":\"2026-09-21T18:47:15Z\",\"description\":\"Topics referred to by the same term\",\"description_source\":\"local\",\"content_urls\":{\"desktop\":{\"page\":\"https://en.wikipedia.org/wiki/Mercury\",\"revisions\":\"https://en.wikipedia.org/wiki/Mercury?action=history\",\"edit\":\"https://en.wikipedia.org/wiki/Mercury?action=edit\",\"talk\":\"https://en.wikipedia.org/wiki/Talk:Mercury\"},\"mobile\":{\"page\":\"https://en.wikipedia.org/wiki/Mercury\",\"revisions\":\"https://en.wikipedia.org/wiki/Special:History/Mercury\",\"edit\":\"https://en.wikipedia.org/wiki/Mercury?action=edit\",\"talk\":\"https://en.wikipedia.org/wiki/Talk:Mercury\"}},\"extract\":\"Mercury most commonly refers to:Mercury (planet), the closest planet to the Sun\\nMercury (element), a chemical element\\nMercury (mythology), a Roman deity\",\"extract_html\":\"<p><b>Mercury</b> most commonly refers to:</p><ul><li>Mercury (planet), the closest planet to the Sun</li>\\n<li>Mercury (element), a chemical element</li>\\n<li>Mercury (mythology), a Roman deity</li></ul>\"}"
+    }
+  },
+  {
+    "request": {
+      "method": "GET",
+      "path": "/api/rest_v1/page/summary/Message_queue",
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "contentType": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+      "body": "{\"type\":\"standard\",\"title\":\"Message queue\",\"displaytitle\":\"<span lang=\\\"en\\\" dir=\\\"ltr\\\"><span class=\\\"mw-page-title-main\\\">Message queue</span></span>\",\"namespace\":{\"id\":0,\"text\":\"\"},\"wikibase_item\":\"Q1065525\",\"titles\":{\"canonical\":\"Message_queue\",\"normalized\":\"Message queue\",\"display\":\"<span lang=\\\"en\\\" dir=\\\"ltr\\\"><span class=\\\"mw-page-title-main\\\">Message queue</span></span>\"},\"pageid\":429709,\"lang\":\"en\",\"dir\":\"ltr\",\"revision\":\"1342964633\",\"tid\":\"26c47c24-1d56-11f1-95da-dbc9e2264f76\",\"timestamp\":\"2026-03-11T14:25:28Z\",\"description\":\"Means of interprocess communication in software engineering\",\"description_source\":\"local\",\"content_urls\":{\"desktop\":{\"page\":\"https://en.wikipedia.org/wiki/Message_queue\",\"revisions\":\"https://en.wikipedia.org/wiki/Message_queue?action=history\",\"edit\":\"https://en.wikipedia.org/wiki/Message_queue?action=edit\",\"talk\":\"https://en.wikipedia.org/wiki/Talk:Message_queue\"},\"mobile\":{\"page\":\"https://en.wikipedia.org/wiki/Message_queue\",\"revisions\":\"https://en.wikipedia.org/wiki/Special:History/Message_queue\",\"edit\":\"https://en.wikipedia.org/wiki/Message_queue?action=edit\",\"talk\":\"https://en.wikipedia.org/wiki/Talk:Message_queue\"}},\"extract\":\"In computer science, message queues and mailboxes are software-engineering components typically used for inter-process communication (IPC), or for inter-thread communication within the same process. They use a queue for messaging – the passing of control or of content. Group communication systems provide similar kinds of functionality.\",\"extract_html\":\"<p>In computer science, <b>message queues</b> and <b>mailboxes</b> are software-engineering components typically used for inter-process communication (IPC), or for inter-thread communication within the same process. They use a queue for messaging – the passing of control or of content. Group communication systems provide similar kinds of functionality.</p>\"}"
+    }
+  },
+  {
+    "request": {
+      "method": "GET",
+      "path": "/api/rest_v1/page/summary/Zzqx_repowiki_no_such_article",
+      "body": null
+    },
+    "response": {
+      "status": 404,
+      "contentType": "application/json; charset=utf-8",
+      "body": "{\"status\":404,\"type\":\"Internal error\"}"
+    }
+  }
+]
