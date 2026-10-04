@@ -411,6 +411,22 @@ describe("codeAliases (F01)", () => {
     });
   });
 
+  it("matches a Greek -sis name with its -ses plural, both ways", () => {
+    const manifest = makeManifest({
+      features: [
+        makeFeature({ id: "signal-analysis", title: "Signal analysis", aliases: [] }),
+        makeFeature({ id: "crisis-desk", title: "Crisis desk", aliases: [] }),
+        makeFeature({ id: "planning", title: "Planning", aliases: [] }),
+      ],
+      membership: { "app/models.py": { featureId: "signal-analysis", weight: 1 } },
+    });
+    const models = ['__tablename__ = "analyses"', '__tablename__ = "crises"'].join("\n");
+    // "analyses" is the feature's own word; "crises" names another feature's subject.
+    expect(codeAliases(manifest, new Map([["app/models.py", models]]))).toEqual({
+      "signal-analysis": ["analyses"],
+    });
+  });
+
   it("keeps an identifier that only shares a word with another feature, or names its own", () => {
     const manifest = makeManifest({
       features: [
