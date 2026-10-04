@@ -1,0 +1,18 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { allPagesEntries } from "../../main-page.ts";
+import { getSite } from "../../site.ts";
+
+const entries = allPagesEntries(getSite());
+---
+<Layout title="All articles">
+  <h1 class="page-title">All articles</h1>
+  <ul class="all-pages">
+    {entries.map((entry) => (
+      <li>
+        <a href={entry.href} class={entry.note === null ? undefined : "all-pages-other"}>{entry.title}</a>
+        {entry.note !== null && <span class="all-pages-note">({entry.note})</span>}
+      </li>
+    ))}
+  </ul>
+</Layout>

@@ -1,11 +1,48 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import { articleCountText, mainPageView } from "../main-page.ts";
 import { getSite } from "../site.ts";
 
-const { wiki } = getSite();
+const site = getSite();
+const view = mainPageView(site);
 ---
-
 <Layout title="Main page">
-  <h1 class="page-title">Welcome to the {wiki.repo} wiki</h1>
-  <p>{wiki.pages.length} articles generated from commit <code>{wiki.head.slice(0, 7)}</code>.</p>
+  <div class="mp-welcome">
+    <h1 class="mp-title">Welcome to the {site.wiki.repo} wiki</h1>
+    <p>
+      The feature-by-feature encyclopedia of <code>{site.wiki.repo}</code>, generated from commit
+      <code>{site.wiki.head.slice(0, 7)}</code>. {articleCountText(view.articleCount)}
+    </p>
+  </div>
+  <div class="mp-columns">
+    <section class="mp-box" aria-labelledby="mp-featured">
+      <h2 id="mp-featured">From the featured article</h2>
+      {view.featured === null ? (
+        <p>No articles yet.</p>
+      ) : (
+        <>
+          <p set:html={view.featured.leadHtml} />
+          <p>(<a href={view.featured.href}>Full article...</a>)</p>
+        </>
+      )}
+    </section>
+    <section class="mp-box" aria-labelledby="mp-dyk">
+      <h2 id="mp-dyk">Did you know...</h2>
+      <ul>
+        {view.didYouKnow.map((item) => (
+          <li>
+            <span set:html={item.html} /> <span class="dyk-source">(<a href={item.href}>{item.title}</a>)</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+    <section class="mp-box" aria-labelledby="mp-recent">
+      <h2 id="mp-recent">Recently updated</h2>
+      <ul>
+        {view.recent.map((item) => (
+          <li><a href={item.href}>{item.title}</a> <span class="mp-date">{item.date}</span></li>
+        ))}
+      </ul>
+    </section>
+  </div>
 </Layout>
