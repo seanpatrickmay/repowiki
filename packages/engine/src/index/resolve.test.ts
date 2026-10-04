@@ -61,6 +61,55 @@ describe("python resolution", () => {
     expect(resolver.resolve("src/pkg/a.py", py("os"))).toEqual({ targets: [], external: true });
   });
 
+  describe("external classification", () => {
+    const internal = createResolver(
+      [
+        "tests/__init__.py",
+        "tests/helpers.py",
+        "src/pkg/__init__.py",
+        "src/pkg/a.py",
+        "tool.py",
+        "alembic/env.py",
+      ],
+      [],
+    );
+
+    it("marks an unresolved import under an existing package as an internal miss", () => {
+      expect(internal.resolve("src/pkg/a.py", py("tests.odyssey_data", ["x"]))).toEqual({
+        targets: [],
+        external: false,
+      });
+    });
+
+    it("marks an unresolved import under a package inside a src/ root as an internal miss", () => {
+      expect(internal.resolve("tests/helpers.py", py("pkg.missing"))).toEqual({
+        targets: [],
+        external: false,
+      });
+    });
+
+    it("marks an unresolved import whose first segment is a module file as an internal miss", () => {
+      expect(internal.resolve("tests/helpers.py", py("tool.missing"))).toEqual({
+        targets: [],
+        external: false,
+      });
+    });
+
+    it("marks a directory without __init__.py as external (a migrations dir is not a package)", () => {
+      expect(internal.resolve("alembic/env.py", py("alembic", ["context"]))).toEqual({
+        targets: [],
+        external: true,
+      });
+    });
+
+    it("marks an import whose first segment matches nothing as external", () => {
+      expect(internal.resolve("tests/helpers.py", py("numpy.linalg", ["norm"]))).toEqual({
+        targets: [],
+        external: true,
+      });
+    });
+  });
+
   it("marks unresolvable relative imports as internal misses", () => {
     expect(resolver.resolve("src/pkg/a.py", py("nope", [], 1))).toEqual({
       targets: [],
@@ -95,6 +144,18 @@ describe("es resolution", () => {
   });
 
   it.each([
+    ["a ?query suffix", "./data.json?raw", ["web/src/data.json"]],
+    ["a ?query suffix on an extensionless file", "./lib/util?worker", ["web/src/lib/util.ts"]],
+    ["a #hash suffix", "./lib/util#frag", ["web/src/lib/util.ts"]],
+    ["a ?query suffix on a workspace package", "@x/core?inline", ["packages/core/src/index.ts"]],
+  ])("strips %s before resolving", (_name, specifier, targets) => {
+    expect(resolver.resolve("web/src/main.tsx", es(specifier))).toEqual({
+      targets,
+      external: false,
+    });
+  });
+
+  it.each([
     ["trailing slash for current directory", "./", ["web/src/lib/index.ts"]],
     ["trailing slash for parent directory", "../", ["web/src/index.ts"]],
   ])("%s", (_name, specifier, targets) => {
@@ -106,6 +167,24 @@ describe("es resolution", () => {
 
   it("marks npm packages as external", () => {
     expect(resolver.resolve("web/src/main.tsx", es("react-dom/client"))).toEqual({
+      targets: [],
+      external: true,
+    });
+  });
+
+  it.each([
+    ["tsconfig @/ alias", "@/lib/missing"],
+    ["tsconfig ~/ alias", "~/lib/missing"],
+    ["package.json # import", "#internal/thing"],
+  ])("leaves an unresolved %s as an internal miss", (_name, specifier) => {
+    expect(resolver.resolve("web/src/main.tsx", es(specifier))).toEqual({
+      targets: [],
+      external: false,
+    });
+  });
+
+  it("still marks a scoped package that no workspace package matches as external", () => {
+    expect(resolver.resolve("web/src/main.tsx", es("@scope/other/deep"))).toEqual({
       targets: [],
       external: true,
     });

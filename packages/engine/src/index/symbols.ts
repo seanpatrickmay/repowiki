@@ -35,12 +35,18 @@ export function extractSymbols(language: SourceLanguage, root: Node): SymbolDef[
   const out: SymbolDef[] = [];
   if (language === "python") collectPython(root, null, out);
   else collectTypeScript(root, out);
+  // Plain code-unit comparison: the order must not depend on the machine's locale.
   return mergeDuplicates(out).sort(
-    (a, b) => a.startLine - b.startLine || a.qualifiedName.localeCompare(b.qualifiedName),
+    (a, b) =>
+      a.startLine - b.startLine ||
+      (a.qualifiedName < b.qualifiedName ? -1 : a.qualifiedName > b.qualifiedName ? 1 : 0),
   );
 }
 
-/** One symbol per name: a getter/setter pair or a conditional redefinition becomes one span. */
+/**
+ * One symbol per name: a getter/setter pair or a conditional redefinition becomes one span.
+ * Same-name symbols of different kinds (`type Foo` + `const Foo`) also merge, keeping the first-seen kind.
+ */
 function mergeDuplicates(symbols: SymbolDef[]): SymbolDef[] {
   const byName = new Map<string, SymbolDef>();
   for (const next of symbols) {
@@ -56,6 +62,11 @@ function mergeDuplicates(symbols: SymbolDef[]): SymbolDef[] {
   return [...byName.values()];
 }
 
+/** Public in Python: no leading underscore, or a `__dunder__` name (public protocol). */
+function isPublicPythonName(name: string): boolean {
+  return !name.startsWith("_") || (name.length > 4 && name.startsWith("__") && name.endsWith("__"));
+}
+
 function collectPython(container: Node, owner: string | null, out: SymbolDef[]): void {
   for (const child of container.namedChildren) {
     if (child.type === "expression_statement") {
@@ -64,7 +75,7 @@ function collectPython(container: Node, owner: string | null, out: SymbolDef[]):
       for (const assignment of child.namedChildren) {
         const target =
           assignment.type === "assignment" ? assignment.childForFieldName("left") : null;
-        if (target?.type === "identifier" && !target.text.startsWith("_")) {
+        if (target?.type === "identifier" && isPublicPythonName(target.text)) {
           out.push(symbol(target.text, "variable", child, true));
         }
       }
@@ -75,7 +86,7 @@ function collectPython(container: Node, owner: string | null, out: SymbolDef[]):
     const name = definition?.childForFieldName("name")?.text;
     if (!definition || !name) continue;
     const qualifiedName = owner === null ? name : `${owner}.${name}`;
-    const exported = !name.startsWith("_");
+    const exported = isPublicPythonName(name);
     if (definition.type === "function_definition") {
       out.push(symbol(qualifiedName, owner === null ? "function" : "method", child, exported));
     } else if (definition.type === "class_definition") {

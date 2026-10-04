@@ -13,6 +13,7 @@ export {
   type SourceLanguage,
   type SymbolDef,
   type SymbolKind,
+  scrubbedGitEnv,
   type UnresolvedImport,
 } from "./index/index.ts";
 export {

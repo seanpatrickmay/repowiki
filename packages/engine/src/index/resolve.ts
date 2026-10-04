@@ -92,6 +92,18 @@ export function createResolver(
   }
   const roots = [...pythonRoots].sort();
 
+  // First segments an absolute import can name: a module file or a package (has __init__.py) under
+  // a source root. A directory of loose .py files (alembic/, scripts/) is not importable as one.
+  const pythonTopNames = new Set<string>();
+  for (const path of files) {
+    for (const root of roots) {
+      const rest =
+        root === "" ? path : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null;
+      const top = rest === null ? null : /^([^/]+)(?:\.py|\/__init__\.py)$/.exec(rest)?.[1];
+      if (top) pythonTopNames.add(top);
+    }
+  }
+
   const pythonModule = (base: string, dotted: string): string | null => {
     const asPath = dotted
       .split(".")
@@ -136,7 +148,10 @@ export function createResolver(
       const module = find(raw.module);
       if (module !== null) targets.add(module);
     }
-    return { targets: [...targets].sort(), external: raw.level === 0 && targets.size === 0 };
+    // Absolute and unresolved: external only if the first segment names nothing in the repo.
+    const external =
+      raw.level === 0 && targets.size === 0 && !pythonTopNames.has(raw.module.split(".")[0] ?? "");
+    return { targets: [...targets].sort(), external };
   };
 
   const resolveFile = (candidate: string): string | null => {
@@ -160,7 +175,9 @@ export function createResolver(
     return null;
   };
 
-  const resolveEs = (fromPath: string, specifier: string): ImportResolution => {
+  const resolveEs = (fromPath: string, rawSpecifier: string): ImportResolution => {
+    // Bundler suffixes ("./x.svg?react", "./x#frag") are not part of the file name; a leading "#" is not one.
+    const specifier = /^(.+?)[?#]/.exec(rawSpecifier)?.[1] ?? rawSpecifier;
     if (
       specifier === "." ||
       specifier === ".." ||
@@ -177,7 +194,11 @@ export function createResolver(
     const segments = specifier.split("/");
     const nameLength = specifier.startsWith("@") ? 2 : 1;
     const pkg = byName.get(segments.slice(0, nameLength).join("/"));
-    if (pkg === undefined) return { targets: [], external: true };
+    if (pkg === undefined) {
+      // tsconfig-style aliases name repo files we cannot map without reading tsconfig: internal misses.
+      const alias = /^(?:@\/|~\/|#)/.test(specifier);
+      return { targets: [], external: !alias };
+    }
     const rest = segments.slice(nameLength).join("/");
     const target = pkg.exports[rest === "" ? "." : `./${rest}`];
     const hit = target === undefined ? null : resolveFile(target);

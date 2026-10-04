@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { scrubbedGitEnv } from "./git.ts";
 
 /** A throwaway git repository with scripted, deterministic commits. Test-only. */
 export interface TestRepo {
@@ -29,7 +30,7 @@ export function createTestRepo(): TestRepo {
   const run = (args: string[], env: Record<string, string> = {}): string =>
     execFileSync("git", args, {
       cwd: dir,
-      env: { ...process.env, ...ISOLATED_ENV, ...env },
+      env: scrubbedGitEnv({ ...ISOLATED_ENV, ...env }),
       encoding: "utf8",
     }).trim();
   run(["init", "-q", "-b", "main"]);

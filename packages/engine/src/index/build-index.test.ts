@@ -1,5 +1,6 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { MemberId } from "@repowiki/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { indexRepo } from "./build-index.ts";
 import { GitError } from "./git.ts";
@@ -124,6 +125,40 @@ describe("indexRepo", () => {
     const b = index.files.find((f) => f.path === "web/b.ts");
     expect(b?.symbols.map((s) => s.qualifiedName)).toEqual(["b"]);
     expect(index.files.some((f) => f.path === "untracked.py")).toBe(false);
+  });
+
+  it("produces only valid member ids for every file and symbol", async () => {
+    const index = await indexRepo(repo.dir, "HEAD");
+    const ids = index.files.flatMap((f) => [f.id, ...f.symbols.map((s) => s.id)]);
+    expect(ids.length).toBeGreaterThan(index.files.length);
+    for (const id of ids) expect(MemberId.safeParse(id), id).toMatchObject({ success: true });
+  });
+
+  it("lists no invalid paths for the ordinary fixture", async () => {
+    expect((await indexRepo(repo.dir, "HEAD")).invalidPaths).toEqual([]);
+  });
+
+  it("excludes paths that are not valid RepoPaths and lists them sorted", async () => {
+    const odd = createTestRepo();
+    try {
+      odd.write("ok.py", "import back\n");
+      odd.write("back\\slash.py", "def f():\n    pass\n");
+      odd.write("a\\b.py", "x = 1\n");
+      odd.commit("add files");
+      odd.write("ok.py", "import back\nimport os\n");
+      odd.write("back\\slash.py", "def f():\n    return 1\n");
+      odd.commit("touch both");
+
+      const index = await indexRepo(odd.dir, "HEAD");
+
+      expect(index.invalidPaths).toEqual(["a\\b.py", "back\\slash.py"]);
+      expect(index.files.map((f) => f.path)).toEqual(["ok.py"]);
+      expect(index.coChange.fileCommits).toEqual({ "ok.py": 2 });
+      expect(index.coChange.pairs).toEqual([]);
+      expect(JSON.stringify(index.imports)).not.toContain("slash");
+    } finally {
+      odd.remove();
+    }
   });
 
   it("rejects a revision that does not exist", async () => {

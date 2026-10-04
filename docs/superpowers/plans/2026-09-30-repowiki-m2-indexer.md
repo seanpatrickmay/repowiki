@@ -46,7 +46,7 @@ Look up ticket numbers by title (after Task 1 has seeded them):
 ## Review Focus
 
 1. **Paths with spaces, non-ASCII characters, `#`, or `%`** must be listed, read, and given member ids that round-trip. *Tests: Task 2 (memberId round-trip), Task 4 (`listBlobs` awkward names), Task 9 (`docs/C%23.md` id).*
-2. **Source with syntax errors** keeps its valid symbols, sets `parseError: true`, and never throws. *Tests: Task 5, Task 9.*
+2. **Source with syntax errors** keeps its valid symbols, sets `parseError: true`, and never throws. *Tests: Task 5, Task 9.* *(Narrowed during execution: well-formed root-level declarations are kept; anything tree-sitter folds into a root-level ERROR node is dropped, never guessed. Recovery via chunked re-parse is #72.)*
 3. **Binary and oversized files** are kept at file level and never fed to the parser. *Test: Task 9.*
 4. **Symlinks and submodules** in the tree are skipped rather than read as files. *Test: Task 4.*
 5. **A dirty or untracked working tree in the target repo** has no effect on the index (it reflects the commit), and the target repo is left untouched (`.git/index` mtime and `git status` unchanged). *Test: Task 9.*

@@ -19,6 +19,8 @@ function dottedText(node: Node): string | null {
 function pythonImports(root: Node): RawImport[] {
   const out: RawImport[] = [];
   for (const node of root.descendantsOfType(["import_statement", "import_from_statement"])) {
+    // Error recovery can splice tokens from a later line into a node; report only clean ones.
+    if (node.hasError) continue;
     const line = node.startPosition.row + 1;
     const names = node
       .childrenForFieldName("name")
@@ -53,6 +55,7 @@ function esImports(root: Node): RawImport[] {
     "export_statement",
     "call_expression",
   ])) {
+    if (node.hasError) continue;
     let specifier: string | null = null;
     if (node.type === "call_expression") {
       if (node.childForFieldName("function")?.type !== "import") continue;

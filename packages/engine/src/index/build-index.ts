@@ -1,6 +1,13 @@
-import { memberId } from "@repowiki/core";
+import { memberId, RepoPath } from "@repowiki/core";
 import { type CoChange, computeCoChange, DEFAULT_MAX_FILES_PER_COMMIT } from "./cochange.ts";
-import { commitFiles, listBlobs, readBlobs, resolveCommit } from "./git.ts";
+import {
+  commitFiles,
+  GitError,
+  listBlobs,
+  readBlobs,
+  resolveCommit,
+  type TreeBlob,
+} from "./git.ts";
 import { extractImports, type RawImport } from "./imports.ts";
 import { createSourceParser, languageForPath, type SourceLanguage } from "./languages.ts";
 import { createResolver, parseWorkspacePackage, type WorkspacePackage } from "./resolve.ts";
@@ -44,6 +51,8 @@ export interface RepoIndex {
   sha: string;
   files: IndexedFile[];
   imports: ImportEdge[];
+  /** Tracked paths excluded because they are not valid RepoPaths (e.g. contain a backslash), sorted. */
+  invalidPaths: string[];
   unresolved: UnresolvedImport[];
   coChange: CoChange;
 }
@@ -74,16 +83,26 @@ export async function indexRepo(
 ): Promise<RepoIndex> {
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const sha = resolveCommit(repo, rev);
-  const blobs = listBlobs(repo, sha);
+  const listed = listBlobs(repo, sha);
+  const isValid = (blob: TreeBlob) => RepoPath.safeParse(blob.path).success;
+  const blobs = listed.filter(isValid);
+  const invalidPaths = listed
+    .filter((blob) => !isValid(blob))
+    .map((blob) => blob.path)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const contents = readBlobs(
     repo,
     blobs.map((blob) => blob.oid),
   );
-  const read = (oid: string): Buffer => contents.get(oid) ?? Buffer.alloc(0);
+  const read = (blob: TreeBlob): Buffer => {
+    const content = contents.get(blob.oid);
+    if (content === undefined) throw new GitError(`missing content for ${blob.path} (${blob.oid})`);
+    return content;
+  };
 
   const packages: WorkspacePackage[] = blobs
     .filter((blob) => blob.path === "package.json" || blob.path.endsWith("/package.json"))
-    .flatMap((blob) => parseWorkspacePackage(blob.path, read(blob.oid).toString("utf8")) ?? []);
+    .flatMap((blob) => parseWorkspacePackage(blob.path, read(blob).toString("utf8")) ?? []);
   const resolver = createResolver(
     blobs.map((blob) => blob.path),
     packages,
@@ -95,7 +114,7 @@ export async function indexRepo(
   const unresolved: UnresolvedImport[] = [];
 
   for (const blob of blobs) {
-    const content = read(blob.oid);
+    const content = read(blob);
     const binary = content.subarray(0, 8000).includes(0);
     const language = languageForPath(blob.path);
     const file: IndexedFile = {
@@ -145,6 +164,7 @@ export async function indexRepo(
   return {
     sha,
     files,
+    invalidPaths,
     imports: [...edges.values()].sort(
       (a, b) => byPath(a, b) || (a.to < b.to ? -1 : a.to > b.to ? 1 : 0),
     ),

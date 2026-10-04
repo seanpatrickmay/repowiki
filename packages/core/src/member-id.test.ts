@@ -12,6 +12,11 @@ describe("memberId", () => {
     expect(memberId(path, symbol)).toBe(id);
   });
 
+  it("throws on an empty symbol, which parseMemberId would reject", () => {
+    expect(() => memberId("src/a.py", "")).toThrow(Error);
+    expect(() => memberId("src/a.py", "")).toThrow(/empty symbol/);
+  });
+
   it.each([
     ["docs/C#.md", null],
     ["docs/%23 and %25.md", "f"],

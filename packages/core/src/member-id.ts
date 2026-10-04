@@ -1,9 +1,10 @@
 /**
  * Member ids name what a feature owns: "path" for a whole file, "path#symbol" for one symbol.
  * The path part percent-encodes "%" and "#" so the first "#" always separates path from symbol;
- * symbols may contain "#" (TypeScript private members: "Cls.#secret").
+ * symbols may contain "#" (TypeScript private members: "Cls.#secret"). An empty symbol throws.
  */
 export function memberId(path: string, symbol?: string): string {
+  if (symbol === "") throw new Error(`memberId("${path}"): empty symbol is not a valid member id`);
   const encoded = path.replace(/[%#]/g, (ch) => (ch === "%" ? "%25" : "%23"));
   return symbol === undefined ? encoded : `${encoded}#${symbol}`;
 }

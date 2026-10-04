@@ -7,10 +7,42 @@ export class GitError extends Error {
   }
 }
 
+/** Variables that redirect git to a different repository, index or object store. */
+const REDIRECTING_GIT_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR",
+] as const;
+
+/** The process environment (plus `extra`) without anything that would redirect `git -C <repo>`. */
+export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  for (const name of REDIRECTING_GIT_ENV) delete env[name];
+  return env;
+}
+
+/** git never ran to completion; an output overflow gets its own, actionable message. */
+function spawnError(error: NodeJS.ErrnoException): GitError {
+  if (error.code === "ENOBUFS" || /maxBuffer/i.test(error.message)) {
+    return new GitError(
+      "the repository's tracked content is too large to index in one pass " +
+        "(git output exceeded the 1 GiB read buffer); streaming reads are tracked in issue #74",
+    );
+  }
+  return new GitError(`could not run git: ${error.message}`);
+}
+
 /** Runs a read-only git command against `repo`; never touches its working tree or index. */
 function git(repo: string, args: readonly string[], input?: string): Buffer {
-  const result = spawnSync("git", ["-C", repo, ...args], { input, maxBuffer: 1 << 30 });
-  if (result.error) throw new GitError(`could not run git: ${result.error.message}`);
+  const result = spawnSync("git", ["-C", repo, ...args], {
+    input,
+    maxBuffer: 1 << 30,
+    env: scrubbedGitEnv(),
+  });
+  if (result.error) throw spawnError(result.error);
   if (result.status !== 0) {
     throw new GitError(
       `git ${args[0]} failed in ${repo}: ${result.stderr.toString("utf8").trim()}`,
@@ -21,15 +53,12 @@ function git(repo: string, args: readonly string[], input?: string): Buffer {
 
 /** Full 40-character sha of the commit `rev` names. */
 export function resolveCommit(repo: string, rev: string): string {
-  const out = spawnSync("git", [
-    "-C",
-    repo,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "--end-of-options",
-    `${rev}^{commit}`,
-  ]);
+  const out = spawnSync(
+    "git",
+    ["-C", repo, "rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
+    { env: scrubbedGitEnv() },
+  );
+  if (out.error) throw spawnError(out.error);
   const sha = out.stdout?.toString("utf8").trim() ?? "";
   if (out.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) {
     throw new GitError(`${repo}: "${rev}" does not name a commit`);

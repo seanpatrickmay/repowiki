@@ -68,6 +68,29 @@ describe("extractSymbols (python)", () => {
     expect(helper?.exported).toBe(false);
   });
 
+  it("counts __dunder__ names as exported and leaves other underscore names unexported", () => {
+    const source = [
+      "__version__ = '1'",
+      "_cache = {}",
+      "class K:",
+      "    def __init__(self): pass",
+      "    def _hidden(self): pass",
+      "    def __mangled(self): pass",
+      "def __trailing_only(): pass",
+    ].join("\n");
+    const exported = Object.fromEntries(
+      symbolsOf("python", source).symbols.map((s) => [s.qualifiedName, s.exported]),
+    );
+    expect(exported).toEqual({
+      __version__: true,
+      K: true,
+      "K.__init__": true,
+      "K._hidden": false,
+      "K.__mangled": false,
+      __trailing_only: false,
+    });
+  });
+
   it("merges a property getter and setter into one span", () => {
     const source = [
       "class K:",
@@ -112,6 +135,23 @@ describe("extractSymbols (typescript)", () => {
       { qualifiedName: "Mode", kind: "enum", startLine: 5, endLine: 5, exported: true },
       { qualifiedName: "Schema", kind: "variable", startLine: 6, endLine: 6, exported: true },
       { qualifiedName: "run", kind: "function", startLine: 8, endLine: 8, exported: true },
+    ]);
+  });
+
+  it("orders same-line symbols by code unit, not by locale", () => {
+    const source = "function z() {} function ä() {} function a() {} function Z() {}\n";
+    expect(symbolsOf("typescript", source).symbols.map((s) => s.qualifiedName)).toEqual([
+      "Z",
+      "a",
+      "z",
+      "ä",
+    ]);
+  });
+
+  it("merges same-name symbols of different kinds into one span with the first kind", () => {
+    const source = "type Foo = { a: 1 };\nexport const Foo = 1;\n";
+    expect(symbolsOf("typescript", source).symbols).toEqual([
+      { qualifiedName: "Foo", kind: "type", startLine: 1, endLine: 2, exported: true },
     ]);
   });
 

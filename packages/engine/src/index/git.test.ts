@@ -1,4 +1,5 @@
 import { symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { commitFiles, GitError, listBlobs, readBlobs, resolveCommit } from "./git.ts";
@@ -23,6 +24,39 @@ describe("resolveCommit", () => {
     repo.write("a.py", "x = 1\n");
     repo.commit("add a");
     expect(() => resolveCommit(repo.dir, rev)).toThrow(GitError);
+  });
+});
+
+describe("inherited git environment", () => {
+  const VARS = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+  ] as const;
+
+  it.each(VARS)("ignores an inherited %s", (name) => {
+    const saved = process.env[name];
+    try {
+      process.env[name] = join(tmpdir(), "repowiki-bogus-git-env", name);
+      repo.write("a.py", "x = 1\n");
+      const sha = repo.commit("add a");
+      expect(resolveCommit(repo.dir, "HEAD")).toBe(sha);
+      const blobs = listBlobs(repo.dir, sha);
+      expect(blobs.map((b) => b.path)).toEqual(["a.py"]);
+      expect(
+        readBlobs(
+          repo.dir,
+          blobs.map((b) => b.oid),
+        ).size,
+      ).toBe(1);
+      expect(commitFiles(repo.dir, sha)).toEqual([["a.py"]]);
+    } finally {
+      if (saved === undefined) delete process.env[name];
+      else process.env[name] = saved;
+    }
   });
 });
 

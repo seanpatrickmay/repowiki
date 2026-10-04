@@ -1,14 +1,14 @@
 import { writeFileSync } from "node:fs";
 import { type IndexedFile, indexRepo } from "@repowiki/engine";
+import { parseIndexArgs } from "./index-args.ts";
 import { resolveOutPath } from "./out-path.ts";
 
-const [repo, rev = "HEAD", ...rest] = process.argv.slice(2);
-if (repo === undefined) {
+const args = parseIndexArgs(process.argv.slice(2));
+if (args === null) {
   console.error("usage: pnpm index:repo <repo-path> [rev] [--out file.json]");
   process.exit(2);
 }
-const outFlag = rest.indexOf("--out");
-const out = outFlag === -1 ? null : (rest[outFlag + 1] ?? null);
+const { repo, rev, out } = args;
 const target = out === null ? null : resolveOutPath(repo, out);
 if (out !== null && target === null) {
   console.error("refusing to write inside the indexed repository; choose an --out path elsewhere");
@@ -31,6 +31,7 @@ const summary = {
     binary: count((f) => f.skipped === "binary"),
     tooLarge: count((f) => f.skipped === "too-large"),
   },
+  invalidPaths: index.invalidPaths.length,
   parseErrors: count((f) => f.parseError),
   symbols: index.files.reduce((total, f) => total + f.symbols.length, 0),
   importEdges: index.imports.length,

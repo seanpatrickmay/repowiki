@@ -5,7 +5,7 @@ export interface CoChangePair {
 }
 
 export interface CoChange {
-  /** Commits that contributed pairs. */
+  /** Every commit not skipped as a sweep, whether or not it contributed any pair. */
   commitsConsidered: number;
   /** Commits ignored for touching more than maxFilesPerCommit files (formatting sweeps, lockfile bumps). */
   commitsSkipped: number;

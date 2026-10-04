@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -39,6 +40,7 @@ describe("resolveOutPath", () => {
     mkdirSync(repo, { recursive: true });
     mkdirSync(repoOut, { recursive: true });
     mkdirSync(elsewhere, { recursive: true });
+    execFileSync("git", ["init", "-q", repo]);
   });
 
   afterEach(() => {
@@ -187,4 +189,55 @@ describe("resolveOutPath", () => {
       expect(resolveOutPath(repo, variant)).toBeNull();
     },
   );
+
+  describe("anchoring to the enclosing git repository", () => {
+    it("repo given as a subdirectory with out at the repo root returns null", () => {
+      const sub = join(repo, "sub");
+      mkdirSync(sub);
+      expect(resolveOutPath(sub, join(repo, "x.json"))).toBeNull();
+    });
+
+    it("repo given as a subdirectory with out in a sibling subdirectory returns null", () => {
+      mkdirSync(join(repo, "sub"));
+      mkdirSync(join(repo, "other"));
+      expect(resolveOutPath(join(repo, "sub"), join(repo, "other", "x.json"))).toBeNull();
+    });
+
+    it("repo given as a subdirectory with out elsewhere returns the canonical path", () => {
+      const sub = join(repo, "sub");
+      mkdirSync(sub);
+      const out = join(elsewhere, "ok.json");
+      expect(resolveOutPath(sub, out)).toBe(join(realpathSync.native(elsewhere), "ok.json"));
+    });
+
+    it("a directory that is not in a git repository returns null", () => {
+      const plain = join(tmpDir, "plain");
+      mkdirSync(plain);
+      expect(resolveOutPath(plain, join(elsewhere, "ok.json"))).toBeNull();
+    });
+
+    it("a path inside .git returns null", () => {
+      expect(resolveOutPath(join(repo, ".git"), join(elsewhere, "ok.json"))).toBeNull();
+    });
+
+    it("ignores an inherited GIT_DIR when finding the work tree", () => {
+      const saved = process.env.GIT_DIR;
+      try {
+        process.env.GIT_DIR = join(elsewhere, "bogus.git");
+        expect(resolveOutPath(repo, join(repo, "x.json"))).toBeNull();
+        expect(resolveOutPath(repo, join(elsewhere, "ok.json"))).toBe(
+          join(realpathSync.native(elsewhere), "ok.json"),
+        );
+      } finally {
+        if (saved === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = saved;
+      }
+    });
+
+    it("a bare repository returns null", () => {
+      const bare = join(tmpDir, "bare.git");
+      execFileSync("git", ["init", "-q", "--bare", bare]);
+      expect(resolveOutPath(bare, join(elsewhere, "ok.json"))).toBeNull();
+    });
+  });
 });
