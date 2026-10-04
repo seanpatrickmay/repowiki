@@ -8,11 +8,14 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm install` — install dependencies (Node 24, pnpm 10)
 - `pnpm check` — typecheck + lint + test; must pass before every commit
 - `pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format`
+- `pnpm manifest:build <repo> [rev] [--out dir]` — index, cluster, and build the manifest live (Haiku 4.5 via the Batches API); writes only under `~/.repowiki/<repo>/` or `--out`
+- `pnpm cassettes:record <test files>` — re-record LLM cassettes live (needs `ANTHROPIC_API_KEY` in `.env`; costs money; review the diff)
 
 ## Layout
 - `packages/core` — zod schemas and types shared by every package; no I/O besides hashing
 - `packages/engine` — pipeline modules (`store/` first; later `index/`, `cluster/`, `manifest/`, `write/`, `verify/`, `link/`, `freshness/`). Modules import each other only through their own `index.ts`.
-- `packages/llm`, `site`, `cli`, `eval` — added in later milestones
+- `packages/llm` — the `Provider` interface, the Claude implementation (structured output, prompt caching, Message Batches), the `TokenLedger`, and record/replay cassettes
+- `site`, `cli`, `eval` — added in later milestones
 - `scripts/tracker` — seeds GitHub labels and issues from `seed.json`
 - `docs/decisions` — ADRs
 
