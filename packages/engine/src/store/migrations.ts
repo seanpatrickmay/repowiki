@@ -64,6 +64,14 @@ export const MIGRATIONS: readonly Migration[] = [
     body TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE architecture_revisions (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    parent_id TEXT REFERENCES architecture_revisions(id),
+    body TEXT NOT NULL
+  );
+  `,
 ];
 
 interface StoredFeature {

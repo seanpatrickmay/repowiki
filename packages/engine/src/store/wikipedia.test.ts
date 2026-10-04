@@ -56,7 +56,7 @@ describe("Wikipedia summary cache", () => {
 
 describe("migration 6", () => {
   it("adds the cache to a store at schema 5 without touching what it holds", () => {
-    expect(MIGRATIONS).toHaveLength(6);
+    expect(MIGRATIONS.length).toBeGreaterThanOrEqual(6);
     const dir = mkdtempSync(join(tmpdir(), "repowiki-wikipedia-"));
     try {
       const path = join(dir, "store.db");
@@ -72,7 +72,7 @@ describe("migration 6", () => {
       store.close();
 
       const after = new Database(path);
-      expect(after.pragma("user_version", { simple: true })).toBe(6);
+      expect(after.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
       expect(after.prepare("SELECT value FROM meta WHERE key = 'head'").get()).toEqual({
         value: "kept",
       });
