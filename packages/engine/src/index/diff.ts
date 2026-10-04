@@ -177,3 +177,41 @@ export function reachableCommits(repo: string, sha: string): Set<string> {
   const out = git(repo, ["rev-list", "--end-of-options", sha]).toString("utf8");
   return new Set(out.split("\n").filter((line) => line !== ""));
 }
+
+/** One commit a replay moves the wiki to. */
+export interface ReplayStep {
+  sha: string;
+  subject: string;
+  /** False only for `to` itself when it is not a merge. */
+  merge: boolean;
+}
+
+/**
+ * The commits a replay from `from` to `to` moves the wiki through (spec §6.2): every merge on
+ * `to`'s first-parent line after `from`, oldest first, then `to` itself when it is not a merge,
+ * so the replay ends where it was asked to. `from` must be an ancestor of `to`.
+ */
+export function replaySteps(repo: string, from: string, to: string): ReplayStep[] {
+  assertSha(from);
+  assertSha(to);
+  if (!isAncestor(repo, from, to)) {
+    throw new GitError(`${from} is not an ancestor of ${to}`);
+  }
+  const out = git(repo, [
+    "rev-list",
+    "--first-parent",
+    "--reverse",
+    "--format=%H %P%x00%s",
+    "--end-of-options",
+    `${from}..${to}`,
+  ]).toString("utf8");
+  const steps: ReplayStep[] = [];
+  for (const line of out.split("\n")) {
+    if (line === "" || line.startsWith("commit ")) continue;
+    const [shas = "", subject = ""] = line.split("\0");
+    const [sha = "", ...parents] = shas.trim().split(" ");
+    const merge = parents.length > 1;
+    if (merge || sha === to) steps.push({ sha, subject, merge });
+  }
+  return steps;
+}
