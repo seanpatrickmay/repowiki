@@ -148,7 +148,7 @@ describe("writeArchitecture", () => {
   });
 
   it("sends a claim citing lines the pack did not show to the retry round", async () => {
-    // The pack shows crud.py's lines 4-5 (signatures) and 1 and 7 (edge sites), not line 6.
+    // The pack shows ingest.py's signature lines 10-11 and 27-28, not lines 12-14.
     const y1 = { id: "y1", text: "`complete()` hands notes on.", pages: [], supports: [] };
     const { result, requests } = run(
       (call) =>
@@ -158,13 +158,13 @@ describe("writeArchitecture", () => {
       (draft) => {
         const layers = draft.sections.find((s) => s.key === "layers");
         if (layers !== undefined)
-          layers.claims = [{ ...y1, cite: ["src/deliverables/crud.py:4-7"] }];
+          layers.claims = [{ ...y1, cite: ["src/signals/ingest.py:10-14"] }];
       },
     );
     const outcome = await result;
     expect(outcome).toMatchObject({ failure: null, dropped: [], calls: 2 });
     expect(String(requests[1]?.messages.at(-1)?.content)).toContain(
-      '- "y1": the claim cites "src/deliverables/crud.py" lines 4-7, which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead',
+      '- "y1": the claim cites "src/signals/ingest.py" lines 10-14, which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead',
     );
     const layers = outcome.architecture?.sections.find((s) => s.key === "layers");
     expect(layers?.claims[0]?.citations).toMatchObject([{ startLine: 4, endLine: 5 }]);

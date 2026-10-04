@@ -10,6 +10,7 @@ import {
   parseRunArgs,
   priced,
   type RunFlags,
+  UPDATE_ESTIMATE_NOTE,
 } from "./wiki-cli.ts";
 
 const FLAGS =
@@ -202,7 +203,7 @@ export function renderUpdateSummary(
       skipped: update.architectureSkipped,
     }),
     "",
-    ...costLines(totals, upFront, estimate !== null),
+    ...costLines(totals, upFront, estimate !== null, UPDATE_ESTIMATE_NOTE),
   ];
   return `${lines.join("\n")}\n`;
 }

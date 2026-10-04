@@ -108,10 +108,10 @@ describe("createRepoTools", () => {
     expect(
       tools.run("grep", { pattern: "max_signals", ignore_case: true, path: "src/signals" }).text,
     ).toMatch(/^2 matching lines:\nsrc\/signals\/ingest.py:7: MAX_SIGNALS = 50\n/);
-    expect(tools.run("grep", { pattern: "foo(" })).toEqual({
-      text: "grep failed: -e option, 'foo(': parentheses not balanced",
-      isError: true,
-    });
+    // The regex library words the reason: "parentheses not balanced" (macOS), "Unmatched (" (glibc).
+    const unbalanced = tools.run("grep", { pattern: "foo(" });
+    expect(unbalanced.isError).toBe(true);
+    expect(unbalanced.text).toMatch(/^grep failed: -e option, 'foo\(': \S/);
   });
 
   it("summarizes a directory too large to list, and pages a long file", () => {
