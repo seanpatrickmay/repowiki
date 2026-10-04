@@ -114,6 +114,39 @@ describe("rewritePages", () => {
     expect([...(outcome?.replaced.keys() ?? [])]).toEqual(["c1"]);
   });
 
+  it("retries every failing page in one later turn, with no cached prefix on the retry", async () => {
+    const bad = claim({ id: "c2", section: "overview", cite: ["src/signals/ingest.py:90-99"] });
+    const twoPages = [
+      signalsRewrite(),
+      signalsRewrite({
+        featureId: "deliverables",
+        revision: { ...signalsRewrite().revision, featureId: "deliverables" },
+      }),
+    ];
+    const { requests } = await run(
+      (_f, call) => (call === 1 ? answer(lead, bad) : { claims: [overview] }),
+      twoPages,
+      false,
+    );
+    const first = requests.filter((r) => r.turn === requests[0]?.turn);
+    const retries = requests.filter((r) => r.turn !== requests[0]?.turn);
+    expect(first.map((r) => r.featureId)).toEqual(["signals", "deliverables"]);
+    expect(retries.map((r) => r.featureId).sort()).toEqual(["deliverables", "signals"]);
+    expect(new Set(retries.map((r) => r.turn)).size).toBe(1);
+    // Round 1 shares the prefix (unbatched, two pages); the retry, another schema, carries none.
+    expect(first.every((r) => typeof r.cacheKey === "string")).toBe(true);
+    expect(retries.map((r) => r.cacheKey)).toEqual([undefined, undefined]);
+  });
+
+  it("keeps a claim stale when the retry gives it up, and counts both calls' tokens", async () => {
+    const bad = claim({ id: "c2", section: "overview", cite: ["src/signals/ingest.py:90-99"] });
+    const { outcome } = await run((_f, call) =>
+      call === 1 ? answer(lead, bad) : { claims: [{ ...bad, cite: [] }] },
+    );
+    expect(outcome).toMatchObject({ keptStale: ["c2"], dropped: [], calls: 2, failure: null });
+    expect(outcome?.tokens).toEqual({ in: 200, out: 20, cacheRead: 0, cacheWrite: 0 });
+  });
+
   it("takes a fixed rewrite from the retry", async () => {
     const bad = claim({ id: "c2", section: "overview", cite: ["src/signals/ingest.py:90-99"] });
     const { outcome } = await run((_f, call) =>
