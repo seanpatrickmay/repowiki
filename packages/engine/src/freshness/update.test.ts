@@ -6,7 +6,7 @@ import { buildFileGraph, clusterFiles } from "../cluster/index.ts";
 import type { TestRepo } from "../index/index.ts";
 import { buildExport, type Store } from "../store/index.ts";
 import { ArchitectureDraft, PageDraft, UpdateDraft, UpdateFixes } from "../verify/index.ts";
-import { type BuildJournal, buildJournal } from "../write/index.ts";
+import { type BuildJournal, buildJournal, buildWiki } from "../write/index.ts";
 import { type ManifestOperation, ManifestOperations } from "./ops.ts";
 import { UpdateError } from "./plan.ts";
 import { scriptedProvider } from "./test-provider.ts";
@@ -981,6 +981,88 @@ describe("updateWiki", () => {
         const { provider: none, requests: after } = turned(() => new Error("no call expected"));
         await updateWiki(store, await inputAt(repo, last), { ...options, provider: none });
         expect(after).toEqual([]);
+      });
+
+      describe("of the pages merged into a feature with no page yet (#357)", () => {
+        /** The History claims of both merged pages, by feature id. */
+        const bothParents = () => [
+          ["Deliverables was added first.", [first]],
+          ["Signal ingestion was added first.", [first]],
+        ];
+        /**
+         * Merges signals and deliverables into storage, which has no page yet, at the merge of PR
+         * 7; storage's whole write gets unusable answers, so it is left missing at the head.
+         */
+        async function mergedIntoMissing(): Promise<string> {
+          await withStorage();
+          const { merge } = mergePaging();
+          const failed = await updateWith(
+            merge,
+            [
+              op({ kind: "merge", feature: "signals", into: "storage" }),
+              op({ kind: "merge", feature: "deliverables", into: "storage" }),
+            ],
+            () => {
+              throw unusable();
+            },
+          );
+          expect(failed.failures.map((f) => f.featureId)).toEqual(["storage"]);
+          expect(store.getCurrentRevision("storage")).toBeNull();
+          return merge;
+        }
+        /** The fill-in wiki:build at `sha`, which writes the missing storage page. */
+        async function fillIn(sha: string) {
+          const { provider: p } = turned((request) => standard(request, storagePage));
+          const build = await buildWiki(store, await inputAt(repo, sha), {
+            provider: p,
+            repoName: "sample",
+            wikipediaFetch: unreachable,
+          });
+          expect(build.stored.map((r) => r.featureId)).toEqual(["storage"]);
+        }
+        /** A commit adding a file to storage, whose update renames storage: a whole write. */
+        async function renameStorage() {
+          repo.write("src/signals/log.py", "def log(signal):\n    return signal\n");
+          const later = repo.commit("feat: log signals");
+          await updateWith(
+            later,
+            [op({ kind: "rename", feature: "storage", title: "Signal log" })],
+            () =>
+              wholePage(
+                "Signal log",
+                "`save_signal()` returns its signal.",
+                "src/signals/store.py:1-2",
+              ),
+          );
+          expect(store.getCurrentRevision("storage")?.reason).toBe("manifest-change");
+        }
+
+        it("carries both merged pages' History into the page a fill-in build writes", async () => {
+          await fillIn(await mergedIntoMissing());
+          expect(historyOf("storage")).toEqual(bothParents());
+        });
+
+        it("carries them on the next whole write of a page written at the merge without them", async () => {
+          await fillIn(await mergedIntoMissing());
+          // As a fill-in build stored the page before #357: at the merge, with no History.
+          const built = store.getCurrentRevision("storage");
+          if (built === null) throw new Error("no page");
+          store.putRevision({
+            ...built,
+            id: "storage-without-history",
+            parentId: built.id,
+            reason: "update",
+            sections: built.sections.filter((s) => s.key !== "history"),
+          });
+          await renameStorage();
+          expect(historyOf("storage")).toEqual(bothParents());
+        });
+
+        it("carries them once when a fill-in build and then an update write the page whole", async () => {
+          await fillIn(await mergedIntoMissing());
+          await renameStorage();
+          expect(historyOf("storage")).toEqual(bothParents());
+        });
       });
     });
 

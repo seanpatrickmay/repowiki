@@ -9,6 +9,7 @@ import {
   type WrittenPages,
   writePages,
 } from "./build.ts";
+import { carriedHistory } from "./carry.ts";
 
 export class WikiBuildError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -130,8 +131,9 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean =>
  * the same sha writes only the pages that are missing (a page that failed, or one a crash never
  * stored), and rewrites the article (a new revision, parented on the old) only if it is missing or
  * the set of current pages changed; a finished rerun makes no LLM call. A page it writes is no
- * longer pending a whole write (Store.getPendingWhole). A store already built at
- * another sha needs an update (M6), so this refuses.
+ * longer pending a whole write (Store.getPendingWhole), and carries the History of every page
+ * merged into it (spec §5 rule 4). A store already built at another sha needs an update (M6), so
+ * this refuses.
  */
 export async function buildWiki(
   store: Store,
@@ -168,7 +170,23 @@ export async function buildWiki(
   let written: WrittenPages | null = null;
   let stored: Revision[] = [];
   if (missing.length > 0) {
-    written = await writePages({ ...input, manifest, only: missing }, { ...rest, wikipedia });
+    // A missing page has no History of its own: it carries that of every page merged into it.
+    const carry = new Map(
+      missing.map((id) => [
+        id,
+        carriedHistory(
+          manifest,
+          id,
+          null,
+          (f) => store.getCurrentRevision(f),
+          () => false,
+        ),
+      ]),
+    );
+    written = await writePages(
+      { ...input, manifest, only: missing, carry },
+      { ...rest, wikipedia },
+    );
     stored = written.pages.flatMap((page) => (page.revision === null ? [] : [page.revision]));
     if (stored.length === 0) {
       // Every missing page failed; its answers are settled all the same.
