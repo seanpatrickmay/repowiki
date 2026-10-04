@@ -74,6 +74,19 @@ export function citedLines(text: string, start: number, end: number): string {
     .join("\n");
 }
 
+/** The innermost symbol whose lines contain start..end, or null when none does. */
+export function symbolAt(
+  symbols: readonly { qualifiedName: string; startLine: number; endLine: number }[],
+  start: number,
+  end: number,
+): string | null {
+  return (
+    symbols
+      .filter((s) => s.startLine <= start && end <= s.endLine)
+      .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))[0]?.qualifiedName ?? null
+  );
+}
+
 export type Resolved = { citation: Citation; lines: string | null } | { problem: string };
 
 /**
@@ -112,12 +125,7 @@ export function resolveReference(ref: string, ctx: VerifyContext): Resolved {
     };
   }
   const lines = citedLines(text, startLine, endLine);
-  const symbol =
-    ctx
-      .symbolsOf(path)
-      .filter((s) => s.startLine <= startLine && endLine <= s.endLine)
-      .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))[0]?.qualifiedName ??
-    null;
+  const symbol = symbolAt(ctx.symbolsOf(path), startLine, endLine);
   const citation: Citation = {
     kind: "code",
     path,

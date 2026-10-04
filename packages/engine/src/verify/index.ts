@@ -19,6 +19,7 @@ export {
   resolveCitations,
   resolveReference,
   sourceLines,
+  symbolAt,
   type Verified,
   type VerifyContext,
   verifyClaim,

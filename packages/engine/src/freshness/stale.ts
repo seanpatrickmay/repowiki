@@ -1,6 +1,6 @@
 import { type Claim, type CodeCitation, contentHash } from "@repowiki/core";
 import type { FileChange } from "../index/index.ts";
-import { citedLines, sourceLines } from "../verify/index.ts";
+import { citedLines, sourceLines, symbolAt } from "../verify/index.ts";
 import { remapRange } from "./remap.ts";
 
 /** What citations are moved against: the commit the wiki moves to and its files. */
@@ -21,16 +21,6 @@ export interface RemapContext {
  * it was deleted).
  */
 export type CitationFate = { fresh: CodeCitation } | { stale: string; path: string | null };
-
-/** The innermost indexed symbol around a range, as resolveReference names it. */
-function symbolAround(ctx: RemapContext, path: string, start: number, end: number): string | null {
-  return (
-    ctx
-      .symbolsOf(path)
-      .filter((s) => s.startLine <= start && end <= s.endLine)
-      .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))[0]?.qualifiedName ?? null
-  );
-}
 
 /**
  * Moves one code citation from its own sha to ctx.sha (spec §6.1 step 2): through the file's
@@ -61,7 +51,7 @@ export function remapCitation(citation: CodeCitation, ctx: RemapContext): Citati
       startLine: range.start,
       endLine: range.end,
       sha: ctx.sha,
-      symbol: symbolAround(ctx, path, range.start, range.end),
+      symbol: symbolAt(ctx.symbolsOf(path), range.start, range.end),
     },
   };
 }

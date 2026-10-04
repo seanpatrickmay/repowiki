@@ -8,6 +8,7 @@ import {
   quote,
   resolveReference,
   sourceLines,
+  symbolAt,
   verifyClaim,
 } from "./claims.ts";
 import type { DraftClaim } from "./draft.ts";
@@ -37,6 +38,24 @@ describe("sourceLines", () => {
         expect(line).toBe(citedLines(text, i + 1, i + 1));
       }
     }
+  });
+});
+
+describe("symbolAt", () => {
+  const symbols = [
+    { qualifiedName: "Outer", startLine: 1, endLine: 40 },
+    { qualifiedName: "Outer.inner", startLine: 10, endLine: 20 },
+    { qualifiedName: "other", startLine: 30, endLine: 35 },
+  ];
+
+  it("names the innermost symbol that contains the whole range", () => {
+    expect(symbolAt(symbols, 12, 15)).toBe("Outer.inner");
+    expect(symbolAt(symbols, 12, 25)).toBe("Outer");
+  });
+
+  it("is null when no symbol contains the range", () => {
+    expect(symbolAt(symbols, 38, 45)).toBeNull();
+    expect(symbolAt([], 1, 2)).toBeNull();
   });
 });
 
