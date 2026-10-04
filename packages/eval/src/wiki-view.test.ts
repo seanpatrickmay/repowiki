@@ -198,7 +198,44 @@ describe("WikiView.resolve, ids as an agent gives them", () => {
   });
 });
 
+describe("WikiView with page-less targets", () => {
+  it("offers only the choices that have a page, and no choices at all as no page", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const records = wiki.manifest.features.find((f) => f.id === "records");
+    if (records === undefined) throw new Error("the fixture has records");
+    wiki.manifest.features.push(
+      makeFeature({ id: "ghost", title: "Ghost", aliases: [], status: { kind: "active" } }),
+      makeFeature({ id: "ghost-two", title: "Ghost two", aliases: [], status: { kind: "active" } }),
+      {
+        ...records,
+        id: "haunted",
+        title: "Haunted",
+        status: { kind: "disambiguation", to: ["ghost", "ghost-two"] },
+      },
+    );
+    records.status = { kind: "disambiguation", to: ["signals", "ghost"] };
+    const view = new WikiView(wiki);
+    expect(view.resolve("records")).toEqual({
+      kind: "choices",
+      from: "records",
+      targets: ["signals"],
+    });
+    expect(() => view.resolve("haunted")).toThrow(ToolError);
+  });
+});
+
 describe("WikiView.text", () => {
+  it("neutralises text in a claim that imitates a reference mark or a page link", () => {
+    expect(
+      view.text(
+        "True [1][2] and [page: signals] and [pages: a, b] and [[deliverables|[page: x]]].",
+      ),
+    ).toBe("True (1)(2) and (page: signals] and (pages: a, b] and (page: x [page: deliverables]].");
+    expect(view.text("Keeps `a[1]` and `[page: x]` in code, and array[i].")).toBe(
+      "Keeps `a[1]` and `[page: x]` in code, and array[i].",
+    );
+  });
+
   it("names a linked page's id so the agent can read it, and keeps everything on one line", () => {
     expect(
       view.text(

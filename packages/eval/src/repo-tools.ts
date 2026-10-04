@@ -89,7 +89,7 @@ function listFiles(files: readonly string[], path: string): string {
   let text = `${count(under.length, "file")} under ${where}, too many to name; list one of these:\n`;
   for (const [i, entry] of entries.entries()) {
     if (text.length + entry.length > BUDGET) {
-      return `${text}… and ${entries.length - i} more entries\n`;
+      return `${text}\u2026 and ${entries.length - i} more entries\n`;
     }
     text += `${entry}\n`;
   }
@@ -137,7 +137,7 @@ function readFile(repo: string, blobs: ReadonlyMap<string, TreeBlob>, input: Rea
   }
   const more =
     end < total
-      ? `… lines ${end + 1}-${total} not shown; call read_file with start_line ${end + 1} to read on\n`
+      ? `\u2026 lines ${end + 1}-${total} not shown; call read_file with start_line ${end + 1} to read on\n`
       : "";
   return `${shown(path)}, lines ${start}-${end} of ${total}:\n${body}${more}`;
 }
@@ -215,7 +215,9 @@ function grep(repo: string, sha: string, input: GrepInput): string {
     listed++;
   }
   const more =
-    listed < total ? `… and ${total - listed} more matches; narrow the pattern or the path\n` : "";
+    listed < total
+      ? `\u2026 and ${total - listed} more matches; narrow the pattern or the path\n`
+      : "";
   return `${count(total, "matching line")}:\n${body}${more}`;
 }
 

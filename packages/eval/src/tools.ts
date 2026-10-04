@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@repowiki/llm";
 import { z } from "zod";
-import { cut, oneLine } from "./text.ts";
+import { cut, oneLine, toolText } from "./text.ts";
 
 /** What one tool call returns to the model. */
 export interface ToolOutput {
@@ -19,6 +19,9 @@ export interface ToolSet {
  * own output below this and says how to read on; this is the backstop.
  */
 export const MAX_TOOL_RESULT_CHARS = 12_000;
+
+/** The most code points of a tool's error message the model is shown. */
+export const MAX_TOOL_ERROR_CHARS = 1000;
 
 /** A tool call the model got wrong (a bad input, an unknown page): an error result, not a crash. */
 export class ToolError extends Error {
@@ -64,20 +67,33 @@ export function defineTool<S extends z.ZodType>(
           .join("; ");
         return { text: `invalid input for ${name}: ${cut(oneLine(why), 300)}`, isError: true };
       }
+      // The backstop for every tool: its result is printable (toolText) and capped, and its error
+      // one printable, capped line, whatever the tool itself did.
       try {
         const text = run(parsed.data);
-        return { text: capped(text), isError: false };
+        return { text: capped(toolText(text)), isError: false };
       } catch (error) {
-        if (error instanceof ToolError) return { text: error.message, isError: true };
+        if (error instanceof ToolError) {
+          return { text: cut(oneLine(error.message), MAX_TOOL_ERROR_CHARS), isError: true };
+        }
         throw error;
       }
     },
   };
 }
 
-/** A set of tools: an unknown tool name is an error result naming the tools there are. */
+/**
+ * A set of tools: an unknown tool name is an error result naming the tools there are. Two tools
+ * of one name are refused, as the API refuses them.
+ */
 export function toolSet(tools: readonly Tool[]): ToolSet {
-  const byName = new Map(tools.map((tool) => [tool.definition.name, tool]));
+  const byName = new Map<string, Tool>();
+  for (const tool of tools) {
+    if (byName.has(tool.definition.name)) {
+      throw new Error(`two tools are named ${tool.definition.name}`);
+    }
+    byName.set(tool.definition.name, tool);
+  }
   return {
     definitions: tools.map((tool) => tool.definition),
     run(name, input) {

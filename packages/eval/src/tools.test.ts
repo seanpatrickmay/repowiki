@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { count, cut, oneLine, toolText } from "./text.ts";
-import { defineTool, MAX_TOOL_RESULT_CHARS, ToolError, toolSet } from "./tools.ts";
+import {
+  defineTool,
+  MAX_TOOL_ERROR_CHARS,
+  MAX_TOOL_RESULT_CHARS,
+  ToolError,
+  toolSet,
+} from "./tools.ts";
 
 const echo = defineTool(
   "echo",
@@ -15,6 +21,27 @@ const echo = defineTool(
 );
 
 describe("defineTool and toolSet", () => {
+  it("makes every result and error printable, and caps an error, whatever a tool returns", () => {
+    const loud = defineTool(
+      "loud",
+      "Says it.",
+      z.strictObject({ fail: z.boolean() }),
+      ({ fail }) => {
+        if (fail) throw new ToolError(`bad\u202E\u0007 ${"e".repeat(5000)}`);
+        return "ok\u200B\u{E0041}\u0007\n\tdone";
+      },
+    );
+    expect(loud.run({ fail: false }).text).toBe("ok\uFFFD\uFFFD\uFFFD\n\tdone");
+    const error = loud.run({ fail: true });
+    expect(error.isError).toBe(true);
+    expect(error.text.startsWith("bad\uFFFD\uFFFD ")).toBe(true);
+    expect([...error.text]).toHaveLength(MAX_TOOL_ERROR_CHARS);
+  });
+
+  it("refuses two tools of one name, which the API would refuse", () => {
+    expect(() => toolSet([echo, echo])).toThrow("two tools are named echo");
+  });
+
   it("caps a long result by code point, so an astral character at the cap is never split", () => {
     const head = "x".repeat(MAX_TOOL_RESULT_CHARS - 1);
     const astral = defineTool("astral", "Says a lot.", z.strictObject({}), () => {

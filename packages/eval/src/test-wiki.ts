@@ -103,7 +103,7 @@ export function sampleWiki(): SampleWiki {
     seeAlso: ["deliverables"],
     infobox: {
       files: 3,
-      loc: 41,
+      loc: 42,
       languages: ["Python"],
       entryPoints: ["src/signals/ingest.py"],
       firstCommitDate: "2026-01-02T00:00:00Z",

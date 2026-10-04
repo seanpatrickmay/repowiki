@@ -60,7 +60,7 @@ export function renderReport(
     );
   } else if (info.set === "dev") {
     lines.push(
-      "This is the dev set: its figures track progress. Spec §9's pass test binds only on the held-out set.",
+      "This is the dev set: its figures track progress. Spec \u00A79's pass test binds only on the held-out set.",
       "",
     );
   }
@@ -206,7 +206,9 @@ export function renderReport(
       );
     }
     if (entries.length < SPOT_CHECK_SIZE) {
-      lines.push(`Spec §9 asks for ${SPOT_CHECK_SIZE}; this spot-check has ${entries.length}.`);
+      lines.push(
+        `Spec \u00A79 asks for ${SPOT_CHECK_SIZE}; this spot-check has ${entries.length}.`,
+      );
     }
     lines.push(
       ...compared

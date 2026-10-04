@@ -17,7 +17,7 @@ describe("readPage", () => {
         "Signal ingestion (page id: signals)",
         `Status: active. This revision: commit ${sha.slice(0, 7)}, 2026-01-03.`,
         "Also called: signal pipeline",
-        "Infobox: 3 files, 41 lines; languages: Python; entry points: src/signals/ingest.py; first commit 2026-01-02, last commit 2026-01-02.",
+        "Infobox: 3 files, 42 lines; languages: Python; entry points: src/signals/ingest.py; first commit 2026-01-02, last commit 2026-01-02.",
         "",
         "Lead",
         "- **Signal ingestion** is the subsystem of sample that turns ingested chunks of text into signals.",
@@ -147,6 +147,38 @@ describe("readPage", () => {
       ),
     ).toBe(true);
     expect([...bare].length).toBeLessThanOrEqual(core.length + 100);
+  });
+
+  it("keeps a title, an alias and a path on one printable line, and caps long lists", () => {
+    const wiki = structuredClone(sample.wiki);
+    const feature = wiki.manifest.features.find((f) => f.id === "signals");
+    const page = wiki.pages.find((p) => p.featureId === "signals");
+    if (feature === undefined || page === undefined) throw new Error("the fixture has signals");
+    feature.title = "Signal\u202E\ningestion";
+    feature.aliases = Array.from({ length: 30 }, (_, i) => `alias ${i}\u0007`);
+    page.infobox.languages = Array.from({ length: 30 }, (_, i) => `lang${i}`);
+    page.infobox.entryPoints = [`src/${"p".repeat(500)}.py`];
+    const first = page.sections[1]?.claims[0];
+    if (first === undefined) throw new Error("the fixture has an overview claim");
+    const citation = first.citations[0];
+    if (citation === undefined || citation.kind !== "code") throw new Error("a code citation");
+    first.citations = [{ ...citation, path: "src/a\u202E\nb.py" }];
+    page.sections[2]?.claims[0]?.citations.splice(0, 1, first.citations[0] as typeof citation);
+    const text = readPage(new WikiView(wiki), "signals");
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("Signal\uFFFD ingestion (page id: signals)");
+    expect(text).not.toContain("\u0007");
+    expect(text).not.toContain("\u202E");
+    const also = lines.find((l) => l.startsWith("Also called: ")) ?? "";
+    expect(also.split("; ")).toHaveLength(21);
+    expect(also.endsWith("; and 10 more")).toBe(true);
+    const infobox = lines.find((l) => l.startsWith("Infobox: ")) ?? "";
+    expect(infobox).toContain("lang19, and 10 more;");
+    expect(infobox).toContain(`src/${"p".repeat(195)}\u2026`);
+    // One citation used by two claims is one reference, numbered once.
+    expect(text).toContain("[1] src/a\uFFFD b.py:10-24 (ingest_chunk)");
+    expect(lines.filter((l) => l.includes("src/a\uFFFD b.py"))).toHaveLength(1);
+    expect(lines.filter((l) => / \[1\]/.test(l))).toHaveLength(2);
   });
 
   it("reads the About article, with the pages its claims rest on", () => {

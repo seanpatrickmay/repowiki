@@ -17,6 +17,17 @@ const SUMMARY_LENGTH = 200;
 
 const TOKEN = /`([^`]+)`|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
+/** Text with every bracket that would open a reference or page mark made a parenthesis. */
+const unmark = (text: string) =>
+  text.replace(/\[(?=\s*(?:\d+\s*\]|pages?\s*:))/gi, "(").replace(/\((\d+)\s*\]/g, "($1)");
+
+/** A page in a list (search results, choices): its id, title and summary, punctuated once. */
+export function listedPage(id: string, title: string, summary: string): string {
+  const shown = oneLine(title);
+  if (summary === "") return `- ${id}: ${shown}`;
+  return `- ${id}: ${shown}${/[.!?]$/.test(shown) ? "" : "."} ${summary}`;
+}
+
 /** What a page id resolves to. */
 export type Resolved =
   | { kind: "page"; featureId: string; from: string | null }
@@ -76,19 +87,30 @@ export class WikiView {
     }
   }
 
-  /** Claim text for the agent: links name their page id, so the agent can read it next. */
+  /**
+   * Claim text for the agent: links name their page id, so the agent can read it next. Text the
+   * claim writes itself that imitates a mark the page adds (a reference `[1]`, `[page: id]`,
+   * `[pages: ...]`) has its bracket made a parenthesis, so only the page's own marks look like marks;
+   * code spans are left as they are.
+   */
   text(claimText: string): string {
-    const linked = claimText.replace(
-      TOKEN,
-      (match, code: string | undefined, target = "", label?: string) => {
-        if (code !== undefined) return match;
-        const id = target.trim();
-        const shown = label?.trim() || undefined;
-        if (id.startsWith("wp:")) return shown ?? id.slice(3).trim();
-        return this.hasRoute(id) ? `${shown ?? this.title(id)} [page: ${id}]` : (shown ?? id);
-      },
-    );
-    return oneLine(linked);
+    let linked = "";
+    let at = 0;
+    for (const token of claimText.matchAll(TOKEN)) {
+      const [match, code, target = "", label] = token;
+      linked += unmark(claimText.slice(at, token.index));
+      at = token.index + match.length;
+      if (code !== undefined) {
+        linked += match;
+        continue;
+      }
+      const id = target.trim();
+      const shown = label === undefined || label.trim() === "" ? undefined : unmark(label.trim());
+      if (id.startsWith("wp:")) linked += shown ?? unmark(id.slice(3).trim());
+      else if (this.hasRoute(id)) linked += `${shown ?? this.title(id)} [page: ${id}]`;
+      else linked += shown ?? unmark(id);
+    }
+    return oneLine(linked + unmark(claimText.slice(at)));
   }
 
   /** The first sentence of a page's lead, one line, for search results and choices. */
@@ -119,7 +141,8 @@ export class WikiView {
         const found = this.reach(slug, slug === this.finalTarget(slug) ? null : from, from);
         if (found !== undefined) return found;
       }
-      const targets = this.aliasRoutes.get(slug);
+      // Only targets with a page: the site shows the others as plain text, with nothing to read.
+      const targets = this.aliasRoutes.get(slug)?.filter((t) => this.hasRoute(t));
       if (targets?.length === 1) {
         const found = this.reach(targets[0] ?? slug, from, from);
         if (found !== undefined) return found;
@@ -135,9 +158,11 @@ export class WikiView {
     const target = this.finalTarget(id);
     const status = this.features.get(target)?.status;
     if (status?.kind === "disambiguation") {
-      // As the site lists them: each target at its final article, once.
-      const targets = [...new Set(status.to.map((to) => this.finalTarget(to)))];
-      return { kind: "choices", from: choicesFrom, targets };
+      // As the site lists them: each target at its final article, once; only those with a page.
+      const targets = [...new Set(status.to.map((to) => this.finalTarget(to)))].filter((t) =>
+        this.hasRoute(t),
+      );
+      return targets.length === 0 ? undefined : { kind: "choices", from: choicesFrom, targets };
     }
     return this.pages.has(target) ? { kind: "page", featureId: target, from: pageFrom } : undefined;
   }

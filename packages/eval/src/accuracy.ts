@@ -43,7 +43,7 @@ export function accuracySheet(wiki: WikiExport, featureIds: readonly string[]): 
     "",
     "Read each claim against its references at the commit shown, then mark its box: `[x]` when the claim is true, `[!]` when it is false (and file an issue with the accuracy template). Leave `[ ]` on a claim you did not review. Then run `pnpm eval:accuracy tally <this file>`.",
     "",
-    `Spec §9 passes when at most 1 claim in ${CLAIMS_PER_FALSE_CLAIM} reviewed is false.`,
+    `Spec \u00A79 passes when at most 1 claim in ${CLAIMS_PER_FALSE_CLAIM} reviewed is false.`,
   ];
   for (const id of ids) {
     const page = pages.get(id);

@@ -1,10 +1,9 @@
 import type { Claim, WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { type SearchDoc, searchIndex } from "./search.ts";
-import { oneLine } from "./text.ts";
 import { defineTool, type ToolSet, toolSet } from "./tools.ts";
 import { readPage } from "./wiki-page.ts";
-import { ABOUT_PAGE_ID, reference, WikiView } from "./wiki-view.ts";
+import { ABOUT_PAGE_ID, listedPage, reference, WikiView } from "./wiki-view.ts";
 
 /** The most pages one search lists. */
 export const MAX_SEARCH_RESULTS = 8;
@@ -66,14 +65,14 @@ export function createWikiTools(wiki: WikiExport): ToolSet {
   return toolSet([
     defineTool(
       "search",
-      "Search the wiki. Returns up to 8 pages, best match first, each with its id, title and the first sentence of its lead.",
+      `Search the wiki. Returns up to ${MAX_SEARCH_RESULTS} pages, best match first, each with its id, title and the first sentence of its lead.`,
       z.strictObject({ query: z.string().trim().min(1).max(200) }),
       ({ query }) => {
         const ids = index.search(query, MAX_SEARCH_RESULTS);
         if (ids.length === 0) return "No page matches; try other words.\n";
         const lines = ids.map((id) => {
           const title = id === ABOUT_PAGE_ID ? (view.article?.title ?? "About") : view.title(id);
-          return `- ${id}: ${oneLine(title)}. ${view.summary(id)}`;
+          return listedPage(id, title, view.summary(id));
         });
         return `${lines.join("\n")}\nRead one with read_page(id).\n`;
       },

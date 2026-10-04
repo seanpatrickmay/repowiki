@@ -1,7 +1,7 @@
 import type { Architecture, Citation, Claim, Revision } from "@repowiki/core";
 import { count, cut, oneLine, toolText } from "./text.ts";
 import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
-import { ABOUT_PAGE_ID, reference, type WikiView } from "./wiki-view.ts";
+import { ABOUT_PAGE_ID, listedPage, reference, type WikiView } from "./wiki-view.ts";
 
 /** Every section key's title, a feature page's and the About article's. */
 export const SECTION_TITLES: Readonly<Record<string, string>> = {
@@ -17,6 +17,15 @@ export const SECTION_TITLES: Readonly<Record<string, string>> = {
   dependencies: "Dependencies",
   infrastructure: "Infrastructure",
 };
+
+/** The most entries of a list (aliases, languages, entry points, choices) a page names. */
+const MAX_LISTED = 20;
+
+/** The first MAX_LISTED items, each one line cut to `max`, then how many more there are. */
+function listed(items: readonly string[], max: number): string[] {
+  const shown = items.slice(0, MAX_LISTED).map((item) => cut(oneLine(item), max));
+  return items.length > MAX_LISTED ? [...shown, `and ${items.length - MAX_LISTED} more`] : shown;
+}
 
 const date = (iso: string) => iso.slice(0, 10);
 const sha7 = (sha: string) => sha.slice(0, 7);
@@ -106,9 +115,9 @@ function renderFeaturePage(
     ...(from === null ? [] : [`(Redirected from ${cut(oneLine(from), 80)})`]),
     `Status: ${status}. This revision: commit ${sha7(page.sha)}, ${date(page.commitDate)}.`,
     ...((feature?.aliases.length ?? 0) > 0
-      ? [`Also called: ${(feature?.aliases ?? []).map(oneLine).join("; ")}`]
+      ? [`Also called: ${listed(feature?.aliases ?? [], 80).join("; ")}`]
       : []),
-    `Infobox: ${count(box.files, "file")}, ${count(box.loc, "line")}; languages: ${box.languages.map(oneLine).join(", ") || "none"}; entry points: ${box.entryPoints.map(oneLine).join(", ") || "none"}; first commit ${date(box.firstCommitDate)}, last commit ${date(box.lastCommitDate)}.`,
+    `Infobox: ${count(box.files, "file")}, ${count(box.loc, "line")}; languages: ${listed(box.languages, 80).join(", ") || "none"}; entry points: ${listed(box.entryPoints, 200).join(", ") || "none"}; first commit ${date(box.firstCommitDate)}, last commit ${date(box.lastCommitDate)}.`,
     ...renderSections(view, page.sections),
   ];
   const seeAlso = page.seeAlso.filter((id) => view.hasRoute(id));
@@ -135,11 +144,11 @@ function renderAbout(view: WikiView): string {
 
 function renderChoices(view: WikiView, from: string, targets: readonly string[]): string {
   const lines = [`${cut(oneLine(from), 80)} may refer to:`];
-  for (const id of targets) {
-    if (!view.hasRoute(id)) continue;
-    const summary = view.summary(view.finalTarget(id));
-    lines.push(`- ${id}: ${oneLine(view.title(id))}${summary === "" ? "" : `. ${summary}`}`);
+  const readable = targets.filter((id) => view.hasRoute(id));
+  for (const id of readable.slice(0, MAX_LISTED)) {
+    lines.push(listedPage(id, view.title(id), view.summary(view.finalTarget(id))));
   }
+  if (readable.length > MAX_LISTED) lines.push(`- and ${readable.length - MAX_LISTED} more`);
   lines.push("Read one with read_page(id).");
   return `${lines.join("\n")}\n`;
 }
