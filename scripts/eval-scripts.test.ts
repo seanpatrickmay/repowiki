@@ -197,3 +197,50 @@ describe("eval-run.ts as a process (no network)", () => {
     expect(result.stderr).toBe("usage: pnpm eval:report <run-dir>\n");
   });
 });
+
+describe("eval-accuracy.ts as a process (no network)", () => {
+  const sheetPath = () => join(out, "eval", "accuracy-review.md");
+
+  it("writes the review sheet for the named pages, and never over a sheet that exists", () => {
+    const first = run(
+      "scripts/eval-accuracy.ts",
+      "sheet",
+      sample.repo.dir,
+      "--out",
+      out,
+      "deliverables",
+    );
+    expect(first.status).toBe(0);
+    expect(first.stdout).toBe(`Wrote ${sheetPath()}: 3 claims to review\n`);
+    writeFileSync(sheetPath(), readFileSync(sheetPath(), "utf8").replaceAll("- [ ]", "- [x]"));
+    const again = run("scripts/eval-accuracy.ts", "sheet", sample.repo.dir, "--out", out);
+    expect(again.status).toBe(2);
+    expect(again.stderr).toBe(
+      `${sheetPath()} exists and may hold your marks; move it aside to write a new sheet\n`,
+    );
+    const tally = run("scripts/eval-accuracy.ts", "tally", sheetPath());
+    expect(tally.status).toBe(0);
+    expect(tally.stdout).toBe(
+      "Reviewed 3 claims, 0 false, 0 not reviewed: pass (spec §9 allows at most 1 false claim per 50 reviewed).\n",
+    );
+  });
+
+  it("refuses a page the wiki does not have, and a mark it does not know", () => {
+    const unknown = run(
+      "scripts/eval-accuracy.ts",
+      "sheet",
+      sample.repo.dir,
+      "--out",
+      out,
+      "kafka",
+    );
+    expect(unknown.status).toBe(2);
+    expect(unknown.stderr).toBe("no page for kafka; the pages are deliverables, signals\n");
+    const bad = join(dir, "sheet.md");
+    writeFileSync(bad, "- [?] `signals/s-1` (Overview): x\n");
+    const tally = run("scripts/eval-accuracy.ts", "tally", bad);
+    expect(tally.status).toBe(2);
+    expect(tally.stderr).toBe(`${bad}: line 1: mark a claim [x], [!] or [ ], not [?]\n`);
+    expect(run("scripts/eval-accuracy.ts").status).toBe(2);
+  });
+});
