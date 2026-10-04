@@ -35,8 +35,9 @@ export function plainClaimText(text: string, titleOf: (id: string) => string | n
 /**
  * Untrusted text as one line of llms.txt: every control or invisible character (newlines and tabs
  * included) becomes a space, runs of spaces collapse, the markdown characters that open a link,
- * an autolink or an HTML tag (`[`, `]`, `<`, `>`) and the backslash are escaped with a backslash,
- * and the text is cut to `max` code points with "…".
+ * an autolink, an HTML tag or a code span (`[`, `]`, `<`, `>`, a backtick) and the backslash are
+ * escaped with a backslash, and the text is cut to `max` code points with "…" before the escapes
+ * are added.
  */
 export function llmsTxtLine(text: string, max: number): string {
   const chars = [...text.replace(INVISIBLE_CHARACTERS, " ").replace(/\s+/g, " ").trim()];
@@ -45,7 +46,20 @@ export function llmsTxtLine(text: string, max: number): string {
     .join("")
     .trimEnd();
   const cut = chars.length <= max ? chars.join("") : `${head}…`;
-  return cut.replace(/[\\[\]<>]/g, (c) => `\\${c}`);
+  return cut.replace(/[\\[\]<>`]/g, (c) => `\\${c}`);
+}
+
+/**
+ * A line of llms.txt that sits after a block prefix (`> `), with a leading block marker escaped so
+ * the text cannot become a heading, list item or rule there: `#`, `-`, `+`, `*` or `12.` / `12)`
+ * followed by a space or nothing, and a line that is only a run of `-`, `*` or `_`. Emphasis
+ * (`**bold**`) and `#tag` are not markers and stay as they are. A leading `>` is already escaped.
+ */
+function noBlockMarker(line: string): string {
+  return line
+    .replace(/^(#{1,6}|[-+*])(?=\s|$)/, "\\$1")
+    .replace(/^(\d{1,9})([.)])(?=\s|$)/, "$1\\$2")
+    .replace(/^(?=([-*_])(?:\s*\1){2,}$)/, "\\");
 }
 
 /** A file name as one URL path segment; parentheses too, so it cannot end a markdown link. */
@@ -57,7 +71,7 @@ const urlSegment = (name: string): string =>
 
 /**
  * The wiki's llms.txt (https://llmstxt.org): its title, the About article's lead as the summary,
- * one line per active page with its URL and the first sentence of its lead, the About article,
+ * one line per active page with its URL and the text of its lead's first claim, the About article,
  * and the JSON export, named `exportPath`. URLs are relative to the file, which sits at the root
  * of the built site and beside the export in the wiki's out dir. Every title and summary is model-
  * or repository-derived text, so each is flattened to one escaped line (llmsTxtLine) and the file
@@ -76,7 +90,7 @@ export function renderLlmsTxt(wiki: WikiExport, exportPath = LLMS_TXT_EXPORT_PAT
   const repo = llmsTxtLine(wiki.repo, TITLE_MAX_LENGTH);
   const summary =
     aboutLead.length > 0
-      ? text(aboutLead.map((c) => c.text).join(" "), ABOUT_MAX_LENGTH)
+      ? noBlockMarker(text(aboutLead.map((c) => c.text).join(" "), ABOUT_MAX_LENGTH))
       : `A feature-by-feature wiki of the ${repo} repository.`;
   const lines = [
     `# ${repo} wiki`,
