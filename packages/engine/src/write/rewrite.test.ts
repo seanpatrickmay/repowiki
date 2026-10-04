@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { UpdateClaim, UpdateDraft } from "../verify/index.ts";
 import { MAX_UPDATE_OUTPUT_TOKENS, rewritePages, updateCacheKey } from "./rewrite.ts";
 import { type Answer, pageProvider } from "./test-provider.ts";
-import { signalsRewrite } from "./test-update.ts";
+import { plannedClaims, signalsRewrite, storedSignalsPage } from "./test-update.ts";
 import { testWiki } from "./test-wiki.ts";
 
 const claim = (o: Partial<UpdateClaim> & Pick<UpdateClaim, "id" | "section">): UpdateClaim => ({
@@ -149,12 +149,119 @@ describe("rewritePages", () => {
     expect(outcome?.added).toEqual([]);
   });
 
-  it("ignores a rewrite of a claim that is not stale", async () => {
+  it("ignores a repeat of a claim that is not stale, word for word", async () => {
     const { outcome, lines } = await run(() =>
-      answer(lead, overview, claim({ id: "c3", section: "history", cite: ["commit:b111111"] })),
+      answer(
+        lead,
+        overview,
+        claim({
+          id: "c3",
+          section: "history",
+          text: "Signal ingestion was added in January 2026.",
+          cite: ["commit:a111111"],
+        }),
+      ),
     );
     expect(outcome?.replaced.has("c3")).toBe(false);
     expect(lines).toContain('signals: ignored a rewrite of "c3", which is not stale');
+  });
+
+  describe("new-claim ids belong to the engine", () => {
+    /** The signals page after an update added the history claim n1: n1 is on the page, fresh. */
+    const withN1 = () => {
+      const stored = storedSignalsPage();
+      const added = history;
+      const n1 = {
+        id: "n1",
+        text: added.text,
+        kind: "history" as const,
+        citations: [stored.sections[2]?.claims[0]?.citations[0]] as never,
+        supports: [],
+        staleSince: null,
+        hook: false,
+      };
+      return signalsRewrite({
+        claims: [
+          ...plannedClaims(stored),
+          { key: "history", claim: n1, status: "fresh", reasons: [] },
+        ],
+      });
+    };
+
+    it("keeps both claims of two successive updates that each add one", async () => {
+      const first = await run(() => answer(lead, overview, history));
+      const firstAdded = first.outcome?.added[0];
+      expect(firstAdded?.claim.id).toBe("n1");
+      const page = signalsRewrite({
+        claims: [
+          ...plannedClaims(),
+          { key: "history", claim: firstAdded?.claim as never, status: "fresh", reasons: [] },
+        ],
+      });
+      const second = await run(
+        () =>
+          answer(
+            lead,
+            overview,
+            claim({
+              ...history,
+              text: "A second revert landed in March.",
+              cite: ["commit:b111111"],
+            }),
+          ),
+        [page],
+      );
+      expect(second.outcome?.replaced.has("n1")).toBe(false);
+      expect(second.outcome?.added.map((a) => a.claim.id)).toEqual(["n2"]);
+      expect(second.lines.join("\n")).not.toContain("ignored a rewrite");
+    });
+
+    it("renames a new claim that collides with another new claim of the answer", async () => {
+      const other = claim({ ...history, text: "Paging was reverted for long chunks." });
+      const { outcome } = await run(() => answer(lead, overview, history, other));
+      expect(outcome?.added.map((a) => [a.claim.id, a.claim.text])).toEqual([
+        ["n1", history.text],
+        ["n2", other.text],
+      ]);
+    });
+
+    it("skips ids the answer's other new claims use, and points a lead at the renamed claim", async () => {
+      const taken = claim({ ...history, id: "n2", text: "Paging was reverted for long chunks." });
+      const colliding = claim({ ...history, text: "Long chunks stopped paging after a revert." });
+      const pointed = { ...lead, supports: ["c2", "c3", "n1"] };
+      const { outcome } = await run(() => answer(pointed, overview, colliding, taken), [withN1()]);
+      expect(outcome?.added.map((a) => [a.claim.id, a.claim.text])).toEqual([
+        ["n3", colliding.text],
+        ["n2", taken.text],
+      ]);
+      expect(outcome?.replaced.get("c1")?.supports).toEqual(["c2", "c3", "n3"]);
+    });
+
+    it("tells the retry about the engine's id, not the model's", async () => {
+      const bad = claim({
+        ...history,
+        text: "Long chunks stopped paging after a revert.",
+        cite: ["commit:a111111"],
+      });
+      const { requests } = await run(
+        (_f, call) => (call === 1 ? answer(lead, overview, bad) : { claims: [] }),
+        [withN1()],
+      );
+      expect(requests[1]?.messages.at(-1)?.content).toContain('"n2": a new history claim cites');
+      expect(requests[1]?.messages[1]?.content).toContain('"id":"n2"');
+    });
+  });
+
+  it("keeps a rewritten claim's stored hook flag, whatever the answer says", async () => {
+    const stored = storedSignalsPage();
+    const hooked = signalsRewrite({
+      claims: plannedClaims(stored).map((c) =>
+        c.claim.id === "c2" ? { ...c, claim: { ...c.claim, hook: true } } : c,
+      ),
+    });
+    const { outcome } = await run(() => answer({ ...lead, hook: true }, overview), [hooked]);
+    expect(outcome?.replaced.get("c2")?.hook).toBe(true);
+    expect(outcome?.replaced.get("c1")?.hook).toBe(false);
   });
 
   it("asks again whole after an unusable answer", async () => {

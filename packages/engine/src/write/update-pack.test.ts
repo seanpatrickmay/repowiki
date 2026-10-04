@@ -105,4 +105,15 @@ describe("updateSystemPrompt", () => {
     );
     expect(updateSystemPrompt("sample", manifest)).toBe(system);
   });
+
+  it("tells the model new ids must be unused, and that What to write is the engine's", () => {
+    expect(UPDATE_INSTRUCTIONS).toContain("no claim on the page uses");
+    const listed = UPDATE_INSTRUCTIONS.split("\n\n").find((p) =>
+      p.startsWith("The update pack has these headings:"),
+    );
+    expect(listed).toContain('"Current page"');
+    expect(listed).not.toContain('"What to write", ');
+    expect(listed).not.toContain('"What to write" and');
+    expect(UPDATE_INSTRUCTIONS).toContain('"What to write" is the engine\'s own instructions');
+  });
 });

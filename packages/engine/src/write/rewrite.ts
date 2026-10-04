@@ -96,6 +96,61 @@ interface State extends CallTally {
 }
 
 /**
+ * The engine owns the ids of new claims (the model cannot see every id a later update will
+ * find on the page). A claim whose id is not a stale claim's is new, and it keeps its id only
+ * if no claim on the page and no earlier new claim of the answer uses it; otherwise it gets
+ * the next unused `n<k>`, deterministically. A repeat of a fresh claim, word for word, is not
+ * new: it keeps its id and `check` ignores it. A lead's supports that named the model's id for
+ * a new claim that collided with a claim on the page name the renamed claim instead (unless the
+ * lead already supported the page's claim of that id). Pure: the answer is returned as given
+ * when nothing collides.
+ */
+export function assignNewIds(rewrite: PageRewrite, claims: readonly UpdateClaim[]): UpdateClaim[] {
+  const onPage = new Map(rewrite.claims.map((c) => [c.claim.id, c]));
+  const targets = new Set(
+    rewrite.claims.filter((c) => c.status === "stale").map((c) => c.claim.id),
+  );
+  const taken = new Set([...onPage.keys(), ...claims.map((c) => c.id.trim())]);
+  const kept = new Set<string>();
+  const renamed = new Map<string, string>();
+  let next = 0;
+  const unused = (): string => {
+    do next += 1;
+    while (taken.has(`n${next}`));
+    taken.add(`n${next}`);
+    return `n${next}`;
+  };
+  const out = claims.map((raw) => {
+    const id = raw.id.trim();
+    const before = onPage.get(id);
+    const repeat =
+      before !== undefined &&
+      !targets.has(id) &&
+      before.key === raw.section &&
+      before.claim.text === raw.text;
+    if ((before !== undefined && targets.has(id)) || repeat) return { ...raw, id };
+    if (before === undefined && !kept.has(id)) {
+      kept.add(id);
+      return { ...raw, id };
+    }
+    const fresh = unused();
+    if (before !== undefined && !renamed.has(id)) renamed.set(id, fresh);
+    return { ...raw, id: fresh };
+  });
+  if (renamed.size === 0) return out;
+  return out.map((claim) => {
+    if (claim.section !== "lead") return claim;
+    const stored = new Set(onPage.get(claim.id)?.claim.supports ?? []);
+    return {
+      ...claim,
+      supports: claim.supports.map((id) =>
+        renamed.has(id) && !stored.has(id) ? (renamed.get(id) as string) : id,
+      ),
+    };
+  });
+}
+
+/**
  * Checks one answer's claims against the page: a stale claim's rewrite must stay in its section
  * and verify at the new commit (a lead's supports must name body claims of the page); a new
  * claim must go in a section the pack opened, and a new history claim must cite one of the
@@ -169,7 +224,7 @@ function check(
       continue;
     }
     state.failing.delete(claim.id);
-    if (target) state.replaced.set(claim.id, verified.claim);
+    if (target) state.replaced.set(claim.id, { ...verified.claim, hook: before.claim.hook });
     else {
       state.added.set(claim.id, { key, claim: verified.claim });
       bodyIds.add(claim.id);
@@ -190,7 +245,8 @@ function check(
     if (verified.claim === null || problems.length > 0) fail(claim, "lead", problems, true);
     else {
       state.failing.delete(claim.id);
-      state.replaced.set(claim.id, verified.claim);
+      const stored = old.get(claim.id)?.claim.hook ?? verified.claim.hook;
+      state.replaced.set(claim.id, { ...verified.claim, hook: stored });
     }
   }
   if (only === null) {
@@ -298,12 +354,13 @@ export async function rewritePages(
   const take = (state: State, outcome: Settled<UpdateDraft>) => {
     recordCall(state, outcome);
     if ("result" in outcome) {
-      state.answer = JSON.stringify(outcome.result.output);
+      const claims = assignNewIds(state.rewrite, outcome.result.output.claims);
+      state.answer = JSON.stringify({ ...outcome.result.output, claims });
       state.rejected = null;
       state.failing.clear();
       if (state.pack.candidates !== null) state.diagram = outcome.result.output.diagram;
       try {
-        check(state, outcome.result.output.claims, ctx, null, log);
+        check(state, claims, ctx, null, log);
       } catch (error) {
         state.failure = `verifying the update failed: ${errorClass(error)}`;
       }
