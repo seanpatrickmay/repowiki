@@ -9,4 +9,8 @@ export {
 export { ensureManifest } from "./ensure.ts";
 export { estimateTokens, plain } from "./prompt.ts";
 export { ManifestProposal } from "./proposal.ts";
-export { renderManifestSummary } from "./summary.ts";
+export {
+  codeSpan as markdownCodeSpan,
+  oneLine as markdownOneLine,
+  renderManifestSummary,
+} from "./summary.ts";

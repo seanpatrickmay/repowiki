@@ -46,11 +46,14 @@ export {
   buildManifest,
   DEFAULT_MAX_PROMPT_TOKENS,
   ensureManifest,
+  estimateTokens,
   type ManifestBuild,
   ManifestBuildError,
   type ManifestBuildOptions,
   ManifestProposal,
   manifestCacheKey,
+  markdownCodeSpan,
+  markdownOneLine,
   renderManifestSummary,
 } from "./manifest/index.ts";
 export {
