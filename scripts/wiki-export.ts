@@ -5,28 +5,22 @@ import { LLMS_TXT_FILE } from "@repowiki/core";
 import { openStore, WikiBuildError, writeExport } from "@repowiki/engine";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { acquireBuildLock, exitWithError } from "./wiki-cli.ts";
-
-const USAGE = "usage: pnpm wiki:export <repo-path> [--out dir]";
+import { acquireBuildLock, EXPORT_USAGE, exitWithError, parseExportArgs } from "./wiki-cli.ts";
 
 /**
- * pnpm wiki:export <repo> [--out dir]: writes export.json and llms.txt next to wiki.db from the
+ * pnpm wiki:export <repo> [--out dir] [--verbose]: writes export.json and llms.txt next to wiki.db from the
  * stored wiki (spec §3 `export`), with no LLM call, for a wiki built before llms.txt existed.
  * wiki:build, wiki:update and wiki:replay write both themselves. Holds the out dir's build lock
  * and never writes in <repo>.
  */
 function main(): void {
-  const [repoArg, flag, outArg, ...extra] = process.argv.slice(2);
-  const outFlag = flag === undefined || (flag === "--out" && outArg !== undefined && outArg !== "");
-  if (repoArg === undefined || repoArg === "" || !outFlag || extra.length > 0) {
-    throw new CliError(USAGE);
-  }
-  const repo = resolve(repoArg);
+  const args = parseExportArgs(process.argv.slice(2));
+  const repo = resolve(args.repo);
   if (!existsSync(repo) || !statSync(repo).isDirectory()) {
-    throw new CliError(`no such repository: ${repoArg}; ${USAGE}`);
+    throw new CliError(`no such repository: ${args.repo}; ${EXPORT_USAGE}`);
   }
   const repoName = basename(repo);
-  const out = resolveOutDir(repo, outArg ?? join(homedir(), ".repowiki", repoName));
+  const out = resolveOutDir(repo, args.out ?? join(homedir(), ".repowiki", repoName));
   if (out === null) {
     throw new CliError(
       "refusing to write inside the documented repository; choose an --out path elsewhere",

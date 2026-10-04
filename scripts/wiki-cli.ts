@@ -131,6 +131,41 @@ export function parseRunArgs(
   };
 }
 
+export const EXPORT_USAGE = "usage: pnpm wiki:export <repo-path> [--out dir] [--verbose]";
+
+/** wiki:export's `<repo> [--out dir] [--verbose]`, flags in any order; a CliError otherwise. */
+export function parseExportArgs(argv: readonly string[]): {
+  repo: string;
+  out: string | null;
+  verbose: boolean;
+} {
+  let parsed: ReturnType<typeof parseExport>;
+  try {
+    parsed = parseExport(argv);
+  } catch (err) {
+    throw badOption(err, EXPORT_USAGE);
+  }
+  const [repo, ...extra] = parsed.positionals;
+  if (repo === undefined || extra.length > 0) throw new CliError(EXPORT_USAGE);
+  if (repo === "") throw new CliError(`<repo-path> must not be empty; ${EXPORT_USAGE}`);
+  return {
+    repo,
+    out: once("--out", parsed.values.out, EXPORT_USAGE) ?? null,
+    verbose: once("--verbose", parsed.values.verbose, EXPORT_USAGE) ?? false,
+  };
+}
+
+function parseExport(argv: readonly string[]) {
+  return parseArgs({
+    args: [...argv],
+    allowPositionals: true,
+    options: {
+      out: { type: "string", multiple: true },
+      verbose: { type: "boolean", multiple: true },
+    },
+  });
+}
+
 /** `<repo> [rev]` plus flags in any order; throws a CliError for any other usage. */
 export function parseWikiArgs(argv: readonly string[]): WikiArgs {
   const { positionals, flags } = parseRunArgs(argv, USAGE);
