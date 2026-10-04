@@ -106,12 +106,23 @@ export function newPageState(pack: ContextPack): PageState {
   };
 }
 
+/** What verifyClaims reads and writes: the claims a round has verified or still has failing. */
+export interface VerifyState<K extends string, D extends { id: string; supports: string[] }, C> {
+  verified: Map<string, { key: K; claim: C }>;
+  failing: Map<string, { key: K; claim: D; problems: string[] }>;
+  /** Failed claims set aside from the retry; a lead's support may name one (a page's only). */
+  unfixable?: ReadonlyMap<string, { key: K }>;
+}
+
 /** The problem for lead supports that are not body claims of the page; each is named once. */
-function unknownSupports(state: PageState, supports: readonly string[]): string[] {
+function unknownSupports<K extends string>(
+  state: VerifyState<K, { id: string; supports: string[] }, unknown>,
+  supports: readonly string[],
+): string[] {
   const unknown = [
     ...new Set(
       supports.filter((id) => {
-        const target = state.verified.get(id) ?? state.failing.get(id) ?? state.unfixable.get(id);
+        const target = state.verified.get(id) ?? state.failing.get(id) ?? state.unfixable?.get(id);
         return target === undefined || target.key === "lead";
       }),
     ),
@@ -124,15 +135,18 @@ function unknownSupports(state: PageState, supports: readonly string[]): string[
   return [`the lead supports ${named.join(", ")}, which are not body claims`];
 }
 
-/** Verifies a set of draft claims, lead claims last so their supports can be checked. */
-export function verifyAll(
-  state: PageState,
-  claims: readonly { key: SectionKey; claim: DraftClaim }[],
-  ctx: VerifyContext,
+/**
+ * Verifies a set of draft claims with `verify`, lead claims last so their supports can be checked
+ * against the body as it stands. Shared by a feature page and the Architecture article.
+ */
+export function verifyClaims<K extends string, D extends { id: string; supports: string[] }, C>(
+  state: VerifyState<K, D, C>,
+  claims: readonly { key: K; claim: D }[],
+  verify: (key: K, claim: D) => { claim: C | null; problems: readonly string[] },
 ): void {
   const ordered = [...claims].sort((a, b) => Number(a.key === "lead") - Number(b.key === "lead"));
   for (const { key, claim } of ordered) {
-    const checked = verifyClaim(key, claim, ctx);
+    const checked = verify(key, claim);
     const problems = [...checked.problems];
     // Reported with the claim's other problems, so the retry turn lists everything at once.
     if (key === "lead") problems.push(...unknownSupports(state, claim.supports));
@@ -143,6 +157,15 @@ export function verifyAll(
       state.failing.set(claim.id, { key, claim, problems });
     }
   }
+}
+
+/** Verifies a set of draft claims of a feature page, lead claims last so their supports can be checked. */
+export function verifyAll(
+  state: PageState,
+  claims: readonly { key: SectionKey; claim: DraftClaim }[],
+  ctx: VerifyContext,
+): void {
+  verifyClaims(state, claims, (key, claim) => verifyClaim(key, claim, ctx));
 }
 
 /**

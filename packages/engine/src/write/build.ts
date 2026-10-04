@@ -116,6 +116,32 @@ export const settle = <T>(promise: Promise<GenerateResult<T>>): Promise<Settled<
     (error: unknown) => ({ error }),
   );
 
+/** What a round's calls add up to: the calls answered, their tokens, and the model that answered. */
+export interface CallTally {
+  tokens: TokenUsage;
+  model: string | null;
+  calls: number;
+}
+
+/**
+ * Counts an answered call into `tally`: a result, or an answer the provider could not use. A call
+ * that never got an answer (a failed batch, a network error) is not counted. An unusable answer's
+ * tokens are on the error (the provider's ledger has them too), so the tally agrees with it.
+ */
+export function recordCall(tally: CallTally, settled: Settled<unknown>): void {
+  if ("result" in settled) {
+    tally.calls += 1;
+    tally.tokens = addTokens(tally.tokens, settled.result.usage);
+    tally.model ??= settled.result.model;
+  } else if (settled.error instanceof LlmOutputError) {
+    tally.calls += 1;
+    if (settled.error.usage !== undefined) {
+      tally.tokens = addTokens(tally.tokens, settled.error.usage);
+    }
+    tally.model ??= settled.error.model ?? null;
+  }
+}
+
 /** The name of whatever was thrown: never its message, which may hold model text. */
 export const errorClass = (error: unknown): string =>
   error instanceof Error ? error.constructor.name : typeof error;
@@ -206,25 +232,6 @@ export async function writePages(
     }),
   );
   const states = packs.map(newPageState);
-  /**
-   * Counts an answered call: a result, or an answer the provider could not use. A call that never
-   * got an answer (a failed batch, a network error) is not counted. An unusable answer's tokens
-   * are on the error (the provider's ledger has them too), so the page's tokens agree with it.
-   */
-  const record = (state: PageState, outcome: Settled<unknown>) => {
-    if ("result" in outcome) {
-      state.calls += 1;
-      state.tokens = addTokens(state.tokens, outcome.result.usage);
-      state.model ??= outcome.result.model;
-    } else if (outcome.error instanceof LlmOutputError) {
-      state.calls += 1;
-      if (outcome.error.usage !== undefined) {
-        state.tokens = addTokens(state.tokens, outcome.error.usage);
-      }
-      state.model ??= outcome.error.model ?? null;
-    }
-  };
-
   // Round 1: one call per page, all issued by this one synchronous map.
   const first = await Promise.all(
     states.map((state) =>
@@ -244,7 +251,7 @@ export async function writePages(
   );
   first.forEach((outcome, i) => {
     const state = states[i] as PageState;
-    record(state, outcome);
+    recordCall(state, outcome);
     if ("result" in outcome) {
       // The draft is kept with the page's unique ids, the ones every later turn names.
       const draft = uniqueDraft(outcome.result.output);
@@ -311,7 +318,7 @@ export async function writePages(
   );
   second.forEach((answer, i) => {
     const state = retrying[i] as PageState;
-    record(state, answer.outcome);
+    recordCall(state, answer.outcome);
     if (!("result" in answer.outcome)) {
       state.failure = `the write call failed twice: ${callFailure(answer.outcome.error)}`;
       return;

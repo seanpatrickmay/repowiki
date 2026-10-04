@@ -1,5 +1,6 @@
 import { memberId, type Revision } from "@repowiki/core";
 import { leadClaim, makeRevision } from "@repowiki/core/test-fixtures";
+import type { ArchitectureDraft } from "../verify/index.ts";
 import { crossFeatureEdges } from "./architecture-edges.ts";
 import { projectTitle } from "./architecture-pack.ts";
 import { testWiki } from "./test-wiki.ts";
@@ -61,4 +62,69 @@ export function testArchitectureInput() {
     new Set(pages.map((p) => p.featureId)),
   );
   return { ...wiki, pages, edges, title: projectTitle("sample", wiki.sources) };
+}
+
+/** A draft of the project article for testArchitectureInput() that verifies cleanly. Test-only. */
+export function architectureDraft(): ArchitectureDraft {
+  const claim = (id: string, text: string, cite: string[], pages: string[] = []) => ({
+    id,
+    text,
+    cite,
+    pages,
+    supports: [],
+  });
+  return {
+    sections: [
+      {
+        key: "lead",
+        claims: [
+          {
+            ...claim(
+              "l1",
+              "**Sample Ops** is built from [[signals|signal ingestion]] and [[deliverables]].",
+              [],
+            ),
+            supports: ["u1", "y1", "p1", "d1"],
+          },
+        ],
+      },
+      {
+        key: "purpose",
+        claims: [
+          claim(
+            "u1",
+            "Sample Ops turns meeting notes into signals and tracks deliverables for project leads.",
+            ["README.md:3-5"],
+          ),
+        ],
+      },
+      {
+        key: "layers",
+        claims: [
+          claim("y1", "`complete()` in the deliverables layer hands notes to ingestion.", [
+            "src/deliverables/crud.py:4-7",
+          ]),
+        ],
+      },
+      {
+        key: "request-paths",
+        claims: [
+          claim("p1", "A completed deliverable's notes go through `ingest_chunk()`.", [
+            "src/deliverables/crud.py:7",
+          ]),
+        ],
+      },
+      {
+        key: "dependencies",
+        claims: [
+          claim(
+            "d1",
+            "[[deliverables]] depends on [[signals]], which works like a [[wp:Message queue]].",
+            [],
+            ["deliverables", "signals"],
+          ),
+        ],
+      },
+    ],
+  };
 }
