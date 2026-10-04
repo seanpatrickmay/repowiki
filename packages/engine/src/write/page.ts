@@ -1,12 +1,26 @@
 import {
+  CLAIM_TEXT_MAX_LENGTH,
   type Claim,
   type Infobox,
   IsoDateTime,
   type Manifest,
+  type Revision,
   type Section,
   type SectionKey,
+  type TokenUsage,
 } from "@repowiki/core";
 import type { CommitInfo, RepoIndex, SourceLanguage } from "../index/index.ts";
+import {
+  createPageLinker,
+  linkTokensIn,
+  linkViolations,
+  seeAlsoFor,
+  textLinkViolations,
+  unlinkText,
+} from "../link/index.ts";
+import { type DraftDiagram, diagramProblems } from "../verify/index.ts";
+import { renderDiagram } from "./diagram.ts";
+import type { ContextPack } from "./pack.ts";
 import { featureFiles } from "./prompt.ts";
 
 /** Section order on a page (spec §5). */
@@ -143,4 +157,116 @@ export function computeInfobox(
     firstCommitDate: dates[0] ?? commitDate,
     lastCommitDate: dates.at(-1) ?? commitDate,
   };
+}
+
+/** Everything a page's revision is made from once its claims are verified. */
+export interface RevisionParts {
+  featureId: string;
+  index: RepoIndex;
+  manifest: Manifest;
+  commitDate: string;
+  generatedAt: string;
+  model: string;
+  tokens: TokenUsage;
+  /** Verified claims with unique draft ids, in any order. */
+  claims: readonly { key: SectionKey; claim: Claim }[];
+  diagram: DraftDiagram;
+  pack: ContextPack;
+  neighbours: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  /** Normalized Wikipedia title → canonical title, or null for plain text. */
+  wikipedia: ReadonlyMap<string, string | null>;
+}
+
+const NO_PAGE = "no lead or no body claim survived verification";
+
+export type Assembled =
+  | { revision: Revision; failure: null; diagramProblems: string[] }
+  | { revision: null; failure: string };
+
+/**
+ * A build revision for one page: sections ordered and renumbered first, then the survivors'
+ * claims linked in page order (spec §7.3) so a claim that is dropped never uses up a concept's
+ * first mention, the infobox, See also, and the diagram, which is dropped (and its problems
+ * returned) if the verifier refuses it.
+ *
+ * Each linked claim is checked again: if it holds a link to anything but an active page, a
+ * Wikipedia link that did not check out, or is longer than `CLAIM_TEXT_MAX_LENGTH`, its links
+ * become plain words (`unlinkText`), first from the linker's output, then, if the feature titles
+ * made even that too long, from the claim as verified, which fit. The claim as written is never
+ * stored, because it may hold link tokens the linker neutralised. A claim blank after linking is
+ * dropped. A page whose links name no page even so is not written (`failure`), never an exception.
+ */
+export function assembleRevision(parts: RevisionParts): Assembled {
+  const { featureId, index, manifest } = parts;
+  const link = createPageLinker(manifest, featureId, parts.wikipedia);
+  const titles = new Map(manifest.features.map((f) => [f.id, f.title]));
+  const checked = new Set(
+    [...parts.wikipedia.values()].flatMap((title) => (title === null ? [] : [title.trim()])),
+  );
+  const linksOk = (text: string): boolean =>
+    textLinkViolations(text, manifest).length === 0 &&
+    linkTokensIn(text).every(
+      (t) => !t.target.startsWith("wp:") || checked.has(t.target.slice(3).trim()),
+    );
+  const linkClaim = (claim: Claim): Claim => {
+    const linked = link(claim.text);
+    if (linked.length <= CLAIM_TEXT_MAX_LENGTH && linksOk(linked))
+      return { ...claim, text: linked };
+    const plain = unlinkText(linked, titles);
+    return {
+      ...claim,
+      text: plain.length <= CLAIM_TEXT_MAX_LENGTH ? plain : unlinkText(claim.text),
+    };
+  };
+
+  const bySection = new Map<SectionKey, Claim[]>();
+  for (const key of SECTION_ORDER) {
+    bySection.set(
+      key,
+      parts.claims.filter((v) => v.key === key).map((v) => v.claim),
+    );
+  }
+  const ordered = pageSections(bySection);
+  if (ordered === null) return { revision: null, failure: NO_PAGE };
+  let dropped = false;
+  const linkedSections = ordered.map((section) => ({
+    key: section.key,
+    claims: section.claims.flatMap((claim) => {
+      const linked = linkClaim(claim);
+      if (linked.text.trim() !== "") return [linked];
+      dropped = true;
+      return [];
+    }),
+  }));
+  // Dropping a claim can leave a lead claim without support, or a page without a body.
+  const sections = dropped
+    ? pageSections(new Map(linkedSections.map((s) => [s.key, s.claims])))
+    : linkedSections;
+  if (sections === null) return { revision: null, failure: NO_PAGE };
+
+  let diagram = renderDiagram(parts.diagram, parts.pack.candidates);
+  const refused = diagram === null ? [] : diagramProblems(diagram);
+  if (refused.length > 0) diagram = null;
+  const revision: Revision = {
+    id: `${featureId}-${index.sha.slice(0, 12)}`,
+    featureId,
+    sha: index.sha,
+    commitDate: parts.commitDate,
+    generatedAt: parts.generatedAt,
+    parentId: null,
+    reason: "build",
+    pr: null,
+    model: parts.model,
+    tokens: parts.tokens,
+    infobox: computeInfobox(featureId, manifest, index, parts.pack.commits, parts.commitDate),
+    diagram,
+    seeAlso: seeAlsoFor(featureId, parts.neighbours, manifest),
+    sections,
+  };
+  // The checks above make this unreachable; it stays as the last word on spec §8.
+  const violations = linkViolations(revision, manifest);
+  if (violations.length > 0) {
+    return { revision: null, failure: `links to nowhere: ${violations.join("; ")}` };
+  }
+  return { revision, failure: null, diagramProblems: refused };
 }

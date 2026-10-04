@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   createPageLinker,
   createTargetResolver,
+  linkTokensIn,
   normalizeWikipediaTitle,
+  unlinkText,
   wikipediaTitlesIn,
 } from "./links.ts";
 import { linkManifest } from "./test-manifest.ts";
@@ -269,5 +271,69 @@ describe("fix round 1", () => {
       }),
     );
     expect(createPageLinker(manifest, "signals", NO_WP)("[[old]]")).toBe("[[billing]]");
+  });
+});
+
+describe("link words built from a feature title", () => {
+  const OPEN = String.fromCharCode(0xe000);
+  const withOld = (title: string) => {
+    const manifest = linkManifest();
+    manifest.features.push(
+      makeFeature({
+        id: "old",
+        title,
+        aliases: [],
+        status: { kind: "redirect", to: "billing" },
+      }),
+    );
+    return manifest;
+  };
+
+  it("strips brackets, backticks and placeholder characters, so the title cannot start a token", () => {
+    const out = createPageLinker(
+      withOld("a`x [[wp:Evil"),
+      "signals",
+      NO_WP,
+    )("Uses ` tick [[old]] here.");
+    expect(out).toBe("Uses ` tick [[billing|ax wp:Evil]] here.");
+    // The site pairs the lone backtick with one from the label; none is left to pair with.
+    const targets = [...out.matchAll(SITE_TOKEN)].flatMap((m) =>
+      m[1] === undefined ? [m[2]] : [],
+    );
+    expect(targets).toEqual(["billing"]);
+    expect(wikipediaTitlesIn(out)).toEqual([]);
+    expect(createPageLinker(withOld(`a${OPEN}b`), "signals", NO_WP)("[[old]]")).toBe(
+      "[[billing|ab]]",
+    );
+  });
+
+  it("keeps a plain title as the label", () => {
+    expect(createPageLinker(withOld("Old name"), "signals", NO_WP)("[[old]]")).toBe(
+      "[[billing|Old name]]",
+    );
+  });
+});
+
+describe("unlinkText", () => {
+  const titles = new Map([["deliverables", "Deliverables"]]);
+
+  it("turns every link token into its plain words and keeps code spans", () => {
+    expect(
+      unlinkText(
+        "See [[deliverables]], [[deliverables|the records]] and [[wp:Message queue]]; `[[x]]` stays.",
+        titles,
+      ),
+    ).toBe("See Deliverables, the records and Message queue; `[[x]]` stays.");
+  });
+
+  it("strips brackets and backticks from the words, and the site's placeholder characters", () => {
+    expect(unlinkText("[[wp:Evil|a `b` [c]]", titles)).toBe("a b c");
+    expect(unlinkText("[\ue000[wp:Evil]]", titles)).toBe("Evil");
+  });
+
+  it("leaves no token behind for odd runs of brackets", () => {
+    const out = unlinkText("[[[ ]][x]]", titles);
+    expect(linkTokensIn(out)).toEqual([]);
+    expect(out).not.toContain("[[");
   });
 });

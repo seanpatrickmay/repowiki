@@ -62,6 +62,17 @@ describe("linkViolations", () => {
     ]);
   });
 
+  it("reports a [[id]] token whose feature is retired or a redirect, but not an active one", () => {
+    const revision = makeRevision();
+    const lead = revision.sections[0];
+    if (lead?.claims[0] === undefined) throw new Error("fixture has a lead");
+    lead.claims[0].text = "[[legacy-signals]] [[retired-thing]] [[billing]] [[deliverables|d]]";
+    expect(linkViolations(revision, linkManifest())).toEqual([
+      "signals lead-1: [[legacy-signals]] is not an active feature id",
+      "signals lead-1: [[retired-thing]] is not an active feature id",
+    ]);
+  });
+
   it("reports every token the site would render that names no feature", () => {
     const revision = makeRevision();
     const lead = revision.sections[0];

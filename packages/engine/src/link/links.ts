@@ -92,7 +92,31 @@ export function createTargetResolver(manifest: Manifest): (target: string) => Fe
  * removed so the words can never join their neighbours into a new token or code span (a freed
  * backtick pairing with a later one would uncover a token the linker left alone as code).
  */
-const plainWords = (words: string): string => words.replace(/[[\]`]/g, "");
+const plainWords = (words: string): string =>
+  words.replace(/[[\]`]/g, "").replace(PLACEHOLDER_CHARS, "");
+
+/**
+ * A text with every link token replaced by its plain words, the way the linker writes a link it
+ * drops: the label, else the title of the feature the target names (from `titles`, by id), else
+ * the target itself. For a claim the linker made too long to store. Brackets, backticks and the
+ * site's placeholder characters are removed, and the pass repeats until no token is left, since
+ * dropping an empty one can join the text around it into a new one.
+ */
+export function unlinkText(text: string, titles: ReadonlyMap<string, string> = new Map()): string {
+  const plain = (match: string, target: string | undefined, label?: string): string => {
+    if (target === undefined) return match;
+    const name = target.trim();
+    const words =
+      label?.trim() || (name.startsWith("wp:") ? name.slice(3).trim() : (titles.get(name) ?? name));
+    return plainWords(words);
+  };
+  let current = text.replace(PLACEHOLDER_CHARS, "");
+  for (let next = current.replace(INLINE_TOKEN, plain); next !== current; ) {
+    current = next;
+    next = current.replace(INLINE_TOKEN, plain);
+  }
+  return current;
+}
 
 /**
  * Rewrites the link tokens of one page's claims, in page order (spec §7.3). A token for a known
@@ -122,8 +146,10 @@ export function createPageLinker(
       return words === canonical ? `[[wp:${canonical}]]` : `[[wp:${canonical}|${words}]]`;
     }
     const feature = resolve(target);
-    // An id shows as the title of the feature it names, even when that feature redirects.
-    const words = (label ?? titles.get(target) ?? target).replace(/]/g, "");
+    // An id shows as the title of the feature it names, even when that feature redirects. A
+    // label is already in the scanned text; a title is model-written data that is not, so it gets
+    // the stripping of a dropped link: it must not open a token or pair a backtick on the page.
+    const words = label?.replace(/]/g, "") ?? plainWords(titles.get(target) ?? target);
     if (feature === null || feature.id === pageId || linked.has(feature.id)) {
       return plainWords(words);
     }
