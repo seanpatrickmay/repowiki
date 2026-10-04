@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { copyFileSync, existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LLMS_TXT_EXPORT_PATH, LLMS_TXT_FILE, renderLlmsTxt } from "@repowiki/core";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
 import * as pagefind from "pagefind";
 import { UsageError } from "./args.ts";
-import { loadExport } from "./load.ts";
+import { loadExport, resolveExportFile } from "./load.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -95,13 +96,16 @@ export interface BuildResult {
   htmlPages: number;
 }
 
-/** Validates the export, renders the static site into outDir, then indexes it with Pagefind. */
+/**
+ * Validates the export, renders the static site into outDir, puts the wiki's llms.txt and the
+ * export it lists at the site's root (F07), then indexes the site with Pagefind.
+ */
 export async function buildSite(
   exportFile: string,
   outDir: string,
   repoUrl: string | null,
 ): Promise<BuildResult> {
-  loadExport(exportFile);
+  const wiki = loadExport(exportFile);
   validateOutDir(exportFile, outDir);
   setBuildEnv(exportFile, repoUrl);
 
@@ -115,6 +119,8 @@ export async function buildSite(
 
   // Write marker file to allow rebuilds
   writeFileSync(`${outDir}/.repowiki-site`, "");
+  copyFileSync(resolveExportFile(exportFile), join(outDir, LLMS_TXT_EXPORT_PATH));
+  writeFileSync(join(outDir, LLMS_TXT_FILE), renderLlmsTxt(wiki));
 
   const { index, errors } = await pagefind.createIndex({ forceLanguage: "en" });
   try {

@@ -1,8 +1,10 @@
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   type Architecture,
+  LLMS_TXT_FILE,
   type Revision,
+  renderLlmsTxt,
   SCHEMA_VERSION,
   WikiExport,
   type WikipediaSummary,
@@ -65,19 +67,28 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
 }
 
 /**
- * Writes the export to `outPath` atomically: to a temporary file beside it, then renamed over it,
- * so a reader (or a site build) never sees half an export, and a failed write leaves the previous
- * export in place.
+ * Writes `text` to `path` atomically: to a temporary file beside it, then renamed over it, so a
+ * reader never sees half a file, and a failed write leaves the previous file in place.
  */
-export function writeExport(store: Store, outPath: string, options: ExportOptions): void {
-  const wiki = buildExport(store, options);
-  mkdirSync(dirname(outPath), { recursive: true });
-  const temporary = `${outPath}.${process.pid}.tmp`;
+function writeAtomically(path: string, text: string): void {
+  const temporary = `${path}.${process.pid}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(wiki, null, 2)}\n`, "utf8");
-    renameSync(temporary, outPath);
+    writeFileSync(temporary, text, "utf8");
+    renameSync(temporary, path);
   } catch (error) {
     rmSync(temporary, { force: true });
     throw error;
   }
+}
+
+/**
+ * Writes the export to `outPath` and the wiki's llms.txt beside it (spec §3 `export`), each
+ * atomically, so a reader (or a site build) never sees half an export, and a failed write leaves
+ * the previous files in place.
+ */
+export function writeExport(store: Store, outPath: string, options: ExportOptions): void {
+  const wiki = buildExport(store, options);
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeAtomically(outPath, `${JSON.stringify(wiki, null, 2)}\n`);
+  writeAtomically(join(dirname(outPath), LLMS_TXT_FILE), renderLlmsTxt(wiki, basename(outPath)));
 }
