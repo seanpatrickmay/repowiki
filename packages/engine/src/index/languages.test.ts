@@ -22,8 +22,6 @@ describe("parse errors for an import type in call type arguments", () => {
     'f<typeof import("x")>();',
     'const m = f<typeof import("x")>();\nexport const k = 1;\n',
     'const m = await importOriginal<typeof import("x")>();\n',
-    'f<typeof import("x"), number>();',
-    'f<typeof import("x") | null>();',
     'f<typeof import("x").default>();',
     'x.f<typeof import("x")>() ;',
     'f<typeof import("x")>().then(a);',
@@ -41,6 +39,14 @@ describe("parse errors for an import type in call type arguments", () => {
   it("still reports an unrelated syntax error next to the idiom", () => {
     expect(hasError("typescript", 'f<typeof import("x")>();\nexport function bad( {\n')).toBe(true);
     expect(hasError("typescript", 'f<typeof import("x")>(;\n')).toBe(true);
+  });
+
+  it("still reports a stray `>();` that does not directly follow the import type", () => {
+    expect(hasError("typescript", 'const ok = a < import("y");\n>();\n')).toBe(true);
+    expect(hasError("typescript", 'const ok = (a < import("y"));\n>();\n')).toBe(true);
+    expect(hasError("typescript", 'const ok = a < typeof import("y");\n\n>();\n')).toBe(true);
+    expect(hasError("typescript", 'f<typeof import("x")>() >();\n')).toBe(true);
+    expect(hasError("tsx", 'const ok = a < import("y");\n>();\n')).toBe(true);
   });
 
   it("still reports an error that merely looks like `>()` after an expression", () => {

@@ -28,16 +28,23 @@ function isImportTypeArgsMisparse(error: Node): boolean {
   if (!/^>\s*\(\s*\)$/.test(error.text)) return false;
   const prev = error.previousSibling;
   if (prev === null) return false;
-  const importsIn = (node: Node): boolean =>
-    [node, ...node.descendantsOfType("call_expression")].some(
-      (n) => n.type === "call_expression" && n.childForFieldName("function")?.type === "import",
-    );
+  // The comparison must be the tail of the previous sibling and end where the ERROR starts, with
+  // only whitespace between; a stray `>();` after a finished statement stays an error.
+  if (prev.endIndex > error.startIndex) return false;
+  const gap = error.tree.rootNode.text.slice(prev.endIndex, error.startIndex);
+  if (!/^\s*$/.test(gap)) return false;
   return [prev, ...prev.descendantsOfType("binary_expression")].some((n) => {
     if (n.type !== "binary_expression" || n.childForFieldName("operator")?.type !== "<") {
       return false;
     }
+    if (n.endIndex !== prev.endIndex) return false;
     const right = n.childForFieldName("right");
-    return right !== null && importsIn(right);
+    return (
+      right !== null &&
+      [right, ...right.descendantsOfType("call_expression")].some(
+        (c) => c.type === "call_expression" && c.childForFieldName("function")?.type === "import",
+      )
+    );
   });
 }
 
