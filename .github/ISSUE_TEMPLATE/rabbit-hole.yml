@@ -1,0 +1,34 @@
+name: Rabbit-hole session
+description: One session of the rabbit-hole test (spec section 9, exit criterion 3), from Random article, at least five hops.
+title: "[rabbit-hole] Session "
+labels: ["v1", "area:eval"]
+body:
+  - type: input
+    id: start
+    attributes:
+      label: Starting article
+      description: The page Random article opened.
+    validations:
+      required: true
+  - type: textarea
+    id: hops
+    attributes:
+      label: Hops
+      description: One line per hop, at least five, each the link followed, the page it reached, and what that page taught.
+      value: "1. \n2. \n3. \n4. \n5. \n"
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Did every hop teach something real?
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Dead ends, wrong claims (file those with the accuracy template), links you wanted and did not find.

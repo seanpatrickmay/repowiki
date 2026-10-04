@@ -244,3 +244,12 @@ describe("eval-accuracy.ts as a process (no network)", () => {
     expect(run("scripts/eval-accuracy.ts").status).toBe(2);
   });
 });
+
+describe("the issue templates for the author's reviews", () => {
+  it("label a false claim accuracy, and ask a rabbit-hole session for five hops", () => {
+    const accuracy = readFileSync(".github/ISSUE_TEMPLATE/accuracy.yml", "utf8");
+    expect(accuracy).toContain('labels: ["accuracy", "v1", "area:eval"]');
+    const rabbit = readFileSync(".github/ISSUE_TEMPLATE/rabbit-hole.yml", "utf8");
+    expect(rabbit).toContain('value: "1. \\n2. \\n3. \\n4. \\n5. \\n"');
+  });
+});
