@@ -1,3 +1,4 @@
+export { type ArticleDue, articleDue } from "./article.ts";
 export { DEFAULT_DRIFT_THRESHOLD, driftedFeatures, featureChurn } from "./drift.ts";
 export {
   DRIFT_INSTRUCTIONS,

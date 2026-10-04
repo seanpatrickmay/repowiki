@@ -43,6 +43,9 @@ export interface BuildJournal extends BatchJournal {
   flush(): void;
 }
 
+/** The journal group of requests no page owns; no feature id is empty. */
+const UNTAGGED = "";
+
 /**
  * The store's batch journal for a build. The batcher forgets a request once its answer is read,
  * but the answer is only safe once its page is stored: until then a killed build must leave the
@@ -53,7 +56,8 @@ export interface BuildJournal extends BatchJournal {
  * A page whose round-1 or retry batch failed as a whole (canceled at its deadline, or its results
  * never downloaded) settled from no answer: the batcher forgot nothing for that request, and its
  * page keeps every row, round 1's included, so a rerun rebuilds the same requests and collects
- * both batches. Requests no tag names are forgotten as before.
+ * both batches. Requests no tag names (the article's, an update's tie-break and drift calls) are
+ * one group under the same rule: while one of them is unanswered, every one of them stays.
  */
 export function buildJournal(store: Store): BuildJournal {
   const pending = new Map<string, Set<string>>();
@@ -67,8 +71,8 @@ export function buildJournal(store: Store): BuildJournal {
       pending.set(batchId, batch);
     },
     tag: (key, featureId) => {
-      if (featureId === null) return;
-      pages.set(featureId, (pages.get(featureId) ?? new Set()).add(key));
+      const group = featureId ?? UNTAGGED;
+      pages.set(group, (pages.get(group) ?? new Set()).add(key));
     },
     flush: () => {
       const answered = new Set([...pending.values()].flatMap((keys) => [...keys]));
@@ -212,10 +216,27 @@ export async function buildWiki(
       ...(options.log === undefined ? {} : { log: options.log }),
     },
   );
-  // The article's call is untagged, so this flush forgets its journal rows once it is settled.
-  store.transaction(() => {
-    if (architecture.architecture !== null) store.putArchitecture(architecture.architecture);
-    journal?.flush();
-  });
+  storeArticle(store, architecture, journal);
   return { ...done, architecture, architectureSkipped: null };
+}
+
+/**
+ * Stores a settled article round and flushes its journal rows in one transaction. If the store
+ * refuses the article, the rows are still forgotten in a transaction of their own before the
+ * error goes on: a rerun then pays for one new call instead of replaying the same refused answer.
+ */
+export function storeArticle(
+  store: Store,
+  outcome: ArchitectureOutcome,
+  journal: BuildJournal | undefined,
+): void {
+  try {
+    store.transaction(() => {
+      if (outcome.architecture !== null) store.putArchitecture(outcome.architecture);
+      journal?.flush();
+    });
+  } catch (error) {
+    store.transaction(() => journal?.flush());
+    throw error;
+  }
 }

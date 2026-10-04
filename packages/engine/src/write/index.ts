@@ -41,6 +41,7 @@ export {
   buildJournal,
   buildWiki,
   MIN_ARCHITECTURE_PAGES,
+  storeArticle,
   type WikiBuild,
   WikiBuildError,
   type WikiBuildOptions,

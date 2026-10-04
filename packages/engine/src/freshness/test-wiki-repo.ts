@@ -1,5 +1,5 @@
 import { contentHash, type Manifest, type Revision } from "@repowiki/core";
-import { INGEST_PY, sourceLines } from "@repowiki/core/test-fixtures";
+import { INGEST_PY, makeArchitecture, sourceLines } from "@repowiki/core/test-fixtures";
 import {
   createTestRepo,
   DEFAULT_MAX_FILE_BYTES,
@@ -9,6 +9,7 @@ import {
   type TestRepo,
 } from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
+import type { ArchitectureDraft } from "../verify/index.ts";
 import type { UpdateInput } from "./plan.ts";
 
 export const STORE_PY = "def save_signal(signal):\n    return signal\n";
@@ -37,7 +38,7 @@ export async function inputAt(repo: TestRepo, sha: string): Promise<UpdateInput>
  * A fixture repository and an in-memory store built at its first commit (spec §8): signals owns
  * src/signals/ (ingest.py, store.py) and docs/signals.md, deliverables owns src/deliverables/
  * crud.py; each has a stored page whose overview claim cites its code and whose history claim
- * cites the first commit. Test-only.
+ * cites the first commit. The project's article is stored too, written from both pages. Test-only.
  */
 export async function builtWiki(): Promise<{ repo: TestRepo; store: Store; first: string }> {
   const repo = createTestRepo();
@@ -175,5 +176,49 @@ export async function builtWiki(): Promise<{ repo: TestRepo; store: Store; first
     ),
   );
   store.setHead(first);
+  store.putArchitecture(
+    makeArchitecture({
+      id: `architecture-${first.slice(0, 12)}-1`,
+      sha: first,
+      commitDate: date,
+      basis: store
+        .listCurrentRevisions()
+        .map((r) => r.id)
+        .sort(),
+      edges: [],
+    }),
+  );
   return { repo, store, first };
+}
+
+/** An article draft for builtWiki's repository that verifies cleanly at any later commit. */
+export function articleAnswer(): ArchitectureDraft {
+  return {
+    sections: [
+      {
+        key: "lead",
+        claims: [
+          {
+            id: "l1",
+            text: "**sample** is built from [[signals]] and [[deliverables]].",
+            cite: [],
+            pages: [],
+            supports: ["y1"],
+          },
+        ],
+      },
+      {
+        key: "layers",
+        claims: [
+          {
+            id: "y1",
+            text: "The deliverables layer hands a completed deliverable's notes to ingestion.",
+            cite: [],
+            pages: ["deliverables", "signals"],
+            supports: [],
+          },
+        ],
+      },
+    ],
+  };
 }

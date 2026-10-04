@@ -3,12 +3,12 @@ import { type GenerateRequest, LlmError } from "@repowiki/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TestRepo } from "../index/index.ts";
 import { buildExport, type Store } from "../store/index.ts";
-import { UpdateDraft, UpdateFixes } from "../verify/index.ts";
+import { ArchitectureDraft, UpdateDraft, UpdateFixes } from "../verify/index.ts";
 import type { BuildJournal } from "../write/index.ts";
 import { ManifestOperations } from "./ops.ts";
 import { UpdateError } from "./plan.ts";
 import { scriptedProvider } from "./test-provider.ts";
-import { builtWiki, inputAt } from "./test-wiki-repo.ts";
+import { articleAnswer, builtWiki, inputAt } from "./test-wiki-repo.ts";
 import { TieBreakAnswer } from "./tiebreak.ts";
 import { updateWiki } from "./update.ts";
 
@@ -26,6 +26,7 @@ function provider(pages: (featureId: string, request: GenerateRequest<unknown>) 
     if (request.schema === TieBreakAnswer) return { files: [] };
     if (request.schema === ManifestOperations) return { operations: [] };
     if (request.schema === UpdateFixes) return { claims: [] };
+    if (request.schema === ArchitectureDraft) return articleAnswer();
     if (request.schema === UpdateDraft) return pages(request.featureId ?? "", request);
     throw new Error(`unexpected call for ${request.featureId}`);
   });
@@ -100,7 +101,11 @@ describe("updateWiki", () => {
     }));
     const result = await updateWiki(store, await inputAt(repo, merge), { ...options, provider: p });
 
-    expect(requests.map((r) => [r.purpose, r.featureId ?? null])).toEqual([["write", "signals"]]);
+    // The signals lead changed, so the project's article is rewritten in a round of its own.
+    expect(requests.map((r) => [r.purpose, r.featureId ?? null])).toEqual([
+      ["write", "signals"],
+      ["write", null],
+    ]);
     expect(requests[0]?.messages[0]?.content).toContain("src/signals/batch.py:1-2 (drain)");
     expect(result).toMatchObject({
       from: first,
@@ -131,6 +136,15 @@ describe("updateWiki", () => {
     expect(store.getCurrentRevision("deliverables")?.sha).toBe(first);
     expect(store.getManifest(merge)?.membership["src/signals/batch.py"]?.featureId).toBe("signals");
     expect(store.getDriftBaseline()?.sha).toBe(first);
+    expect(result.articleDue).toBe("a lead changed");
+    expect(result.architecture?.failure).toBeNull();
+    expect(store.getCurrentArchitecture()).toMatchObject({
+      sha: merge,
+      reason: "update",
+      pr: 7,
+      parentId: `architecture-${first.slice(0, 12)}-1`,
+      basis: [`deliverables-${first.slice(0, 12)}`, signals?.id].sort(),
+    });
     expect(
       buildExport(store, { repo: "sample", exportedAt: "2026-10-03T12:00:00Z" }).history.signals,
     ).toHaveLength(2);
