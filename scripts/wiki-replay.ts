@@ -52,8 +52,8 @@ import { checkWiki } from "./wiki-problems.ts";
 
 /**
  * pnpm wiki:replay <repo> <from> <to> [--limit N]: moves the wiki stored for <repo> through the
- * first-parent merges between <from> and <to> (spec §6.2), one wiki:update per merge, so each
- * page's history is dated by the merges that changed it. The wiki must be built at <from> (or be
+ * first-parent merges (and squash-merged pull requests) between <from> and <to> (spec §6.2), one
+ * wiki:update per step, so each page's history is dated by the merges that changed it. The wiki must be built at <from> (or be
  * part-way along, from an earlier replay: it resumes from its head). --limit N replays the next N
  * steps only; --dry-run lists them with an upper-side estimate. After every step it records
  * spec §8's invariants in replay-<from7>-<to7>.md, rendered from the step records saved beside it

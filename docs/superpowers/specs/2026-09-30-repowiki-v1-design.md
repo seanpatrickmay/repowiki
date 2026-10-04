@@ -229,7 +229,7 @@ WikiExport { schemaVersion: 2, repo, head, exportedAt, manifest: Manifest,
 The PR number is parsed from `Merge pull request #N` and stored on the revision.
 Building at an old commit and replaying forward produces the full dated history (F06, F17).
 
-**Replay (M6).** Replay walks the first-parent line of `<to>` (which need not be `main`): every merge after `<from>`, then `<to>` itself when it is not a merge. It resumes from the store's head, collecting any batch a killed run left through the batch journal; `--limit N` bounds one run. PR numbers come from "Merge pull request #N" or a squash's trailing "(#N)". After each step it records the §8 invariants in a summary file.
+**Replay (M6).** Replay walks the first-parent line of `<to>` (which need not be `main`): every merge after `<from>`, then `<to>` itself when it is not a merge. A first-parent commit whose subject ends in a squash merge's "(#N)" counts as a step too, so a repository that squash-merges replays one step per pull request. It resumes from the store's head, collecting any batch a killed run left through the batch journal; `--limit N` bounds one run. PR numbers come from "Merge pull request #N" or a squash's trailing "(#N)". After each step it records the §8 invariants in a summary file.
 
 ### 6.3 Failure handling
 

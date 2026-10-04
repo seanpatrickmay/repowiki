@@ -36,4 +36,46 @@ describe("replaySteps", () => {
     expect(replaySteps(repo.dir, tip, tip)).toEqual([]);
     expect(() => replaySteps(repo.dir, tip, root)).toThrow(GitError);
   });
+
+  it("takes each squash-merged pull request, a first-parent commit ending in (#N), as a step", () => {
+    repo = createTestRepo();
+    repo.write("a.py", "a = 1\n");
+    const root = repo.commit("feat: root");
+    repo.write("b.py", "b = 1\n");
+    const one = repo.commit("feat: add b (#11)");
+    repo.write("c.py", "c = 1\n");
+    repo.commit("fix: a plain commit on main");
+    repo.write("d.py", "d = 1\n");
+    const two = repo.commit("Add d (#12)");
+    repo.write("e.py", "e = 1\n");
+    const tip = repo.commit("chore: tip");
+    expect(replaySteps(repo.dir, root, tip)).toEqual([
+      { sha: one, subject: "feat: add b (#11)", merge: false },
+      { sha: two, subject: "Add d (#12)", merge: false },
+      { sha: tip, subject: "chore: tip", merge: false },
+    ]);
+  });
+
+  it("mixes merge commits and squash commits in first-parent order", () => {
+    repo = createTestRepo();
+    repo.write("a.py", "a = 1\n");
+    const root = repo.commit("feat: root");
+    repo.write("b.py", "b = 1\n");
+    const squash = repo.commit("feat: add b (#3)");
+    repo.git("switch", "-q", "-c", "side");
+    repo.write("side.py", "s = 1\n");
+    // A squash-looking subject off the first-parent line is not a step: only its merge is.
+    repo.commit("feat: side work (#5)");
+    repo.git("switch", "-q", "main");
+    const merge = repo.merge("side", "Merge pull request #4 from me/side");
+    repo.write("c.py", "c = 1\n");
+    const plain = repo.commit("fix: no pull request here");
+    expect(replaySteps(repo.dir, root, plain)).toEqual([
+      { sha: squash, subject: "feat: add b (#3)", merge: false },
+      { sha: merge, subject: "Merge pull request #4 from me/side", merge: true },
+      { sha: plain, subject: "fix: no pull request here", merge: false },
+    ]);
+    // A plain commit is not a step unless it is `to`.
+    expect(replaySteps(repo.dir, root, merge).map((s) => s.sha)).toEqual([squash, merge]);
+  });
 });
