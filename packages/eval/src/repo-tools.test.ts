@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -359,6 +360,36 @@ describe("createRepoTools against hostile config and content", () => {
     expect(slow.run("list_files", { path: "docs" }).isError).toBe(false);
     expect(createRepoTools(big.dir, bigSha).run("grep", { pattern: "export const" }).isError).toBe(
       false,
+    );
+  });
+
+  it("does not call a grep that could not read a file in a partial clone 'No matches.'", () => {
+    const source = createTestRepo();
+    const scratch = mkdtempSync(join(tmpdir(), "repowiki-partial-"));
+    try {
+      source.write("a.txt", "hello\n");
+      const at = source.commit("init");
+      source.git("config", "uploadpack.allowFilter", "true");
+      const clone = join(scratch, "clone");
+      execFileSync(
+        "git",
+        ["clone", "-q", "--no-checkout", "--filter=blob:none", `file://${source.dir}`, clone],
+        { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+      );
+      const result = createRepoTools(clone, at).run("grep", { pattern: "hello" });
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/^grep failed: .*partial clone/);
+      expect(result.text).toMatch(/git fetch --refetch/);
+      expect(result.text).not.toBe("No matches.\n");
+    } finally {
+      source.remove();
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("still says 'No matches.' when git exits 1 with nothing on stderr", () => {
+    expect(createRepoTools(big.dir, bigSha).run("grep", { pattern: "zzz_not_here" }).text).toBe(
+      "No matches.\n",
     );
   });
 });

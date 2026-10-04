@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { assertSha, GitError, listBlobs, scrubbedGitEnv, type TreeBlob } from "@repowiki/engine";
+import {
+  assertSha,
+  GitError,
+  gitFailureCause,
+  listBlobs,
+  scrubbedGitEnv,
+  type TreeBlob,
+} from "@repowiki/engine";
 import { z } from "zod";
 import { count, cut, oneLine, toolText } from "./text.ts";
 import { defineTool, MAX_TOOL_RESULT_CHARS, ToolError, type ToolSet, toolSet } from "./tools.ts";
@@ -180,9 +187,13 @@ function grep(repo: string, sha: string, input: GrepInput, timeoutMs: number): s
   if (result.signal !== null) {
     throw new ToolError("grep took too long; narrow the pattern or the path");
   }
-  if (result.status === 1) return "No matches.\n";
+  // No match is exit 1 with an empty stderr. Anything on stderr (a partial clone's "unable to
+  // read <oid>", say) means files went unsearched, so "No matches." would be a false answer.
+  const stderr = result.stderr.toString("utf8");
+  if (result.status === 1 && stderr.trim() === "") return "No matches.\n";
   if (result.status !== 0) {
-    const why = cut(oneLine(result.stderr.toString("utf8")).replace(/^fatal: /, ""), 200);
+    const cause = gitFailureCause(repo, stderr);
+    const why = cause ?? cut(oneLine(stderr).replace(/^fatal: /, ""), 200);
     throw new ToolError(`grep failed: ${why}`);
   }
   // Each match is "<sha>:<path>\0<line>\0<text>\n"; the path may hold any character but NUL.

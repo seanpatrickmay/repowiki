@@ -82,10 +82,17 @@ function unsafeRepositoryCause(repo: string): string {
   );
 }
 
-/** The cause git's stderr names that RepoWiki's own environment brings about, if any. */
-function knownCause(repo: string, stderr: string): string | undefined {
+/** `git grep` and `git cat-file` words for an object that is not there to read. */
+const UNREADABLE_OBJECT_STDERR = /unable to read [0-9a-f]{40}/i;
+
+/**
+ * The cause git's stderr names that RepoWiki's own environment brings about (an unsafe repository,
+ * a partial clone's missing object), as one printable clause; undefined when it names neither.
+ */
+export function gitFailureCause(repo: string, stderr: string): string | undefined {
   if (UNSAFE_REPOSITORY_STDERR.test(stderr)) return unsafeRepositoryCause(repo);
   if (PARTIAL_CLONE_STDERR.test(stderr)) return PARTIAL_CLONE_CAUSE;
+  if (UNREADABLE_OBJECT_STDERR.test(stderr) && isPartialClone(repo)) return PARTIAL_CLONE_CAUSE;
   return undefined;
 }
 
@@ -108,7 +115,7 @@ export function git(repo: string, args: readonly string[]): Buffer {
   if (result.error) throw spawnError(result.error);
   if (result.status !== 0) {
     const stderr = result.stderr.toString("utf8").trim();
-    const cause = knownCause(repo, stderr);
+    const cause = gitFailureCause(repo, stderr);
     throw new GitError(
       cause === undefined
         ? `git ${args[0]} failed in ${repo}: ${stderr}`
