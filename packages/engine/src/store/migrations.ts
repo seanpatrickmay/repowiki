@@ -49,6 +49,7 @@ export const MIGRATIONS: readonly Migration[] = [
   );
   CREATE INDEX ledger_run ON ledger(run_id);
   `,
+  "ALTER TABLE manifests ADD COLUMN llm_revised INTEGER NOT NULL DEFAULT 0",
 ];
 
 interface StoredFeature {

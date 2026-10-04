@@ -24,6 +24,7 @@ export {
   EmptyStoreError,
   type ExportOptions,
   openStore,
+  type PutManifestOptions,
   StaleParentError,
   type Store,
   StoreError,
