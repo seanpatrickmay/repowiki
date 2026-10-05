@@ -76,7 +76,7 @@ describe("eval-run.ts as a process (no network)", () => {
     const result = evalRun("--questions", smoke, "--set", "smoke", "--dry-run");
     expect(result.status).toBe(0);
     expect(result.stderr).toMatch(
-      /^3 questions to both agents: about \$\d+\.\d\d .*\(--max-usd\)\n$/,
+      /^3 questions to the wiki and repo agents: about \$\d+\.\d\d .*\(--max-usd\)\n$/,
     );
     expect(existsSync(join(out, "eval"))).toBe(false);
   });
@@ -167,6 +167,7 @@ describe("eval-run.ts as a process (no network)", () => {
       questionsHash: "f".repeat(64),
       writtenOn: "2026-10-01",
       turnLimit: 15,
+      agents: ["wiki", "repo"],
       models: { evalAgent: "claude-haiku-4-5", evalJudge: "claude-haiku-4-5" },
       buildTokens: null,
       questions,

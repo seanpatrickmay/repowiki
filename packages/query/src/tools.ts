@@ -125,3 +125,29 @@ export function toolSet(tools: readonly Tool[]): LocalToolSet {
     },
   };
 }
+
+/**
+ * Several tool sets as one (the repo+mcp agent's: the repository's tools and the MCP server's).
+ * Two tools of one name are refused; an unknown name is an error result naming every tool.
+ */
+export function combineToolSets(...sets: readonly ToolSet[]): ToolSet {
+  const byName = new Map<string, ToolSet>();
+  for (const set of sets) {
+    for (const definition of set.definitions) {
+      if (byName.has(definition.name)) throw new Error(`two tools are named ${definition.name}`);
+      byName.set(definition.name, set);
+    }
+  }
+  return {
+    definitions: sets.flatMap((set) => set.definitions),
+    run(name, input) {
+      const set = byName.get(name);
+      if (set !== undefined) return set.run(name, input);
+      const names = [...byName.keys()].join(", ");
+      return {
+        text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${names}`,
+        isError: true,
+      };
+    },
+  };
+}

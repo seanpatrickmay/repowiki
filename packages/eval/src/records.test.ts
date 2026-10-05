@@ -18,7 +18,7 @@ import {
   openRun,
   RESULTS_FILE,
   RUN_INFO_FILE,
-  type RunInfo,
+  RunInfo,
   readRecords,
   readRunInfo,
 } from "./records.ts";
@@ -37,6 +37,7 @@ const info: RunInfo = {
   questionsHash: "f".repeat(64),
   writtenOn: null,
   turnLimit: 4,
+  agents: ["wiki", "repo"],
   models: { evalAgent: "claude-haiku-4-5", evalJudge: "claude-haiku-4-5" },
   buildTokens: null,
   questions: [
@@ -113,6 +114,22 @@ describe("openRun", () => {
     expect(() => readRunInfo(dir)).toThrow(
       new EvalRunError(`cannot read ${join(dir, RUN_INFO_FILE)}`),
     );
+  });
+
+  it("reads an M7 run.json, which names no agents, as the wiki and repo agents", () => {
+    const { agents: _agents, ...m7 } = info;
+    writeFileSync(join(dir, RUN_INFO_FILE), JSON.stringify(m7));
+    expect(readRunInfo(dir).agents).toEqual(["wiki", "repo"]);
+    expect(openRun(dir, info)).toEqual(info);
+  });
+
+  it("refuses to resume with other agents, and a run that names an agent twice", () => {
+    openRun(dir, info);
+    expect(() => openRun(dir, { ...info, agents: ["wiki", "repo", "mcp"] })).toThrow(
+      new EvalRunError(`${dir} holds another run: its agents differ from this one's`),
+    );
+    expect(RunInfo.safeParse({ ...info, agents: ["mcp", "mcp"] }).success).toBe(false);
+    expect(RunInfo.safeParse({ ...info, agents: ["grep"] }).success).toBe(false);
   });
 });
 

@@ -20,6 +20,7 @@ export function info(overrides: Partial<RunInfo> = {}): RunInfo {
     questionsHash: "f".repeat(64),
     writtenOn: "2026-10-01",
     turnLimit: 15,
+    agents: ["wiki", "repo"],
     models: { evalAgent: "claude-haiku-4-5", evalJudge: "claude-haiku-4-5" },
     buildTokens: 1_000_000,
     questions,
