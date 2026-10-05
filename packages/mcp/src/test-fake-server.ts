@@ -12,6 +12,8 @@
  * - flood: writes 1 MiB to stderr and a 5 MiB line with no reply in it before answering.
  * - deaf: answers only initialize, and ignores the end of stdin.
  * - stubborn: as deaf, and ignores SIGTERM too.
+ * - split: writes each tools/call reply in two writes 50 ms apart, split inside a two-byte
+ *   character, so the client reads it in two chunks.
  */
 import { writeFileSync } from "node:fs";
 
@@ -75,6 +77,14 @@ function handle(message: Message): void {
       id,
       result: { content: [{ type: "text", text: `echo ${JSON.stringify(args)}` }] },
     };
+    if (mode === "split") {
+      reply.result.content[0] = { type: "text", text: "caf\u00e9 au lait" };
+      const bytes = Buffer.from(`${JSON.stringify(reply)}\n`, "utf8");
+      const at = bytes.indexOf(0xc3) + 1;
+      process.stdout.write(bytes.subarray(0, at));
+      setTimeout(() => process.stdout.write(bytes.subarray(at)), 50);
+      return;
+    }
     if (mode === "late" && args?.slow === true) {
       setTimeout(() => send(reply), 4000);
       return;

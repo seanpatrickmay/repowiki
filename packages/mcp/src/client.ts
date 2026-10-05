@@ -142,8 +142,11 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
   child.stdin.on("error", (error) => {
     failAll(new McpClientError(`cannot write to the MCP server: ${shown(error.message)}`));
   });
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr = (stderr + chunk.toString("utf8")).slice(-MAX_STDERR_CHARS);
+  // Decoded as streams: a character split across two reads stays one character.
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr = (stderr + chunk).slice(-MAX_STDERR_CHARS);
   });
   const take = (line: string) => {
     let raw: unknown;
@@ -163,8 +166,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     waiting.delete(reply.data.id);
     pending.resolve(reply.data);
   };
-  child.stdout.on("data", (chunk: Buffer) => {
-    buffered += chunk.toString("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    buffered += chunk;
     for (let nl = buffered.indexOf("\n"); nl !== -1; nl = buffered.indexOf("\n")) {
       const line = buffered.slice(0, nl);
       buffered = buffered.slice(nl + 1);

@@ -146,6 +146,22 @@ describe("connectMcp", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it(
+    "decodes a character split across two reads of the server's output",
+    async () => {
+      const client = await connectMcp(fake("split").options);
+      try {
+        expect(await client.callTool("echo", {})).toEqual({
+          text: "caf\u00e9 au lait",
+          isError: false,
+        });
+      } finally {
+        await client.close();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
 
 describe("McpClient.close", () => {
