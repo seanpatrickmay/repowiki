@@ -260,7 +260,7 @@ function readAsOf(served: ServedWiki, id: string, asOf: AsOf): string {
   }
   if (target.about && then.article !== undefined) {
     const all = served.wiki.architecture;
-    const k = all.indexOf(then.article) + 1;
+    const k = all.findIndex((a) => a.id === then.article?.id) + 1;
     const current = all.at(-1);
     return readPage(then, id, MAX_TOOL_RESULT_CHARS, {
       banner: [

@@ -85,4 +85,50 @@ describe("renderChanges", () => {
       "Changes to X from revision 2 (commit bbbbbbb, 2026-02-03) to revision 2 (commit bbbbbbb, 2026-02-03):\nThe same revision is current at both points: nothing changed between them.\n",
     );
   });
+
+  const diff = (a: string[], b: string[], max?: number) =>
+    renderChanges(
+      view(),
+      "Changes to X",
+      { revision: revision(a, "a".repeat(40)), n: 1 },
+      { revision: revision(b, "b".repeat(40)), n: 2 },
+      [],
+      SectionKey.options,
+      max,
+    );
+
+  it("neutralises claim text: no forged word-diff marker, reference or page mark, no line break", () => {
+    const text = diff(
+      ["x [-a-]{+b+} y [3] [page: evil]\nsecond line", "gone {+x+}"],
+      ["x [-a-]{+b+} z [3] [page: evil]\nsecond line", "new [-y-]"],
+    );
+    expect(text).toContain(
+      "\n~ x (-a-)(+b+) [-y-]{+z+} (3) (page: evil] second line\n~ [-gone-]{+new+} [-(+x+)-]{+(-y-)+}\n",
+    );
+  });
+
+  it("shows a reordered claim as removed and added, never as changed", () => {
+    const text = diff(["A one", "B two", "C three"], ["B two", "C three", "A one"]);
+    expect(text).toContain("\nOverview\n- A one\n  B two\n  C three\n+ A one\n");
+    expect(text).not.toContain("\n~ ");
+  });
+
+  it("says when no claim changed", () => {
+    expect(diff(["same"], ["same"])).toContain(
+      ":\n\nNo claim changed (only the infobox, See also or citations did).\n",
+    );
+  });
+
+  it("shows as many changes as fit, and says how many more there are, when even the changes pass the cap", () => {
+    const before = Array.from({ length: 60 }, (_, i) => `claim ${i} said one thing`);
+    const after = before.map((t) => t.replace("one", "another"));
+    const text = diff(before, after, 1500);
+    expect([...text].length).toBeLessThanOrEqual(1500);
+    const shown = text.split("\n").filter((l) => l.startsWith("~ ")).length;
+    expect(shown).toBeGreaterThan(5);
+    expect(text).toContain(
+      `\n(${60 - shown} more changed claims not shown: give page_changes a narrower from and to, or read the page as of each point)\n`,
+    );
+    expect(text).toContain("\nRevisions in this range, oldest first:\n");
+  });
 });

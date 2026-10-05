@@ -19,11 +19,26 @@ export function sourceImports(root: string): Map<string, { text: string; imports
     const full = join(entry.parentPath, entry.name);
     const path = relative(root, full).split(sep).join("/");
     if (isTestFile(path)) continue;
-    const text = readFileSync(full, "utf8");
-    const imports = [...text.matchAll(IMPORT)].map((m) => m[1] ?? m[2] ?? m[3] ?? "");
-    sources.set(path, { text, imports });
+    sources.set(path, read(full));
   }
   return sources;
+}
+
+/** A source's text and the module specifiers it imports. */
+function read(full: string): { text: string; imports: string[] } {
+  const text = readFileSync(full, "utf8");
+  return { text, imports: [...text.matchAll(IMPORT)].map((m) => m[1] ?? m[2] ?? m[3] ?? "") };
+}
+
+/**
+ * The same for the named files under `root`, test-only helpers included: the helpers a package
+ * ships on a subpath (test-wiki.ts, test-boundaries.ts) are loaded by other packages' tests.
+ */
+export function fileImports(
+  root: string,
+  paths: readonly string[],
+): Map<string, { text: string; imports: string[] }> {
+  return new Map(paths.map((path) => [path, read(join(root, path))]));
 }
 
 /** Network modules no query or mcp source may load (spec v2 #5 §4). */
@@ -54,9 +69,16 @@ export function refusedImports(
     .sort();
 }
 
+/**
+ * The global fetch, called bare or read off the global object (globalThis, window, self or global,
+ * by a dot or a bracket); a method of that name on any other object is not it.
+ */
+const FETCH =
+  /(^|[^\w.])fetch\s*\(|\b(?:globalThis|window|self|global)\s*(?:\.\s*fetch\b|\[\s*["'`]fetch["'`]\s*\])/m;
+
 /** "path calls fetch" for every source that calls the global fetch. */
 export function fetchCalls(sources: ReadonlyMap<string, { text: string }>): string[] {
   return [...sources].flatMap(([path, { text }]) =>
-    /(^|[^\w.])fetch\s*\(/m.test(text) ? [`${path} calls fetch`] : [],
+    FETCH.test(text) ? [`${path} calls fetch`] : [],
   );
 }

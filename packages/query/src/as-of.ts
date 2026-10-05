@@ -173,7 +173,8 @@ export function asOfBanner(
 ): string[] {
   const all = wiki.history[featureId] ?? [];
   const current = all.at(-1);
-  const k = all.indexOf(revision) + 1;
+  // By id: a copy of the revision (from a view as of a point) is still that revision.
+  const k = all.findIndex((r) => r.id === revision.id) + 1;
   const lines = [
     `This is the page as of ${asOfLabel(asOf)}: revision ${k} of ${all.length}, commit ${revision.sha.slice(0, 7)}, ${revision.commitDate.slice(0, 10)}. The current revision is ${current?.commitDate.slice(0, 10) ?? "unknown"} (commit ${current?.sha.slice(0, 7) ?? "unknown"}).`,
   ];
@@ -190,6 +191,9 @@ export function asOfBanner(
 }
 
 /** read_page's answer for a point before a feature's first revision. */
-export function historyBegins(featureId: string, first: { sha: string; commitDate: string }) {
+export function historyBegins(
+  featureId: string,
+  first: { sha: string; commitDate: string },
+): string {
   return `The wiki's history of ${featureId} begins on ${first.commitDate.slice(0, 10)} (commit ${first.sha.slice(0, 7)}).\n`;
 }

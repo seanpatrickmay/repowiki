@@ -187,6 +187,20 @@ describe("claimChanges", () => {
     ]);
   });
 
+  it("compares claims by text alone, and shows a moved claim as removed and added", () => {
+    const withIds = (ids: string[]) => [
+      { key: "overview", claims: ids.map((id) => ({ id, text: "same text" })) },
+    ];
+    // A claim whose id changed but whose text did not is no change at all.
+    expect(claimChanges(withIds(["c-1"]), withIds(["c-9"]), KEYS)).toEqual([]);
+    expect(claimChanges(page(["A", "B", "C"]), page(["B", "C", "A"]), KEYS)).toEqual([
+      { section: "overview", kind: "removed", before: "A", after: null },
+      { section: "overview", kind: "context", before: "B", after: "B" },
+      { section: "overview", kind: "context", before: "C", after: "C" },
+      { section: "overview", kind: "added", before: null, after: "A" },
+    ]);
+  });
+
   it("is empty for equal sections, and skips keys neither side has", () => {
     expect(claimChanges(page(["a"]), page(["a"]), KEYS)).toEqual([]);
     expect(claimChanges([], [{ key: "layers", claims: [{ text: "x" }] }], ["layers"])).toEqual([
