@@ -79,6 +79,41 @@ const get = (port: number, path: string, host = `127.0.0.1:${port}`) =>
     req.end();
   });
 
+const post = (port: number, path: string, body: string) =>
+  new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          host: `127.0.0.1:${port}`,
+          origin: `http://127.0.0.1:${port}`,
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(body)),
+        },
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          text += chunk;
+        });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: text }));
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+
+/** An out dir with an export and no site, so serving it would build the site first. */
+function staleOut(): string {
+  const dir = mkdtempSync(join(tmpdir(), "repowiki-serve-stale-"));
+  writeFileSync(join(dir, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
+  return dir;
+}
+
 describe("wiki-serve.ts as a process", () => {
   it(
     "serves the site with routing only under --no-ask, and prints the session's total on SIGINT",
@@ -118,6 +153,98 @@ describe("wiki-serve.ts as a process", () => {
       expect(JSON.parse((await get(server.port, "/api/ask/status")).body).reason).toBe("no-key");
       server.child.kill("SIGTERM");
       expect(await server.exited).toBe(0);
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "prints the estimate and both caps without a key, and calls nothing",
+    async () => {
+      const server = await serve([
+        "--out",
+        out,
+        "--port",
+        "0",
+        "--question-usd",
+        "0.1",
+        "--max-usd",
+        "2",
+      ]);
+      const lines = server.stderr().split("\n");
+      const estimate = lines.findIndex((l) =>
+        /^ask: claude-haiku-4-5, about \$\d+\.\d\d a question, at most \$0\.10 a question and \$2\.00 this session$/.test(
+          l,
+        ),
+      );
+      expect(estimate).toBeGreaterThanOrEqual(0);
+      expect(lines[estimate + 1]).toBe("ask: routing only (no ANTHROPIC_API_KEY)");
+      expect(JSON.parse((await get(server.port, "/api/ask/status")).body)).toEqual({
+        mode: "routing",
+        head: sample.sha,
+        reason: "no-key",
+      });
+      const asked = await post(server.port, "/api/ask", JSON.stringify({ question: "Where?" }));
+      expect(asked.status).toBe(503);
+      expect(JSON.parse(asked.body).code).toBe("routing");
+      server.child.kill("SIGINT");
+      expect(await server.exited).toBe(0);
+      expect(server.stderr()).toContain("0 questions, 0 cached, $0.0000");
+      expect(existsSync(join(out, "ask"))).toBe(false);
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "exits 2 for a --config it cannot read, before building the site",
+    () => {
+      const stale = staleOut();
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            SCRIPT,
+            sample.repo.dir,
+            "--out",
+            stale,
+            "--port",
+            "0",
+            "--config",
+            join(stale, "none.json"),
+          ],
+          { env: keyless(), encoding: "utf8", timeout: PROCESS_TIMEOUT_MS },
+        );
+        expect(result.status).toBe(2);
+        expect(result.stderr.trim().split("\n")).toHaveLength(1);
+        expect(result.stderr).toContain("cannot read config");
+        expect(existsSync(join(stale, "site"))).toBe(false);
+      } finally {
+        rmSync(stale, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "exits 2 for a busy port before building the site",
+    async () => {
+      const busy = createServer();
+      await new Promise<void>((resolve) => busy.listen(0, "127.0.0.1", resolve));
+      const stale = staleOut();
+      try {
+        const port = (busy.address() as AddressInfo).port;
+        const result = spawnSync(
+          process.execPath,
+          [SCRIPT, sample.repo.dir, "--out", stale, "--port", String(port), "--no-ask"],
+          { env: keyless(), encoding: "utf8", timeout: PROCESS_TIMEOUT_MS },
+        );
+        expect(result.status).toBe(2);
+        expect(result.stderr).toContain(`port ${port} is in use`);
+        expect(result.stderr).not.toContain("building the site");
+        expect(existsSync(join(stale, "site"))).toBe(false);
+      } finally {
+        rmSync(stale, { recursive: true, force: true });
+        await new Promise((resolve) => busy.close(resolve));
+      }
     },
     PROCESS_TIMEOUT_MS,
   );
