@@ -15,7 +15,7 @@ import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@r
 import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
 import { renderAskReport, runAskEval } from "./ask-eval-run.ts";
-import { supportSheet, tallySupport } from "./ask-eval-sheet.ts";
+import { criteriaLines, devBaseline, supportSheet, tallySupport } from "./ask-eval-sheet.ts";
 import { logLine } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
@@ -25,9 +25,9 @@ import { exitWithError, requireApiKey } from "./wiki-cli.ts";
 /**
  * pnpm ask:eval <repo> --questions <file> (spec v2 #4 §7): asks the dev set of the M7 question
  * file through the ask (no cache), judges each answer with the M7 judge, and writes report.md and
- * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks. States
- * its estimate first; --dry-run stops there. Never runs the held-out set (R25) and never writes
- * in <repo>.
+ * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks and the
+ * comparison with his latest complete eval:run dev run (§12.2). States its estimate first;
+ * --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
  * `pnpm ask:eval tally <support.md>` counts a marked support sheet.
  */
 async function main(): Promise<void> {
@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     `${JSON.stringify({ repo: wiki.repo, head: wiki.head, model: models.ask, set: args.set, questionsHash: loaded.hash, startedAt, ...result }, null, 2)}\n`,
   );
   const report = join(runDir, "report.md");
+  const baseline = devBaseline(out, loaded.hash);
   writeFileSync(
     report,
     renderAskReport({
@@ -115,6 +116,7 @@ async function main(): Promise<void> {
       set: args.set,
       startedAt,
       result,
+      extra: criteriaLines(result, baseline),
     }),
   );
   writeFileSync(
