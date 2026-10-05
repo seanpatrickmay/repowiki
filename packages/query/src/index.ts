@@ -1,4 +1,17 @@
 export {
+  type AsOf,
+  architectureAt,
+  asOfBanner,
+  asOfLabel,
+  historyBegins,
+  type IsAncestor,
+  parseAsOf,
+  pointAt,
+  type ResolveCommit,
+  revisionAt,
+  viewAt,
+} from "./as-of.ts";
+export {
   type ChangedRevision,
   renderChanges,
   revisionEntry,
