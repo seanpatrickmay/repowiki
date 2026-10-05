@@ -409,6 +409,75 @@ describe("mcp-probe", () => {
     );
   });
 
+  it("reports an error result and a rejected call as error rows, and goes on", async () => {
+    const asked: string[] = [];
+    const rows = await runProbe(
+      async () => ({
+        listTools: async () => {
+          throw new McpClientError("tools/list: method not found");
+        },
+        callTool: async (name, args) => {
+          asked.push(name);
+          const query = (args as { query?: string }).query;
+          if (query === "configuration")
+            throw new McpClientError("no reply to tools/call within 30000 ms");
+          if (query === "tests") return { text: "invalid input\n", isError: true };
+          if (name === "list_pages") return { text: "- signals: S.\n", isError: false };
+          return { text: "x\n", isError: false };
+        },
+      }),
+      () => 0,
+    );
+    expect(asked).toEqual([
+      "list_pages",
+      "search",
+      "search",
+      "search",
+      "read_page",
+      "cited_code",
+      "page_changes",
+    ]);
+    expect(rows.map((r) => [r.call, r.isError, r.problem ?? null])).toEqual([
+      ["start to initialize", null, null],
+      ["tools/list", true, "tools/list: method not found"],
+      ["list_pages", false, null],
+      ['search "how does it start"', false, null],
+      ['search "configuration"', true, "no reply to tools/call within 30000 ms"],
+      ['search "tests"', true, null],
+      ["read_page signals", false, null],
+      ["cited_code signals 1", false, null],
+      ["page_changes signals", false, null],
+    ]);
+    const report = probeReport(rows, 12_000);
+    expect(report).toContain(
+      '       0            -    yes  search "configuration": no reply to tools/call within 30000 ms\n',
+    );
+    expect(report).toMatch(/errors: 3\n$/);
+  });
+
+  it("says so in every row left when the server dies mid-run", async () => {
+    let dead = false;
+    const rows = await runProbe(
+      async () => ({
+        listTools: async () => [],
+        callTool: async (name) => {
+          if (dead) throw new McpClientError("the MCP server has exited");
+          if (name === "read_page") {
+            dead = true;
+            throw new McpClientError("the MCP server exited (code 1): repowiki mcp: boom");
+          }
+          return { text: "- signals: S.\n", isError: false };
+        },
+      }),
+      () => 0,
+    );
+    expect(rows.slice(-3).map((r) => [r.call, r.problem])).toEqual([
+      ["read_page signals", "the MCP server exited (code 1): repowiki mcp: boom"],
+      ["cited_code signals 1", "the MCP server has exited"],
+      ["page_changes signals", "the MCP server has exited"],
+    ]);
+  });
+
   it("parses <repo> [--out dir] and refuses the rest", () => {
     expect(parseProbeArgs(["r", "--out", "o"])).toEqual({ repo: "r", out: "o" });
     for (const bad of [[], ["a", "b"], ["a", "--out", ""], ["a", "--x"]]) {
