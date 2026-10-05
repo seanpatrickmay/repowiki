@@ -123,7 +123,8 @@ function pagesForFile(served: ServedWiki, raw: string): string {
   lines.push(...citing);
   const status = served.freshness.status();
   if (!status.known || status.compare === null) {
-    lines.push("Whether it changed since the wiki's commit is unknown.");
+    const why = status.problem === undefined ? "" : `: ${oneLine(status.problem)}`;
+    lines.push(`Whether it changed since the wiki's commit is unknown${why}.`);
   } else if (status.addedFiles.has(path) && owners.size === 0) {
     lines.push(
       `Added after the wiki's commit (compared with commit ${sha7(status.compare)}): not in the wiki yet; read it in the working tree.`,
@@ -159,7 +160,7 @@ function nowLine(served: ServedWiki, citation: CodeCitation): string {
     case "deleted":
       return `${at}: ${shownPath(citation.path)} was deleted.`;
     case "unknown":
-      return "Where these lines are now is unknown: the repository does not hold the wiki's commit.";
+      return `Where these lines are now is unknown: ${oneLine(now.why)}.`;
   }
 }
 

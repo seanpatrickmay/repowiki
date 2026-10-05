@@ -166,6 +166,9 @@ describe("createFreshness: per-claim marks", () => {
       endLine: 6,
     });
     const lost = createFreshness({ repo: h.repo.dir, wikiHead: "f".repeat(40), pinned: null });
-    expect(lost.citationNow(crud)).toEqual({ kind: "unknown" });
+    expect(lost.citationNow(crud)).toEqual({
+      kind: "unknown",
+      why: "the repository does not hold the wiki's commit",
+    });
   });
 });

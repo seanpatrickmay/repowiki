@@ -59,6 +59,12 @@ function citesChanged(served: ServedWiki, status: HeadStatus, id: string): boole
   return false;
 }
 
+/** Why freshness is unknown, as one line. */
+function unknownWhy(served: ServedWiki, status: HeadStatus): string {
+  if (status.problem !== undefined) return oneLine(status.problem);
+  return `the repository does not hold the wiki's commit ${sha7(served.wiki.head)}${status.compare === null ? " or has no HEAD" : ""}`;
+}
+
 /** The status header list_pages opens with (spec v2 #5 §6.2). */
 function statusLines(served: ServedWiki, status: HeadStatus): string[] {
   const { wiki } = served;
@@ -68,12 +74,8 @@ function statusLines(served: ServedWiki, status: HeadStatus): string[] {
   if (served.reloadProblem !== null) lines.push(oneLine(served.reloadProblem));
   const against = served.pinned ? "the pinned compare commit" : "the repository's HEAD";
   if (!status.known || status.compare === null) {
-    lines.push(
-      `Freshness is unknown: the repository does not hold the wiki's commit ${sha7(wiki.head)}${status.compare === null ? " or has no HEAD" : ""}; pages are served as written.`,
-    );
-    return lines;
-  }
-  if (status.compare === wiki.head) {
+    lines.push(`Freshness is unknown: ${unknownWhy(served, status)}; pages are served as written.`);
+  } else if (status.compare === wiki.head) {
     lines.push(
       `Compared with ${against} (commit ${sha7(status.compare)}): the wiki's own commit; nothing has changed.`,
     );
@@ -179,6 +181,9 @@ function freshnessLine(
   claims: number,
 ): string | null {
   const status = served.freshness.status();
+  if (status.problem !== undefined) {
+    return `Freshness is unknown: ${oneLine(status.problem)}; the page is served unmarked.`;
+  }
   if (!status.known || status.compare === null || status.compare === served.wiki.head) return null;
   const changed = [...marks.values()].filter((m) => m.kind === "changed").length;
   const moved = [...marks.values()].filter((m) => m.kind === "moved").length;
