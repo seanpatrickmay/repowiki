@@ -555,7 +555,7 @@ cost if wrong".
   `searchIndex`: BM25F); `wiki-view.ts` (`WikiView`, `ABOUT_PAGE_ID`, `listedPage`, `reference`);
   `wiki-page.ts` (`readPage(view, id, max, options?)`); `wiki-tools.ts` (`createWikiTools`);
   `as-of.ts` (`parseAsOf(text, resolveCommit)`, `revisionAt(revisions, asOf, isAncestor)`,
-  `architectureAt`, `WikiView.at`, with git passed in as functions); `changes.ts`; `load.ts`
+  `architectureAt`, `viewAt`, with git passed in as functions); `changes.ts`; `load.ts`
   (`loadExport`); `test-wiki.ts`. Everything that runs git or engine code lives in
   `@repowiki/mcp` (M8 task 4; depends on `core`, `engine`, `query`): the git helper moved out of
   eval's `repo-tools.ts`, `code.ts`, `head-status.ts` and `agent-tools.ts`. M9 adds to `query`,

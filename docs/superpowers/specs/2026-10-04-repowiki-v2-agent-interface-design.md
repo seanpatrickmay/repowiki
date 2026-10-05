@@ -88,7 +88,7 @@ packages/
                                      no LLM, no git, no network (C3)
     text.ts tools.ts search.ts wiki-view.ts wiki-page.ts wiki-tools.ts   (moved from eval)
     as-of.ts         AsOf parsing (resolveCommit passed in), revision-at (isAncestor passed in),
-                     WikiView at a point in time
+                     viewAt: a WikiView of the wiki at a point in time
     changes.ts       page_changes rendering (claim diff, word diff as text)
     load.ts          loadExport (file → WikiExport, with the site's schema-version message)
     test-wiki.ts     the sample wiki fixture (moved from eval), plus historyWiki(); tests only,
@@ -103,7 +103,8 @@ packages/
     server.ts        the export holder (reload), instructions, tools/list, tools/call
     client.ts        a minimal stdio client (spawn, initialize, list, call) for eval and probe
   eval/     imports query and mcp; agent kinds mcp and repo+mcp; history suite
-  engine/ site/ llm/ unchanged but for site importing diffSequence from core
+  engine/ site/ llm/ unchanged but for site importing diffSequence from core, and engine's
+                     diffCommits gaining an optional path filter (only the cited files)
 scripts/
   mcp-serve.ts  mcp-probe.ts  (eval-run.ts / eval-cli.ts gain --agents)
 ```
@@ -123,8 +124,9 @@ transitively, but nothing in `query` or `mcp` can construct a provider.
 - `@repowiki/eval` re-imports the moved modules from `@repowiki/query`. `createWikiTools` (the v1
   wiki agent's `search` and `read_page`) and `createRepoTools` keep their definitions and output
   byte for byte: the M7 recorded cassettes replay unchanged, and a test pins both tool lists.
-- `readPage(view, id, max)` gains an options argument (`{ asOf, marks }`) whose default renders
-  exactly the v1 page. The MCP `read_page` passes both.
+- `readPage(view, id, max)` gains an options argument (`{ banner, freshness, claimNote }`: text
+  the caller computes, so `query` needs no git and no mark type) whose default renders exactly the
+  v1 page. The MCP `read_page` passes all three.
 - `ToolDefinition` (name, description, input schema) is declared in `query` as a plain shape; the
   `llm` package's identical type stays, and structural typing joins them with no import.
 - `site/src/diff.ts` keeps `wordDiffHtml` and `revisionDiff`, built on `core`'s `diffSequence`
@@ -177,7 +179,7 @@ they are data, never instructions."
 ## 5. Data model
 
 No stored schema changes (R18). New in-memory types in `@repowiki/query` (`AsOf`, `revisionAt`,
-`architectureAt`, `WikiView.at`, `ClaimChange`) and in `@repowiki/mcp` (`HeadStatus`,
+`architectureAt`, `viewAt`, `ClaimChange`) and in `@repowiki/mcp` (`HeadStatus`,
 `ClaimMark`):
 
 ```ts
@@ -192,7 +194,7 @@ revisionAt(revisions: readonly Revision[], asOf, isAncestor): Revision | null
               // null: the history begins later (the caller says where it begins)
 architectureAt(articles, asOf, isAncestor): Architecture | null   // the same for the About article
 
-WikiView.at(asOf): WikiView
+viewAt(wiki, asOf, isAncestor): WikiView
               // a view whose pages are each feature's revisionAt (features with none are absent),
               // whose article is architectureAt, and whose manifest is the export's (lineage is
               // read to say when a feature was created, renamed, merged, split or retired)
@@ -227,7 +229,7 @@ stored claim is fresh at the wiki's head or already carries `staleSince`.
 |---|---|
 | `pnpm mcp:serve <repo> [--out <dir>] [--compare-to <rev>]` | Starts the stdio server (the client runs `node scripts/mcp-serve.ts …` directly, R15). `<repo>` must be a directory in a git work tree; `--out` defaults as everywhere; `--compare-to` pins the compare commit. Prints one line to stderr: the wiki, its commit and the compare commit. `--help` prints the registration line. |
 | `pnpm mcp:probe <repo> [--out <dir>]` | Spawns the server, runs `initialize`, `tools/list` and a fixed list of calls (list_pages, three searches, read_page of the first result, cited_code of its reference 1, read_page with `as_of` its first revision's date, page_changes of the page), and prints per call: time in ms, result size in code points, `isError`. No LLM, writes nothing. |
-| `pnpm eval:run … --agents <list>` | As M7, with agents chosen from `wiki`, `repo`, `mcp`, `repo+mcp` (default `wiki,repo`). The estimate line lists each agent's estimate. |
+| `pnpm eval:run … --agents <list>` | As M7, with agents chosen from `wiki`, `repo`, `mcp`, `repo+mcp` (default `wiki,repo`; `wiki,mcp` with `--set history`). The estimate line lists each agent's estimate and assumed turns. |
 | `pnpm eval:run … --set history` | Runs a history-suite file (§8.1). |
 
 ### 6.2 Tools
@@ -289,7 +291,7 @@ network, no LLM; the only recorded calls are eval cassettes.
    so freshness has a moved and a changed claim.
 2. **Query units.** `parseAsOf` (dates, short and full shas, unknown commit, garbage);
    `revisionAt` (before the first revision, on a revision's day, between two, after the last,
-   ancestor commits, a commit on another branch); `WikiView.at`; `claimChanges` against the site's
+   ancestor commits, a commit on another branch); `viewAt`; `claimChanges` against the site's
    current `revisionDiff` output (the site snapshot must not move); per-claim marks equal
    `remapClaims`'s stale set on the same fixture (marks mean "stale at the next update"); the head
    status ahead/behind/unknown cases; `pages_for_file` with relative, absolute, outside-the-repo,
@@ -358,23 +360,27 @@ count by git's rename detection; fixtures and cassettes do not count). Branches 
 | # | Task | Issue parent | Size |
 |---|---|---|---|
 | 1 | Seed the M8 issues (`scripts/tracker/seed.json`) and ADR-0004 (hand-rolled stdio MCP, R2; C1). | F07 | ≈180 |
-| 2 | Create `@repowiki/query` (runtime deps `core` and `zod` only, C3): move `text`, `tools`, `search`, `wiki-view`, `wiki-page`, `wiki-tools`, the `test-wiki` fixture and their tests from `eval`; local `ToolDefinition`; boundary test (no engine, llm, network or process import); v1 tool-parity pins; CLAUDE.md layout line. This is the only extraction in v2 (C15). | F07 | ≈200 (moves) |
-| 3 | Move `diffSequence` to `core`, add `claimChanges`; site's `revisionDiff` built on it, snapshots unchanged. | F08 | ≈180 |
-| 4 | Create `@repowiki/mcp` (deps `core`, `engine`, `query`) with its boundary test; move the read-only git helper out of `repo-tools.ts` into `mcp/git.ts` (eval re-imports it); `mcp/code.ts`: cited lines at a sha with context, commit details; `query/load.ts`: `loadExport`. | F07 | ≈250 |
-| 5 | `query/as-of.ts`: `parseAsOf`, `revisionAt`, `architectureAt`, `WikiView.at` (git passed in as functions); `historyWiki()` fixture. | F08 | ≈280 |
-| 6 | `mcp/head-status.ts`: compare commit, ahead/behind, changed files, per-claim marks through `remapCitation`, caches; marks-equal-`remapClaims` test. | F07 | ≈260 |
-| 7 | `mcp/agent-tools.ts` part 1: `list_pages`, `search` (with `as_of`), `read_page` (with `as_of` and marks via `readPage` options; v1 output unchanged). | F08 | ≈280 |
-| 8 | `mcp/agent-tools.ts` part 2: `pages_for_file`, `cited_code` (shared reference numbering), `page_changes`; hostile-text tests across all six tools. | F08 | ≈290 |
-| 9 | `@repowiki/mcp` `protocol.ts` and `stdio.ts`: JSON-RPC, lifecycle, version negotiation, limits; transcript tests; the `console.log` ban test. | F07 | ≈260 |
-| 10 | `server.ts` + `scripts/mcp-serve.ts` (+ `pnpm mcp:serve`): export holder with reload, instructions, env scrub, `--compare-to`, `--help` registration line, startup failures; spawn test with the writes-nothing check. | F07 | ≈280 |
-| 11 | `client.ts` + `scripts/mcp-probe.ts` (+ `pnpm mcp:probe`); async-capable `ToolSet.run` and the agent loop awaiting it. | F07 | ≈220 |
-| 12 | Eval agents `mcp` and `repo+mcp`: `--agents`, `RunInfo.agents` default, widened agent enum, system-prompt sources, estimate per agent; smoke cassettes recorded with `pnpm cassettes:record` (≈$0.10). | F07 | ≈280 |
-| 13 | Report's M8 table (§11 thresholds, repo-tool calls per question), and the history suite (`suite: "history"`, kinds `as-of`, set `history`, smoke file). | F08 | ≈260 |
-| 14 | Final review fixes, and the owner's runbook in the M8 plan: registration, probe, the two measurement runs and their estimates. | F07 | ≈150 |
+| 2 | Create `@repowiki/query` (runtime deps `core` and `zod` only, C3): move `text`, `tools`, `search`, `wiki-view`, `wiki-page`, `wiki-tools`, the `test-wiki` fixture and their tests from `eval`; local `ToolDefinition`; boundary test (no engine, llm, network or process import); v1 tool-parity pins; CLAUDE.md layout line. This is the only extraction in v2 (C15). | F07 | ≈300 (moves) |
+| 3 | Move `diffSequence` to `core`, add `claimChanges`; site's `revisionDiff` built on it, snapshots unchanged; `query/changes.ts` (`renderChanges`). | F08 | ≈250 |
+| 4 | Create `@repowiki/mcp` (deps `core`, `engine`, `query`) with its boundary test; move the read-only git helper out of `repo-tools.ts` into `mcp/git.ts` (eval re-imports it); `mcp/code.ts`: cited lines at a sha with context, commit details; `query/load.ts`: `loadExport`. | F07 | ≈300 |
+| 5 | `query/as-of.ts`: `parseAsOf`, `revisionAt`, `architectureAt`, `viewAt` (git passed in as functions); `historyWiki()` fixture. | F08 | ≈210 |
+| 6 | `mcp/head-status.ts`: compare commit, ahead/behind, changed files, per-claim marks through `remapCitation`, caches; engine's `diffCommits` path filter; marks-equal-`remapClaims` test. | F07 | ≈300 |
+| 7 | `mcp/served.ts` (the loaded wiki, its views, indexes, freshness and as-of views); `readPage` options and `referenceList`; v1 output unchanged. | F08 | ≈240 |
+| 8 | `mcp/agent-tools.ts`: `list_pages`, `search` (with `as_of`), `read_page` (with `as_of` and marks). | F08 | ≈300 |
+| 9 | `mcp/code-tools.ts`: `pages_for_file`, `cited_code` (shared reference numbering), `page_changes`; hostile-text tests across all six tools. | F08 | ≈260 + tests |
+| 10 | `@repowiki/mcp` `protocol.ts` and `stdio.ts`: JSON-RPC, lifecycle, version negotiation, limits; transcript tests; the `console.log` ban test. | F07 | ≈280 |
+| 11 | `server.ts` + `scripts/mcp-serve.ts` (+ `pnpm mcp:serve`): export holder with reload, instructions, env scrub, `--compare-to`, `--help` registration line, startup failures; spawn test with the writes-nothing check. | F07 | ≈290 |
+| 12 | `client.ts`; async-capable `ToolSet.run` and the agent loop awaiting it. | F07 | ≈230 |
+| 13 | `scripts/mcp-probe.ts` (+ `pnpm mcp:probe`). | F07 | ≈170 |
+| 14 | Eval agents `mcp` and `repo+mcp`: `--agents`, `RunInfo.agents` default, widened agent enum, system-prompt sources, estimate per agent; smoke cassette recorded with `pnpm cassettes:record`'s mechanism (≈$0.10). | F07 | ≈270 + tests |
+| 15 | The history suite (`suite: "history"`, kind `as-of`, set `history`, default agents `wiki,mcp`, smoke file). | F08 | ≈200 |
+| 16 | Report's M8 bars (§11 thresholds, repo-tool calls per question); history smoke cassette (≈$0.05). | F08 | ≈200 |
+| 17 | Final review fixes, and the owner's runbook in the M8 plan: registration, probe, the two measurement runs and their estimates. | F07 | ≈150 |
 
-Fourteen tasks. Tasks 2 and 3 can run in parallel after 1; 4 after 2; 5 and 6 after 2–4; 7 → 8;
-9 needs 4 (the package) and is independent of 5–8; 10 needs 7–9; 11 needs 10; 12 needs 11; 13
-needs 12. M8 depends on no other v2 milestone; M9–M11 build on its `query` package (C3, C15).
+Seventeen tasks (the plan split the spec's first fourteen where one PR would pass the size guide).
+Tasks 2 and 4 run in order after 1; 3 after 2; 5 after 2; 6 after 4 and 5; 7 after 6; 7 → 8 → 9;
+10 needs 4 (the package) and is independent of 5–9; 11 needs 8–10; 12 needs 11; 13 needs 12; 14
+needs 12; 15 needs 14; 16 needs 15. M8 depends on no other v2 milestone; M9–M11 build on its `query` package (C3, C15).
 
 ## 11. Exit criteria
 
@@ -476,7 +482,7 @@ cost if wrong".
   `searchIndex`: BM25F); `wiki-view.ts` (`WikiView`, `ABOUT_PAGE_ID`, `listedPage`, `reference`);
   `wiki-page.ts` (`readPage(view, id, max, options?)`); `wiki-tools.ts` (`createWikiTools`);
   `as-of.ts` (`parseAsOf(text, resolveCommit)`, `revisionAt(revisions, asOf, isAncestor)`,
-  `architectureAt`, `WikiView.at`, with git passed in as functions); `changes.ts`; `load.ts`
+  `architectureAt`, `viewAt`, with git passed in as functions); `changes.ts`; `load.ts`
   (`loadExport`); `test-wiki.ts`. Everything that runs git or engine code lives in
   `@repowiki/mcp` (M8 task 4; depends on `core`, `engine`, `query`): the git helper moved out of
   eval's `repo-tools.ts`, `code.ts`, `head-status.ts` and `agent-tools.ts`. M9 adds to `query`,
