@@ -74,8 +74,12 @@ export function missingText(path: string, sha: string, file: Exclude<FileAt, { t
  * A code citation's lines at its own commit with `context` lines around them, numbered, each
  * cited line marked `>`: what the claim rests on, exactly as it was cited.
  */
-export function citedCode(repo: string, citation: CodeCitation, context: number): string {
-  const file = fileAt(repo, citation.sha, citation.path);
+export function citedCode(
+  repo: string,
+  citation: CodeCitation,
+  context: number,
+  file: FileAt = fileAt(repo, citation.sha, citation.path),
+): string {
   if (!("text" in file)) return `${missingText(citation.path, citation.sha, file)}\n`;
   const lines = toolText(file.text).split("\n");
   if (lines.at(-1) === "") lines.pop();
