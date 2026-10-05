@@ -3,7 +3,7 @@ import { revisionHtml, type SectionView } from "./article.ts";
 import { formatDate } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
-import { articleLink } from "./preview.ts";
+import { inlineOptions } from "./preview.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
 
 export const ARCHITECTURE_SECTION_TITLES: Record<
@@ -46,7 +46,7 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
   const article = site.architecture;
   if (article === null) return null;
   const refs = collectReferences(article);
-  const link = (id: string) => articleLink(site, id);
+  const links = inlineOptions(site);
   const paragraph = (claims: readonly ArchitectureClaim[]): string =>
     claims
       .map((claim) => {
@@ -59,7 +59,7 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
         const pages =
           backing.length === 0 ? "" : ` <span class="page-ref">(see ${backing.join(", ")})</span>`;
         return (
-          renderInline(claim.text, { link }) + markersHtml(refs.markers.get(claim.id) ?? []) + pages
+          renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []) + pages
         );
       })
       .join(" ");

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSiteModel } from "./model.ts";
-import { previewData } from "./preview.ts";
-import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
+import { inlineOptions, previewData, wikipediaPreviews } from "./preview.ts";
+import { EXPONENTIAL_BACKOFF, fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
 
 const site = buildSiteModel(fixtureExport(), null);
 
@@ -49,5 +49,52 @@ describe("previewData", () => {
     expect(preview?.html).toMatch(/^<p>She said &quot;hi&quot; and it&#39;s fine\.<\/p>/);
     expect(preview?.html).not.toContain("<img");
     expect(preview?.html).not.toMatch(/[\uE000\uE001]/);
+  });
+});
+
+describe("wikipediaPreviews", () => {
+  const HASH = "bc5383acbe963e3deb31c1ff3a4b9a03";
+
+  it("has one preview per title, under a hash of the normalized title", () => {
+    expect([...wikipediaPreviews(site).keys()]).toEqual([HASH]);
+    expect(wikipediaPreviews(site).get(HASH)).toEqual({
+      title: "Exponential backoff",
+      url: "https://en.wikipedia.org/wiki/Exponential_backoff",
+      html: `<p>${EXPONENTIAL_BACKOFF.extract}</p><p class="preview-facts">From Wikipedia</p>`,
+    });
+  });
+
+  it("is computed once per site", () => {
+    expect(wikipediaPreviews(site)).toBe(wikipediaPreviews(site));
+  });
+
+  it("escapes the untrusted summary and keeps the title plain text", () => {
+    const hostile = {
+      title: "<b>T</b> & co",
+      extract: `<img src=x onerror=alert(1)> "q" & 'p' ${String.fromCharCode(0xe000)}`,
+      url: "https://en.wikipedia.org/wiki/T",
+    };
+    const other = buildSiteModel({ ...fixtureExport(), wikipedia: { T: hostile } }, null);
+    const [preview] = [...wikipediaPreviews(other).values()];
+    expect(preview?.title).toBe("<b>T</b> & co");
+    expect(preview?.html).toBe(
+      `<p>&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39; ${String.fromCharCode(0xe000)}</p><p class="preview-facts">From Wikipedia</p>`,
+    );
+  });
+
+  it("has no preview for a summary without text", () => {
+    const empty = { ...EXPONENTIAL_BACKOFF, extract: " " };
+    const other = buildSiteModel({ ...fixtureExport(), wikipedia: { X: empty } }, null);
+    expect(wikipediaPreviews(other).size).toBe(0);
+  });
+
+  it("finds a title however the link spells it, and keeps prototype names out", () => {
+    const ask = inlineOptions(site).wikipedia;
+    expect(ask?.("Exponential backoff")).toBe(`wp:${HASH}`);
+    expect(ask?.("exponential_backoff")).toBe(`wp:${HASH}`);
+    expect(ask?.("  Exponential   backoff ")).toBe(`wp:${HASH}`);
+    expect(ask?.("Linear backoff")).toBeNull();
+    expect(ask?.("constructor")).toBeNull();
+    expect(ask?.("__proto__")).toBeNull();
   });
 });
