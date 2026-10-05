@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { connectMcp, McpClientError, mcpToolSet } from "@repowiki/mcp";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -211,6 +212,58 @@ describe("mcp-serve.ts as a process (no network, no LLM)", () => {
       } finally {
         rmSync(empty, { recursive: true, force: true });
       }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "serves the repository's own wiki when started in a subdirectory of it",
+    () => {
+      const home = mkdtempSync(join(tmpdir(), "repowiki-mcp-home-"));
+      try {
+        const wikiDir = join(home, ".repowiki", basename(h.repo.dir));
+        mkdirSync(wikiDir, { recursive: true });
+        writeFileSync(join(wikiDir, "export.json"), JSON.stringify(h.wiki));
+        const served = spawnSync(process.execPath, [SCRIPT, join(h.repo.dir, "src")], {
+          env: { ...clientEnv(), HOME: home },
+          input: "",
+          encoding: "utf8",
+        });
+        expect(served.stderr).toContain(`from ${wikiDir}; comparing with HEAD`);
+        expect(served.status).toBe(0);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "ends quietly, exit 0, when its client stops reading its output",
+    async () => {
+      const child = spawn(process.execPath, [SCRIPT, h.repo.dir, "--out", out], {
+        env: clientEnv(),
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+      while (!stderr.includes("\n")) await new Promise((resolve) => setTimeout(resolve, 20));
+      child.stdout.destroy();
+      const call = { jsonrpc: "2.0", method: "tools/call", params: { name: "list_pages" } };
+      for (let id = 1; id <= 20; id++) {
+        child.stdin.write(
+          `${JSON.stringify({ ...call, id, params: { ...call.params, arguments: {} } })}\n`,
+        );
+      }
+      const code = await Promise.race([
+        closed,
+        new Promise<"running">((resolve) => setTimeout(() => resolve("running"), 5000)),
+      ]);
+      if (code === "running") child.kill("SIGKILL");
+      expect(code).toBe(0);
+      expect(stderr.trim().split("\n")).toHaveLength(1);
     },
     PROCESS_TIMEOUT_MS,
   );

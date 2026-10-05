@@ -135,14 +135,16 @@ function listPages(served: ServedWiki): string {
       );
     }
   }
-  const render = (summaryLength: number) =>
-    [
+  /** The list with summaries cut to `summaryLength`, and only the first `shown` pages. */
+  const render = (summaryLength: number, shown = entries.length) => {
+    const hidden = entries.length - shown;
+    return [
       ...header,
       "",
       view.article === undefined
         ? "Pages:"
         : `Pages (${ABOUT_PAGE_ID} is the project's own article):`,
-      ...entries.map((e) => {
+      ...entries.slice(0, shown).map((e) => {
         const line = listedPage(
           e.id,
           e.title,
@@ -150,16 +152,33 @@ function listPages(served: ServedWiki): string {
         );
         return `${line}${e.tags.length === 0 ? "" : ` [${e.tags.join("; ")}]`}`;
       }),
-      ...(others.length === 0 ? [] : ["", "Redirects and disambiguations:", ...others]),
+      ...(hidden === 0
+        ? []
+        : [
+            `- and ${count(hidden, "more page")} not listed${others.length === 0 ? "" : ", nor the redirects and disambiguations"}: the list is cut to fit ${MAX_TOOL_RESULT_CHARS} characters; search finds any page by words from its title or text.`,
+          ]),
+      ...(others.length === 0 || hidden > 0
+        ? []
+        : ["", "Redirects and disambiguations:", ...others]),
       "",
       "Read one with read_page(id), or search for words.",
       "",
     ].join("\n");
+  };
+  const fits = (text: string) => [...text].length <= MAX_TOOL_RESULT_CHARS;
   for (const length of [200, 120, 60, 0]) {
     const text = render(length);
-    if ([...text].length <= MAX_TOOL_RESULT_CHARS) return text;
+    if (fits(text)) return text;
   }
-  return render(0);
+  // Even bare, every page is too many: as many as fit, then how many more and how to find them.
+  let low = 0;
+  let high = entries.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(render(0, mid))) low = mid;
+    else high = mid - 1;
+  }
+  return render(0, low);
 }
 
 /** The view an as_of argument asks for, or the current one. */

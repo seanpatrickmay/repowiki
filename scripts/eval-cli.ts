@@ -145,13 +145,15 @@ export function runDirFor(out: string, set: QuestionSet, runDir: string | null, 
 }
 
 /**
- * Turns an agent is assumed to take on a typical question: the wiki and mcp agents search and
- * read; the repo agent lists, greps and reads; repo+mcp reads the wiki first, then less code.
+ * Turns an agent is assumed to take on a typical question: the wiki agent searches and reads; the
+ * mcp agent too, plus an as_of read or page_changes on a history question (spec v2 #5 §7 assumes
+ * 5 there; every set uses 5, so the estimate stays upper-side); the repo agent lists, greps and
+ * reads; repo+mcp reads the wiki first, then less code.
  */
 export const ASSUMED_TURNS: Readonly<Record<AgentKind, number>> = {
   wiki: 4,
   repo: 8,
-  mcp: 4,
+  mcp: 5,
   "repo+mcp": 6,
 };
 /** Tokens a typical turn adds to the conversation: one tool call and its result. */

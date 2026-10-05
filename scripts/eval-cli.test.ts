@@ -260,7 +260,7 @@ describe("estimateEval", () => {
     expect(four.byAgent["repo+mcp"] ?? 0).toBeLessThan(four.byAgent.repo ?? 0);
     const line = estimateLine(four, { turnLimit: 15, maxUsd: 5, batch: true });
     expect(line).toMatch(
-      /^3 questions to the wiki, repo, mcp and repo\+mcp agents: about \$\d+\.\d\d \(wiki \$\d+\.\d\d at 4 turns, repo \$\d+\.\d\d at 8 turns, mcp \$\d+\.\d\d at 4 turns, repo\+mcp \$\d+\.\d\d at 6 turns a question/,
+      /^3 questions to the wiki, repo, mcp and repo\+mcp agents: about \$\d+\.\d\d \(wiki \$\d+\.\d\d at 4 turns, repo \$\d+\.\d\d at 8 turns, mcp \$\d+\.\d\d at 5 turns, repo\+mcp \$\d+\.\d\d at 6 turns a question/,
     );
   });
 });

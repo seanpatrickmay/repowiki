@@ -83,7 +83,10 @@ describe("createFreshness: per-claim marks", () => {
         kind: "changed",
         reasons: ["src/signals/store.py:6-8: the cited lines changed"],
       },
-      "s-lead": { kind: "changed", reasons: ["it summarizes s-3, which changed"] },
+      "s-lead": {
+        kind: "changed",
+        reasons: ["it summarizes 1 claim below that changed, in Overview"],
+      },
     });
     expect(freshness.marks("deliverables-2", page("deliverables").sections).size).toBe(0);
   });

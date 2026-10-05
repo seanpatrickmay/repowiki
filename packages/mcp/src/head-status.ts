@@ -8,7 +8,7 @@ import {
   type RemapContext,
   remapCitation,
 } from "@repowiki/engine";
-import { cut, oneLine } from "@repowiki/query";
+import { count, cut, oneLine, SECTION_TITLES } from "@repowiki/query";
 import { fileAt } from "./code.ts";
 import { commitOf, GIT_TIMEOUT_MS, gitOutput } from "./git.ts";
 
@@ -74,6 +74,19 @@ export interface FreshnessOptions {
   wikiHead: string;
   /** The compare commit: a sha pinned by --compare-to, or null for the repository's HEAD. */
   pinned: string | null;
+}
+
+/**
+ * A lead's reason, by the sections of the changed claims it summarizes (one key per claim):
+ * read_page shows no claim ids, so it names where the marked claims are.
+ */
+function leadReason(keys: readonly string[]): string {
+  const titles = [...new Set(keys)].map((k) => SECTION_TITLES[k] ?? k);
+  const where =
+    titles.length <= 2
+      ? titles.join(" and ")
+      : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+  return `it summarizes ${count(keys.length, "claim")} below that changed, in ${where}`;
 }
 
 /** A Map that forgets its least recently used entry past `max`. */
@@ -280,14 +293,13 @@ export function createFreshness(options: FreshnessOptions): Freshness {
           }
           // A lead claim summarizes the claims it supports: it is changed when one of them is
           // (spec §5 rule 2).
+          const sectionOf = new Map(claims.map(({ key, claim }) => [claim.id, key]));
           for (const { key, claim } of claims) {
             if (key !== "lead" || claim.staleSince !== null) continue;
             const changed = claim.supports.filter((id) => marks.get(id)?.kind === "changed");
             if (changed.length > 0) {
-              marks.set(claim.id, {
-                kind: "changed",
-                reasons: [`it summarizes ${changed.join(", ")}, which changed`],
-              });
+              const keys = changed.map((id) => sectionOf.get(id) ?? "");
+              marks.set(claim.id, { kind: "changed", reasons: [leadReason(keys)] });
             }
           }
           return marks;

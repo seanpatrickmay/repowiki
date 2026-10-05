@@ -32,6 +32,54 @@ const text = (set: ReturnType<typeof tools>, name: string, input: unknown) => {
   return out.isError ? `ERROR ${out.text}` : out.text;
 };
 
+/** A wiki of `n` pages with long leads, and one redirect, at the history fixture's head. */
+function bigWiki(n: number) {
+  const ids = Array.from({ length: n }, (_, i) => `feature-${String(i).padStart(3, "0")}`);
+  const pages = ids.map((id) =>
+    makeRevision({
+      id: `${id}-1`,
+      featureId: id,
+      sha: h.sha,
+      seeAlso: [],
+      sections: [
+        {
+          key: "lead",
+          claims: [
+            leadClaim({
+              text: `**${id}** ${"does a great many things. ".repeat(12)}`,
+              supports: ["c-1"],
+            }),
+          ],
+        },
+        ...makeRevision().sections.slice(1),
+      ],
+    }),
+  );
+  return WikiExport.parse({
+    ...h.wiki,
+    manifest: {
+      ...h.wiki.manifest,
+      membership: {},
+      features: [
+        ...ids.map((id) => makeFeature({ id, title: `Title of ${id}`, aliases: [] })),
+        makeFeature({
+          id: "old",
+          title: "Old",
+          aliases: [],
+          status: { kind: "redirect", to: "feature-000" },
+          lineage: [
+            { kind: "create", sha: h.sha },
+            { kind: "merge", sha: h.sha, into: "feature-000" },
+          ],
+        }),
+      ],
+    },
+    pages,
+    history: Object.fromEntries(pages.map((p) => [p.featureId, [p]])),
+    architecture: [],
+  });
+}
+
 describe("list_pages", () => {
   it("opens with the wiki's commit and how far HEAD has moved, then lists every page", () => {
     expect(text(tools(), "list_pages", {})).toBe(
@@ -71,55 +119,27 @@ describe("list_pages", () => {
   it("lists redirects and disambiguations, and shortens summaries until the list fits the cap", () => {
     const n = 150;
     const ids = Array.from({ length: n }, (_, i) => `feature-${String(i).padStart(3, "0")}`);
-    const pages = ids.map((id) =>
-      makeRevision({
-        id: `${id}-1`,
-        featureId: id,
-        sha: h.sha,
-        seeAlso: [],
-        sections: [
-          {
-            key: "lead",
-            claims: [
-              leadClaim({
-                text: `**${id}** ${"does a great many things. ".repeat(12)}`,
-                supports: ["c-1"],
-              }),
-            ],
-          },
-          ...makeRevision().sections.slice(1),
-        ],
-      }),
-    );
-    const big = WikiExport.parse({
-      ...h.wiki,
-      manifest: {
-        ...h.wiki.manifest,
-        membership: {},
-        features: [
-          ...ids.map((id) => makeFeature({ id, title: `Title of ${id}`, aliases: [] })),
-          makeFeature({
-            id: "old",
-            title: "Old",
-            aliases: [],
-            status: { kind: "redirect", to: "feature-000" },
-            lineage: [
-              { kind: "create", sha: h.sha },
-              { kind: "merge", sha: h.sha, into: "feature-000" },
-            ],
-          }),
-        ],
-      },
-      pages,
-      history: Object.fromEntries(pages.map((p) => [p.featureId, [p]])),
-      architecture: [],
-    });
+    const big = bigWiki(n);
     const listed = text(tools(h.sha, big), "list_pages", {});
     expect([...listed].length).toBeLessThanOrEqual(MAX_TOOL_RESULT_CHARS);
     for (const id of ids) expect(listed).toContain(`\n- ${id}: Title of ${id}`);
     expect(listed).toContain("\nPages:\n");
     expect(listed).toContain(
       "\nRedirects and disambiguations:\n- old (Old): redirects to feature-000\n",
+    );
+    expect(listed.endsWith("Read one with read_page(id), or search for words.\n")).toBe(true);
+  });
+
+  it("says how many pages it leaves out when even the bare list is over the cap", () => {
+    const n = 600;
+    const listed = text(tools(h.sha, bigWiki(n)), "list_pages", {});
+    expect([...listed].length).toBeLessThanOrEqual(MAX_TOOL_RESULT_CHARS);
+    expect(listed).not.toContain("result cut at");
+    expect(listed).toContain("\n- feature-000: Title of feature-000\n");
+    const shown = listed.split("\n").filter((l) => /^- feature-\d+: /.test(l)).length;
+    expect(shown).toBeGreaterThan(100);
+    expect(listed).toContain(
+      `\n- and ${n - shown} more pages not listed, nor the redirects and disambiguations: the list is cut to fit ${MAX_TOOL_RESULT_CHARS} characters; search finds any page by words from its title or text.\n`,
     );
     expect(listed.endsWith("Read one with read_page(id), or search for words.\n")).toBe(true);
   });
@@ -171,7 +191,7 @@ describe("read_page", () => {
       `2 of 5 claims cite lines changed since the wiki's commit (compared with commit ${after}); they are marked. 2 more claims cite lines that moved but still hold.`,
     ]);
     expect(page).toContain(
-      "\n- **Signal ingestion** turns chunks of text into signals and keeps them in memory. (changed since the wiki's commit: it summarizes s-3, which changed)\n",
+      "\n- **Signal ingestion** turns chunks of text into signals and keeps them in memory. (changed since the wiki's commit: it summarizes 1 claim below that changed, in Overview)\n",
     );
     expect(page).toContain(
       "\n- `save_signal` appends each signal to the in-memory `SIGNALS` list. [2] (changed since the wiki's commit: src/signals/store.py:6-8: the cited lines changed)\n",
