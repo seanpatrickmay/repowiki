@@ -26,9 +26,10 @@ export type FileAt =
 /**
  * The text of `path` at commit `sha` in `repo`, read from git objects only (ls-tree, then
  * cat-file of the blob), never the working tree. The path comes from a stored citation and is
- * given to ls-tree as a literal path after `--`, so it is never an option or a pattern.
+ * given to ls-tree as a literal path after `--`, so it is never an option or a pattern. A file
+ * over `maxBytes` (by the size git reports) is "too-large" and never read.
  */
-export function fileAt(repo: string, sha: string, path: string): FileAt {
+export function fileAt(repo: string, sha: string, path: string, maxBytes = MAX_CODE_BYTES): FileAt {
   assertSha(sha);
   if (commitOf(repo, sha) !== sha) return { missing: "no-commit" };
   const listing = gitOutput(repo, [
@@ -47,7 +48,7 @@ export function fileAt(repo: string, sha: string, path: string): FileAt {
     if (tab === -1 || entry.slice(tab + 1) !== path) continue;
     const [mode, type, oid, size] = entry.slice(0, tab).split(/ +/);
     if (type !== "blob" || mode === "120000" || oid === undefined) break;
-    if (Number(size) > MAX_CODE_BYTES) return { missing: "too-large", size: Number(size) };
+    if (Number(size) > maxBytes) return { missing: "too-large", size: Number(size) };
     const bytes = gitOutput(repo, ["cat-file", "blob", "--end-of-options", oid]);
     if (bytes.subarray(0, 8000).includes(0)) return { missing: "binary" };
     return { text: bytes.toString("utf8") };

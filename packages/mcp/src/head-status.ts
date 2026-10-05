@@ -1,6 +1,7 @@
 import type { Claim, CodeCitation } from "@repowiki/core";
 import {
   type CitationFate,
+  DEFAULT_MAX_FILE_BYTES,
   diffCommits,
   type FileChange,
   type RemapContext,
@@ -129,6 +130,7 @@ export function createFreshness(options: FreshnessOptions): Freshness {
         "rev-list",
         "--left-right",
         "--count",
+        "--end-of-options",
         `${wikiHead}...${compare}`,
       ])
         .toString("utf8")
@@ -194,7 +196,8 @@ export function createFreshness(options: FreshnessOptions): Freshness {
     }
     const sources = new Map<string, string>();
     for (const path of paths) {
-      const file = fileAt(repo, compare, path);
+      // wiki:update's own limit: a file it would not read is one whose claims it calls stale.
+      const file = fileAt(repo, compare, path, DEFAULT_MAX_FILE_BYTES);
       if ("text" in file) sources.set(path, file.text);
     }
     const ctx: RemapContext = { sha: compare, changesSince: since, sources, symbolsOf: () => [] };

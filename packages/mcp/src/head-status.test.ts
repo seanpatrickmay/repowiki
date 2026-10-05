@@ -1,4 +1,6 @@
-import { diffCommits, readSources, remapClaims } from "@repowiki/engine";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { DEFAULT_MAX_FILE_BYTES, diffCommits, readSources, remapClaims } from "@repowiki/engine";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createFreshness } from "./head-status.ts";
@@ -107,6 +109,35 @@ describe("createFreshness: per-claim marks", () => {
         .map(([claimId]) => claimId)
         .sort();
       expect(changed, featureId).toEqual(stale);
+    }
+  });
+
+  it("reads sources within wiki:update's file-size limit, so a file grown past it is marked", async () => {
+    const crudNow = readFileSync(join(h.repo.dir, "src/deliverables/crud.py"), "utf8");
+    // The cited lines stay as they are; the file grows to between the limit and 2 MiB.
+    h.repo.write("src/deliverables/crud.py", `${crudNow}${"# padding\n".repeat(150_000)}`);
+    const grown = h.repo.commit("chore: pad crud.py");
+    try {
+      const ctx = {
+        sha: grown,
+        changesSince: (from: string) => diffCommits(h.repo.dir, from, grown),
+        sources: await readSources(h.repo.dir, grown, DEFAULT_MAX_FILE_BYTES),
+        symbolsOf: () => [],
+      };
+      const { id, sections } = page("deliverables");
+      const stale = remapClaims(sections, ctx, new Set(["src/deliverables/crud.py"]))
+        .filter((r) => r.status === "stale")
+        .map((r) => r.claim.id)
+        .sort();
+      expect(stale.length).toBeGreaterThan(0);
+      const freshness = createFreshness({ repo: h.repo.dir, wikiHead: h.sha, pinned: grown });
+      const changed = [...freshness.marks(id, sections)]
+        .filter(([, mark]) => mark.kind === "changed")
+        .map(([claimId]) => claimId)
+        .sort();
+      expect(changed).toEqual(stale);
+    } finally {
+      h.repo.git("reset", "-q", "--hard", h.commits.after);
     }
   });
 
