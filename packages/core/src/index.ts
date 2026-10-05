@@ -20,6 +20,15 @@ export {
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
 export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind } from "./claim.ts";
 export { contentHash } from "./content-hash.ts";
+export {
+  type ClaimChange,
+  type ClaimSections,
+  claimChanges,
+  type DiffOp,
+  diffSequence,
+  MAX_DIFF_CELLS,
+  wordDiff,
+} from "./diff-sequence.ts";
 export { RunTotal, WikiExport } from "./export.ts";
 export {
   FEATURE_ID_MAX_LENGTH,

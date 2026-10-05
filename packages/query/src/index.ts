@@ -1,4 +1,10 @@
 export {
+  type ChangedRevision,
+  renderChanges,
+  revisionEntry,
+  wordDiffText,
+} from "./changes.ts";
+export {
   type SearchDoc,
   type SearchField,
   type SearchIndex,
