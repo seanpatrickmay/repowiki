@@ -83,6 +83,12 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
   if (set.data === "held-out" && runDir !== null) {
     throw fail("the held-out set always runs in <out>/eval/held-out, so --run-dir cannot be given");
   }
+  const agents = parseAgents(once("--agents", v.agents, EVAL_USAGE));
+  if (set.data === "held-out" && agents !== null && agents.join(",") !== "wiki,repo") {
+    throw fail(
+      "the held-out set is v1's single-use sign-off of the wiki and repo agents, so --agents can only be wiki,repo with it",
+    );
+  }
   const turnsText = once("--turns", v.turns, EVAL_USAGE) ?? String(DEFAULT_TURN_LIMIT);
   const turns = Number(turnsText);
   if (!/^\d+$/.test(turnsText) || turns < 1 || turns > MAX_TURN_LIMIT) {
@@ -97,7 +103,7 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
     repo,
     questions,
     set: set.data,
-    agents: parseAgents(once("--agents", v.agents, EVAL_USAGE)),
+    agents,
     out: once("--out", v.out, EVAL_USAGE) ?? null,
     runDir,
     turnLimit: turns,
@@ -262,6 +268,15 @@ export function estimateLine(
     (a) => `${a} ${money(estimate.byAgent[a] ?? 0)} at ${turns(a)} turns`,
   );
   return `${estimate.questions} questions to the ${listed(estimate.agents)} agent${estimate.agents.length === 1 ? "" : "s"}: about ${money(estimate.agentsUsd)} (${shares.join(", ")} a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}, at most ${money(estimate.judgeCeilingUsd)} if every judgment is retried; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+}
+
+/** A run's scores, one per agent it asked, in the order asked: "wiki 7 of 10, repo 5 of 10". */
+export function scoreLine(summary: {
+  info: { agents: readonly AgentKind[]; questions: readonly unknown[] };
+  agents: Readonly<Record<AgentKind, { correct: number }>>;
+}): string {
+  const n = summary.info.questions.length;
+  return summary.info.agents.map((a) => `${a} ${summary.agents[a].correct} of ${n}`).join(", ");
 }
 
 /** --agents: a comma-separated list of agent kinds, each once; null when not given. */

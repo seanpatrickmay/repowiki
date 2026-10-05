@@ -11,6 +11,7 @@ import {
   estimateLine,
   parseEvalArgs,
   runDirFor,
+  scoreLine,
 } from "./eval-cli.ts";
 import { CliError } from "./manifest-cli.ts";
 
@@ -78,6 +79,18 @@ describe("parseEvalArgs", () => {
     ],
     [["r", "--set", "dev"], "--questions is required"],
     [["r", "--questions", "q", "--set", "held-out", "--run-dir", "d"], "--run-dir cannot be given"],
+    [
+      ["r", "--questions", "q", "--set", "held-out", "--agents", "mcp"],
+      "the held-out set is v1's single-use sign-off of the wiki and repo agents, so --agents can only be wiki,repo with it",
+    ],
+    [
+      ["r", "--questions", "q", "--set", "held-out", "--agents", "repo,wiki"],
+      "--agents can only be wiki,repo with it",
+    ],
+    [
+      ["r", "--questions", "q", "--set", "held-out", "--agents", "wiki,repo,mcp"],
+      "--agents can only be wiki,repo with it",
+    ],
     [["r", "--questions", "q", "--set", "dev", "--turns", "0"], "--turns must be a whole number"],
     [["r", "--questions", "q", "--set", "dev", "--turns", "2.5"], "--turns must be a whole number"],
     [["r", "--questions", "q", "--set", "dev", "--max-usd", "0"], "--max-usd must be a number"],
@@ -111,6 +124,32 @@ describe("parseEvalArgs", () => {
 
   it("ends every usage error with the usage line", () => {
     expect(() => parseEvalArgs([])).toThrow(EVAL_USAGE);
+  });
+});
+
+describe("parseEvalArgs and the held-out set", () => {
+  it("runs the held-out set with its default agents, given or not", () => {
+    const parse = (...more: string[]) =>
+      parseEvalArgs(["r", "--questions", "q", "--set", "held-out", ...more]).agents;
+    expect(parse()).toBeNull();
+    expect(parse("--agents", "wiki,repo")).toEqual(["wiki", "repo"]);
+  });
+});
+
+describe("scoreLine", () => {
+  const stats = (correct: number) => ({ correct });
+  const agents = { wiki: stats(2), repo: stats(1), mcp: stats(3), "repo+mcp": stats(0) };
+  it("names each asked agent's score, in the order asked", () => {
+    const questions = [1, 2, 3];
+    expect(scoreLine({ info: { agents: ["wiki", "repo"], questions }, agents })).toBe(
+      "wiki 2 of 3, repo 1 of 3",
+    );
+    expect(scoreLine({ info: { agents: ["mcp", "repo+mcp"], questions }, agents })).toBe(
+      "mcp 3 of 3, repo+mcp 0 of 3",
+    );
+    expect(scoreLine({ info: { agents: ["wiki", "mcp"], questions }, agents })).toBe(
+      "wiki 2 of 3, mcp 3 of 3",
+    );
   });
 });
 

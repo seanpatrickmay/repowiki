@@ -215,6 +215,12 @@ describe("eval-run.ts as a process (no network)", () => {
     );
     // The dev set of the same file still runs (here, as a dry run).
     expect(evalRun("--questions", file, "--set", "dev", "--dry-run").status).toBe(0);
+    // The held-out set is v1's: no other agent may spend it.
+    const mcp = evalRun("--questions", file, "--set", "held-out", "--agents", "mcp", "--dry-run");
+    expect(mcp.status).toBe(2);
+    expect(mcp.stderr).toMatch(
+      /^the held-out set is v1's single-use sign-off .* wiki,repo with it; usage: /,
+    );
 
     const report = run("scripts/eval-report.ts", runDir);
     expect(report.status).toBe(0);

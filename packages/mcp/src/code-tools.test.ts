@@ -140,6 +140,18 @@ describe("cited_code", () => {
       /^ERROR invalid input for cited_code: ref: /,
     );
   });
+
+  it("answers as read_page does for a point before the page's history begins", () => {
+    for (const id of ["deliverables", "special:about"]) {
+      const asOf = { id, as_of: "2026-01-01" };
+      const begins = text("read_page", asOf);
+      expect(begins, id).toMatch(/^The wiki's history of \S+ begins on 2026-01-0\d/);
+      expect(text("cited_code", { ...asOf, ref: 1 }), id).toBe(begins);
+    }
+    expect(text("cited_code", { id: "deliverables", ref: 1, as_of: "2026-01-02" })).toBe(
+      "The wiki's history of deliverables begins on 2026-01-03 (commit 594d833).\n",
+    );
+  });
 });
 
 describe("page_changes", () => {

@@ -23,6 +23,8 @@ export {
 export {
   assertSha,
   GitError,
+  type GitOptions,
+  GitTimeoutError,
   gitFailureCause,
   listBlobs,
   resolveCommit,

@@ -1,13 +1,14 @@
 import type { Claim, CodeCitation } from "@repowiki/core";
 import {
   type CitationFate,
+  DEFAULT_MAX_FILE_BYTES,
   diffCommits,
   type FileChange,
   type RemapContext,
   remapCitation,
 } from "@repowiki/engine";
 import { fileAt } from "./code.ts";
-import { commitOf, gitOutput } from "./git.ts";
+import { commitOf, GIT_TIMEOUT_MS, gitOutput } from "./git.ts";
 
 /**
  * Where the repository stands against the wiki (spec v2 #5 §5): the compare commit, how far it is
@@ -129,13 +130,15 @@ export function createFreshness(options: FreshnessOptions): Freshness {
         "rev-list",
         "--left-right",
         "--count",
+        "--end-of-options",
         `${wikiHead}...${compare}`,
       ])
         .toString("utf8")
         .trim()
         .split(/\s+/);
       const tokens = gitOutput(repo, [
-        "diff",
+        "diff-tree",
+        "-r",
         "--name-status",
         "-z",
         "--no-renames",
@@ -176,7 +179,7 @@ export function createFreshness(options: FreshnessOptions): Freshness {
     const key = [...paths].sort().join("\0");
     return (from: string) =>
       changes.get(`${from}\0${compare}\0${key}`, () =>
-        holds(from) ? diffCommits(repo, from, compare, paths) : [],
+        holds(from) ? diffCommits(repo, from, compare, paths, { timeoutMs: GIT_TIMEOUT_MS }) : [],
       );
   };
 
@@ -193,7 +196,8 @@ export function createFreshness(options: FreshnessOptions): Freshness {
     }
     const sources = new Map<string, string>();
     for (const path of paths) {
-      const file = fileAt(repo, compare, path);
+      // wiki:update's own limit: a file it would not read is one whose claims it calls stale.
+      const file = fileAt(repo, compare, path, DEFAULT_MAX_FILE_BYTES);
       if ("text" in file) sources.set(path, file.text);
     }
     const ctx: RemapContext = { sha: compare, changesSince: since, sources, symbolsOf: () => [] };

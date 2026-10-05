@@ -1,7 +1,7 @@
 import type { WikiExport } from "@repowiki/core";
-import { GitError, isAncestor as gitIsAncestor } from "@repowiki/engine";
+import { GitError, GitTimeoutError, isAncestor as gitIsAncestor } from "@repowiki/engine";
 import { type AsOf, pageSearchIndex, type SearchIndex, viewAt, WikiView } from "@repowiki/query";
-import { commitOf } from "./git.ts";
+import { commitOf, GIT_TIMEOUT_MS } from "./git.ts";
 import { createFreshness, type Freshness } from "./head-status.ts";
 
 /** The most as-of views (each with its search index) one served wiki keeps (spec v2 #5 §4.2). */
@@ -24,7 +24,10 @@ export interface ServedWiki {
   reloadProblem: string | null;
   /** The wiki as of a point, and its search index (at most MAX_AS_OF_VIEWS kept). */
   at(asOf: AsOf): { view: WikiView; index: SearchIndex };
-  /** isAncestor in the repository, memoised; a commit it lacks is no one's ancestor. */
+  /**
+   * isAncestor in the repository within GIT_TIMEOUT_MS, memoised: only git's answers are kept. A
+   * commit it lacks is no one's ancestor (not kept); a timeout is thrown (a GitTimeoutError).
+   */
   isAncestor(ancestor: string, descendant: string): boolean;
   /** The full sha of the one commit a hex prefix names, or null. */
   resolveCommit(prefix: string): string | null;
@@ -47,17 +50,17 @@ export function serveWiki(wiki: WikiExport, options: ServeOptions): ServedWiki {
   const ancestry = new Map<string, boolean>();
   const isAncestor = (a: string, b: string) => {
     const key = `${a}\0${b}`;
-    let found = ancestry.get(key);
-    if (found === undefined) {
-      try {
-        found = a === b || gitIsAncestor(options.repo, a, b);
-      } catch (error) {
-        if (!(error instanceof GitError)) throw error;
-        found = false;
-      }
-      ancestry.set(key, found);
+    const found = ancestry.get(key);
+    if (found !== undefined) return found;
+    let answer: boolean;
+    try {
+      answer = a === b || gitIsAncestor(options.repo, a, b, { timeoutMs: GIT_TIMEOUT_MS });
+    } catch (error) {
+      if (error instanceof GitTimeoutError || !(error instanceof GitError)) throw error;
+      return false;
     }
-    return found;
+    ancestry.set(key, answer);
+    return answer;
   };
   const views = new Map<string, { view: WikiView; index: SearchIndex }>();
   let index: SearchIndex | undefined;

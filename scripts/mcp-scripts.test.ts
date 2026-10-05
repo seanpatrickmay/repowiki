@@ -20,6 +20,7 @@ import {
   probeReport,
   registrationHelp,
   runProbe,
+  startLine,
 } from "./mcp-cli.ts";
 
 const SCRIPT = "scripts/mcp-serve.ts";
@@ -230,6 +231,31 @@ describe("mcp-serve.ts as a process (no network, no LLM)", () => {
 });
 
 describe("mcp-cli", () => {
+  it("keeps a hostile repository name on the start line short and on one line", () => {
+    const line = startLine({
+      repo: `evil\nname\u202E${"x".repeat(300)}`,
+      head: "3d751d3".padEnd(40, "0"),
+      headDate: "2026-01-04",
+      out: "/out",
+      pinned: null,
+    });
+    expect(line).toMatch(
+      /^repowiki mcp: serving the wiki of evil name\uFFFDx+\u2026 at commit 3d751d3 \(2026-01-04\) from \/out; comparing with HEAD$/,
+    );
+    expect([...line].length).toBeLessThanOrEqual(300);
+    expect(
+      startLine({
+        repo: "sample",
+        head: "a".repeat(40),
+        headDate: null,
+        out: "/o",
+        pinned: "b".repeat(40),
+      }),
+    ).toBe(
+      "repowiki mcp: serving the wiki of sample at commit aaaaaaa from /o; comparing with commit bbbbbbb",
+    );
+  });
+
   it("parses a repo with --out and --compare-to, or --help alone, and refuses the rest", () => {
     expect(parseServeArgs(["repo", "--out", "o", "--compare-to", "abc"])).toEqual({
       repo: "repo",
@@ -381,6 +407,75 @@ describe("mcp-probe", () => {
     expect(report).toContain(
       "slowest tool call: 10 ms (list_pages); largest result: 56 code points (the cap is 12,000); errors: 0\n",
     );
+  });
+
+  it("reports an error result and a rejected call as error rows, and goes on", async () => {
+    const asked: string[] = [];
+    const rows = await runProbe(
+      async () => ({
+        listTools: async () => {
+          throw new McpClientError("tools/list: method not found");
+        },
+        callTool: async (name, args) => {
+          asked.push(name);
+          const query = (args as { query?: string }).query;
+          if (query === "configuration")
+            throw new McpClientError("no reply to tools/call within 30000 ms");
+          if (query === "tests") return { text: "invalid input\n", isError: true };
+          if (name === "list_pages") return { text: "- signals: S.\n", isError: false };
+          return { text: "x\n", isError: false };
+        },
+      }),
+      () => 0,
+    );
+    expect(asked).toEqual([
+      "list_pages",
+      "search",
+      "search",
+      "search",
+      "read_page",
+      "cited_code",
+      "page_changes",
+    ]);
+    expect(rows.map((r) => [r.call, r.isError, r.problem ?? null])).toEqual([
+      ["start to initialize", null, null],
+      ["tools/list", true, "tools/list: method not found"],
+      ["list_pages", false, null],
+      ['search "how does it start"', false, null],
+      ['search "configuration"', true, "no reply to tools/call within 30000 ms"],
+      ['search "tests"', true, null],
+      ["read_page signals", false, null],
+      ["cited_code signals 1", false, null],
+      ["page_changes signals", false, null],
+    ]);
+    const report = probeReport(rows, 12_000);
+    expect(report).toContain(
+      '       0            -    yes  search "configuration": no reply to tools/call within 30000 ms\n',
+    );
+    expect(report).toMatch(/errors: 3\n$/);
+  });
+
+  it("says so in every row left when the server dies mid-run", async () => {
+    let dead = false;
+    const rows = await runProbe(
+      async () => ({
+        listTools: async () => [],
+        callTool: async (name) => {
+          if (dead) throw new McpClientError("the MCP server has exited");
+          if (name === "read_page") {
+            dead = true;
+            throw new McpClientError("the MCP server exited (code 1): repowiki mcp: boom");
+          }
+          return { text: "- signals: S.\n", isError: false };
+        },
+      }),
+      () => 0,
+    );
+    expect(rows.slice(-3).map((r) => [r.call, r.problem])).toEqual([
+      ["read_page signals", "the MCP server exited (code 1): repowiki mcp: boom"],
+      ["cited_code signals 1", "the MCP server has exited"],
+      ["page_changes signals", "the MCP server has exited"],
+    ]);
   });
 
   it("parses <repo> [--out dir] and refuses the rest", () => {

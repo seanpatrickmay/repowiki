@@ -11,6 +11,7 @@ import {
   count,
   cut,
   defineTool,
+  historyBegins,
   oneLine,
   parseAsOf,
   reference,
@@ -23,7 +24,13 @@ import {
   type WikiView,
 } from "@repowiki/query";
 import { z } from "zod";
-import { citedCode, commitDetails, DEFAULT_CONTEXT_LINES, MAX_CONTEXT_LINES } from "./code.ts";
+import {
+  citedCode,
+  commitDetails,
+  DEFAULT_CONTEXT_LINES,
+  fileAt,
+  MAX_CONTEXT_LINES,
+} from "./code.ts";
 import type { ServedWiki } from "./served.ts";
 
 const sha7 = (sha: string) => sha.slice(0, 7);
@@ -156,6 +163,18 @@ function nowLine(served: ServedWiki, citation: CodeCitation): string {
   }
 }
 
+/**
+ * read_page's answer for a point before a page's history: where it begins, or null when the page
+ * has no history (or `id` names several pages).
+ */
+function historyStart(served: ServedWiki, id: string): string | null {
+  const now = served.view.resolve(id);
+  if (now.kind === "choices") return null;
+  const about = now.kind === "about";
+  const first = about ? served.wiki.architecture[0] : served.wiki.history[now.featureId]?.[0];
+  return first === undefined ? null : historyBegins(about ? ABOUT_PAGE_ID : now.featureId, first);
+}
+
 /** cited_code: reference `ref` of a page, numbered as read_page numbers it with the same as_of. */
 function citedCodeTool(
   served: ServedWiki,
@@ -165,7 +184,15 @@ function citedCodeTool(
     input.as_of === undefined
       ? served.view
       : served.at(parseAsOf(input.as_of, served.resolveCommit)).view;
-  const page = pageSections(view, input.id);
+  let page: ReturnType<typeof pageSections>;
+  try {
+    page = pageSections(view, input.id);
+  } catch (error) {
+    // Not in the wiki then: read_page's answer, where its history begins.
+    const begins = input.as_of === undefined ? null : historyStart(served, input.id);
+    if (begins === null) throw error;
+    return begins;
+  }
   const refs = referenceList(page.sections);
   const citation = refs[input.ref - 1];
   if (citation === undefined) {
@@ -177,7 +204,10 @@ function citedCodeTool(
   }
   const heading = `Reference [${input.ref}] of ${page.id}: ${reference(citation)}`;
   if (citation.kind === "commit") return `${heading}\n${commitDetails(served.repo, citation)}`;
-  const code = citedCode(served.repo, citation, input.context ?? DEFAULT_CONTEXT_LINES);
+  const file = fileAt(served.repo, citation.sha, citation.path);
+  const code = citedCode(served.repo, citation, input.context ?? DEFAULT_CONTEXT_LINES, file);
+  // A file its own commit lacks has no "now" to speak of: the citation itself is wrong.
+  if ("missing" in file && file.missing === "no-file") return `${heading}\n${code}`;
   return `${heading}\n${code}${nowLine(served, citation)}\n`;
 }
 

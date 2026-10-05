@@ -209,9 +209,10 @@ function createRunInfo(runDir: string, info: RunInfo): boolean {
 }
 
 /**
- * Refuses records that no run of `info` writes: a record of a question the run does not hold, or
- * a second answer or judgment of one question by one agent (a run appends each once; a hand-edited
- * or doubly appended file would otherwise be read with the last one winning).
+ * Refuses records that no run of `info` writes: a record of a question the run does not hold or
+ * of an agent it does not ask (a resume would judge it, and pay), or a second answer or judgment
+ * of one question by one agent (a run appends each once; a hand-edited or doubly appended file
+ * would otherwise be read with the last one winning).
  */
 export function checkRecords(runDir: string, info: RunInfo, records: readonly RunRecord[]): void {
   const path = join(runDir, RESULTS_FILE);
@@ -221,6 +222,11 @@ export function checkRecords(runDir: string, info: RunInfo, records: readonly Ru
     if (!ids.has(r.questionId)) {
       throw new EvalRunError(
         `${path} holds a record of ${JSON.stringify(r.questionId)}, which is not one of this run's questions`,
+      );
+    }
+    if (!info.agents.includes(r.agent)) {
+      throw new EvalRunError(
+        `${path} holds a record of the ${r.agent} agent, which this run does not ask (it asks ${info.agents.join(", ")})`,
       );
     }
     if (r.kind === "judge-failure") continue;

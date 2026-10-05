@@ -1,6 +1,8 @@
+import type { WikiExport } from "@repowiki/core";
 import { isAncestor, resolveCommit } from "@repowiki/engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  type AsOf,
   architectureAt,
   asOfBanner,
   historyBegins,
@@ -130,6 +132,90 @@ describe("viewAt", () => {
     expect(pointAt(h.wiki, { kind: "date", date: "2026-01-01" })).toBeNull();
     expect(pointAt(h.wiki, { kind: "date", date: "2026-01-03" })).toBe(h.commits.second);
     expect(pointAt(h.wiki, { kind: "date", date: "2030-01-01" })).toBe(h.commits.third);
+  });
+
+  it("orders commit dates by time, not by text, when their offsets differ", () => {
+    // Both are written on 2026-01-03; the second is later in real time but sorts first as text.
+    const [one, two, three] = signals();
+    if (one === undefined || two === undefined || three === undefined) throw new Error("fixture");
+    const wiki: WikiExport = {
+      ...h.wiki,
+      history: {
+        signals: [
+          { ...one, commitDate: "2026-01-03T01:00:00+09:00" },
+          { ...two, commitDate: "2026-01-03T00:30:00-05:00" },
+          { ...three, commitDate: "2026-01-05T00:00:00Z" },
+        ],
+      },
+      architecture: [],
+    };
+    expect(pointAt(wiki, { kind: "date", date: "2026-01-03" })).toBe(h.commits.second);
+  });
+
+  it("gives each feature the status and aliases it had then (R5)", () => {
+    // signals is retired at the third commit; deliverables is merged into it at `after`.
+    const [signalsNow, deliverablesNow] = h.wiki.manifest.features;
+    if (signalsNow === undefined || deliverablesNow === undefined) throw new Error("fixture");
+    const wiki: WikiExport = {
+      ...h.wiki,
+      manifest: {
+        ...h.wiki.manifest,
+        features: [
+          {
+            ...signalsNow,
+            status: { kind: "retired" },
+            lineage: [...signalsNow.lineage, { kind: "retire", sha: h.commits.third }],
+          },
+          {
+            ...deliverablesNow,
+            status: { kind: "redirect", to: "signals" },
+            lineage: [
+              ...deliverablesNow.lineage,
+              { kind: "merge", sha: h.commits.after, into: "signals" },
+            ],
+          },
+        ],
+      },
+    };
+    const at = (asOf: AsOf) => {
+      const view = viewAt(wiki, asOf, ancestor);
+      const feature = (id: string) => {
+        const f = view.features.get(id);
+        return { title: f?.title, aliases: f?.aliases, status: f?.status.kind };
+      };
+      return { signals: feature("signals"), deliverables: feature("deliverables") };
+    };
+    const second = at({ kind: "commit", sha: h.commits.second });
+    expect(second).toEqual({
+      signals: { title: "Signal ingestion", aliases: [], status: "active" },
+      deliverables: { title: "Deliverable records", aliases: [], status: "active" },
+    });
+    expect(at({ kind: "date", date: "2026-01-03" })).toEqual(second);
+    const third = at({ kind: "commit", sha: h.commits.third });
+    expect(third).toEqual({
+      signals: { title: "Signal ingestion", aliases: [], status: "retired" },
+      deliverables: {
+        title: "Deliverables",
+        aliases: ["Deliverable records"],
+        status: "active",
+      },
+    });
+    expect(at({ kind: "date", date: "2026-01-04" })).toEqual(third);
+    expect(at({ kind: "commit", sha: h.commits.after }).deliverables).toEqual({
+      title: "Deliverables",
+      aliases: ["Deliverable records"],
+      status: "redirect",
+    });
+  });
+
+  it("ends the About article's revisions at the point", () => {
+    const shas = (date: string) =>
+      viewAt(h.wiki, { kind: "date", date }, ancestor).wiki.architecture.map((a) => a.sha);
+    expect(shas("2026-01-01")).toEqual([]);
+    expect(shas("2026-01-03")).toEqual([h.commits.first]);
+    expect(shas("2026-01-04")).toEqual([h.commits.first, h.commits.third]);
+    const onSide = viewAt(h.wiki, { kind: "commit", sha: side }, ancestor);
+    expect(onSide.wiki.architecture.map((a) => a.sha)).toEqual([h.commits.first]);
   });
 });
 

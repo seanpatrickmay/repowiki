@@ -41,6 +41,7 @@ import {
   requireSameExport,
   runDirFor,
   runEvalJournaled,
+  scoreLine,
 } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
@@ -213,10 +214,8 @@ async function main(): Promise<void> {
       log,
     });
     const { summary, reportPath } = writeReport(runDir);
-    const { wiki: w, repo: r } = summary.agents;
-    const n = summary.info.questions.length;
     console.log(
-      `wiki ${w.correct} of ${n}, repo ${r.correct} of ${n}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
+      `${scoreLine(summary)}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
     );
     console.log(`Wrote ${reportPath}`);
   } finally {
@@ -231,7 +230,11 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  await started.mcp?.close();
-  exitWithError(err);
+  // The run's own error is the one to report, even if stopping the server fails too.
+  try {
+    await started.mcp?.close();
+  } finally {
+    exitWithError(err);
+  }
 }
 await started.mcp?.close();

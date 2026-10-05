@@ -34,16 +34,41 @@ describe("@repowiki/mcp's boundaries", () => {
     ]);
   });
 
-  it("imports no LLM or network module and calls no fetch", () => {
+  it("imports no LLM or network module, nor a subpath of one, and calls no fetch", () => {
     const refused = new Set<string>(["@repowiki/llm", "@anthropic-ai/sdk", ...NETWORK_MODULES]);
-    expect(refusedImports(sources, (s) => !refused.has(s))).toEqual([]);
+    const allowed = (s: string) => ![...refused].some((m) => s === m || s.startsWith(`${m}/`));
+    for (const subpath of ["@repowiki/llm/cassette", "@anthropic-ai/sdk/resources", "node:net"]) {
+      expect(allowed(subpath), subpath).toBe(false);
+    }
+    expect(allowed("@repowiki/llm-free")).toBe(true);
+    expect(refusedImports(sources, allowed)).toEqual([]);
     expect(fetchCalls(sources)).toEqual([]);
   });
 
-  it("never writes to stdout but through stdio.ts's output: no console.log, console.info or process.stdout", () => {
-    const writers = [...sources]
-      .filter(([, { text }]) => /console\.(log|info|debug|table)\b|process\.stdout/.test(text))
-      .map(([path]) => path);
+  it("never writes to stdout but through stdio.ts's output: no console printer, process.stdout or fd 1", () => {
+    // Every console method that prints to stdout, stdout by any spelling, and fd 1 written raw.
+    const STDOUT_WRITER =
+      /console\.(log|info|debug|table|dir|dirxml|count|group|groupCollapsed|timeEnd|timeLog)\b|process\s*(\.\s*stdout\b|\[\s*["'`]stdout["'`]\s*\])|\bwrite(Sync)?\(\s*1\s*,/;
+    const writesStdout = (text: string) => STDOUT_WRITER.test(text);
+    for (const sample of [
+      "console.dir(x)",
+      "console.dirxml(x)",
+      "console.count()",
+      "console.group('a')",
+      "console.groupCollapsed()",
+      "console.timeEnd('t')",
+      "console.timeLog('t')",
+      'process["stdout"].write(x)',
+      "process['stdout']",
+      "fs.writeSync(1, text)",
+      "writeSync( 1 ,text)",
+      "fs.write(1, text, () => {})",
+    ]) {
+      expect(writesStdout(sample), sample).toBe(true);
+    }
+    expect(writesStdout("console.error(logLine(x))")).toBe(false);
+    expect(writesStdout("writeSync(10, text)")).toBe(false);
+    const writers = [...sources].filter(([, { text }]) => writesStdout(text)).map(([path]) => path);
     expect(writers).toEqual([]);
   });
 });

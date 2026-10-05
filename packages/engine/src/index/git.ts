@@ -7,6 +7,28 @@ export class GitError extends Error {
   }
 }
 
+/** git ran past the time its caller gave it and was stopped; still a GitError. */
+export class GitTimeoutError extends GitError {}
+
+/** How one git call runs. */
+export interface GitOptions {
+  /** Stop git after this many milliseconds, with a GitTimeoutError; no limit when absent. */
+  timeoutMs?: number;
+}
+
+/** The GitTimeoutError for a call that ran past `timeoutMs`, or null for any other failure. */
+export function timeoutError(
+  error: NodeJS.ErrnoException,
+  repo: string,
+  args: readonly string[],
+  timeoutMs: number | undefined,
+): GitTimeoutError | null {
+  if (error.code !== "ETIMEDOUT") return null;
+  return new GitTimeoutError(
+    `git ${args[0]} timed out after ${timeoutMs ?? "?"} ms in ${printable(repo)}`,
+  );
+}
+
 /** Variables that redirect git to a different repository, index or object store. */
 const REDIRECTING_GIT_ENV = [
   "GIT_DIR",
@@ -124,13 +146,19 @@ function isPartialClone(repo: string): boolean {
   return promisors.status === 0 && /\btrue\s*$/im.test(promisors.stdout?.toString("utf8") ?? "");
 }
 
-/** Runs a read-only git command against `repo`; never touches its working tree or index. */
-export function git(repo: string, args: readonly string[]): Buffer {
+/**
+ * Runs a read-only git command against `repo`; never touches its working tree or index. With
+ * `timeoutMs`, a git that runs longer is stopped and reported as a GitTimeoutError.
+ */
+export function git(repo: string, args: readonly string[], options: GitOptions = {}): Buffer {
   const result = spawnSync("git", ["-C", repo, ...args], {
     maxBuffer: 1 << 30,
     env: scrubbedGitEnv(),
+    timeout: options.timeoutMs,
   });
-  if (result.error) throw spawnError(result.error);
+  if (result.error) {
+    throw timeoutError(result.error, repo, args, options.timeoutMs) ?? spawnError(result.error);
+  }
   if (result.status !== 0) {
     const stderr = result.stderr.toString("utf8").trim();
     const cause = gitFailureCause(repo, stderr);

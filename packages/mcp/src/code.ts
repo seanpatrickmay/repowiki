@@ -12,7 +12,7 @@ export const MAX_CODE_BYTES = 2 * 1024 * 1024;
 export const MAX_CHANGED_PATHS = 50;
 /** The most code points of one source line shown; a longer line is cut. */
 const MAX_LINE = 2000;
-/** git's empty tree: what a root commit is diffed against. */
+/** git's empty tree: what a root commit is diffed against, and where attributes are read from. */
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 const sha7 = (sha: string) => sha.slice(0, 7);
@@ -26,9 +26,10 @@ export type FileAt =
 /**
  * The text of `path` at commit `sha` in `repo`, read from git objects only (ls-tree, then
  * cat-file of the blob), never the working tree. The path comes from a stored citation and is
- * given to ls-tree as a literal path after `--`, so it is never an option or a pattern.
+ * given to ls-tree as a literal path after `--`, so it is never an option or a pattern. A file
+ * over `maxBytes` (by the size git reports) is "too-large" and never read.
  */
-export function fileAt(repo: string, sha: string, path: string): FileAt {
+export function fileAt(repo: string, sha: string, path: string, maxBytes = MAX_CODE_BYTES): FileAt {
   assertSha(sha);
   if (commitOf(repo, sha) !== sha) return { missing: "no-commit" };
   const listing = gitOutput(repo, [
@@ -47,8 +48,8 @@ export function fileAt(repo: string, sha: string, path: string): FileAt {
     if (tab === -1 || entry.slice(tab + 1) !== path) continue;
     const [mode, type, oid, size] = entry.slice(0, tab).split(/ +/);
     if (type !== "blob" || mode === "120000" || oid === undefined) break;
-    if (Number(size) > MAX_CODE_BYTES) return { missing: "too-large", size: Number(size) };
-    const bytes = gitOutput(repo, ["cat-file", "blob", oid]);
+    if (Number(size) > maxBytes) return { missing: "too-large", size: Number(size) };
+    const bytes = gitOutput(repo, ["cat-file", "blob", "--end-of-options", oid]);
     if (bytes.subarray(0, 8000).includes(0)) return { missing: "binary" };
     return { text: bytes.toString("utf8") };
   }
@@ -73,8 +74,12 @@ export function missingText(path: string, sha: string, file: Exclude<FileAt, { t
  * A code citation's lines at its own commit with `context` lines around them, numbered, each
  * cited line marked `>`: what the claim rests on, exactly as it was cited.
  */
-export function citedCode(repo: string, citation: CodeCitation, context: number): string {
-  const file = fileAt(repo, citation.sha, citation.path);
+export function citedCode(
+  repo: string,
+  citation: CodeCitation,
+  context: number,
+  file: FileAt = fileAt(repo, citation.sha, citation.path),
+): string {
   if (!("text" in file)) return `${missingText(citation.path, citation.sha, file)}\n`;
   const lines = toolText(file.text).split("\n");
   if (lines.at(-1) === "") lines.pop();
@@ -93,7 +98,10 @@ export function citedCode(repo: string, citation: CodeCitation, context: number)
 /**
  * A commit citation's commit: sha, commit date, subject, pull request and up to
  * MAX_CHANGED_PATHS changed paths with added and removed line counts, never a diff body or an
- * author. A commit the repository lacks is shown from the citation alone.
+ * author. A commit the repository lacks is shown from the citation alone. Read with plumbing
+ * (rev-list, diff-tree), so the user's config cannot verify a signature, reorder the paths or
+ * run a diff driver, and with attributes read from the empty tree (and no global attributes
+ * file), so neither the repository nor the user can make a changed text file read as binary.
  */
 export function commitDetails(repo: string, citation: CommitCitation): string {
   assertSha(citation.sha);
@@ -107,18 +115,26 @@ export function commitDetails(repo: string, citation: CommitCitation): string {
     ].join("\n")}\n`;
   }
   const [, date = "", parents = "", subject = ""] = gitOutput(repo, [
-    "show",
-    "-s",
-    "--no-color",
+    "rev-list",
+    "--no-walk",
+    "--max-count=1",
+    "--no-commit-header",
+    "--encoding=UTF-8",
     "--format=%H%x00%cI%x00%P%x00%s",
+    "--end-of-options",
     citation.sha,
+    "--",
   ])
     .toString("utf8")
     .replace(/\n$/, "")
     .split("\0");
   const parent = parents.split(" ")[0] || EMPTY_TREE;
   const fields = gitOutput(repo, [
-    "diff",
+    "-c",
+    "core.attributesFile=",
+    `--attr-source=${EMPTY_TREE}`,
+    "diff-tree",
+    "-r",
     "--numstat",
     "-z",
     "--no-renames",

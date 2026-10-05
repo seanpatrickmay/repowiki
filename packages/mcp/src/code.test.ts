@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CodeCitation, CommitCitation } from "@repowiki/core";
 import { createTestRepo, type TestRepo } from "@repowiki/engine/test-repo";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
@@ -137,6 +140,84 @@ describe("commitDetails", () => {
         "",
       ].join("\n"),
     );
+  });
+});
+
+describe("commitDetails, whatever the user's config and the repository's attributes say", () => {
+  let repo: TestRepo;
+  let home: string;
+  let saved: string | undefined;
+  const commit = (sha: string, subject: string, pr: number | null): CommitCitation => ({
+    kind: "commit",
+    sha,
+    subject,
+    pr,
+  });
+  beforeAll(() => {
+    repo = createTestRepo();
+    home = mkdtempSync(join(tmpdir(), "repowiki-config-"));
+    saved = process.env.GIT_CONFIG_GLOBAL;
+  });
+  afterAll(() => {
+    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = saved;
+    repo.remove();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("lists every change in path order, with no signature check and no attribute hiding a diff", () => {
+    // The repository's own attributes call its Python files binary; the user's call text files so.
+    repo.write(".gitattributes", "*.py -diff\n");
+    repo.write("a.py", "x = 1\n");
+    repo.write("b.txt", "one\n");
+    repo.commit("feat: start");
+    repo.write("a.py", "x = 2\n");
+    repo.write("b.txt", "two\n");
+    const changed = repo.commit("feat: change both");
+    // A commit carrying a signature: showing it with log.showSignature would run gpg.program.
+    const tree = repo.git("rev-parse", `${changed}^{tree}`);
+    const raw = join(home, "commit.txt");
+    writeFileSync(
+      raw,
+      [
+        `tree ${tree}`,
+        `parent ${changed}`,
+        "author A <a@example.com> 1767484800 +0000",
+        "committer A <a@example.com> 1767484800 +0000",
+        "gpgsig -----BEGIN PGP SIGNATURE-----",
+        " ",
+        " iQEzBAABCAAdFiEE",
+        " -----END PGP SIGNATURE-----",
+        "",
+        "feat: signed",
+        "",
+      ].join("\n"),
+    );
+    const signed = repo.git("hash-object", "-t", "commit", "-w", raw);
+    const ran = join(home, "gpg-ran");
+    const gpg = join(home, "gpg.sh");
+    writeFileSync(gpg, `#!/bin/sh\ntouch '${ran}'\nexit 1\n`, { mode: 0o755 });
+    writeFileSync(join(home, "order"), "b.txt\na.py\n");
+    writeFileSync(join(home, "attributes"), "*.txt -diff\n");
+    writeFileSync(
+      join(home, "config"),
+      [
+        "[log]\n\tshowSignature = true",
+        `[gpg]\n\tprogram = ${gpg}`,
+        `[diff]\n\torderFile = ${join(home, "order")}\n\trelative = true`,
+        `[core]\n\tattributesFile = ${join(home, "attributes")}`,
+        "",
+      ].join("\n"),
+    );
+    process.env.GIT_CONFIG_GLOBAL = join(home, "config");
+
+    expect(commitDetails(repo.dir, commit(changed, "feat: change both", null))).toContain(
+      "2 changed files:\n- a.py: +1 -1\n- b.txt: +1 -1\n",
+    );
+    expect(commitDetails(repo.dir, commit(signed, "feat: signed", null))).toBe(
+      [`commit ${signed}, 2026-01-04`, "Subject: feat: signed", "0 changed files:", ""].join("\n"),
+    );
+    expect(existsSync(ran)).toBe(false);
   });
 });
 

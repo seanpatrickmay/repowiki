@@ -76,8 +76,9 @@ export const architectureAt = revisionAt;
 
 /**
  * The commit the wiki stood at on `asOf`: the commit itself, or for a date the commit of the
- * newest revision (of any page or the About article) written on or before it. Null when nothing
- * was written by then.
+ * newest revision (of any page or the About article) written on or before it: the day is the
+ * written calendar date, "newest" is by instant (Date.parse), since offsets differ. Null when
+ * nothing was written by then.
  */
 export function pointAt(wiki: WikiExport, asOf: AsOf): string | null {
   if (asOf.kind === "commit") return asOf.sha;
@@ -85,7 +86,7 @@ export function pointAt(wiki: WikiExport, asOf: AsOf): string | null {
   const all = [...Object.values(wiki.history).flat(), ...wiki.architecture];
   for (const r of all) {
     if (r.commitDate.slice(0, 10) > asOf.date) continue;
-    if (best === null || r.commitDate > best.commitDate) best = r;
+    if (best === null || Date.parse(r.commitDate) > Date.parse(best.commitDate)) best = r;
   }
   return best?.sha ?? null;
 }

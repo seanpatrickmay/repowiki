@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { assertSha, GitError, git, scrubbedGitEnv } from "./git.ts";
+import { assertSha, GitError, type GitOptions, git, scrubbedGitEnv, timeoutError } from "./git.ts";
 import { pullRequestOf } from "./history.ts";
 
 /**
@@ -63,21 +63,26 @@ function blobHunks(
   repo: string,
   oldOid: string,
   newOid: string,
+  options: GitOptions,
 ): { hunks: Hunk[]; binary: boolean } {
   if (oldOid === newOid) return { hunks: [], binary: false };
-  const text = git(repo, [
-    "diff",
-    "-U0",
-    "--inter-hunk-context=0",
-    "--diff-algorithm=myers",
-    "--no-indent-heuristic",
-    "--no-color",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--end-of-options",
-    oldOid,
-    newOid,
-  ]).toString("utf8");
+  const text = git(
+    repo,
+    [
+      "diff",
+      "-U0",
+      "--inter-hunk-context=0",
+      "--diff-algorithm=myers",
+      "--no-indent-heuristic",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--end-of-options",
+      oldOid,
+      newOid,
+    ],
+    options,
+  ).toString("utf8");
   return parseHunks(text);
 }
 
@@ -88,30 +93,36 @@ function blobHunks(
  * file is added, a file that became one is deleted. A copy that the caller's git config reports
  * counts as an added file. With `only`, just the changes whose old path (a new file's new path) is
  * in it are returned, and only they are diffed for hunks; renames are still paired over the whole
- * tree, so a cited file that moved is followed (the MCP server's per-claim marks, M8).
+ * tree, so a cited file that moved is followed (the MCP server's per-claim marks, M8). With
+ * `options.timeoutMs`, each git call it makes is stopped after that long (a GitTimeoutError).
  */
 export function diffCommits(
   repo: string,
   from: string,
   to: string,
   only?: ReadonlySet<string>,
+  options: GitOptions = {},
 ): FileChange[] {
   assertSha(from);
   assertSha(to);
   if (from === to) return [];
-  const tokens = git(repo, [
-    "diff",
-    "--raw",
-    "-z",
-    "-M",
-    "--no-abbrev",
-    "--no-color",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--end-of-options",
-    from,
-    to,
-  ])
+  const tokens = git(
+    repo,
+    [
+      "diff",
+      "--raw",
+      "-z",
+      "-M",
+      "--no-abbrev",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--end-of-options",
+      from,
+      to,
+    ],
+    options,
+  )
     .toString("utf8")
     .split("\0");
   const changes: FileChange[] = [];
@@ -137,7 +148,7 @@ export function diffCommits(
         status: "renamed",
         oldPath: first,
         newPath: second,
-        ...blobHunks(repo, srcOid, dstOid),
+        ...blobHunks(repo, srcOid, dstOid, options),
       });
     } else if (kind === "M" || kind === "T" || kind === "R") {
       if (was && is) {
@@ -145,7 +156,7 @@ export function diffCommits(
           status: "modified",
           oldPath: first,
           newPath: second,
-          ...blobHunks(repo, srcOid, dstOid),
+          ...blobHunks(repo, srcOid, dstOid, options),
         });
       } else if (was) {
         changes.push({
@@ -167,14 +178,29 @@ export function diffCommits(
   return changes;
 }
 
-/** True when `ancestor` is `descendant` or one of its ancestors. */
-export function isAncestor(repo: string, ancestor: string, descendant: string): boolean {
+/**
+ * True when `ancestor` is `descendant` or one of its ancestors. With `options.timeoutMs`, a git
+ * that runs longer is stopped (a GitTimeoutError).
+ */
+export function isAncestor(
+  repo: string,
+  ancestor: string,
+  descendant: string,
+  options: GitOptions = {},
+): boolean {
   assertSha(ancestor);
   assertSha(descendant);
-  const out = spawnSync("git", ["-C", repo, "merge-base", "--is-ancestor", ancestor, descendant], {
+  const args = ["merge-base", "--is-ancestor", ancestor, descendant];
+  const out = spawnSync("git", ["-C", repo, ...args], {
     env: scrubbedGitEnv(),
+    timeout: options.timeoutMs,
   });
-  if (out.error) throw new GitError(`could not run git: ${out.error.message}`);
+  if (out.error) {
+    throw (
+      timeoutError(out.error, repo, args, options.timeoutMs) ??
+      new GitError(`could not run git: ${out.error.message}`)
+    );
+  }
   if (out.status === 0) return true;
   if (out.status === 1) return false;
   throw new GitError(`git merge-base failed in ${repo}: ${out.stderr.toString("utf8").trim()}`);

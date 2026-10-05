@@ -1,4 +1,6 @@
 import { parseArgs } from "node:util";
+import { logLine } from "@repowiki/mcp";
+import { cut, oneLine } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 
 export const SERVE_USAGE =
@@ -91,6 +93,24 @@ export function prepareEnvironment(env: NodeJS.ProcessEnv): void {
   env.GIT_OPTIONAL_LOCKS = "0";
 }
 
+/**
+ * The server's start line on stderr: the wiki's repository name (one line, at most 80 code points,
+ * as the initialize instructions show it), its commit and date, the out dir and the compare commit.
+ */
+export function startLine(at: {
+  repo: string;
+  head: string;
+  headDate: string | null;
+  out: string;
+  pinned: string | null;
+}): string {
+  const date = at.headDate === null ? "" : ` (${at.headDate})`;
+  const compare = at.pinned === null ? "HEAD" : `commit ${at.pinned.slice(0, 7)}`;
+  return logLine(
+    `repowiki mcp: serving the wiki of ${cut(oneLine(at.repo), 80)} at commit ${at.head.slice(0, 7)}${date} from ${at.out}; comparing with ${compare}`,
+  );
+}
+
 export const PROBE_USAGE = "usage: pnpm mcp:probe <repo-path> [--out dir]";
 
 /** `<repo> [--out dir]`; every other usage is a CliError. */
@@ -123,13 +143,19 @@ export function parseProbeArgs(argv: readonly string[]): { repo: string; out: st
 /** The probe's searches: generic words that most repositories' wikis answer. */
 export const PROBE_QUERIES = ["how does it start", "configuration", "tests"] as const;
 
-/** One probed call: its time, its result's size in code points, and whether it was an error. */
+/**
+ * One probed call: its time, its result's size in code points, and whether it was an error; a
+ * call that got no result (it was refused, timed out, or the server died) has the reason why.
+ */
 export interface ProbeRow {
   call: string;
   ms: number;
   codePoints: number | null;
   isError: boolean | null;
+  problem?: string;
 }
+
+const why = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** What the probe needs of a client: McpClient's calls. */
 export interface ProbeClient {
@@ -140,7 +166,9 @@ export interface ProbeClient {
 /**
  * pnpm mcp:probe's fixed list of calls (spec v2 #5 §6.1): the start to the initialize reply,
  * tools/list, list_pages, three searches, read_page of the first result, cited_code of its
- * reference 1, read_page as of its first revision's date, and page_changes of it. No LLM.
+ * reference 1, read_page as of its first revision's date, and page_changes of it. A call that
+ * fails is an error row with its reason, and the probe goes on (a dead server's calls all fail,
+ * each row saying so). No LLM.
  */
 export async function runProbe(
   connect: () => Promise<ProbeClient>,
@@ -151,23 +179,44 @@ export async function runProbe(
   const client = await connect();
   rows.push({ call: "start to initialize", ms: now() - at, codePoints: null, isError: null });
   at = now();
-  const tools = await client.listTools();
-  rows.push({
-    call: "tools/list",
-    ms: now() - at,
-    codePoints: [...JSON.stringify(tools)].length,
-    isError: false,
-  });
+  try {
+    const tools = await client.listTools();
+    rows.push({
+      call: "tools/list",
+      ms: now() - at,
+      codePoints: [...JSON.stringify(tools)].length,
+      isError: false,
+    });
+  } catch (error) {
+    rows.push({
+      call: "tools/list",
+      ms: now() - at,
+      codePoints: null,
+      isError: true,
+      problem: why(error),
+    });
+  }
   const call = async (label: string, name: string, args: unknown) => {
     const start = now();
-    const out = await client.callTool(name, args);
-    rows.push({
-      call: label,
-      ms: now() - start,
-      codePoints: [...out.text].length,
-      isError: out.isError,
-    });
-    return out.text;
+    try {
+      const out = await client.callTool(name, args);
+      rows.push({
+        call: label,
+        ms: now() - start,
+        codePoints: [...out.text].length,
+        isError: out.isError,
+      });
+      return out.text;
+    } catch (error) {
+      rows.push({
+        call: label,
+        ms: now() - start,
+        codePoints: null,
+        isError: true,
+        problem: why(error),
+      });
+      return "";
+    }
   };
   const listed = await call("list_pages", "list_pages", {});
   // The first feature page a result names (a feature id; not special:about, which has no history).
@@ -194,8 +243,9 @@ export function probeReport(rows: readonly ProbeRow[], cap: number): string {
   for (const r of rows) {
     const size = r.codePoints === null ? "-" : r.codePoints.toLocaleString("en-US");
     const error = r.isError === null ? "-" : r.isError ? "yes" : "no";
+    const problem = r.problem === undefined ? "" : `: ${cut(oneLine(r.problem), 160)}`;
     lines.push(
-      `${Math.round(r.ms).toString().padStart(8)}  ${size.padStart(11)}  ${error.padStart(5)}  ${r.call}`,
+      `${Math.round(r.ms).toString().padStart(8)}  ${size.padStart(11)}  ${error.padStart(5)}  ${r.call}${problem}`,
     );
   }
   const calls = rows.filter((r) => r.isError !== null && r.call !== "tools/list");
@@ -206,7 +256,7 @@ export function probeReport(rows: readonly ProbeRow[], cap: number): string {
   const largest = calls.reduce((n, r) => Math.max(n, r.codePoints ?? 0), 0);
   lines.push(
     "",
-    `slowest tool call: ${slowest === null ? "-" : `${Math.round(slowest.ms)} ms (${slowest.call})`}; largest result: ${largest.toLocaleString("en-US")} code points (the cap is ${cap.toLocaleString("en-US")}); errors: ${calls.filter((r) => r.isError).length}`,
+    `slowest tool call: ${slowest === null ? "-" : `${Math.round(slowest.ms)} ms (${slowest.call})`}; largest result: ${largest.toLocaleString("en-US")} code points (the cap is ${cap.toLocaleString("en-US")}); errors: ${rows.filter((r) => r.isError === true).length}`,
   );
   return `${lines.join("\n")}\n`;
 }
