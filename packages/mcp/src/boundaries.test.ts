@@ -39,4 +39,11 @@ describe("@repowiki/mcp's boundaries", () => {
     expect(refusedImports(sources, (s) => !refused.has(s))).toEqual([]);
     expect(fetchCalls(sources)).toEqual([]);
   });
+
+  it("never writes to stdout but through stdio.ts's output: no console.log, console.info or process.stdout", () => {
+    const writers = [...sources]
+      .filter(([, { text }]) => /console\.(log|info|debug|table)\b|process\.stdout/.test(text))
+      .map(([path]) => path);
+    expect(writers).toEqual([]);
+  });
 });
