@@ -23,6 +23,7 @@
     "eval:run": "node --env-file-if-exists=.env scripts/eval-run.ts",
     "eval:report": "node scripts/eval-report.ts",
     "eval:accuracy": "node scripts/eval-accuracy.ts",
+    "mcp:serve": "node scripts/mcp-serve.ts",
     "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run",
     "site:build": "node packages/site/src/cli.ts build",
     "site:preview": "node packages/site/src/cli.ts preview",

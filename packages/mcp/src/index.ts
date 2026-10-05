@@ -32,4 +32,15 @@ export {
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "./protocol.ts";
 export { MAX_AS_OF_VIEWS, type ServedWiki, type ServeOptions, serveWiki } from "./served.ts";
+export {
+  createServer,
+  instructionsFor,
+  logLine,
+  MAX_INSTRUCTIONS_CHARS,
+  MAX_LOG_CHARS,
+  type McpServer,
+  SERVER_VERSION,
+  type ServerOptions,
+  ServerStartError,
+} from "./server.ts";
 export { encodeMessage, MAX_LINE_BYTES, type StdioOptions, serveStdio } from "./stdio.ts";
