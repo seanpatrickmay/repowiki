@@ -14,6 +14,11 @@ export class GitTimeoutError extends GitError {}
 export interface GitOptions {
   /** Stop git after this many milliseconds, with a GitTimeoutError; no limit when absent. */
   timeoutMs?: number;
+  /**
+   * Variables to set on top of scrubbedGitEnv(), e.g. work in flight's GIT_CONFIG_GLOBAL=/dev/null
+   * for every command in its own object store (C13).
+   */
+  env?: Readonly<Record<string, string>>;
 }
 
 /** The GitTimeoutError for a call that ran past `timeoutMs`, or null for any other failure. */
@@ -153,7 +158,7 @@ function isPartialClone(repo: string): boolean {
 export function git(repo: string, args: readonly string[], options: GitOptions = {}): Buffer {
   const result = spawnSync("git", ["-C", repo, ...args], {
     maxBuffer: 1 << 30,
-    env: scrubbedGitEnv(),
+    env: scrubbedGitEnv({ ...options.env }),
     timeout: options.timeoutMs,
   });
   if (result.error) {
@@ -181,12 +186,17 @@ export function assertSha(sha: string): void {
   if (!isSha(sha)) throw new GitError(`not a 40-hex commit sha: ${JSON.stringify(sha)}`);
 }
 
+/** Throws unless `oid` is a full 40-hex object id (a commit or a tree, e.g. merge-tree's). */
+export function assertOid(oid: string): void {
+  if (!isSha(oid)) throw new GitError(`not a 40-hex object id: ${JSON.stringify(oid)}`);
+}
+
 /** Full 40-character sha of the commit `rev` names. */
-export function resolveCommit(repo: string, rev: string): string {
+export function resolveCommit(repo: string, rev: string, options: GitOptions = {}): string {
   const out = spawnSync(
     "git",
     ["-C", repo, "rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
-    { env: scrubbedGitEnv() },
+    { env: scrubbedGitEnv({ ...options.env }) },
   );
   if (out.error) throw spawnError(out.error);
   const sha = out.stdout?.toString("utf8").trim() ?? "";
@@ -205,17 +215,16 @@ export interface TreeBlob {
   size: number;
 }
 
-/** Regular files at `sha`. Symlinks and submodules are skipped: they have no indexable source. */
-export function listBlobs(repo: string, sha: string): TreeBlob[] {
-  const out = git(repo, [
-    "ls-tree",
-    "-r",
-    "-z",
-    "--long",
-    "--full-tree",
-    "--end-of-options",
-    sha,
-  ]).toString("utf8");
+/**
+ * Regular files at `sha` (a commit, or a tree). Symlinks and submodules are skipped: they have no
+ * indexable source.
+ */
+export function listBlobs(repo: string, sha: string, options: GitOptions = {}): TreeBlob[] {
+  const out = git(
+    repo,
+    ["ls-tree", "-r", "-z", "--long", "--full-tree", "--end-of-options", sha],
+    options,
+  ).toString("utf8");
   const blobs: TreeBlob[] = [];
   for (const entry of out.split("\0")) {
     if (entry === "") continue;
@@ -345,10 +354,11 @@ export async function* streamBlobs(
   repo: string,
   oids: readonly string[],
   holdLimit: number,
+  options: GitOptions = {},
 ): AsyncGenerator<StreamedBlob, void, undefined> {
   if (oids.length === 0) return;
   const child = spawn("git", ["-C", repo, "cat-file", "--batch"], {
-    env: scrubbedGitEnv(),
+    env: scrubbedGitEnv({ ...options.env }),
     stdio: ["pipe", "pipe", "pipe"],
   });
   let spawnFailure: Error | undefined;
@@ -462,16 +472,12 @@ export async function* streamBlobs(
 }
 
 /** Files changed by each non-merge commit reachable from `sha`, newest first. Renames count as delete + add. */
-export function commitFiles(repo: string, sha: string): string[][] {
-  const out = git(repo, [
-    "log",
-    "--no-merges",
-    "--no-renames",
-    "-z",
-    "--name-only",
-    "--format=%x00%H",
-    sha,
-  ]);
+export function commitFiles(repo: string, sha: string, options: GitOptions = {}): string[][] {
+  const out = git(
+    repo,
+    ["log", "--no-merges", "--no-renames", "-z", "--name-only", "--format=%x00%H", sha],
+    options,
+  );
   const tokens = out.toString("utf8").split("\0");
   const commits: string[][] = [];
   let i = 0;
