@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { markdownText, oneLine } from "@repowiki/query";
 import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
-import type { QuestionKind } from "./questions.ts";
+import { QuestionKind } from "./questions.ts";
 import {
   checkRecords,
   createOnce,
@@ -35,7 +35,7 @@ const percent = (x: number) => `${Math.round(x * 1000) / 10}%`;
 const usd = (x: number) => `$${x.toFixed(4)}`;
 /** Model or author text in the report: one line of plain text, cut short (markdownText). */
 const cell = (text: string, max = 120) => markdownText(text, max);
-const KINDS: readonly QuestionKind[] = ["where", "how", "why", "what-changed"];
+const KINDS: readonly QuestionKind[] = QuestionKind.options;
 /** Each agent's name in a table heading. */
 const LABELS: Readonly<Record<AgentKind, string>> = {
   wiki: "Wiki",
@@ -62,6 +62,11 @@ export function renderReport(
   if (info.set === "smoke") {
     lines.push(
       "This is the smoke set: questions about the test fixture that check the harness. It measures nothing.",
+      "",
+    );
+  } else if (info.set === "history") {
+    lines.push(
+      "This is the history suite: questions about the wiki's past (spec v2 #5 \u00A78.1). Spec \u00A79's pass test does not apply to it.",
       "",
     );
   } else if (info.set === "dev") {

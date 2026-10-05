@@ -23,6 +23,13 @@ export const AGENTS: readonly AgentKind[] = Agent.options;
 /** The agents a run asks unless --agents says otherwise: M7's two, so a v1 run is unchanged. */
 export const DEFAULT_AGENTS: readonly AgentKind[] = ["wiki", "repo"];
 
+/** The history suite's agents (spec v2 #5 R20): the server against the v1 wiki agent. */
+export const HISTORY_AGENTS: readonly AgentKind[] = ["wiki", "mcp"];
+
+/** The agents a run asks when --agents is not given: v1's two, or the history suite's. */
+export const defaultAgents = (set: QuestionSet): readonly AgentKind[] =>
+  set === "history" ? HISTORY_AGENTS : DEFAULT_AGENTS;
+
 /** What a run is: the questions, the wiki and repository, and the settings both agents share. */
 export const RunInfo = z.object({
   set: QuestionSet,

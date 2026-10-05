@@ -4,12 +4,21 @@ import { INVISIBLE_CHARACTERS } from "@repowiki/core";
 import { cut, oneLine } from "@repowiki/query";
 import { z } from "zod";
 
-/** Spec §9's four kinds of question. */
-export const QuestionKind = z.enum(["where", "how", "why", "what-changed"]);
+/** Spec §9's four kinds of question, which the exit-criteria file must all hold. */
+export const V1_QUESTION_KINDS = ["where", "how", "why", "what-changed"] as const;
+
+/** Every kind of question: spec §9's four, and the history suite's "as-of" (F08, M8). */
+export const QuestionKind = z.enum([...V1_QUESTION_KINDS, "as-of"]);
 export type QuestionKind = z.infer<typeof QuestionKind>;
 
-/** Which questions a run asks: the author's dev or held-out set, or the fixture's smoke set. */
-export const QuestionSet = z.enum(["dev", "held-out", "smoke"]);
+/** The history suite's kinds: "how did X work on D" and "what changed in X between D1 and D2". */
+export const HISTORY_QUESTION_KINDS = ["as-of", "what-changed"] as const;
+
+/**
+ * Which questions a run asks: the author's dev or held-out set, the owner's history suite (M8),
+ * or a fixture's smoke set.
+ */
+export const QuestionSet = z.enum(["dev", "held-out", "history", "smoke"]);
 export type QuestionSet = z.infer<typeof QuestionSet>;
 
 /** Spec §9: 30 questions, 20 dev and 10 held out. */
@@ -61,16 +70,19 @@ function addRepeatIssues(
   });
 }
 
-const question = <S extends z.ZodType<QuestionSet>>(set: S) =>
+const question = <S extends z.ZodType<QuestionSet>, K extends z.ZodType<QuestionKind>>(
+  set: S,
+  kind: K,
+) =>
   z.strictObject({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, "expected a short kebab-case id"),
     set,
-    kind: QuestionKind,
+    kind,
     question: authored(MAX_QUESTION_LENGTH),
     reference: authored(MAX_REFERENCE_LENGTH),
   });
 
-export const EvalQuestion = question(QuestionSet);
+export const EvalQuestion = question(QuestionSet, QuestionKind);
 export type EvalQuestion = z.infer<typeof EvalQuestion>;
 
 function addIdIssues(questions: readonly { id: string }[], ctx: z.RefinementCtx): void {
@@ -93,7 +105,7 @@ export const ExitCriteriaQuestions = z
     suite: z.literal("exit-criteria"),
     repo: RepoName,
     writtenOn: z.iso.date(),
-    questions: z.array(question(z.enum(["dev", "held-out"]))),
+    questions: z.array(question(z.enum(["dev", "held-out"]), z.enum(V1_QUESTION_KINDS))),
   })
   .superRefine((file, ctx) => {
     addIdIssues(file.questions, ctx);
@@ -105,7 +117,7 @@ export const ExitCriteriaQuestions = z
         ctx.addIssue({ code: "custom", message, path: ["questions"] });
       }
     }
-    for (const kind of QuestionKind.options) {
+    for (const kind of V1_QUESTION_KINDS) {
       if (!file.questions.some((q) => q.kind === kind)) {
         ctx.addIssue({ code: "custom", message: `no ${kind} question`, path: ["questions"] });
       }
@@ -118,13 +130,50 @@ export const SmokeQuestions = z
     suite: z.literal("smoke"),
     repo: RepoName,
     questions: z
-      .array(question(z.literal("smoke")))
+      .array(question(z.literal("smoke"), QuestionKind))
       .min(1)
       .max(5),
   })
   .superRefine((file, ctx) => addIdIssues(file.questions, ctx));
 
-export const QuestionFile = z.discriminatedUnion("suite", [ExitCriteriaQuestions, SmokeQuestions]);
+/** The history suite's size (spec v2 #5 §8.1): the owner writes 10. */
+export const HISTORY_QUESTION_COUNT = { min: 8, max: 20 } as const;
+
+/**
+ * The owner's history suite (spec v2 #5 §8.1, F08): 8-20 questions about one wiki's past, each
+ * "as-of" (how did X work on D) or "what-changed" (what changed in X between D1 and D2), at
+ * least two of each. Written before the owner uses the server on that wiki; `writtenOn` says when.
+ */
+export const HistoryQuestions = z
+  .strictObject({
+    suite: z.literal("history"),
+    repo: RepoName,
+    writtenOn: z.iso.date(),
+    questions: z
+      .array(question(z.literal("history"), z.enum(HISTORY_QUESTION_KINDS)))
+      .min(HISTORY_QUESTION_COUNT.min)
+      .max(HISTORY_QUESTION_COUNT.max),
+  })
+  .superRefine((file, ctx) => {
+    addIdIssues(file.questions, ctx);
+    addRepeatIssues(file.questions, ctx);
+    for (const kind of HISTORY_QUESTION_KINDS) {
+      const n = file.questions.filter((q) => q.kind === kind).length;
+      if (n < 2) {
+        ctx.addIssue({
+          code: "custom",
+          message: `expected at least 2 ${kind} questions, found ${n}`,
+          path: ["questions"],
+        });
+      }
+    }
+  });
+
+export const QuestionFile = z.discriminatedUnion("suite", [
+  ExitCriteriaQuestions,
+  SmokeQuestions,
+  HistoryQuestions,
+]);
 export type QuestionFile = z.infer<typeof QuestionFile>;
 
 /** A question file that cannot be read, or holds the wrong questions for the run. */
@@ -192,15 +241,19 @@ export function loadQuestions(path: string): LoadedQuestions {
 }
 
 /**
- * The questions a run asks, in file order. The smoke file runs only as the smoke set, and the
- * author's file never does, so the two can never be mistaken for each other.
+ * The questions a run asks, in file order. The smoke file runs only as the smoke set and the
+ * history file only as the history set, and the author's exit-criteria file as neither, so no two
+ * can be mistaken for each other.
  */
 export function selectQuestions(file: QuestionFile, set: QuestionSet): EvalQuestion[] {
   if (file.suite === "smoke" && set !== "smoke") {
     throw new QuestionFileError("this is the smoke question file; run it with --set smoke");
   }
-  if (file.suite === "exit-criteria" && set === "smoke") {
-    throw new QuestionFileError("--set smoke runs only the smoke question file");
+  if (file.suite === "history" && set !== "history") {
+    throw new QuestionFileError("this is the history question file; run it with --set history");
+  }
+  if (file.suite === "exit-criteria" && (set === "smoke" || set === "history")) {
+    throw new QuestionFileError(`--set ${set} runs only the ${set} question file`);
   }
   return file.questions.filter((q) => q.set === set);
 }

@@ -32,6 +32,9 @@ export {
   EvalQuestion,
   EXIT_CRITERIA_COUNTS,
   ExitCriteriaQuestions,
+  HISTORY_QUESTION_COUNT,
+  HISTORY_QUESTION_KINDS,
+  HistoryQuestions,
   type LoadedQuestions,
   loadQuestions,
   MAX_QUESTION_LENGTH,
@@ -42,6 +45,7 @@ export {
   QuestionSet,
   SmokeQuestions,
   selectQuestions,
+  V1_QUESTION_KINDS,
 } from "./questions.ts";
 export {
   AGENTS,
@@ -49,7 +53,9 @@ export {
   AnswerRecord,
   appendRecord,
   DEFAULT_AGENTS,
+  defaultAgents,
   EvalRunError,
+  HISTORY_AGENTS,
   JudgmentRecord,
   openRun,
   RESULTS_FILE,

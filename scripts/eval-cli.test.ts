@@ -71,8 +71,11 @@ describe("parseEvalArgs", () => {
   });
 
   it.each([
-    [["r", "--questions", "q.json"], "--set must be dev, held-out or smoke"],
-    [["r", "--questions", "q.json", "--set", "all"], "--set must be dev, held-out or smoke"],
+    [["r", "--questions", "q.json"], "--set must be dev, held-out, history or smoke"],
+    [
+      ["r", "--questions", "q.json", "--set", "all"],
+      "--set must be dev, held-out, history or smoke",
+    ],
     [["r", "--set", "dev"], "--questions is required"],
     [["r", "--questions", "q", "--set", "held-out", "--run-dir", "d"], "--run-dir cannot be given"],
     [["r", "--questions", "q", "--set", "dev", "--turns", "0"], "--turns must be a whole number"],
@@ -119,6 +122,9 @@ describe("runDirFor", () => {
       join("/o", "eval", "dev-2026-10-04T12-30-00-000Z"),
     );
     expect(runDirFor("/o", "smoke", "/runs/s", now)).toBe("/runs/s");
+    expect(runDirFor("/o", "history", null, now)).toBe(
+      join("/o", "eval", "history-2026-10-04T12-30-00-000Z"),
+    );
   });
 });
 

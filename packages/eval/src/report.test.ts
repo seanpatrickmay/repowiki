@@ -37,7 +37,7 @@ describe("renderReport", () => {
     expect(text).toContain("Agents $0.4000, judge $0.0040: $0.4040 in all");
   });
 
-  it("says a run is incomplete, and what a dev or smoke set is for", () => {
+  it("says a run is incomplete, and what a dev, smoke or history set is for", () => {
     const partial = renderReport(
       summarize(info(), records().slice(0, -1)),
       records().slice(0, -1),
@@ -53,6 +53,8 @@ describe("renderReport", () => {
       null,
     );
     expect(smoke).toContain("It measures nothing.");
+    const history = renderReport(summarize(info({ set: "history" }), records()), records(), null);
+    expect(history).toContain("This is the history suite: questions about the wiki's past");
   });
 
   it("states the break-even only for a complete run, and what its numerator leaves out", () => {
