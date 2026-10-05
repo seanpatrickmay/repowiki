@@ -59,6 +59,30 @@ describe("diffCommits", () => {
     ]);
   });
 
+  it("returns only the changes of the files asked for, following a rename of one", () => {
+    const body = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`);
+    repo.write("kept.py", lines(...body));
+    repo.write("moved.py", lines(...body));
+    repo.write("other.py", lines(...body));
+    const from = repo.commit("first");
+    repo.write("kept.py", lines("top", ...body));
+    repo.git("rm", "-q", "moved.py");
+    repo.write("lib/moved.py", lines(...body));
+    repo.write("other.py", lines(...body, "end"));
+    const to = repo.commit("second");
+    expect(diffCommits(repo.dir, from, to, new Set(["kept.py", "moved.py"]))).toEqual([
+      {
+        status: "modified",
+        oldPath: "kept.py",
+        newPath: "kept.py",
+        hunks: [{ oldStart: 0, oldCount: 0, newStart: 1, newCount: 1 }],
+        binary: false,
+      },
+      { status: "renamed", oldPath: "moved.py", newPath: "lib/moved.py", hunks: [], binary: false },
+    ]);
+    expect(diffCommits(repo.dir, from, to, new Set())).toEqual([]);
+  });
+
   it("follows a rename with an edit, and keeps a path with spaces and a newline whole", () => {
     const body = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`);
     repo.write("old name.py", lines(...body));
