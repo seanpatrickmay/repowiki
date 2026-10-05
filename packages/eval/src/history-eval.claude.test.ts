@@ -1,3 +1,5 @@
+// Re-record (live, costs money; review the diff, then run packages/llm/src/cassette-secrets.test.ts):
+// REPOWIKI_CASSETTE=record node --env-file=<RepoWiki checkout>/.env node_modules/vitest/vitest.mjs run packages/eval/src/history-eval.claude.test.ts
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

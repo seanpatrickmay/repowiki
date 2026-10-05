@@ -41,7 +41,7 @@ const sha7 = (sha: string) => sha.slice(0, 7);
 const PAGE_ID = z.string().trim().min(1).max(200);
 const AS_OF = z.string().trim().min(1).max(40);
 const AS_OF_HELP =
-  "as_of (optional) reads the wiki as it was on a date YYYY-MM-DD or at a commit (7-40 hex)";
+  "as_of (optional) reads the wiki as it was on a date YYYY-MM-DD or at a commit (7-40 hex); by date, renames, merges and retirements count up to the wiki's last revision on or before it (by commit, exactly)";
 
 /** Every code path a revision's claims cite. */
 const citedPaths = (revision: {
