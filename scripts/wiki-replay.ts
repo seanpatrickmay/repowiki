@@ -20,6 +20,7 @@ import {
   writeExport,
 } from "@repowiki/engine";
 import { totalsOf } from "@repowiki/llm";
+import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
@@ -242,6 +243,7 @@ async function replay(
     return;
   }
 
+  const before = beforeUpdate(store);
   for (const [i, step] of todo.entries()) {
     try {
       const input = await readInput(repo, step.sha);
@@ -309,6 +311,17 @@ async function replay(
       }
       throw err;
     }
+  }
+  // The work in flight follows the head the replay reached, once, offline (R4, C14).
+  if (before !== null) {
+    const lines = await inflightAfterUpdate(
+      { repo, out, repoName, store, models, log },
+      before,
+      store.getHead() ?? head,
+      true,
+    );
+    for (const line of lines)
+      if (line !== "" && !line.startsWith("#")) log(`work in flight: ${line}`);
   }
   writeExports();
   console.log(renderReplaySummary(repoName, args.from, args.to, records, left, buildTokens));
