@@ -37,6 +37,11 @@ export {
   type ToolSet,
   toolSet,
 } from "./tools.ts";
-export { readPage, SECTION_TITLES } from "./wiki-page.ts";
-export { createWikiTools, MAX_SEARCH_RESULTS } from "./wiki-tools.ts";
+export { type PageOptions, readPage, referenceList, SECTION_TITLES } from "./wiki-page.ts";
+export {
+  createWikiTools,
+  MAX_SEARCH_RESULTS,
+  pageSearchIndex,
+  searchResults,
+} from "./wiki-tools.ts";
 export { ABOUT_PAGE_ID, listedPage, type Resolved, reference, WikiView } from "./wiki-view.ts";

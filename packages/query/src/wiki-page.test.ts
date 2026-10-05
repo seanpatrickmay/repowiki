@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extendedWiki, type SampleWiki, sampleWiki } from "./test-wiki.ts";
-import { readPage } from "./wiki-page.ts";
+import { readPage, referenceList } from "./wiki-page.ts";
 import { ABOUT_PAGE_ID, WikiView } from "./wiki-view.ts";
 
 let sample: SampleWiki;
@@ -187,5 +187,49 @@ describe("readPage", () => {
       `sample (page id: ${ABOUT_PAGE_ID}): the project's own article`,
     );
     expect(text).toContain("\nDependencies\n- Signals feed deliverables. [pages: signals]\n");
+  });
+
+  it("adds a banner, a freshness line and claim notes when asked, each on one line", () => {
+    const view = new WikiView(sample.wiki);
+    const text = readPage(view, "signals", undefined, {
+      banner: ["As of then.", "Line\ntwo"],
+      freshness: "1 of 4 claims changed.",
+      claimNote: (id) => (id === "s-2" ? "(changed since the wiki's commit: x.py:1-2)" : null),
+    });
+    const lines = text.split("\n");
+    expect(lines.slice(0, 5)).toEqual([
+      "Signal ingestion (page id: signals)",
+      "As of then.",
+      "Line two",
+      `Status: active. This revision: commit ${sample.sha.slice(0, 7)}, 2026-01-03.`,
+      "1 of 4 claims changed.",
+    ]);
+    expect(text).toContain(
+      "- Ingestion stops once a chunk has made `MAX_SIGNALS` (50) signals; the rest of the chunk is dropped. [2][3] (changed since the wiki's commit: x.py:1-2)\n",
+    );
+    expect(readPage(view, "signals", undefined, {})).toBe(readPage(view, "signals"));
+    const about = readPage(new WikiView(extendedWiki(sample)), ABOUT_PAGE_ID, undefined, {
+      banner: ["As of then."],
+      freshness: "Fresh.",
+    });
+    expect(about.split("\n").slice(1, 4)).toEqual([
+      "As of then.",
+      `This revision: commit ${sample.sha.slice(0, 7)}, 2026-02-03.`,
+      "Fresh.",
+    ]);
+  });
+});
+
+describe("referenceList", () => {
+  it("lists a page's citations in read_page's reference order, each distinct reference once", () => {
+    const page = sample.wiki.pages.find((p) => p.featureId === "signals");
+    const refs = referenceList(page?.sections ?? []);
+    expect(refs.map((c) => (c.kind === "code" ? `${c.startLine}-${c.endLine}` : c.kind))).toEqual([
+      "10-24",
+      "7-7",
+      "19-21",
+      "commit",
+      "20-20",
+    ]);
   });
 });
