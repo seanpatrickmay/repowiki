@@ -13,7 +13,14 @@ import { join } from "node:path";
 import { connectMcp, McpClientError, mcpToolSet } from "@repowiki/mcp";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { parseServeArgs, prepareEnvironment, registrationHelp } from "./mcp-cli.ts";
+import {
+  parseProbeArgs,
+  parseServeArgs,
+  prepareEnvironment,
+  probeReport,
+  registrationHelp,
+  runProbe,
+} from "./mcp-cli.ts";
 
 const SCRIPT = "scripts/mcp-serve.ts";
 /** Spawning node and loading the engine takes a few seconds on a loaded machine. */
@@ -331,6 +338,86 @@ describe("connectMcp and mcpToolSet (client.ts)", () => {
       } finally {
         rmSync(empty, { recursive: true, force: true });
       }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+});
+
+describe("mcp-probe", () => {
+  it("runs the fixed calls and reports each one's time and size", async () => {
+    const asked: string[] = [];
+    let t = 0;
+    const rows = await runProbe(
+      async () => ({
+        listTools: async () => [{ name: "search" }],
+        callTool: async (name, args) => {
+          asked.push(`${name} ${JSON.stringify(args)}`);
+          if (name === "list_pages")
+            return { text: "Pages:\n- special:about: x\n- signals: S.\n", isError: false };
+          if (name === "read_page")
+            return {
+              text: "Page history, oldest first: 2026-01-02 commit a (build)\n",
+              isError: false,
+            };
+          return { text: "No page matches; try other words.\n", isError: false };
+        },
+      }),
+      () => (t += 10),
+    );
+    expect(asked).toEqual([
+      "list_pages {}",
+      'search {"query":"how does it start"}',
+      'search {"query":"configuration"}',
+      'search {"query":"tests"}',
+      'read_page {"id":"signals"}',
+      'cited_code {"id":"signals","ref":1}',
+      'read_page {"id":"signals","as_of":"2026-01-02"}',
+      'page_changes {"id":"signals"}',
+    ]);
+    expect(rows.map((r) => r.ms)).toEqual(Array(10).fill(10));
+    const report = probeReport(rows, 12_000);
+    expect(report.split("\n")[0]).toBe("      ms  code points  error  call");
+    expect(report).toContain("      10            -      -  start to initialize\n");
+    expect(report).toContain(
+      "slowest tool call: 10 ms (list_pages); largest result: 56 code points (the cap is 12,000); errors: 0\n",
+    );
+  });
+
+  it("parses <repo> [--out dir] and refuses the rest", () => {
+    expect(parseProbeArgs(["r", "--out", "o"])).toEqual({ repo: "r", out: "o" });
+    for (const bad of [[], ["a", "b"], ["a", "--out", ""], ["a", "--x"]]) {
+      expect(() => parseProbeArgs(bad), bad.join(" ")).toThrow(/usage: pnpm mcp:probe/);
+    }
+  });
+
+  it(
+    "probes the fixture's server end to end as a process",
+    () => {
+      const before = listing(out);
+      const probe = spawnSync(
+        process.execPath,
+        ["scripts/mcp-probe.ts", h.repo.dir, "--out", out],
+        {
+          env: clientEnv(),
+          encoding: "utf8",
+        },
+      );
+      expect(probe.status, probe.stderr).toBe(0);
+      const lines = probe.stdout.trim().split("\n");
+      expect(lines.slice(1, 11).map((l) => l.slice(30))).toEqual([
+        "start to initialize",
+        "tools/list",
+        "list_pages",
+        'search "how does it start"',
+        'search "configuration"',
+        'search "tests"',
+        "read_page signals",
+        "cited_code signals 1",
+        "read_page signals as_of 2026-01-02",
+        "page_changes signals",
+      ]);
+      expect(probe.stdout).toMatch(/errors: 0\n$/);
+      expect(listing(out)).toEqual(before);
     },
     PROCESS_TIMEOUT_MS,
   );
