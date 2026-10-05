@@ -332,6 +332,37 @@ describe("extractSymbols (typescript)", () => {
     expect(names("typescript", source)).toEqual(["function after"]);
   });
 
+  it("does not take exports in an unindented namespace body for top-level symbols", () => {
+    for (const open of ["namespace N {", "export namespace N {"]) {
+      const source = [
+        "foo( {",
+        open,
+        "export function inner() {}",
+        "export const v = 1;",
+        "}",
+        "export function after() {}",
+      ].join("\n");
+      expect(names("typescript", source)).toEqual(["function after"]);
+    }
+    const errorLater = "namespace N {\nexport const inner = 1\n}\nexport function bad( {\n";
+    expect(names("typescript", errorLater)).toEqual([]);
+  });
+
+  it("stays linear in the nesting of multi-line template literals", () => {
+    // Quadratic row marking took about 9 s here; linear takes well under a second.
+    const depth = 16_000;
+    const source = `f( {\nconst s = ${"`\n${".repeat(depth)}1${"}\n`".repeat(depth)};\nfunction z() {}\n`;
+    const parsed = parser.parse("typescript", source);
+    try {
+      const started = performance.now();
+      const symbols = extractSymbols("typescript", parsed.root, parser);
+      expect(performance.now() - started).toBeLessThan(2000);
+      expect(symbols.map((s) => s.qualifiedName)).toEqual(["z"]);
+    } finally {
+      parsed.dispose();
+    }
+  });
+
   it("keeps a bare `export default` line with the declaration under it", () => {
     const source = "foo( {\nexport default\nclass C {}\nexport const k = 1;\n";
     expect(symbolsOf("typescript", source).symbols).toEqual([

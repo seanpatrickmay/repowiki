@@ -84,9 +84,14 @@ interface Chunk {
  */
 function rowsInsideText(node: Node): Set<number> {
   const rows = new Set<number>();
+  // Document order: a node nested in a text node comes after it and is covered by it, so each
+  // row is added once and the walk stays linear however deeply templates nest.
+  let covered = -1;
   for (const text of node.descendantsOfType(["comment", "string", "template_string", "jsx_text"])) {
     const last = text.endPosition.column > 0 ? text.endPosition.row : text.endPosition.row - 1;
-    for (let row = text.startPosition.row + 1; row <= last; row++) rows.add(row);
+    for (let row = Math.max(text.startPosition.row + 1, covered + 1); row <= last; row++)
+      rows.add(row);
+    covered = Math.max(covered, last);
   }
   return rows;
 }
@@ -123,11 +128,15 @@ function closesOuterBlock(root: Node): boolean {
   return depth < 0;
 }
 
+/** A column-0 namespace or module block start: an `export` in its body is not top-level. */
+const NAMESPACE_START = /^(?:export\s+)?(?:declare\s+)?(?:namespace|module|global)\s*[\w"'{]/m;
+
 /**
  * Symbols from re-parsed chunks. Only an error-free chunk is trusted: a chunk can start inside a
  * broken body, and tree-sitter mangles what follows an error. A broken first chunk keeps the full
  * parse's symbols for the statement, cut off at the chunk's last line. Non-exported symbols from
- * clean chunks before a TS chunk that closes an outer block were locals of that block.
+ * clean chunks before a TS chunk that closes an outer block were locals of that block; exported
+ * ones were too if a namespace or module block was opened since the last such chunk.
  */
 function recover(
   language: SourceLanguage,
@@ -137,7 +146,9 @@ function recover(
   out: SymbolDef[],
 ): void {
   let pending: SymbolDef[] = [];
+  let namespaced = false;
   chunks.forEach((chunk, i) => {
+    namespaced ||= language !== "python" && NAMESPACE_START.test(chunk.text);
     const parsed = parser.parse(language, chunk.text);
     try {
       if (!parsed.hasError) {
@@ -156,7 +167,8 @@ function recover(
         for (const s of found)
           if (s.startLine <= last) out.push({ ...s, endLine: Math.min(s.endLine, last) });
       } else if (language !== "python" && closesOuterBlock(parsed.root)) {
-        pending = pending.filter((s) => s.exported);
+        pending = namespaced ? [] : pending.filter((s) => s.exported);
+        namespaced = false;
       }
     } finally {
       parsed.dispose();
