@@ -48,6 +48,11 @@ export interface AskQuestionOptions {
   /** The question's cap in dollars (--question-usd). */
   questionUsd: number;
   onStatus?: (progress: AskProgress) => void;
+  /**
+   * Called after each turn the model answered, with what it cost (its upper bound when it cannot
+   * be priced), so a caller still counts the spend if the question then throws.
+   */
+  onSpend?: (usd: number) => void;
   now?: () => Date;
 }
 
@@ -169,6 +174,7 @@ export async function askQuestion(options: AskQuestionOptions): Promise<AskResul
     const cost = callCostUsd(result.model, result.usage, false);
     usd = usd === null || cost === null ? null : usd + cost;
     spent += cost ?? bound;
+    options.onSpend?.(cost ?? bound);
     reported = result.model;
     const uses = result.content.filter((b): b is ToolUseBlock => b.type === "tool_use");
     const echoed: (TextBlock | ToolUseBlock)[] = result.content.filter(

@@ -62,7 +62,8 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  * A serve session (spec v2 #4 §6.4): the export snapshot and its indexes, built once; the answer
  * cache (R12; a hit costs nothing and is allowed past the session cap); the session cap (a
  * question starts only if the spend so far plus the question cap stays within it, so the cap is
- * never crossed); one question in flight; and one terminal line per question. Only answered,
+ * never crossed); one question in flight; and one terminal line per question, a question that
+ * throws included (what it spent before throwing is counted, then it rethrows). Only answered,
  * partial and not-found answers are cached; "Ask again" (`fresh`) skips the cache and replaces
  * the entry.
  */
@@ -81,7 +82,8 @@ export function createAskSession(options: AskSessionOptions): AskSession {
 
   async function answer(
     request: AskRequest,
-    onStatus?: (progress: AskProgress) => void,
+    onStatus: ((progress: AskProgress) => void) | undefined,
+    onSpend: (usd: number) => void,
   ): Promise<{ response: AskResponse; tokens: TokenUsage; error: string | null }> {
     if (!affordable()) {
       const response = buildResponse({
@@ -106,6 +108,7 @@ export function createAskSession(options: AskSessionOptions): AskSession {
       model,
       questionUsd,
       onStatus,
+      onSpend,
       now,
     });
   }
@@ -142,10 +145,27 @@ export function createAskSession(options: AskSessionOptions): AskSession {
         return { ...hit.response, question: request.question, cached: true };
       }
       if (flight !== null) throw new BusyError();
-      const pending = answer({ ...request, page }, onStatus);
+      let paid = 0;
+      const pending = answer({ ...request, page }, onStatus, (usd) => {
+        paid += usd;
+      });
       flight = pending;
       try {
-        const { response, tokens, error } = await pending;
+        let result: Awaited<typeof pending>;
+        try {
+          result = await pending;
+        } catch (failure) {
+          // What the question spent before it threw still counts toward the session cap.
+          totals.questions++;
+          spent += paid;
+          totals.usd = spent;
+          const message = failure instanceof Error ? failure.message : String(failure);
+          log(
+            `ask ${shown(request.question)} \u2192 failed (${cut(oneLine(message), 120)}), ${money(paid)} ${sessionLine()}`,
+          );
+          throw failure;
+        }
+        const { response, tokens, error } = result;
         totals.questions++;
         // An unpriced turn is counted at the question's cap, so the session cap still holds.
         const usd = response.cost.turns === 0 ? 0 : (response.cost.usd ?? questionUsd);
