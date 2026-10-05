@@ -9,6 +9,7 @@ import {
   readBlobs,
   resolveCommit,
   scrubbedGitEnv,
+  streamBlobs,
 } from "./git.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
@@ -159,6 +160,68 @@ describe("readBlobs", () => {
     repo.write("a.py", "x = 1\n");
     repo.commit("add a");
     expect(() => readBlobs(repo.dir, ["0".repeat(40)])).toThrow(GitError);
+  });
+});
+
+describe("streamBlobs", () => {
+  async function stream(oids: string[], holdLimit: number) {
+    const out = [];
+    for await (const blob of streamBlobs(repo.dir, oids, holdLimit)) out.push(blob);
+    return out;
+  }
+
+  it("yields every requested blob in order, repeats included, with whole contents when small", async () => {
+    const binary = Buffer.from([0x89, 0x50, 0x00, 0x0a, 0xff]);
+    repo.write("img.png", binary);
+    repo.write("empty.py", "");
+    repo.write("a.py", "x = 1\n");
+    repo.write("copy.py", "x = 1\n");
+    repo.write("tail.txt", "one\ntwo");
+    const sha = repo.commit("add files");
+    const blobs = listBlobs(repo.dir, sha);
+    const got = await stream(
+      blobs.map((blob) => blob.oid),
+      1000,
+    );
+    expect(got.map((blob) => blob.oid)).toEqual(blobs.map((blob) => blob.oid));
+    const byPath = (path: string) => got[blobs.findIndex((b) => b.path === path)];
+    expect(byPath("img.png")?.content).toEqual(binary);
+    expect(byPath("empty.py")?.content).toEqual(Buffer.alloc(0));
+    expect(byPath("empty.py")?.lines).toBe(0);
+    expect(byPath("a.py")?.content?.toString("utf8")).toBe("x = 1\n");
+    expect(byPath("a.py")?.lines).toBe(1);
+    expect(byPath("copy.py")?.content?.toString("utf8")).toBe("x = 1\n");
+    expect(byPath("tail.txt")?.lines).toBe(2);
+    expect(byPath("tail.txt")?.size).toBe(7);
+  });
+
+  it("counts an oversized blob's lines and keeps only its first 8000 bytes", async () => {
+    repo.write("big.txt", "line\n".repeat(5000));
+    repo.write("big-tail.txt", `${"line\n".repeat(5000)}end`);
+    repo.write("big.bin", Buffer.concat([Buffer.alloc(9000, 0x41), Buffer.from([0])]));
+    const sha = repo.commit("add big files");
+    const blobs = listBlobs(repo.dir, sha);
+    const got = await stream(
+      blobs.map((blob) => blob.oid),
+      100,
+    );
+    const byPath = (path: string) => got[blobs.findIndex((b) => b.path === path)];
+    expect(byPath("big.txt")?.content).toBeNull();
+    expect(byPath("big.txt")?.size).toBe(25_000);
+    expect(byPath("big.txt")?.lines).toBe(5000);
+    expect(byPath("big.txt")?.head).toEqual(Buffer.from("line\n".repeat(1600)));
+    expect(byPath("big-tail.txt")?.lines).toBe(5001);
+    expect(byPath("big.bin")?.content).toBeNull();
+    expect(byPath("big.bin")?.head.includes(0)).toBe(false);
+    expect(byPath("big.bin")?.head.length).toBe(8000);
+  });
+
+  it("yields nothing for no oids and throws GitError for an object that does not exist", async () => {
+    expect(await stream([], 100)).toEqual([]);
+    repo.write("a.py", "x = 1\n");
+    repo.commit("add a");
+    await expect(stream(["0".repeat(40)], 100)).rejects.toThrow(GitError);
+    await expect(stream(["0".repeat(40)], 100)).rejects.toThrow(/unexpected cat-file header/);
   });
 });
 
