@@ -135,7 +135,8 @@ export function createFreshness(options: FreshnessOptions): Freshness {
         .trim()
         .split(/\s+/);
       const tokens = gitOutput(repo, [
-        "diff",
+        "diff-tree",
+        "-r",
         "--name-status",
         "-z",
         "--no-renames",

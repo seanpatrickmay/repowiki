@@ -38,11 +38,15 @@ export function runGit(
  */
 export function gitOutput(repo: string, args: readonly string[]): Buffer {
   const result = runGit(repo, args, GIT_TIMEOUT_MS, GIT_MAX_BUFFER);
-  if (result.signal !== null) throw new GitError(`git ${args[0]} took too long in ${repo}`);
-  if (result.error !== undefined) throw new GitError(`git ${args[0]} wrote too much in ${repo}`);
+  // The command, not a global option before it (-c, --literal-pathspecs) or its value.
+  const command = args.find((arg, i) => !arg.startsWith("-") && args[i - 1] !== "-c") ?? "";
+  // An overflow first: Node kills git for it too, so it also comes with a signal.
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "ENOBUFS") throw new GitError(`git ${command} wrote too much in ${repo}`);
+  if (result.signal !== null) throw new GitError(`git ${command} took too long in ${repo}`);
   if (result.status !== 0) {
     const why = result.stderr.toString("utf8").trim().split("\n")[0] ?? "";
-    throw new GitError(`git ${args[0]} failed in ${repo}: ${why}`);
+    throw new GitError(`git ${command} failed in ${repo}: ${why}`);
   }
   return result.stdout;
 }

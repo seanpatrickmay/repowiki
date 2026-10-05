@@ -34,9 +34,14 @@ describe("@repowiki/mcp's boundaries", () => {
     ]);
   });
 
-  it("imports no LLM or network module and calls no fetch", () => {
+  it("imports no LLM or network module, nor a subpath of one, and calls no fetch", () => {
     const refused = new Set<string>(["@repowiki/llm", "@anthropic-ai/sdk", ...NETWORK_MODULES]);
-    expect(refusedImports(sources, (s) => !refused.has(s))).toEqual([]);
+    const allowed = (s: string) => ![...refused].some((m) => s === m || s.startsWith(`${m}/`));
+    for (const subpath of ["@repowiki/llm/cassette", "@anthropic-ai/sdk/resources", "node:net"]) {
+      expect(allowed(subpath), subpath).toBe(false);
+    }
+    expect(allowed("@repowiki/llm-free")).toBe(true);
+    expect(refusedImports(sources, allowed)).toEqual([]);
     expect(fetchCalls(sources)).toEqual([]);
   });
 
