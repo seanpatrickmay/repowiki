@@ -1,4 +1,4 @@
-import { parseMemberId } from "@repowiki/core";
+import { type Claim, parseMemberId } from "@repowiki/core";
 import { INGEST_PY } from "@repowiki/core/test-fixtures";
 import { type GenerateRequest, LlmError, LlmOutputError, type Provider } from "@repowiki/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +6,7 @@ import { buildFileGraph, clusterFiles } from "../cluster/index.ts";
 import type { TestRepo } from "../index/index.ts";
 import { buildExport, type Store } from "../store/index.ts";
 import { ArchitectureDraft, PageDraft, UpdateDraft, UpdateFixes } from "../verify/index.ts";
-import { type BuildJournal, buildJournal } from "../write/index.ts";
+import { type BuildJournal, buildJournal, buildWiki } from "../write/index.ts";
 import { type ManifestOperation, ManifestOperations } from "./ops.ts";
 import { UpdateError } from "./plan.ts";
 import { scriptedProvider } from "./test-provider.ts";
@@ -981,6 +981,153 @@ describe("updateWiki", () => {
         const { provider: none, requests: after } = turned(() => new Error("no call expected"));
         await updateWiki(store, await inputAt(repo, last), { ...options, provider: none });
         expect(after).toEqual([]);
+      });
+
+      describe("of the pages merged into a feature with no page yet (#357)", () => {
+        /** The History claims of both merged pages, by feature id. */
+        const bothParents = () => [
+          ["Deliverables was added first.", [first]],
+          ["Signal ingestion was added first.", [first]],
+        ];
+        /**
+         * Merges signals and deliverables into storage, which has no page yet, at the merge of PR
+         * 7; storage's whole write gets unusable answers, so it is left missing at the head.
+         */
+        async function mergedIntoMissing(): Promise<string> {
+          await withStorage();
+          const { merge } = mergePaging();
+          const failed = await updateWith(
+            merge,
+            [
+              op({ kind: "merge", feature: "signals", into: "storage" }),
+              op({ kind: "merge", feature: "deliverables", into: "storage" }),
+            ],
+            () => {
+              throw unusable();
+            },
+          );
+          expect(failed.failures.map((f) => f.featureId)).toEqual(["storage"]);
+          expect(store.getCurrentRevision("storage")).toBeNull();
+          return merge;
+        }
+        /** The fill-in wiki:build at `sha`, which writes the missing storage page. */
+        async function fillIn(sha: string) {
+          const { provider: p } = turned((request) => standard(request, storagePage));
+          const build = await buildWiki(store, await inputAt(repo, sha), {
+            provider: p,
+            repoName: "sample",
+            wikipediaFetch: unreachable,
+          });
+          expect(build.stored.map((r) => r.featureId)).toEqual(["storage"]);
+        }
+        /** A commit adding a file to storage, whose update renames storage: a whole write. */
+        async function renameStorage() {
+          repo.write("src/signals/log.py", "def log(signal):\n    return signal\n");
+          const later = repo.commit("feat: log signals");
+          await updateWith(
+            later,
+            [op({ kind: "rename", feature: "storage", title: "Signal log" })],
+            () =>
+              wholePage(
+                "Signal log",
+                "`save_signal()` returns its signal.",
+                "src/signals/store.py:1-2",
+              ),
+          );
+          expect(store.getCurrentRevision("storage")?.reason).toBe("manifest-change");
+        }
+
+        it("carries both merged pages' History into the page a fill-in build writes", async () => {
+          await fillIn(await mergedIntoMissing());
+          expect(historyOf("storage")).toEqual(bothParents());
+        });
+
+        it("restores, on its next whole write, what a page written at the merge lacks, as it can", async () => {
+          const merge = await mergedIntoMissing();
+          // Deliverables' page also tells of the paging branch PR 7 merged.
+          const commit = (await inputAt(repo, merge)).history.find((c) => c.sha === merge);
+          const branch = (await inputAt(repo, merge)).history.find(
+            (c) => c.sha === commit?.parents[1],
+          );
+          const deliverables = store.getCurrentRevision("deliverables");
+          if (branch === undefined || deliverables === null) throw new Error("no fixture");
+          store.putRevision({
+            ...deliverables,
+            id: "deliverables-paging",
+            parentId: deliverables.id,
+            reason: "update",
+            sections: deliverables.sections.map((s) =>
+              s.key === "history"
+                ? {
+                    ...s,
+                    claims: [
+                      ...s.claims,
+                      {
+                        ...(s.claims[0] as Claim),
+                        id: "c9",
+                        text: "Deliverables gained batch draining.",
+                        citations: [
+                          {
+                            kind: "commit",
+                            sha: branch.sha,
+                            subject: branch.subject,
+                            pr: branch.pr,
+                          },
+                        ],
+                      },
+                    ],
+                  }
+                : s,
+            ),
+          });
+          await fillIn(merge);
+          // As a fill-in build stored the page before #357: at the merge, with History of its own
+          // (here one claim citing the first commit) but none of deliverables'.
+          const built = store.getCurrentRevision("storage");
+          if (built === null) throw new Error("no page");
+          store.putRevision({
+            ...built,
+            id: "storage-without-history",
+            parentId: built.id,
+            reason: "update",
+            sections: built.sections.map((s) =>
+              s.key === "history"
+                ? { ...s, claims: s.claims.filter((c) => c.text.startsWith("Signal")) }
+                : s,
+            ),
+          });
+          await renameStorage();
+          // The repair is best-effort: a claim citing only commits a kept claim already cites
+          // (deliverables' first one) reads as carried already, so only the other comes back.
+          expect(historyOf("storage")).toEqual([
+            ["Signal ingestion was added first.", [first]],
+            ["Deliverables gained batch draining.", [branch.sha]],
+          ]);
+        });
+
+        it("carries the History of a chain of merges one update made, each page's in turn", async () => {
+          await withStorage();
+          const { merge } = mergePaging();
+          await updateWith(
+            merge,
+            [
+              op({ kind: "merge", feature: "deliverables", into: "signals" }),
+              op({ kind: "merge", feature: "signals", into: "storage" }),
+            ],
+            storagePage,
+          );
+          expect(store.getCurrentRevision("storage")?.reason).toBe("manifest-change");
+          expect(historyOf("storage")).toEqual([
+            ["Signal ingestion was added first.", [first]],
+            ["Deliverables was added first.", [first]],
+          ]);
+        });
+
+        it("carries them once when a fill-in build and then an update write the page whole", async () => {
+          await fillIn(await mergedIntoMissing());
+          await renameStorage();
+          expect(historyOf("storage")).toEqual(bothParents());
+        });
       });
     });
 

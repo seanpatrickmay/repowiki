@@ -27,6 +27,7 @@ import {
   wikipediaTitlesIn,
 } from "../link/index.ts";
 import { ClaimFixes, PageDraft, quote, type VerifyContext } from "../verify/index.ts";
+import { commitsOf, coversCommits } from "./carry.ts";
 import { buildPack, type ContextPack, DEFAULT_CONTEXT_BUDGET_TOKENS } from "./pack.ts";
 import { type Assembled, assembleRevision } from "./page.ts";
 import { writeSystemPrompt } from "./prompt.ts";
@@ -195,10 +196,6 @@ export async function checkTitles(
   return wikipedia;
 }
 
-/** The commits a claim cites. */
-const commitsOf = (claim: Claim): Set<string> =>
-  new Set(claim.citations.flatMap((c) => (c.kind === "commit" ? [c.sha] : [])));
-
 /**
  * A page's verified claims with `carried` History claims ahead of its new ones (spec §5 rule 4).
  * A new History claim that cites only commits, all of which one carried claim already cites, is
@@ -228,9 +225,8 @@ function withCarried(
   const hooked = new Set<string>();
   for (const { key, claim } of verified) {
     if (key !== "history" || claim.citations.some((c) => c.kind !== "commit")) continue;
-    const commits = [...commitsOf(claim)];
-    if (commits.length === 0) continue;
-    const covering = cited.find((c) => commits.every((sha) => c.commits.has(sha)));
+    const commits = commitsOf(claim);
+    const covering = cited.find((c) => coversCommits(c.commits, commits));
     if (covering === undefined) continue;
     replaced.set(claim.id, covering.id);
     if (claim.hook) hooked.add(covering.id);

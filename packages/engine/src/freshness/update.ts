@@ -1,7 +1,6 @@
 import type { Claim, Manifest, Revision } from "@repowiki/core";
 import type { FetchLike, Provider } from "@repowiki/llm";
 import type { ClusterOptions } from "../cluster/index.ts";
-import { isAncestor } from "../index/index.ts";
 import {
   codeAliases,
   featureNeighbours,
@@ -11,8 +10,10 @@ import {
 import { addAliases, type Store } from "../store/index.ts";
 import {
   type ArchitectureOutcome,
+  ancestry,
   assembleUpdate,
   type BuildJournal,
+  carriedHistory,
   checkTitles,
   type PageRewrite,
   type RewriteOutcome,
@@ -109,41 +110,6 @@ export class UpdateArticleError extends UpdateError {
 }
 
 /**
- * The History claims each whole-written feature carries forward (spec §5 rule 4, §6.3): those of
- * its own current page, then those of every page merged into it since that page was written (a
- * merge whose event its page's commit does not already contain), by feature id. Commit citations
- * never go stale, so the claims are carried as stored.
- */
-function carriedHistory(
-  repo: string,
-  manifest: Manifest,
-  whole: readonly string[],
-  pages: ReadonlyMap<string, Revision>,
-): Map<string, Claim[]> {
-  const historyOf = (page: Revision | undefined): Claim[] =>
-    page?.sections.find((s) => s.key === "history")?.claims ?? [];
-  const carry = new Map<string, Claim[]>();
-  for (const featureId of whole) {
-    const own = pages.get(featureId);
-    const merged = manifest.features
-      .filter((f) => f.status.kind === "redirect" && f.status.to === featureId)
-      .filter((f) =>
-        f.lineage.some(
-          (e) =>
-            e.kind === "merge" &&
-            e.into === featureId &&
-            (own === undefined || !isAncestor(repo, e.sha, own.sha)),
-        ),
-      )
-      .map((f) => f.id)
-      .sort();
-    const claims = [own, ...merged.map((id) => pages.get(id))].flatMap(historyOf);
-    if (claims.length > 0) carry.set(featureId, claims);
-  }
-  return carry;
-}
-
-/**
  * Moves the wiki from its head to index.sha (spec §6.1). planUpdate reads the diff and places
  * the new files with no call; the tie-break model settles the disputed ones; one constrained
  * manifest call runs if a feature drifted. Then one round of update calls for the dirty pages,
@@ -225,7 +191,14 @@ export async function updateWiki(
     ...(options.wikipediaFetch === undefined ? {} : { fetch: options.wikipediaFetch }),
     now,
   };
-  const carry = carriedHistory(input.repo, manifest, whole, pages);
+  // A whole page carries its own History and that of every page merged into it, transitively.
+  const ancestorOf = ancestry(history);
+  const carry = new Map(
+    whole.map((id) => {
+      const own = pages.get(id) ?? null;
+      return [id, carriedHistory(manifest, id, own, (f) => pages.get(f) ?? null, ancestorOf)];
+    }),
+  );
   const budget = options.budgetTokens === undefined ? {} : { budgetTokens: options.budgetTokens };
   // Both rounds issue their first calls in this tick, so they share one Message Batch.
   const [written, rewritten] = await Promise.all([
