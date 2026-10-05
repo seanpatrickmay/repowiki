@@ -1,4 +1,4 @@
-import { parseMemberId } from "@repowiki/core";
+import { type Claim, parseMemberId } from "@repowiki/core";
 import { INGEST_PY } from "@repowiki/core/test-fixtures";
 import { type GenerateRequest, LlmError, LlmOutputError, type Provider } from "@repowiki/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1042,9 +1042,47 @@ describe("updateWiki", () => {
           expect(historyOf("storage")).toEqual(bothParents());
         });
 
-        it("carries them on the next whole write of a page written at the merge without them", async () => {
-          await fillIn(await mergedIntoMissing());
-          // As a fill-in build stored the page before #357: at the merge, with no History.
+        it("restores, on its next whole write, what a page written at the merge lacks, as it can", async () => {
+          const merge = await mergedIntoMissing();
+          // Deliverables' page also tells of the paging branch PR 7 merged.
+          const commit = (await inputAt(repo, merge)).history.find((c) => c.sha === merge);
+          const branch = (await inputAt(repo, merge)).history.find(
+            (c) => c.sha === commit?.parents[1],
+          );
+          const deliverables = store.getCurrentRevision("deliverables");
+          if (branch === undefined || deliverables === null) throw new Error("no fixture");
+          store.putRevision({
+            ...deliverables,
+            id: "deliverables-paging",
+            parentId: deliverables.id,
+            reason: "update",
+            sections: deliverables.sections.map((s) =>
+              s.key === "history"
+                ? {
+                    ...s,
+                    claims: [
+                      ...s.claims,
+                      {
+                        ...(s.claims[0] as Claim),
+                        id: "c9",
+                        text: "Deliverables gained batch draining.",
+                        citations: [
+                          {
+                            kind: "commit",
+                            sha: branch.sha,
+                            subject: branch.subject,
+                            pr: branch.pr,
+                          },
+                        ],
+                      },
+                    ],
+                  }
+                : s,
+            ),
+          });
+          await fillIn(merge);
+          // As a fill-in build stored the page before #357: at the merge, with History of its own
+          // (here one claim citing the first commit) but none of deliverables'.
           const built = store.getCurrentRevision("storage");
           if (built === null) throw new Error("no page");
           store.putRevision({
@@ -1052,10 +1090,19 @@ describe("updateWiki", () => {
             id: "storage-without-history",
             parentId: built.id,
             reason: "update",
-            sections: built.sections.filter((s) => s.key !== "history"),
+            sections: built.sections.map((s) =>
+              s.key === "history"
+                ? { ...s, claims: s.claims.filter((c) => c.text.startsWith("Signal")) }
+                : s,
+            ),
           });
           await renameStorage();
-          expect(historyOf("storage")).toEqual(bothParents());
+          // The repair is best-effort: a claim citing only commits a kept claim already cites
+          // (deliverables' first one) reads as carried already, so only the other comes back.
+          expect(historyOf("storage")).toEqual([
+            ["Signal ingestion was added first.", [first]],
+            ["Deliverables gained batch draining.", [branch.sha]],
+          ]);
         });
 
         it("carries the History of a chain of merges one update made, each page's in turn", async () => {

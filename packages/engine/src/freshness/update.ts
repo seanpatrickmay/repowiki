@@ -10,6 +10,7 @@ import {
 import { addAliases, type Store } from "../store/index.ts";
 import {
   type ArchitectureOutcome,
+  ancestry,
   assembleUpdate,
   type BuildJournal,
   carriedHistory,
@@ -191,10 +192,11 @@ export async function updateWiki(
     now,
   };
   // A whole page carries its own History and that of every page merged into it, transitively.
+  const ancestorOf = ancestry(history);
   const carry = new Map(
     whole.map((id) => {
       const own = pages.get(id) ?? null;
-      return [id, carriedHistory(manifest, id, own, (f) => pages.get(f) ?? null, history)];
+      return [id, carriedHistory(manifest, id, own, (f) => pages.get(f) ?? null, ancestorOf)];
     }),
   );
   const budget = options.budgetTokens === undefined ? {} : { budgetTokens: options.budgetTokens };

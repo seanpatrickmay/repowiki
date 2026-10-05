@@ -13,17 +13,25 @@ const historyOf = (page: Revision | null): Claim[] =>
   page?.sections.find((s) => s.key === "history")?.claims ?? [];
 
 /**
- * Whether `history` (commits with their parents) reaches `ancestor` from `descendant`, itself
- * included. A descendant `history` does not hold contains nothing.
+ * Whether `ancestor` is `descendant` or an ancestor of it; undefined when either is outside the
+ * history it was made from (a shallow clone's, cut off before them).
  */
-function ancestry(history: readonly CommitInfo[]) {
-  const parents = new Map(history.map((c) => [c.sha, c.parents]));
+export type Ancestry = (ancestor: string, descendant: string) => boolean | undefined;
+
+/**
+ * The Ancestry of `history` (commits with their parents). Build it once per build or update: it
+ * reads `history` only on its first question, and remembers what it walked.
+ */
+export function ancestry(history: readonly CommitInfo[]): Ancestry {
+  let parents: Map<string, readonly string[]> | null = null;
   const reached = new Map<string, Set<string>>();
-  return (ancestor: string, descendant: string): boolean => {
+  return (ancestor, descendant) => {
+    parents ??= new Map(history.map((c) => [c.sha, c.parents]));
+    if (!parents.has(ancestor) || !parents.has(descendant)) return undefined;
     let seen = reached.get(descendant);
     if (seen === undefined) {
       seen = new Set();
-      const queue = parents.has(descendant) ? [descendant] : [];
+      const queue = [descendant];
       for (let sha = queue.pop(); sha !== undefined; sha = queue.pop()) {
         if (seen.has(sha)) continue;
         seen.add(sha);
@@ -55,19 +63,29 @@ function mergedInto(manifest: Manifest, into: string): { id: string; shas: strin
  * one, and so on: in a chain of merges one update made, no page in between was written to carry
  * them. Each feature is visited once, so a cycle in hostile lineage data ends the walk.
  *
- * A merged page whose every merge a page on its way to `featureId` (`own` included) already
- * contains, by `history` (every commit reachable from the wiki's sha), should already be in that
- * page's History, so only its claims whose commits no claim of those pages all cites are carried:
- * a claim carried before is not carried twice, and one a fill-in build never carried (#357) is.
+ * A merged page is contained when every merge of it is contained by a page on its way to
+ * `featureId` (`own` included) by `ancestorOf`, and every hop above it was contained too. Its
+ * History should then already be in those pages', so only its claims whose commits no claim of
+ * those pages all cites are carried: a claim carried before is not carried twice, and one a
+ * fill-in build never carried (#357) is, unless a claim already there cites all its commits (the
+ * repair is best-effort).
  */
 export function carriedHistory(
   manifest: Manifest,
   featureId: string,
   own: Revision | null,
   pageOf: (featureId: string) => Revision | null,
-  history: readonly CommitInfo[],
+  ancestorOf: Ancestry,
 ): Claim[] {
-  const contains = ancestry(history);
+  // A merge or page outside a shallow history cannot be placed. Taken as not contained, its page
+  // would be carried again on every whole write; so it is contained when the page already cites
+  // the merge's commit (a write after the merge tells of it), and otherwise carried again rather
+  // than risk losing it.
+  const contains = (sha: string, page: Revision): boolean =>
+    ancestorOf(sha, page.sha) ??
+    page.sections.some((s) =>
+      s.claims.some((c) => c.citations.some((x) => x.kind === "commit" && x.sha === sha)),
+    );
   const claims = [...historyOf(own)];
   const visited = new Set([featureId]);
   const walk = (into: string, path: readonly Revision[]): void => {
@@ -76,7 +94,7 @@ export function carriedHistory(
     for (const { id, shas } of merged) {
       const page = pageOf(id);
       const mine = historyOf(page);
-      const contained = shas.every((sha) => path.some((p) => contains(sha, p.sha)));
+      const contained = shas.every((sha) => path.some((p) => contains(sha, p)));
       // Compared only with the claims of the pages on its way, never with another merged page's
       // (two pages' History often cite the same commit, as their first), and by commits only: a
       // code citation of a copy carried before may have been remapped by an update since.
@@ -86,7 +104,10 @@ export function carriedHistory(
           ? mine.filter((claim) => !cited.some((by) => coversCommits(by, commitsOf(claim))))
           : mine),
       );
-      walk(id, page === null ? path : [...path, page]);
+      // Only a hop that was contained lets the pages above it vouch for the hops below: a page
+      // written after a deeper merge never carried that merge's History unless this hop did.
+      const kept = contained ? path : [];
+      walk(id, page === null ? kept : [...kept, page]);
     }
   };
   walk(featureId, own === null ? [] : [own]);

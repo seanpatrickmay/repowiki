@@ -9,7 +9,7 @@ import {
   type WrittenPages,
   writePages,
 } from "./build.ts";
-import { carriedHistory } from "./carry.ts";
+import { ancestry, carriedHistory } from "./carry.ts";
 
 export class WikiBuildError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -171,11 +171,10 @@ export async function buildWiki(
   let stored: Revision[] = [];
   if (missing.length > 0) {
     // A missing page has no History of its own: it carries that of every page merged into it.
+    const ancestorOf = ancestry(input.history);
+    const pageOf = (f: string) => store.getCurrentRevision(f);
     const carry = new Map(
-      missing.map((id) => [
-        id,
-        carriedHistory(manifest, id, null, (f) => store.getCurrentRevision(f), input.history),
-      ]),
+      missing.map((id) => [id, carriedHistory(manifest, id, null, pageOf, ancestorOf)]),
     );
     written = await writePages(
       { ...input, manifest, only: missing, carry },
