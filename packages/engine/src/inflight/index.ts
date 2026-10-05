@@ -42,6 +42,15 @@ export {
   type Suggest,
 } from "./issues.ts";
 export {
+  InFlightAnswer,
+  type SummaryOutcome,
+  type SummaryRequest,
+  summarize,
+  summaryRequest,
+  type Verified,
+  verifySummary,
+} from "./summary.ts";
+export {
   INFLIGHT_INSTRUCTIONS,
   INFLIGHT_MAX_OUTPUT_TOKENS,
   INFLIGHT_PACK_BUDGET_TOKENS,
