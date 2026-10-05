@@ -1,10 +1,17 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { cut, oneLine, type ToolDefinition, type ToolOutput, type ToolSet } from "@repowiki/query";
+import { z } from "zod";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol.ts";
 import { encodeMessage } from "./stdio.ts";
 
 /** How long a request waits for its reply before the client gives up on it. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+/** How long close() waits after ending the server's input before SIGTERM, and again before SIGKILL. */
+export const DEFAULT_CLOSE_GRACE_MS = 2_000;
+/** The most of the server's stderr kept (its end). */
+export const MAX_STDERR_CHARS = 64 * 1024;
+/** The longest line read from the server; a longer one is dropped to its end. */
+export const MAX_REPLY_LINE_CHARS = 4 * 1024 * 1024;
 
 /** The server failed to start, answered with an error, or did not answer in time. */
 export class McpClientError extends Error {
@@ -17,9 +24,13 @@ export class McpClientError extends Error {
 export interface McpClientOptions {
   command: string;
   args: readonly string[];
+  /** The server's environment (default: this process's), always without ANTHROPIC_ variables. */
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   timeoutMs?: number;
+  closeGraceMs?: number;
+  /** Told, one line each, of what the server wrote that is not a reply to a pending request. */
+  log?: (line: string) => void;
 }
 
 /** What the server said when it was initialized. */
@@ -39,72 +50,136 @@ export interface McpClient {
   info: McpServerInfo;
   listTools(): Promise<McpTool[]>;
   callTool(name: string, args: unknown): Promise<ToolOutput>;
-  /** What the server wrote to stderr so far. */
+  /** What the server wrote to stderr so far (at most its last MAX_STDERR_CHARS). */
   stderr(): string;
-  /** Ends the server's input and waits for it to exit. */
+  /**
+   * Ends the server's input and waits for it to exit: SIGTERM after closeGraceMs, SIGKILL after
+   * as long again. Always resolves; later calls reject.
+   */
   close(): Promise<{ code: number | null }>;
 }
 
-type Reply = { result?: unknown; error?: { code: number; message: string } };
+/** A reply to a request: an error, or a result object; never a request or a notification. */
+const Reply = z.union([
+  z.object({ id: z.int(), error: z.object({ code: z.int(), message: z.string() }) }),
+  z.object({ id: z.int(), result: z.record(z.string(), z.unknown()) }),
+]);
+type Reply = z.infer<typeof Reply>;
+
+const InitializeResult = z.object({
+  protocolVersion: z.string(),
+  serverInfo: z.object({ name: z.string(), version: z.string(), title: z.string().optional() }),
+  instructions: z.string().optional(),
+});
+const ToolsListResult = z.object({
+  tools: z.array(
+    z.object({
+      name: z.string(),
+      description: z.string().default(""),
+      inputSchema: z.looseObject({ type: z.literal("object") }),
+      title: z.string().optional(),
+      annotations: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ),
+});
+const CallToolResult = z.object({
+  content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+  isError: z.boolean().optional(),
+});
+
+/** The server's text as one short line, for an error message or a log line. */
+const shown = (text: string) => cut(oneLine(text), 200);
 
 /**
- * A minimal MCP client over stdio (spec v2 #5 §4): spawns the server, initializes it with the
- * newest protocol revision and sends notifications/initialized, then sends one request per call
- * and matches replies by id. For the eval's mcp agents and pnpm mcp:probe; no other feature.
+ * A minimal MCP client over stdio (spec v2 #5 §4): spawns the server (with no ANTHROPIC_
+ * variable in its environment), initializes it with the newest protocol revision and sends
+ * notifications/initialized, then sends one request per call and matches replies by id. Every
+ * line the server writes is checked as a reply; anything else is logged and ignored. A server
+ * that fails to initialize, or does not in time, is killed. For the eval's mcp agents and
+ * pnpm mcp:probe; no other feature.
  */
 export async function connectMcp(options: McpClientOptions): Promise<McpClient> {
+  const env = Object.fromEntries(
+    Object.entries(options.env ?? process.env).filter(([name]) => !name.startsWith("ANTHROPIC_")),
+  );
   const child: ChildProcessWithoutNullStreams = spawn(options.command, [...options.args], {
-    env: options.env,
+    env,
     cwd: options.cwd,
   });
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const graceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
+  const log = options.log ?? (() => {});
   const waiting = new Map<number, { resolve: (r: Reply) => void; reject: (e: Error) => void }>();
+  const failAll = (error: McpClientError) => {
+    for (const { reject } of waiting.values()) reject(error);
+    waiting.clear();
+  };
   let stderr = "";
   let buffered = "";
+  let dropping = false;
+  let closing = false;
   let exited: { code: number | null } | null = null;
+  let settle: (result: { code: number | null }) => void = () => {};
   const exit = new Promise<{ code: number | null }>((resolve) => {
-    child.on("close", (code) => {
-      exited = { code };
-      const last = stderr.trim().split("\n").at(-1) ?? "";
-      for (const { reject } of waiting.values()) {
-        reject(
-          new McpClientError(
-            `the MCP server exited (code ${code})${last === "" ? "" : `: ${last}`}`,
-          ),
-        );
-      }
-      waiting.clear();
-      resolve(exited);
-    });
+    settle = resolve;
+  });
+  const finish = (code: number | null, why: string) => {
+    if (exited !== null) return;
+    exited = { code };
+    failAll(new McpClientError(why));
+    settle(exited);
+  };
+  child.on("close", (code, signal) => {
+    const last = stderr.trim().split("\n").at(-1) ?? "";
+    const how = signal === null ? `code ${code}` : `signal ${signal}`;
+    finish(code, `the MCP server exited (${how})${last === "" ? "" : `: ${shown(last)}`}`);
   });
   child.on("error", (error) => {
-    for (const { reject } of waiting.values())
-      reject(new McpClientError(`cannot start the MCP server: ${error.message}`));
-    waiting.clear();
+    const why = `cannot start the MCP server: ${shown(error.message)}`;
+    if (child.pid === undefined) finish(null, why);
+    else failAll(new McpClientError(why));
+  });
+  child.stdin.on("error", (error) => {
+    failAll(new McpClientError(`cannot write to the MCP server: ${shown(error.message)}`));
   });
   child.stderr.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString("utf8");
+    stderr = (stderr + chunk.toString("utf8")).slice(-MAX_STDERR_CHARS);
   });
+  const take = (line: string) => {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      return log(`repowiki client: ignored a line that is not JSON: ${shown(line)}`);
+    }
+    const isRequest = typeof raw === "object" && raw !== null && "method" in raw;
+    const reply = isRequest ? null : Reply.safeParse(raw);
+    const pending = reply?.success === true ? waiting.get(reply.data.id) : undefined;
+    if (reply?.success !== true || pending === undefined) {
+      return log(
+        `repowiki client: ignored a line that is no pending request's reply: ${shown(line)}`,
+      );
+    }
+    waiting.delete(reply.data.id);
+    pending.resolve(reply.data);
+  };
   child.stdout.on("data", (chunk: Buffer) => {
     buffered += chunk.toString("utf8");
-    let nl = buffered.indexOf("\n");
-    while (nl !== -1) {
+    for (let nl = buffered.indexOf("\n"); nl !== -1; nl = buffered.indexOf("\n")) {
       const line = buffered.slice(0, nl);
       buffered = buffered.slice(nl + 1);
-      nl = buffered.indexOf("\n");
-      let reply: Reply & { id?: unknown };
-      try {
-        reply = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (typeof reply.id !== "number") continue;
-      waiting.get(reply.id)?.resolve(reply);
-      waiting.delete(reply.id);
+      if (dropping) dropping = false;
+      else take(line);
+    }
+    if (buffered.length > MAX_REPLY_LINE_CHARS) {
+      log(`repowiki client: dropped a line over ${MAX_REPLY_LINE_CHARS} characters`);
+      buffered = "";
+      dropping = true;
     }
   });
   let nextId = 0;
-  const request = (method: string, params?: unknown): Promise<unknown> => {
+  const request = (method: string, params?: unknown): Promise<Record<string, unknown>> => {
+    if (closing) return Promise.reject(new McpClientError("the MCP client is closed"));
     if (exited !== null) return Promise.reject(new McpClientError("the MCP server has exited"));
     const id = ++nextId;
     return new Promise((resolve, reject) => {
@@ -115,8 +190,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
       waiting.set(id, {
         resolve: (reply) => {
           clearTimeout(timer);
-          if (reply.error !== undefined)
-            reject(new McpClientError(`${method}: ${reply.error.message}`));
+          if ("error" in reply)
+            reject(new McpClientError(`${method}: ${shown(reply.error.message)}`));
           else resolve(reply.result);
         },
         reject: (error) => {
@@ -129,15 +204,42 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
       );
     });
   };
-  const init = (await request("initialize", {
-    protocolVersion: SUPPORTED_PROTOCOL_VERSIONS[0],
-    capabilities: {},
-    clientInfo: { name: "repowiki-client", version: "0.0.0" },
-  })) as {
-    protocolVersion: string;
-    serverInfo: McpServerInfo["serverInfo"];
-    instructions?: string;
+  /** A request's result, checked against `schema`. */
+  const ask = async <T>(schema: z.ZodType<T>, method: string, params?: unknown): Promise<T> => {
+    const result = schema.safeParse(await request(method, params));
+    if (!result.success)
+      throw new McpClientError(`${method}: the MCP server's result is not valid`);
+    return result.data;
   };
+  const close = () => {
+    if (!closing) {
+      closing = true;
+      failAll(new McpClientError("the MCP client is closed"));
+      if (exited === null) {
+        child.stdin.end();
+        const term = setTimeout(() => child.kill("SIGTERM"), graceMs);
+        const kill = setTimeout(() => child.kill("SIGKILL"), 2 * graceMs);
+        void exit.then(() => {
+          clearTimeout(term);
+          clearTimeout(kill);
+        });
+      }
+    }
+    return exit;
+  };
+  let init: z.infer<typeof InitializeResult>;
+  try {
+    init = await ask(InitializeResult, "initialize", {
+      protocolVersion: SUPPORTED_PROTOCOL_VERSIONS[0],
+      capabilities: {},
+      clientInfo: { name: "repowiki-client", version: "0.0.0" },
+    });
+  } catch (error) {
+    closing = true;
+    child.kill("SIGKILL");
+    await exit;
+    throw error;
+  }
   child.stdin.write(encodeMessage({ jsonrpc: "2.0", method: "notifications/initialized" }));
   return {
     info: {
@@ -146,22 +248,15 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
       instructions: init.instructions ?? null,
     },
     async listTools() {
-      const result = (await request("tools/list")) as { tools: McpTool[] };
-      return result.tools;
+      return (await ask(ToolsListResult, "tools/list")).tools;
     },
     async callTool(name, args) {
-      const result = (await request("tools/call", { name, arguments: args })) as {
-        content: { type: string; text?: string }[];
-        isError?: boolean;
-      };
+      const result = await ask(CallToolResult, "tools/call", { name, arguments: args });
       const text = result.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("");
       return { text, isError: result.isError === true };
     },
     stderr: () => stderr,
-    close() {
-      if (exited === null) child.stdin.end();
-      return exit;
-    },
+    close,
   };
 }
 
