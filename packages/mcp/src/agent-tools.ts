@@ -10,12 +10,14 @@ import {
   historyBegins,
   type LocalToolSet,
   listedPage,
+  MAX_SEARCH_RESULTS,
   MAX_TOOL_RESULT_CHARS,
   oneLine,
   parseAsOf,
   readPage,
   searchResults,
   type Tool,
+  ToolError,
   titleText,
   toolSet,
   type WikiView,
@@ -188,10 +190,14 @@ function viewFor(served: ServedWiki, asOfText: string | undefined) {
   return { ...served.at(asOf), asOf };
 }
 
+/** The most code points of a claim's reasons read_page shows, so one claim cannot fill a page. */
+const MAX_NOTE_CHARS = 600;
+
 /** A claim note for read_page: changed claims only (moved ones still hold). */
 function noteOf(mark: ClaimMark | undefined): string | null {
   if (mark?.kind !== "changed") return null;
-  return `(changed since the wiki's commit: ${mark.reasons.map((r) => oneLine(r)).join("; ")})`;
+  const reasons = mark.reasons.map((r) => oneLine(r)).join("; ");
+  return `(changed since the wiki's commit: ${cut(reasons, MAX_NOTE_CHARS)})`;
 }
 
 /** The freshness line read_page puts under a current page's revision line, or null. */
@@ -237,7 +243,10 @@ function readCurrent(served: ServedWiki, id: string): string {
   const sections = target.about ? view.article?.sections : target.revision?.sections;
   const revisionId = target.about ? view.article?.id : target.revision?.id;
   if (sections === undefined || revisionId === undefined) return readPage(view, id);
-  const marks = served.freshness.marks(revisionId, sections);
+  // At the wiki's own commit nothing can have changed: no marks, so no git either.
+  const status = served.freshness.status();
+  const marks =
+    status.compare === served.wiki.head ? new Map() : served.freshness.marks(revisionId, sections);
   const claims = sections.reduce((n, s) => n + s.claims.length, 0);
   return readPage(view, id, MAX_TOOL_RESULT_CHARS, {
     freshness: freshnessLine(served, marks, claims),
@@ -252,6 +261,7 @@ function readAsOf(served: ServedWiki, id: string, asOf: AsOf): string {
   try {
     target = revisionOf(then, id);
   } catch (error) {
+    if (!(error instanceof ToolError)) throw error;
     // Not in the wiki then: say where its history begins, when it has one now.
     const now = revisionOf(served.view, id);
     const first = now.about ? served.wiki.architecture[0] : served.wiki.history[now.id]?.[0];
@@ -279,7 +289,7 @@ export function wikiTools(served: () => ServedWiki): Tool[] {
   return [
     defineTool(
       "search",
-      `Search the wiki of this repository: one page per feature of the code, each claim citing the code lines or commits it rests on. Returns up to 8 pages, best match first, with each page's id, title and first lead sentence. ${AS_OF_HELP}.`,
+      `Search the wiki of this repository: one page per feature of the code, each claim citing the code lines or commits it rests on. Returns up to ${MAX_SEARCH_RESULTS} pages, best match first, with each page's id, title and first lead sentence. ${AS_OF_HELP}.`,
       z.strictObject({ query: z.string().trim().min(1).max(200), as_of: AS_OF.optional() }),
       ({ query, as_of }) => {
         const s = served();

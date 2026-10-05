@@ -1,6 +1,7 @@
 import type { Claim, WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { type SearchDoc, type SearchIndex, searchIndex } from "./search.ts";
+import { oneLine } from "./text.ts";
 import { defineTool, type LocalToolSet, toolSet } from "./tools.ts";
 import { readPage } from "./wiki-page.ts";
 import { ABOUT_PAGE_ID, listedPage, reference, WikiView } from "./wiki-view.ts";
@@ -75,9 +76,9 @@ export function searchResults(
   const lines = ids.map((id) => {
     const title = id === ABOUT_PAGE_ID ? (view.article?.title ?? "About") : view.title(id);
     const note = options.note?.(id) ?? null;
-    return `${listedPage(id, title, view.summary(id))}${note === null ? "" : ` ${note}`}`;
+    return `${listedPage(id, title, view.summary(id))}${note === null ? "" : ` ${oneLine(note)}`}`;
   });
-  return `${lines.join("\n")}\n${options.hint ?? "Read one with read_page(id)."}\n`;
+  return `${lines.join("\n")}\n${oneLine(options.hint ?? "Read one with read_page(id).")}\n`;
 }
 
 /**

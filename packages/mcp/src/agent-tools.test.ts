@@ -231,6 +231,52 @@ describe("read_page", () => {
     expect(renamed).not.toContain("Also called");
   });
 
+  it("refuses an as_of it cannot read, naming both forms or the missing commit", () => {
+    const set = tools();
+    expect(text(set, "read_page", { id: "signals", as_of: "yesterday" })).toBe(
+      "ERROR as_of must be a date YYYY-MM-DD or a commit sha of 7 to 40 hex characters",
+    );
+    expect(text(set, "read_page", { id: "signals", as_of: "2026-02-30" })).toMatch(/^ERROR /);
+    expect(text(set, "read_page", { id: "signals", as_of: "abcdef1" })).toMatch(/^ERROR .*abcdef1/);
+  });
+
+  it("caps a claim's note, so one claim cannot crowd out the page", () => {
+    const [signals] = h.wiki.pages;
+    if (signals === undefined) throw new Error("fixture");
+    const many = Array.from({ length: 200 }, (_, i) => ({
+      kind: "code" as const,
+      path: "src/signals/store.py",
+      startLine: 6,
+      endLine: 8,
+      sha: `${i % 2 === 0 ? h.commits.second : h.commits.third}`,
+      symbol: `save_signal_${i}`,
+      contentHash: "0".repeat(64),
+    }));
+    const wiki = WikiExport.parse({
+      ...h.wiki,
+      pages: h.wiki.pages.map((p) =>
+        p.featureId !== "signals"
+          ? p
+          : {
+              ...p,
+              sections: p.sections.map((s) =>
+                s.key !== "overview"
+                  ? s
+                  : {
+                      ...s,
+                      claims: s.claims.map((c) => (c.id === "s-3" ? { ...c, citations: many } : c)),
+                    },
+              ),
+            },
+      ),
+    });
+    const page = text(tools(null, wiki), "read_page", { id: "signals" });
+    const line = page.split("\n").find((l) => l.includes("save_signal` appends")) ?? "";
+    const note = line.slice(line.indexOf("(changed since"));
+    expect([...note].length).toBeLessThanOrEqual(640);
+    expect(note).toMatch(/\u2026\)$/);
+  });
+
   it("says where a page's history begins, and reads the About article as of a date", () => {
     const set = tools();
     expect(text(set, "read_page", { id: "deliverables", as_of: "2026-01-02" })).toBe(
