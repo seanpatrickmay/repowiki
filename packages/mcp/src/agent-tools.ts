@@ -16,6 +16,7 @@ import {
   readPage,
   searchResults,
   type Tool,
+  titleText,
   toolSet,
   type WikiView,
 } from "@repowiki/query";
@@ -126,11 +127,11 @@ function listPages(served: ServedWiki): string {
       });
     } else if (feature.status.kind === "redirect") {
       others.push(
-        `- ${feature.id} (${oneLine(feature.title)}): redirects to ${view.finalTarget(feature.id)}`,
+        `- ${feature.id} (${titleText(feature.title)}): redirects to ${view.finalTarget(feature.id)}`,
       );
     } else if (feature.status.kind === "disambiguation") {
       others.push(
-        `- ${feature.id} (${oneLine(feature.title)}): may refer to ${feature.status.to.join(", ")}`,
+        `- ${feature.id} (${titleText(feature.title)}): may refer to ${feature.status.to.join(", ")}`,
       );
     }
   }

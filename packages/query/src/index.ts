@@ -46,4 +46,11 @@ export {
   pageSearchIndex,
   searchResults,
 } from "./wiki-tools.ts";
-export { ABOUT_PAGE_ID, listedPage, type Resolved, reference, WikiView } from "./wiki-view.ts";
+export {
+  ABOUT_PAGE_ID,
+  listedPage,
+  type Resolved,
+  reference,
+  titleText,
+  WikiView,
+} from "./wiki-view.ts";

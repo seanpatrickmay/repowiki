@@ -1,6 +1,6 @@
 import type { Feature, LineageEvent, Revision, WikiExport } from "@repowiki/core";
 import { ToolError } from "./tools.ts";
-import { WikiView } from "./wiki-view.ts";
+import { titleText, WikiView } from "./wiki-view.ts";
 
 /**
  * A point in the wiki's past (spec v2 #5 R9): a calendar date, compared with the date written in
@@ -150,7 +150,7 @@ function lineagePhrase(event: LineageEvent): string {
     case "create":
       return `created ${at}`;
     case "rename":
-      return `renamed from ${JSON.stringify(event.fromTitle)} ${at}`;
+      return `renamed from ${JSON.stringify(titleText(event.fromTitle))} ${at}`;
     case "merge":
       return `merged into ${event.into} ${at}`;
     case "split":

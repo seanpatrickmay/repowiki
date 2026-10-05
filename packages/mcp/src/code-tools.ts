@@ -21,6 +21,7 @@ import {
   revisionEntry,
   type Tool,
   ToolError,
+  titleText,
   type WikiView,
 } from "@repowiki/query";
 import { z } from "zod";
@@ -103,7 +104,7 @@ function pagesForFile(served: ServedWiki, raw: string): string {
           .map((s) => oneLine(s))
           .join(", ")}${owner.symbols.length > 5 ? ", …" : ""}`;
     lines.push(
-      `- Owned by ${featureId} (${oneLine(view.title(featureId))}), weight ${owner.weight}, ${what}.`,
+      `- Owned by ${featureId} (${titleText(view.title(featureId))}), weight ${owner.weight}, ${what}.`,
     );
   }
   const citing: string[] = [];
@@ -117,7 +118,7 @@ function pagesForFile(served: ServedWiki, raw: string): string {
       .filter((r) => r !== null);
     if (refs.length > 0) {
       const title = id === ABOUT_PAGE_ID ? (view.article?.title ?? "About") : view.title(id);
-      citing.push(`- Cited by ${id} (${oneLine(title)}): references ${refs.join(", ")}.`);
+      citing.push(`- Cited by ${id} (${titleText(title)}): references ${refs.join(", ")}.`);
     }
   }
   lines.push(...citing);
@@ -245,7 +246,7 @@ function pageChanges(
   const before = history[a];
   const after = history[b];
   if (before === undefined || after === undefined) throw new ToolError(`${id} has no revisions`);
-  const heading = `Changes to ${oneLine(title)} (page id: ${id})`;
+  const heading = `Changes to ${titleText(title)} (page id: ${id})`;
   if (history.length === 1) {
     return `${heading}: the page has one revision, ${revisionEntry(after)}; nothing to compare it with.\n`;
   }
