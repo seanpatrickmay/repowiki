@@ -34,6 +34,7 @@
     "@repowiki/engine": "workspace:*",
     "@repowiki/eval": "workspace:*",
     "@repowiki/llm": "workspace:*",
+    "@repowiki/mcp": "workspace:*",
     "@repowiki/query": "workspace:*",
     "@types/node": "24.19.0",
     "typescript": "7.0.2",

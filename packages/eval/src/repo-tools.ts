@@ -1,12 +1,5 @@
-import { spawnSync } from "node:child_process";
-import {
-  assertSha,
-  GitError,
-  gitFailureCause,
-  listBlobs,
-  scrubbedGitEnv,
-  type TreeBlob,
-} from "@repowiki/engine";
+import { assertSha, GitError, gitFailureCause, listBlobs, type TreeBlob } from "@repowiki/engine";
+import { runGit, topLevel } from "@repowiki/mcp";
 import {
   count,
   cut,
@@ -37,36 +30,6 @@ const GREP_MAX_BUFFER = 32 * 1024 * 1024;
 const GREP_TIMEOUT_MS = 10_000;
 /** Room left under MAX_TOOL_RESULT_CHARS for a tool's own last line. */
 const BUDGET = MAX_TOOL_RESULT_CHARS - 300;
-
-/**
- * Runs read-only git in `repo` with the engine's scrubbed environment (no redirection, no config
- * or pathspec rules from the environment, no lazy fetch). A git that cannot start is a GitError;
- * a timeout or an output overflow (ENOBUFS, also when git exits just before the kill) is left for
- * the caller to read from `signal` and `error`.
- */
-function git(repo: string, args: readonly string[], timeout?: number, maxBuffer = 1 << 30) {
-  const result = spawnSync("git", ["-C", repo, ...args], {
-    env: scrubbedGitEnv(),
-    maxBuffer,
-    timeout,
-  });
-  const error = result.error as NodeJS.ErrnoException | undefined;
-  if (error !== undefined && result.signal === null && error.code !== "ENOBUFS") {
-    throw new GitError(`could not run git: ${error.message}`);
-  }
-  return result;
-}
-
-/**
- * The top level of the work tree `repo` is in (or `repo` itself, for a bare repository), so a
- * directory inside a repository gives the whole repository: grep then names every path from the
- * root, as list_files and read_file do.
- */
-function topLevel(repo: string): string {
-  const result = git(repo, ["rev-parse", "--show-toplevel"]);
-  const top = result.status === 0 ? result.stdout.toString("utf8").trim() : "";
-  return top === "" ? repo : top;
-}
 
 /** A path the model gave, as a repository path: "./", a leading "/" and a trailing "/" dropped. */
 function repoPath(path: string): string {
@@ -129,7 +92,7 @@ function readFile(repo: string, blobs: ReadonlyMap<string, TreeBlob>, input: Rea
       `${shown(path)} is ${blob.size} bytes, over the ${MAX_READ_BYTES}-byte limit for read_file; grep it instead`,
     );
   }
-  const result = git(repo, ["cat-file", "blob", blob.oid]);
+  const result = runGit(repo, ["cat-file", "blob", blob.oid]);
   if (result.status !== 0) throw new GitError(`git cat-file failed for ${blob.oid} in ${repo}`);
   const bytes = result.stdout;
   if (bytes.subarray(0, 8000).includes(0))
@@ -189,7 +152,7 @@ function grep(repo: string, sha: string, input: GrepInput, timeoutMs: number): s
   ];
   if (input.ignore_case === true) args.push("-i");
   args.push("-e", input.pattern, sha, "--", path === "" ? "." : path);
-  const result = git(repo, args, timeoutMs, GREP_MAX_BUFFER);
+  const result = runGit(repo, args, timeoutMs, GREP_MAX_BUFFER);
   if (result.error !== undefined && "code" in result.error && result.error.code === "ENOBUFS") {
     throw new ToolError("grep produced too much output; narrow the pattern or the path");
   }
