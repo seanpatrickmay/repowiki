@@ -3,23 +3,31 @@ import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
 const seen = vi.hoisted(() => ({
   calls: [] as { oids: string[]; holdLimit: number }[],
+  spawned: [] as string[][],
   mode: "real" as "real" | "short" | "wrongOid" | "held",
 }));
+vi.mock("node:child_process", async (importOriginal) => {
+  const real: typeof import("node:child_process") = await importOriginal();
+  return {
+    ...real,
+    spawn: ((command: string, args: readonly string[], ...rest: unknown[]) => {
+      seen.spawned.push([command, ...args]);
+      return (real.spawn as (...a: unknown[]) => unknown)(command, args, ...rest);
+    }) as typeof real.spawn,
+  };
+});
 vi.mock("./git.ts", async (importOriginal) => {
   const real: typeof import("./git.ts") = await importOriginal();
   return {
     ...real,
     streamBlobs: async function* (repo: string, oids: readonly string[], holdLimit: number) {
       seen.calls.push({ oids: [...oids], holdLimit });
-      let count = 0;
       for await (const blob of real.streamBlobs(repo, oids, holdLimit)) {
         if (seen.mode === "short") return;
-        count++;
         if (seen.mode === "wrongOid") yield { ...blob, oid: "f".repeat(40) };
         else if (seen.mode === "held") yield { ...blob, content: null };
         else yield blob;
       }
-      return count;
     },
   };
 });
@@ -31,6 +39,7 @@ let repo: TestRepo;
 beforeEach(() => {
   repo = createTestRepo();
   seen.calls = [];
+  seen.spawned = [];
   seen.mode = "real";
 });
 afterEach(() => repo.remove());
@@ -53,12 +62,16 @@ describe("readSources reads blobs as a stream", () => {
     expect(seen.calls[0]?.holdLimit).toBe(100);
     expect(seen.calls[0]?.oids).toHaveLength(new Set(seen.calls[0]?.oids).size);
     expect(seen.calls[0]?.oids).toHaveLength(3);
+    expect(seen.spawned).toHaveLength(1);
+    expect(seen.spawned[0]).toContain("cat-file");
   });
 
   it("does not start git for a tree with nothing to read", async () => {
     repo.write("big.txt", "z".repeat(500));
     const sha = repo.commit("files");
     expect([...(await readSources(repo.dir, sha, 100))]).toEqual([]);
+    expect(seen.calls.every((call) => call.oids.length === 0)).toBe(true);
+    expect(seen.spawned).toEqual([]);
   });
 
   it("throws GitError when git returns fewer blobs than were requested", async () => {

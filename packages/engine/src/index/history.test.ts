@@ -65,7 +65,7 @@ describe("readHistory", () => {
     expect(prs).toEqual({ [merge]: 9, [topic]: 9, [direct]: null, [base]: null });
   });
 
-  it("refuses anything but a 40-hex sha before it reaches git", async () => {
+  it("refuses anything but a 40-hex sha before it reaches git", () => {
     repo.write("a.py", "x = 1\n");
     repo.commit("init");
     for (const bad of ["HEAD", "main", "--all", "-n1", "abc123", "A".repeat(40)]) {
