@@ -46,6 +46,15 @@ export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.Proce
     if (CONFIG_INJECTING_GIT_ENV.test(name)) delete env[name];
   }
   env.GIT_NO_LAZY_FETCH = "1";
+  // English messages, whatever the user's locale: the causes below are read from git's own words.
+  // LC_ALL and LANGUAGE would override LC_MESSAGES, so they go; the user's character-type locale
+  // (what `git grep -i` and -E use on non-ASCII text) stays, with an LC_ALL folded into LC_CTYPE.
+  if (env.LC_ALL !== undefined && env.LC_ALL !== "" && env.LC_CTYPE === undefined) {
+    env.LC_CTYPE = env.LC_ALL;
+  }
+  delete env.LC_ALL;
+  delete env.LANGUAGE;
+  env.LC_MESSAGES = "C";
   return env;
 }
 
@@ -60,6 +69,61 @@ function spawnError(error: NodeJS.ErrnoException): GitError {
   return new GitError(`could not run git: ${error.message}`);
 }
 
+/** One printable line: control and format characters (newlines, escapes, bidi marks) become spaces. */
+function printable(text: string): string {
+  return text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").trim();
+}
+
+/**
+ * What git says when the scrubbed environment (no lazy fetch) leaves it without an object
+ * (promisor-remote.c): a warning line, then `fatal: could not fetch <oid> from promisor remote`.
+ * Anchored to whole lines: git echoes caller text (a pattern, a rev) in other messages.
+ */
+const PARTIAL_CLONE_STDERR =
+  /^warning: lazy fetching disabled; |^fatal: could not fetch [0-9a-f]{40,64} from promisor remote$/m;
+/** What git says when it refuses a repository another user owns (setup.c), a line of its own. */
+const UNSAFE_REPOSITORY_STDERR = /^fatal: detected dubious ownership in repository at /m;
+
+const PARTIAL_CLONE_CAUSE =
+  "a partial clone is missing an object, and RepoWiki reads without fetching missing objects; " +
+  "use a full clone or run git fetch --refetch";
+
+function unsafeRepositoryCause(repo: string): string {
+  return (
+    "git treats the repository as unsafe (owned by another user); RepoWiki ignores safe.directory " +
+    "given through the environment, so run git config --global --add safe.directory " +
+    `'${printable(repo).replace(/'/g, "'\\''")}'`
+  );
+}
+
+/**
+ * The cause git's stderr names that RepoWiki's own environment brings about (an unsafe repository,
+ * a partial clone's missing object), as one printable clause; undefined when it names neither.
+ * With `unreadableObject`, a partial clone is named whatever git's stderr says.
+ */
+export function gitFailureCause(
+  repo: string,
+  stderr: string,
+  options: { unreadableObject?: boolean } = {},
+): string | undefined {
+  if (UNSAFE_REPOSITORY_STDERR.test(stderr)) return unsafeRepositoryCause(repo);
+  if (PARTIAL_CLONE_STDERR.test(stderr)) return PARTIAL_CLONE_CAUSE;
+  // `unreadableObject`: the caller knows the failure is a read that went wrong (git grep's exit 1
+  // with a message), whatever git's wording; in a partial clone that is a missing blob.
+  if (options.unreadableObject === true && isPartialClone(repo)) return PARTIAL_CLONE_CAUSE;
+  return undefined;
+}
+
+/** True when `repo` is a partial clone: a remote is marked promisor, or extensions.partialClone names one. */
+function isPartialClone(repo: string): boolean {
+  const config = (...args: string[]) =>
+    spawnSync("git", ["-C", repo, "config", ...args], { env: scrubbedGitEnv() });
+  const named = config("--get", "extensions.partialClone");
+  if (named.status === 0 && (named.stdout?.toString("utf8").trim() ?? "") !== "") return true;
+  const promisors = config("--get-regexp", "^remote\\..*\\.promisor$");
+  return promisors.status === 0 && /\btrue\s*$/im.test(promisors.stdout?.toString("utf8") ?? "");
+}
+
 /** Runs a read-only git command against `repo`; never touches its working tree or index. */
 export function git(repo: string, args: readonly string[]): Buffer {
   const result = spawnSync("git", ["-C", repo, ...args], {
@@ -68,8 +132,12 @@ export function git(repo: string, args: readonly string[]): Buffer {
   });
   if (result.error) throw spawnError(result.error);
   if (result.status !== 0) {
+    const stderr = result.stderr.toString("utf8").trim();
+    const cause = gitFailureCause(repo, stderr);
     throw new GitError(
-      `git ${args[0]} failed in ${repo}: ${result.stderr.toString("utf8").trim()}`,
+      cause === undefined
+        ? `git ${args[0]} failed in ${repo}: ${stderr}`
+        : `git ${args[0]} failed in ${printable(repo)}: ${cause}`,
     );
   }
   return result.stdout;
@@ -94,6 +162,9 @@ export function resolveCommit(repo: string, rev: string): string {
   );
   if (out.error) throw spawnError(out.error);
   const sha = out.stdout?.toString("utf8").trim() ?? "";
+  if (out.status !== 0 && UNSAFE_REPOSITORY_STDERR.test(out.stderr?.toString("utf8") ?? "")) {
+    throw new GitError(`git failed in ${printable(repo)}: ${unsafeRepositoryCause(repo)}`);
+  }
   if (out.status !== 0 || !isSha(sha)) {
     throw new GitError(`${repo}: "${rev}" does not name a commit`);
   }
@@ -276,7 +347,12 @@ export async function* streamBlobs(
     }
     if (code === 0) return null;
     const why = stderr.trim() || (signal === null ? `exit status ${code}` : `signal ${signal}`);
-    return new GitError(`git cat-file failed in ${repo}: ${why}`);
+    const cause = gitFailureCause(repo, stderr);
+    return new GitError(
+      cause === undefined
+        ? `git cat-file failed in ${repo}: ${why}`
+        : `git cat-file failed in ${printable(repo)}: ${cause}`,
+    );
   };
 
   const feed = async (): Promise<void> => {
@@ -299,6 +375,9 @@ export async function* streamBlobs(
         if (line === null) break;
         const [oid, type, sizeText] = line.split(" ");
         const size = Number(sizeText);
+        if (type === "missing" && oid !== undefined && isPartialClone(repo)) {
+          throw new GitError(`object ${printable(oid)} is missing: ${PARTIAL_CLONE_CAUSE}`);
+        }
         if (oid === undefined || type !== "blob" || !Number.isSafeInteger(size) || size < 0) {
           throw new GitError(`unexpected cat-file header: ${line}`);
         }

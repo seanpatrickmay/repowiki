@@ -17,9 +17,17 @@ const SUMMARY_LENGTH = 200;
 
 const TOKEN = /`([^`]+)`|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
-/** Text with every bracket that would open a reference or page mark made a parenthesis. */
+/**
+ * Text with every bracket that would open a reference or page mark made a parenthesis. A `[n]`
+ * straight after a letter, digit, `_`, `]` or `)` is an index in prose (`items[0]`, `grid[i][0]`),
+ * not a mark: the page puts its own marks after a space, so those stay as written.
+ */
 const unmark = (text: string) =>
-  text.replace(/\[(?=\s*(?:\d+\s*\]|pages?\s*:))/gi, "(").replace(/\((\d+)\s*\]/g, "($1)");
+  text
+    .replace(/(^|[^\p{L}\p{N}_\])])((?:\[\s*\d+\s*\])+)/gu, (_all, before: string, run: string) => {
+      return before + run.replace(/\[\s*(\d+)\s*\]/g, "($1)");
+    })
+    .replace(/\[(?=\s*pages?\s*:)/giu, "(");
 
 /** A page in a list (search results, choices): its id, title and summary, punctuated once. */
 export function listedPage(id: string, title: string, summary: string): string {
@@ -91,7 +99,7 @@ export class WikiView {
    * Claim text for the agent: links name their page id, so the agent can read it next. Text the
    * claim writes itself that imitates a mark the page adds (a reference `[1]`, `[page: id]`,
    * `[pages: ...]`) has its bracket made a parenthesis, so only the page's own marks look like marks;
-   * code spans are left as they are.
+   * code spans and indexes in prose (`items[0]`) are left as they are.
    */
   text(claimText: string): string {
     let linked = "";

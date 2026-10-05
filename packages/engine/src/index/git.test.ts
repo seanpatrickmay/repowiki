@@ -104,6 +104,37 @@ describe("scrubbedGitEnv", () => {
   });
 });
 
+describe("scrubbedGitEnv locale", () => {
+  const NAMES = ["LC_ALL", "LANGUAGE", "LC_MESSAGES", "LC_CTYPE", "LANG"] as const;
+
+  function withLocale(values: Partial<Record<(typeof NAMES)[number], string>>) {
+    const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
+    try {
+      for (const name of NAMES) delete process.env[name];
+      Object.assign(process.env, values);
+      return scrubbedGitEnv();
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }
+
+  it("asks for English messages: LC_MESSAGES=C, with LC_ALL and LANGUAGE (which override it) removed", () => {
+    const env = withLocale({ LC_ALL: "de_DE.UTF-8", LANGUAGE: "de", LC_MESSAGES: "de_DE.UTF-8" });
+    expect(env.LC_MESSAGES).toBe("C");
+    expect(env.LC_ALL).toBeUndefined();
+    expect(env.LANGUAGE).toBeUndefined();
+  });
+
+  it("keeps the user's character-type locale, folding an LC_ALL into LC_CTYPE", () => {
+    expect(withLocale({ LANG: "en_US.UTF-8" }).LANG).toBe("en_US.UTF-8");
+    expect(withLocale({ LC_CTYPE: "en_US.UTF-8", LC_ALL: "C" }).LC_CTYPE).toBe("en_US.UTF-8");
+    expect(withLocale({ LC_ALL: "en_US.UTF-8" }).LC_CTYPE).toBe("en_US.UTF-8");
+  });
+});
+
 describe("listBlobs", () => {
   it("lists regular files with awkward names, sorted by path", () => {
     repo.write("src/my file.py", "a = 1\n");
