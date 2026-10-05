@@ -20,6 +20,7 @@ describe("parseEvalArgs", () => {
       repo: "../repo",
       questions: "q.json",
       set: "dev",
+      agents: null,
       out: null,
       runDir: null,
       turnLimit: DEFAULT_TURN_LIMIT,
@@ -133,6 +134,7 @@ describe("estimateEval", () => {
       questions: selectQuestions(loadQuestions(SMOKE_QUESTIONS).file, "smoke"),
       repoName: "sample",
       turnLimit: 15,
+      agents: ["wiki", "repo"] as const,
       tools: {
         wiki: createWikiTools(sample.wiki).definitions,
         repo: createRepoTools(sample.repo.dir, sample.sha).definitions,
@@ -176,14 +178,58 @@ describe("estimateEval", () => {
   it("prints one line", () => {
     const line = estimateLine(estimateEval(input()), { turnLimit: 15, maxUsd: 5, batch: true });
     expect(line).toMatch(
-      /^3 questions to both agents: about \$\d+\.\d\d \(assuming 4 wiki and 8 repo turns a question, no cache hits\), at most \$\d+\.\d\d if every question takes all 15 turns with full tool results; judging about \$\d+\.\d\d \(batched\), at most \$\d+\.\d\d if every judgment is retried; no question is asked once the run has spent \$5\.00 \(--max-usd\)$/,
+      /^3 questions to the wiki and repo agents: about \$\d+\.\d\d \(wiki \$\d+\.\d\d at 4 turns, repo \$\d+\.\d\d at 8 turns a question, no cache hits\), at most \$\d+\.\d\d if every question takes all 15 turns with full tool results; judging about \$\d+\.\d\d \(batched\), at most \$\d+\.\d\d if every judgment is retried; no question is asked once the run has spent \$5\.00 \(--max-usd\)$/,
     );
     const short = estimateLine(estimateEval(input({ turnLimit: 3, batchJudge: false })), {
       turnLimit: 3,
       maxUsd: 5,
       batch: false,
     });
-    expect(short).toContain("(assuming 3 wiki and 3 repo turns a question, no cache hits)");
+    expect(short).toMatch(
+      /\(wiki \$\d+\.\d\d at 3 turns, repo \$\d+\.\d\d at 3 turns a question, no cache hits\)/,
+    );
     expect(short).not.toContain("(batched)");
+  });
+
+  it("estimates each asked agent, the mcp ones from the server's tool definitions", () => {
+    // Six tools with long descriptions, as the server lists them: a longer prefix than the wiki's.
+    const mcpTools = Array.from({ length: 6 }, (_, i) => ({
+      name: `tool_${i}`,
+      description: "x".repeat(400),
+      inputSchema: { type: "object" as const },
+    }));
+    const four = estimateEval(
+      input({
+        agents: ["wiki", "repo", "mcp", "repo+mcp"],
+        tools: {
+          ...input().tools,
+          mcp: mcpTools,
+          "repo+mcp": [...(input().tools.repo ?? []), ...mcpTools],
+        },
+      }),
+    );
+    expect(Object.keys(four.byAgent)).toEqual(["wiki", "repo", "mcp", "repo+mcp"]);
+    const sum = Object.values(four.byAgent).reduce((a, b) => a + (b ?? 0), 0);
+    expect(four.agentsUsd).toBeCloseTo(sum, 10);
+    expect(four.byAgent.mcp ?? 0).toBeGreaterThan(four.byAgent.wiki ?? 0);
+    expect(four.byAgent["repo+mcp"] ?? 0).toBeLessThan(four.byAgent.repo ?? 0);
+    const line = estimateLine(four, { turnLimit: 15, maxUsd: 5, batch: true });
+    expect(line).toMatch(
+      /^3 questions to the wiki, repo, mcp and repo\+mcp agents: about \$\d+\.\d\d \(wiki \$\d+\.\d\d at 4 turns, repo \$\d+\.\d\d at 8 turns, mcp \$\d+\.\d\d at 4 turns, repo\+mcp \$\d+\.\d\d at 6 turns a question/,
+    );
+  });
+});
+
+describe("parseAgents", () => {
+  it("reads --agents as a list of agent kinds, each once", () => {
+    const parse = (agents: string) =>
+      parseEvalArgs(["r", "--questions", "q", "--set", "dev", "--agents", agents]).agents;
+    expect(parse("wiki,repo,mcp,repo+mcp")).toEqual(["wiki", "repo", "mcp", "repo+mcp"]);
+    expect(parse(" mcp , repo+mcp ")).toEqual(["mcp", "repo+mcp"]);
+    expect(() => parse("wiki,grep")).toThrow(
+      "--agents takes a comma-separated list of wiki, repo, mcp, repo+mcp",
+    );
+    expect(() => parse("mcp,mcp")).toThrow("--agents lists mcp twice");
+    expect(() => parse("")).toThrow(CliError);
   });
 });

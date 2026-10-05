@@ -27,6 +27,7 @@ export {
 } from "./search.ts";
 export { count, cut, markdownText, oneLine, toolText } from "./text.ts";
 export {
+  combineToolSets,
   defineTool,
   type LocalToolSet,
   MAX_TOOL_ERROR_CHARS,

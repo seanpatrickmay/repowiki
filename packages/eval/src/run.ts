@@ -5,7 +5,6 @@ import { JudgeError, judgeAnswer } from "./judge.ts";
 import { type AgentKind, agentSystemPrompt } from "./prompts.ts";
 import type { EvalQuestion } from "./questions.ts";
 import {
-  AGENTS,
   type AnswerRecord,
   appendRecord,
   checkRecords,
@@ -19,8 +18,8 @@ import {
 export interface EvalRunOptions {
   runDir: string;
   info: RunInfo;
-  wikiTools: ToolSet;
-  repoTools: ToolSet;
+  /** Each asked agent's tools (info.agents); a ToolSet may answer later (the MCP client's). */
+  tools: Partial<Readonly<Record<AgentKind, ToolSet>>>;
   agents: ToolProvider;
   judge: Provider;
   /** Send the judge calls as one Message Batch (half price); the agents' turns never are. */
@@ -79,21 +78,29 @@ async function settleAll<T>(
   return settled;
 }
 
+/** "a", "a and b", "a, b and c". */
+const listed = (items: readonly string[]) =>
+  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
 const key = (r: { questionId: string; agent: AgentKind }) => `${r.questionId}\0${r.agent}`;
 
 /**
- * Runs a set (spec §9): each question to both agents (side by side, the same model and turn
- * limit), each answer recorded as soon as it exists, then every unjudged answer judged, the
+ * Runs a set (spec §9): each question to every agent of info.agents (side by side, the same
+ * model and turn limit), each answer recorded as soon as it exists, then every unjudged answer judged, the
  * judge calls together so they can go as one batch (with --no-batch, at most
  * MAX_DIRECT_JUDGE_CALLS at a time). A rerun with the same run directory resumes: it asks only
  * questions an agent has not answered and judges only unjudged answers, so no question of a
  * held-out set is asked twice. A judgment that fails is recorded with what it cost.
  */
 export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
-  const { runDir, wikiTools, repoTools, agents, judge } = options;
+  const { runDir, agents, judge } = options;
   const now = options.now ?? (() => new Date());
   const log = options.log ?? (() => {});
   const info = openRun(runDir, options.info);
+  for (const agent of info.agents) {
+    if (options.tools[agent] === undefined)
+      throw new EvalRunError(`no tools for the ${agent} agent`);
+  }
   const records = readRecords(runDir);
   checkRecords(runDir, info, records);
   const append = (record: RunRecord) => {
@@ -103,7 +110,7 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   const answered = new Set(records.flatMap((r) => (r.kind === "answer" ? [key(r)] : [])));
   const unaskedQuestions = () =>
     info.questions.some((q) =>
-      AGENTS.some((agent) => !answered.has(key({ questionId: q.id, agent }))),
+      info.agents.some((agent) => !answered.has(key({ questionId: q.id, agent }))),
     );
   const unjudgedAnswers = () => {
     const judged = new Set(records.flatMap((r) => (r.kind === "judgment" ? [key(r)] : [])));
@@ -118,9 +125,8 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   if (unaskedQuestions() || unjudgedAnswers().length > 0) requirePrice(info.models.evalJudge);
   let spent = 0;
   let stopped: EvalRunResult["stopped"] = null;
-  const tools = { wiki: wikiTools, repo: repoTools };
   for (const [i, question] of info.questions.entries()) {
-    const pending = AGENTS.filter(
+    const pending = info.agents.filter(
       (agent) => !answered.has(key({ questionId: question.id, agent })),
     );
     if (pending.length === 0) continue;
@@ -132,14 +138,14 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
       break;
     }
     log(
-      `[${i + 1}/${info.questions.length}] ${question.id}: asking the ${pending.join(" and ")} agent${pending.length > 1 ? "s" : ""}`,
+      `[${i + 1}/${info.questions.length}] ${question.id}: asking the ${listed(pending)} agent${pending.length > 1 ? "s" : ""}`,
     );
     const outcomes = await Promise.allSettled(
       pending.map((agent) =>
         runAgent({
           provider: agents,
           system: agentSystemPrompt(agent, info.repo, info.turnLimit),
-          tools: tools[agent],
+          tools: options.tools[agent] as ToolSet,
           question: question.question,
           turnLimit: info.turnLimit,
         }),

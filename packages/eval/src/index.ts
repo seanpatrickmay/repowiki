@@ -1,5 +1,6 @@
 export {
   ABOUT_PAGE_ID,
+  combineToolSets,
   createWikiTools,
   MAX_TOOL_RESULT_CHARS,
   type ToolSet,
@@ -20,6 +21,12 @@ export {
   MAX_RETRY_PROBLEM_CHARS,
   retryTurn,
 } from "./judge.ts";
+export {
+  MCP_SERVE_SCRIPT,
+  type McpAgentTools,
+  type McpAgentToolsOptions,
+  openMcpTools,
+} from "./mcp-tools.ts";
 export { type AgentKind, ANSWER_WORDS, agentSystemPrompt, questionTurn } from "./prompts.ts";
 export {
   EvalQuestion,
@@ -38,8 +45,10 @@ export {
 } from "./questions.ts";
 export {
   AGENTS,
+  Agent,
   AnswerRecord,
   appendRecord,
+  DEFAULT_AGENTS,
   EvalRunError,
   JudgmentRecord,
   openRun,

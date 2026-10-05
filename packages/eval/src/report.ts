@@ -5,7 +5,6 @@ import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import type { QuestionKind } from "./questions.ts";
 import {
-  AGENTS,
   checkRecords,
   createOnce,
   EvalRunError,
@@ -37,6 +36,13 @@ const usd = (x: number) => `$${x.toFixed(4)}`;
 /** Model or author text in the report: one line of plain text, cut short (markdownText). */
 const cell = (text: string, max = 120) => markdownText(text, max);
 const KINDS: readonly QuestionKind[] = ["where", "how", "why", "what-changed"];
+/** Each agent's name in a table heading. */
+const LABELS: Readonly<Record<AgentKind, string>> = {
+  wiki: "Wiki",
+  repo: "Repo",
+  mcp: "MCP",
+  "repo+mcp": "Repo+MCP",
+};
 
 /** The run's report for the owner (spec §9): accuracy, tokens, the pass test and the break-even point. */
 export function renderReport(
@@ -65,8 +71,8 @@ export function renderReport(
     );
   }
   if (!complete) {
-    const missing = AGENTS.reduce((s, a) => s + n - agents[a].answered, 0);
-    const unjudged = AGENTS.reduce((s, a) => s + agents[a].answered - agents[a].judged, 0);
+    const missing = info.agents.reduce((s, a) => s + n - agents[a].answered, 0);
+    const unjudged = info.agents.reduce((s, a) => s + agents[a].answered - agents[a].judged, 0);
     lines.push(
       `Incomplete: ${missing} answers and ${unjudged} judgments missing. Run pnpm eval:run again with the same run directory to finish; no question is asked twice.`,
       "",
@@ -75,13 +81,14 @@ export function renderReport(
   lines.push(
     "| Agent | Correct | Accuracy | Tokens per question | Cost per question | Answered on the last turn |",
     "|---|---:|---:|---:|---:|---:|",
-    ...AGENTS.map((a) => {
+    ...info.agents.map((a) => {
       const s = agents[a];
       return `| ${a} | ${s.correct} of ${n} | ${s.accuracy === null ? "-" : percent(s.accuracy)} | ${s.tokensPerQuestion === null ? "-" : count(s.tokensPerQuestion)} | ${s.usdPerQuestion === null ? "-" : usd(s.usdPerQuestion)} | ${s.lastTurn} |`;
     }),
     "",
   );
-  if (complete && agents.repo.correct === 0) {
+  const v1 = info.agents.includes("wiki") && info.agents.includes("repo");
+  if (complete && v1 && agents.repo.correct === 0) {
     lines.push(
       "## Pass test (spec \u00A79)",
       "",
@@ -105,7 +112,12 @@ export function renderReport(
     );
   }
   lines.push("## Break-even", "");
-  if (info.buildTokens === null) {
+  if (!v1) {
+    lines.push(
+      "Not stated: the break-even compares the wiki and repo agents, and this run did not ask both.",
+      "",
+    );
+  } else if (info.buildTokens === null) {
     lines.push(
       "Unknown: the export this run read records no build run. Re-run pnpm wiki:export to include build tokens before the next run.",
       "",
@@ -127,41 +139,41 @@ export function renderReport(
   lines.push(
     "## By kind",
     "",
-    "| Kind | Questions | Wiki correct | Repo correct |",
-    "|---|---:|---:|---:|",
+    `| Kind | Questions | ${info.agents.map((a) => `${LABELS[a]} correct`).join(" | ")} |`,
+    `|---|---:|${info.agents.map(() => "---:").join("|")}|`,
   );
   for (const kind of KINDS) {
     const of = info.questions.filter((q) => q.kind === kind);
     if (of.length === 0) continue;
     const right = (a: AgentKind) =>
       of.filter((q) => judgments.get(`${q.id}\0${a}`)?.score === 1).length;
-    lines.push(`| ${kind} | ${of.length} | ${right("wiki")} | ${right("repo")} |`);
+    lines.push(`| ${kind} | ${of.length} | ${info.agents.map(right).join(" | ")} |`);
   }
   lines.push(
     "",
     "## Questions",
     "",
-    "| Question | Kind | Wiki | Repo | Wiki tokens | Repo tokens | Wiki turns | Repo turns |",
-    "|---|---|---:|---:|---:|---:|---:|---:|",
+    `| Question | Kind | ${[...info.agents.map((a) => LABELS[a]), ...info.agents.map((a) => `${LABELS[a]} tokens`), ...info.agents.map((a) => `${LABELS[a]} turns`)].join(" | ")} |`,
+    `|---|---|${info.agents.flatMap(() => ["---:", "---:", "---:"]).join("|")}|`,
   );
   for (const q of info.questions) {
     const at = (a: AgentKind) => ({
       a: answers.get(`${q.id}\0${a}`),
       j: judgments.get(`${q.id}\0${a}`),
     });
-    const w = at("wiki");
-    const r = at("repo");
-    const score = (x: typeof w) => (x.j === undefined ? "-" : String(x.j.score));
-    const tokens = (x: typeof w) => (x.a === undefined ? "-" : count(tokensOf(x.a.usage)));
-    const turns = (x: typeof w) => (x.a === undefined ? "-" : String(x.a.turns));
+    const rows = info.agents.map(at);
+    const score = (x: (typeof rows)[number]) => (x.j === undefined ? "-" : String(x.j.score));
+    const tokens = (x: (typeof rows)[number]) =>
+      x.a === undefined ? "-" : count(tokensOf(x.a.usage));
+    const turns = (x: (typeof rows)[number]) => (x.a === undefined ? "-" : String(x.a.turns));
     lines.push(
-      `| ${cell(q.id)} | ${q.kind} | ${score(w)} | ${score(r)} | ${tokens(w)} | ${tokens(r)} | ${turns(w)} | ${turns(r)} |`,
+      `| ${cell(q.id)} | ${q.kind} | ${[...rows.map(score), ...rows.map(tokens), ...rows.map(turns)].join(" | ")} |`,
     );
   }
   lines.push("", "## The judge's reasons", "");
   for (const q of info.questions) {
     lines.push(`- ${cell(q.id)}: ${cell(q.question, 200)}`);
-    for (const a of AGENTS) {
+    for (const a of info.agents) {
       const j = judgments.get(`${q.id}\0${a}`);
       if (j !== undefined) lines.push(`  - ${a} (${j.score}): ${cell(j.reason, 500)}`);
     }

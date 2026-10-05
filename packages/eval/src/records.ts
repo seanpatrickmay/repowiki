@@ -17,8 +17,11 @@ import { JudgeVerdict } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import { EvalQuestion, QuestionSet } from "./questions.ts";
 
-const Agent = z.enum(["wiki", "repo"] satisfies AgentKind[]);
+export const Agent = z.enum(["wiki", "repo", "mcp", "repo+mcp"] satisfies AgentKind[]);
+/** Every agent kind, in the order reports list them. */
 export const AGENTS: readonly AgentKind[] = Agent.options;
+/** The agents a run asks unless --agents says otherwise: M7's two, so a v1 run is unchanged. */
+export const DEFAULT_AGENTS: readonly AgentKind[] = ["wiki", "repo"];
 
 /** What a run is: the questions, the wiki and repository, and the settings both agents share. */
 export const RunInfo = z.object({
@@ -32,6 +35,12 @@ export const RunInfo = z.object({
   /** The author's statement of when he wrote the questions; null for the smoke set. */
   writtenOn: z.iso.date().nullable(),
   turnLimit: z.int().positive(),
+  /** The agents asked, each once per question; a run.json from M7 has none and means wiki, repo. */
+  agents: z
+    .array(Agent)
+    .min(1)
+    .refine((a) => new Set(a).size === a.length, "an agent is listed twice")
+    .default([...DEFAULT_AGENTS]),
   models: z.object({ evalAgent: z.string().min(1), evalJudge: z.string().min(1) }),
   /** The build's tokens from the export's runs (all four classes), or null when it has none. */
   buildTokens: z.int().nonnegative().nullable(),
@@ -128,6 +137,9 @@ export function openRun(runDir: string, info: RunInfo): RunInfo {
     if (stored[field] !== info[field]) {
       throw new EvalRunError(`${runDir} holds another run: its ${field} differs from this one's`);
     }
+  }
+  if (stored.agents.join(",") !== info.agents.join(",")) {
+    throw new EvalRunError(`${runDir} holds another run: its agents differ from this one's`);
   }
   if (
     stored.models.evalAgent !== info.models.evalAgent ||

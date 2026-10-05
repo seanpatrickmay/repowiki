@@ -11,11 +11,16 @@ import {
   WikiBuildError,
 } from "@repowiki/engine";
 import {
+  type AgentKind,
   buildTokensOf,
+  combineToolSets,
   createRepoTools,
   createWikiTools,
+  DEFAULT_AGENTS,
   EvalRunError,
   loadQuestions,
+  type McpAgentTools,
+  openMcpTools,
   QuestionFileError,
   RUN_INFO_FILE,
   type RunInfo,
@@ -23,6 +28,7 @@ import {
   readRunInfo,
   selectQuestions,
   summarize,
+  type ToolSet,
   writeReport,
 } from "@repowiki/eval";
 import { createClaudeToolProvider, createLedger } from "@repowiki/llm";
@@ -51,6 +57,9 @@ import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
  * Message Batch is journaled in the wiki store (<out>/wiki.db, as wiki:build does), so a run
  * killed while it is in flight collects that batch on a rerun (with --run-dir, for the dev set).
  */
+/** The MCP server the mcp agents use, when they run; closed however the run ends. */
+const started: { mcp: McpAgentTools | null } = { mcp: null };
+
 async function main(): Promise<void> {
   const args = parseEvalArgs(process.argv.slice(2));
   const repo = resolve(args.repo);
@@ -125,11 +134,25 @@ async function main(): Promise<void> {
       );
     }
   }
+  const agents = args.agents ?? [...DEFAULT_AGENTS];
+  // The mcp agents use the MCP server through its real stdio transport, pinned at the wiki's head
+  // (spec v2 #5 R19). A dry run starts it too: the estimate counts its tool definitions. The
+  // server makes no call and writes nothing.
+  if (agents.some((a) => a === "mcp" || a === "repo+mcp")) {
+    started.mcp = await openMcpTools({ repo, out, compareTo: wiki.head });
+  }
+  const mcp = started.mcp;
+  const tools: Partial<Record<AgentKind, ToolSet>> = {
+    wiki: wikiTools,
+    repo: repoTools,
+    ...(mcp === null ? {} : { mcp: mcp.tools, "repo+mcp": combineToolSets(repoTools, mcp.tools) }),
+  };
   const estimate = estimateEval({
     questions,
     repoName: wiki.repo,
     turnLimit: args.turnLimit,
-    tools: { wiki: wikiTools.definitions, repo: repoTools.definitions },
+    agents,
+    tools: Object.fromEntries(agents.map((a) => [a, tools[a]?.definitions ?? []])),
     models,
     batchJudge: args.batch,
   });
@@ -171,6 +194,7 @@ async function main(): Promise<void> {
       questionsHash: loaded.hash,
       writtenOn: loaded.file.suite === "exit-criteria" ? loaded.file.writtenOn : null,
       turnLimit: args.turnLimit,
+      agents,
       models: { evalAgent: models.evalAgent, evalJudge: models.evalJudge },
       buildTokens: buildTokensOf(wiki),
       questions,
@@ -181,8 +205,7 @@ async function main(): Promise<void> {
     const result = await runEvalJournaled(journal, {
       runDir,
       info,
-      wikiTools,
-      repoTools,
+      tools,
       agents: createClaudeToolProvider({ models, ledger, runId }),
       judge: createJudgeProvider({ models, ledger, runId, journal, log }),
       batchJudge: args.batch,
@@ -208,5 +231,7 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
+  await started.mcp?.close();
   exitWithError(err);
 }
+await started.mcp?.close();

@@ -63,6 +63,7 @@ function info(): RunInfo {
     questionsHash: "f".repeat(64),
     writtenOn: null,
     turnLimit: 4,
+    agents: ["wiki", "repo"],
     models: { evalAgent: "claude-haiku-4-5", evalJudge: "claude-haiku-4-5" },
     buildTokens: null,
     questions,
@@ -87,8 +88,10 @@ function options(overrides: Partial<EvalRunOptions>): EvalRunOptions {
   return {
     runDir: join(dir, "run"),
     info: info(),
-    wikiTools: createWikiTools(sample.wiki),
-    repoTools: createRepoTools(sample.repo.dir, sample.sha),
+    tools: {
+      wiki: createWikiTools(sample.wiki),
+      repo: createRepoTools(sample.repo.dir, sample.sha),
+    },
     agents: answeringAgents({ n: 0 }),
     judge: { generate: () => Promise.reject(new Error("no judge")) },
     batchJudge: true,

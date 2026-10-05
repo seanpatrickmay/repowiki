@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { estimateTokens } from "@repowiki/engine";
 import {
+  Agent,
   type AgentKind,
   ANSWER_WORDS,
   agentSystemPrompt,
@@ -35,7 +36,7 @@ import { CliError } from "./manifest-cli.ts";
 import { badOption, once, priced, problemLine } from "./wiki-cli.ts";
 
 export const EVAL_USAGE =
-  "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|smoke [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
+  "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|smoke [--agents wiki,repo,mcp,repo+mcp] [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
 
 /** Both agents' turn limit unless --turns says otherwise (spec \u00A79: the same for both). */
 export const DEFAULT_TURN_LIMIT = 15;
@@ -49,6 +50,8 @@ export interface EvalArgs {
   repo: string;
   questions: string;
   set: QuestionSet;
+  /** --agents, in the order given; null when not given (the set's default). */
+  agents: AgentKind[] | null;
   out: string | null;
   runDir: string | null;
   turnLimit: number;
@@ -94,6 +97,7 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
     repo,
     questions,
     set: set.data,
+    agents: parseAgents(once("--agents", v.agents, EVAL_USAGE)),
     out: once("--out", v.out, EVAL_USAGE) ?? null,
     runDir,
     turnLimit: turns,
@@ -112,6 +116,7 @@ function parse(argv: readonly string[]) {
     options: {
       questions: { type: "string", multiple: true },
       set: { type: "string", multiple: true },
+      agents: { type: "string", multiple: true },
       out: { type: "string", multiple: true },
       "run-dir": { type: "string", multiple: true },
       turns: { type: "string", multiple: true },
@@ -133,8 +138,16 @@ export function runDirFor(out: string, set: QuestionSet, runDir: string | null, 
   return runDir ?? join(out, "eval", `${set}-${now.toISOString().replace(/[:.]/g, "-")}`);
 }
 
-/** Turns an agent is assumed to take on a typical question: the wiki agent searches and reads. */
-export const ASSUMED_TURNS: Readonly<Record<AgentKind, number>> = { wiki: 4, repo: 8 };
+/**
+ * Turns an agent is assumed to take on a typical question: the wiki and mcp agents search and
+ * read; the repo agent lists, greps and reads; repo+mcp reads the wiki first, then less code.
+ */
+export const ASSUMED_TURNS: Readonly<Record<AgentKind, number>> = {
+  wiki: 4,
+  repo: 8,
+  mcp: 4,
+  "repo+mcp": 6,
+};
 /** Tokens a typical turn adds to the conversation: one tool call and its result. */
 export const ASSUMED_TURN_GROWTH = 2_700;
 /** Output tokens of a typical turn, and of a judgment. */
@@ -147,9 +160,12 @@ const conversation = (prefix: number, growth: number, turns: number) =>
 
 export interface EvalEstimate {
   questions: number;
-  /** Both agents on every question, with the assumed turns and no cache hits. */
+  agents: readonly AgentKind[];
+  /** Every agent on every question, with the assumed turns and no cache hits. */
   agentsUsd: number;
-  /** Both agents on every question taking every turn with full tool results, no cache hits. */
+  /** The same, per agent. */
+  byAgent: Readonly<Partial<Record<AgentKind, number>>>;
+  /** Every agent on every question taking every turn with full tool results, no cache hits. */
   ceilingUsd: number;
   judgeUsd: number;
   /** Every judgment retried once, each answer as long as the judge reads, at its output cap. */
@@ -160,7 +176,9 @@ export interface EvalEstimateInput {
   questions: readonly EvalQuestion[];
   repoName: string;
   turnLimit: number;
-  tools: Readonly<Record<AgentKind, readonly ToolDefinition[]>>;
+  agents: readonly AgentKind[];
+  /** Each asked agent's tool definitions. */
+  tools: Readonly<Partial<Record<AgentKind, readonly ToolDefinition[]>>>;
   models: Pick<ModelConfig, "evalAgent" | "evalJudge">;
   batchJudge: boolean;
 }
@@ -173,23 +191,26 @@ export function estimateEval(input: EvalEstimateInput): EvalEstimate {
   const { turnLimit, models } = input;
   const ceilingGrowth = estimateTokens("x".repeat(MAX_TOOL_RESULT_CHARS)) + MAX_TURN_OUTPUT_TOKENS;
   let agentsUsd = 0;
+  const byAgent: Partial<Record<AgentKind, number>> = {};
   let ceilingUsd = 0;
   let judgeUsd = 0;
   let judgeCeilingUsd = 0;
   for (const question of input.questions) {
-    for (const agent of ["wiki", "repo"] as const) {
+    for (const agent of input.agents) {
       const prefix = estimateTokens(
         agentSystemPrompt(agent, input.repoName, turnLimit) +
-          JSON.stringify(input.tools[agent]) +
+          JSON.stringify(input.tools[agent] ?? []) +
           questionTurn(question.question),
       );
       const turns = Math.min(ASSUMED_TURNS[agent], turnLimit);
-      agentsUsd += priced(
+      const typical = priced(
         models.evalAgent,
         conversation(prefix, ASSUMED_TURN_GROWTH, turns),
         turns * ASSUMED_TURN_OUTPUT,
         false,
       );
+      agentsUsd += typical;
+      byAgent[agent] = (byAgent[agent] ?? 0) + typical;
       ceilingUsd += priced(
         models.evalAgent,
         conversation(prefix, ceilingGrowth, turnLimit),
@@ -217,21 +238,46 @@ export function estimateEval(input: EvalEstimateInput): EvalEstimate {
   }
   return {
     questions: input.questions.length,
+    agents: input.agents,
     agentsUsd,
+    byAgent,
     ceilingUsd,
     judgeUsd,
     judgeCeilingUsd,
   };
 }
 
-/** The estimate as the one line eval:run prints before any call. */
+/** "a", "a and b", "a, b and c". */
+const listed = (items: readonly string[]) =>
+  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
+/** The estimate as the one line eval:run prints before any call, each agent's share named. */
 export function estimateLine(
   estimate: EvalEstimate,
   args: Pick<EvalArgs, "turnLimit" | "maxUsd" | "batch">,
 ): string {
   const money = (x: number) => `$${x.toFixed(2)}`;
   const turns = (agent: AgentKind) => Math.min(ASSUMED_TURNS[agent], args.turnLimit);
-  return `${estimate.questions} questions to both agents: about ${money(estimate.agentsUsd)} (assuming ${turns("wiki")} wiki and ${turns("repo")} repo turns a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}, at most ${money(estimate.judgeCeilingUsd)} if every judgment is retried; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+  const shares = estimate.agents.map(
+    (a) => `${a} ${money(estimate.byAgent[a] ?? 0)} at ${turns(a)} turns`,
+  );
+  return `${estimate.questions} questions to the ${listed(estimate.agents)} agent${estimate.agents.length === 1 ? "" : "s"}: about ${money(estimate.agentsUsd)} (${shares.join(", ")} a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}, at most ${money(estimate.judgeCeilingUsd)} if every judgment is retried; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+}
+
+/** --agents: a comma-separated list of agent kinds, each once; null when not given. */
+export function parseAgents(text: string | undefined): AgentKind[] | null {
+  if (text === undefined) return null;
+  const names = text.split(",").map((name) => name.trim());
+  const agents: AgentKind[] = [];
+  for (const name of names) {
+    const agent = Agent.safeParse(name);
+    if (!agent.success) {
+      throw fail(`--agents takes a comma-separated list of ${Agent.options.join(", ")}`);
+    }
+    if (agents.includes(agent.data)) throw fail(`--agents lists ${agent.data} twice`);
+    agents.push(agent.data);
+  }
+  return agents;
 }
 
 /**

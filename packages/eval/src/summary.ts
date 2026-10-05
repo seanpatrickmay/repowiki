@@ -42,12 +42,14 @@ export interface AgentStats {
 
 export interface EvalSummary {
   info: RunInfo;
+  /** Every agent kind's figures; an agent the run did not ask has none answered. */
   agents: Record<AgentKind, AgentStats>;
-  /** Every question answered by both agents, and every answer judged. */
+  /** Every question answered by every asked agent, and every answer judged. */
   complete: boolean;
   /**
-   * Spec §9's two conditions, when the run is complete and the repo agent got at least one answer
-   * right (at 0, 90% of its accuracy is 0 and any wiki accuracy would meet it).
+   * Spec §9's two conditions, when the run asked the wiki and repo agents, is complete, and the
+   * repo agent got at least one answer right (at 0, 90% of its accuracy is 0 and any wiki
+   * accuracy would meet it).
    */
   pass: { accuracy: boolean; tokens: boolean } | null;
   /**
@@ -99,8 +101,12 @@ export function summarize(info: RunInfo, records: readonly RunRecord[]): EvalSum
       lastTurn: mine.filter((m) => m.a.stop === "turn-limit").length,
     };
   };
-  const agents = { wiki: stats("wiki"), repo: stats("repo") };
-  const complete = AGENTS.every((a) => agents[a].judged === n);
+  const agents = Object.fromEntries(AGENTS.map((a) => [a, stats(a)])) as Record<
+    AgentKind,
+    AgentStats
+  >;
+  const complete = info.agents.every((a) => agents[a].judged === n);
+  const v1 = info.agents.includes("wiki") && info.agents.includes("repo");
   const { wiki, repo } = agents;
   // Once complete, both agents answered all n questions: compare whole-number totals, exactly.
   const total = (agent: AgentKind) =>
@@ -109,13 +115,13 @@ export function summarize(info: RunInfo, records: readonly RunRecord[]): EvalSum
       return sum + (a === undefined ? 0 : tokensOf(a.usage));
     }, 0);
   const pass =
-    complete && repo.correct > 0
+    complete && v1 && repo.correct > 0
       ? {
           accuracy: 100 * wiki.correct >= ACCURACY_PERCENT * repo.correct,
           tokens: 100 * total("wiki") <= TOKEN_PERCENT * total("repo"),
         }
       : null;
-  const saved = complete ? total("repo") - total("wiki") : null;
+  const saved = complete && v1 ? total("repo") - total("wiki") : null;
   const breakEven =
     info.buildTokens === null || saved === null
       ? null

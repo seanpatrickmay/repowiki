@@ -35,6 +35,7 @@ function info(overrides: Partial<RunInfo> = {}): RunInfo {
     questionsHash: "f".repeat(64),
     writtenOn: null,
     turnLimit: 4,
+    agents: ["wiki", "repo"],
     models: { evalAgent: "claude-haiku-4-5", evalJudge: "claude-haiku-4-5" },
     buildTokens: 50_000,
     questions,
@@ -76,8 +77,10 @@ function options(overrides: Partial<EvalRunOptions> = {}): EvalRunOptions {
   return {
     runDir: dir,
     info: info(),
-    wikiTools: createWikiTools(sample.wiki),
-    repoTools: createRepoTools(sample.repo.dir, sample.sha),
+    tools: {
+      wiki: createWikiTools(sample.wiki),
+      repo: createRepoTools(sample.repo.dir, sample.sha),
+    },
     // Every agent answers at once, naming the agent from its system prompt.
     agents: scriptedToolProvider([], (_q, request) => ({
       answer: request.system.includes("wiki") ? "wiki answer" : "repo answer",

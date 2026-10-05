@@ -3,13 +3,7 @@ import { z } from "zod";
 import { judgedAnswer, visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import { QuestionSet } from "./questions.ts";
-import {
-  AGENTS,
-  EvalRunError,
-  type JudgmentRecord,
-  type RunInfo,
-  type RunRecord,
-} from "./records.ts";
+import { EvalRunError, type JudgmentRecord, type RunInfo, type RunRecord } from "./records.ts";
 import { latestRecords } from "./summary.ts";
 
 /** Spec §9: the author spot-checks 10 of the judgments. */
@@ -56,7 +50,7 @@ export function spotCheckEntry(startedAt: string, questionId: string, agent: Age
 }
 
 /**
- * Ten judgments for the owner to grade (spec §9), drawn evenly from both agents in an order fixed
+ * Ten judgments for the owner to grade (spec §9), drawn evenly from the run's agents in an order fixed
  * by the run's start time, so the sample does not depend on which answers the judge got right; the
  * file lists them by entry key, so their order does not tell the agents apart either. The
  * question, reference and answer are shown as the judge read them (`visibleText`, the answer cut
@@ -67,7 +61,7 @@ export function spotCheckSample(info: RunInfo, records: readonly RunRecord[]): S
   const { answers, judgments } = latestRecords(records);
   const questions = new Map(info.questions.map((q) => [q.id, q]));
   const entry = (j: JudgmentRecord) => spotCheckEntry(info.startedAt, j.questionId, j.agent);
-  const byAgent = AGENTS.map((agent) =>
+  const byAgent = info.agents.map((agent) =>
     [...judgments.values()]
       .filter((j) => j.agent === agent)
       .sort((a, b) => entry(a).localeCompare(entry(b)) || a.questionId.localeCompare(b.questionId)),
