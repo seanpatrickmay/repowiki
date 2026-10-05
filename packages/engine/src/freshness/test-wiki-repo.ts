@@ -29,7 +29,7 @@ export async function inputAt(repo: TestRepo, sha: string): Promise<UpdateInput>
   return {
     repo: repo.dir,
     index: await indexRepo(repo.dir, sha),
-    sources: readSources(repo.dir, sha, DEFAULT_MAX_FILE_BYTES),
+    sources: await readSources(repo.dir, sha, DEFAULT_MAX_FILE_BYTES),
     history: readHistory(repo.dir, sha),
   };
 }
