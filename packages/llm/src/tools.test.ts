@@ -182,6 +182,36 @@ describe("createClaudeToolProvider", () => {
     ]);
   });
 
+  it("forces one named tool, with one call, and refuses a tool the turn does not have", async () => {
+    const answer: ToolDefinition = {
+      name: "answer",
+      description: "Answers.",
+      inputSchema: { type: "object", properties: { text: { type: "string" } } },
+    };
+    const { bodies, fetch } = cannedTurns([
+      { type: "tool_use", id: "tu_3", name: "answer", input: { text: "In ingest.py." } },
+    ]);
+    const { provider } = setup(fetch);
+    const result = await provider.turn({
+      ...request,
+      tools: [search, answer],
+      toolChoice: { tool: "answer" },
+      cache: false,
+    });
+    expect(bodies[0]?.tool_choice).toEqual({
+      type: "tool",
+      name: "answer",
+      disable_parallel_tool_use: true,
+    });
+    expect(result.content).toEqual([
+      { type: "tool_use", id: "tu_3", name: "answer", input: { text: "In ingest.py." } },
+    ]);
+    await expect(provider.turn({ ...request, toolChoice: { tool: "answer" } })).rejects.toThrow(
+      new LlmError("the turn forces tool answer, which is not one of its tools"),
+    );
+    expect(bodies).toHaveLength(1);
+  });
+
   it("never sends an empty or whitespace-only text block, which the API refuses", async () => {
     const { bodies, fetch } = cannedTurns([{ type: "text", text: "ok" }], "end_turn");
     const { provider } = setup(fetch);

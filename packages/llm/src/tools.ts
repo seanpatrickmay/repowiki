@@ -48,8 +48,11 @@ export interface TurnRequest {
   tools: readonly ToolDefinition[];
   messages: readonly TurnMessage[];
   maxTokens: number;
-  /** "auto": the model may call at most one tool this turn; "none": it must answer in text. */
-  toolChoice: "auto" | "none";
+  /**
+   * "auto": the model may call at most one tool this turn; "none": it must answer in text;
+   * `{ tool }`: it must call exactly that tool, once (the Ask sidebar's forced `answer`).
+   */
+  toolChoice: "auto" | "none" | { tool: string };
   /**
    * Put a cache breakpoint on the last block, so the next turn of the conversation reads this
    * prefix from the cache. A prefix under the model's minimum (4,096 tokens on Haiku 4.5) is
@@ -129,6 +132,17 @@ function messageParams(request: TurnRequest): MessageParam[] {
   return messages;
 }
 
+/** A turn's tool choice as the API takes it; a forced tool must be one of the turn's tools. */
+function toolChoiceParam(request: TurnRequest): MessageCreateParamsNonStreaming["tool_choice"] {
+  const choice = request.toolChoice;
+  if (choice === "none") return { type: "none" };
+  if (choice === "auto") return { type: "auto", disable_parallel_tool_use: true };
+  if (!request.tools.some((tool) => tool.name === choice.tool)) {
+    throw new LlmError(`the turn forces tool ${choice.tool}, which is not one of its tools`);
+  }
+  return { type: "tool", name: choice.tool, disable_parallel_tool_use: true };
+}
+
 /**
  * The Claude API tool-use provider: the role's model, the tools, at most one tool call per turn
  * (so a turn limit bounds the tool calls), and one ledger row per turn. No thinking is requested.
@@ -152,10 +166,7 @@ export function createClaudeToolProvider(options: ToolProviderOptions): ToolProv
           description: tool.description.toWellFormed(),
           input_schema: tool.inputSchema,
         })),
-        tool_choice:
-          request.toolChoice === "none"
-            ? { type: "none" }
-            : { type: "auto", disable_parallel_tool_use: true },
+        tool_choice: toolChoiceParam(request),
         messages: messageParams(request),
         ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       };
