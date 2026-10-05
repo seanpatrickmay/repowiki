@@ -25,7 +25,7 @@ export {
   searchIndex,
   terms,
 } from "./search.ts";
-export { count, cut, markdownText, oneLine, toolText } from "./text.ts";
+export { andList, count, cut, markdownText, oneLine, toolText } from "./text.ts";
 export {
   combineToolSets,
   defineTool,
@@ -38,6 +38,7 @@ export {
   type ToolOutput,
   type ToolSet,
   toolSet,
+  unknownTool,
 } from "./tools.ts";
 export { type PageOptions, readPage, referenceList, SECTION_TITLES } from "./wiki-page.ts";
 export {
@@ -46,4 +47,11 @@ export {
   pageSearchIndex,
   searchResults,
 } from "./wiki-tools.ts";
-export { ABOUT_PAGE_ID, listedPage, type Resolved, reference, WikiView } from "./wiki-view.ts";
+export {
+  ABOUT_PAGE_ID,
+  listedPage,
+  type Resolved,
+  reference,
+  titleText,
+  WikiView,
+} from "./wiki-view.ts";

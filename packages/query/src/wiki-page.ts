@@ -1,7 +1,7 @@
 import type { Architecture, Citation, Claim, Revision } from "@repowiki/core";
 import { count, cut, oneLine, toolText } from "./text.ts";
 import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
-import { ABOUT_PAGE_ID, listedPage, reference, type WikiView } from "./wiki-view.ts";
+import { ABOUT_PAGE_ID, listedPage, reference, titleText, type WikiView } from "./wiki-view.ts";
 
 /** Every section key's title, a feature page's and the About article's. */
 export const SECTION_TITLES: Readonly<Record<string, string>> = {
@@ -132,24 +132,22 @@ function renderFeaturePage(
       ? "retired: the feature is no longer in the code, and this is its last page"
       : "active";
   const lines = [
-    `${oneLine(view.title(featureId))} (page id: ${featureId})`,
+    `${titleText(view.title(featureId))} (page id: ${featureId})`,
     ...(from === null ? [] : [`(Redirected from ${cut(oneLine(from), 80)})`]),
     ...(options.banner ?? []).map(oneLine),
     `Status: ${status}. This revision: commit ${sha7(page.sha)}, ${date(page.commitDate)}.`,
-    ...(options.freshness === undefined || options.freshness === null
-      ? []
-      : [oneLine(options.freshness)]),
+    ...freshnessLines(options),
     ...((feature?.aliases.length ?? 0) > 0
-      ? [`Also called: ${listed(feature?.aliases ?? [], 80).join("; ")}`]
+      ? [`Also called: ${listed((feature?.aliases ?? []).map(titleText), 80).join("; ")}`]
       : []),
     `Infobox: ${count(box.files, "file")}, ${count(box.loc, "line")}; languages: ${listed(box.languages, 80).join(", ") || "none"}; entry points: ${listed(box.entryPoints, 200).join(", ") || "none"}; first commit ${date(box.firstCommitDate)}, last commit ${date(box.lastCommitDate)}.`,
-    ...renderSections(view, page.sections, options.claimNote ?? (() => null)),
+    ...renderSections(view, page.sections, claimNoteOf(options)),
   ];
   const seeAlso = page.seeAlso.filter((id) => view.hasRoute(id));
   const seeAlsoLine =
     seeAlso.length === 0
       ? null
-      : `See also: ${seeAlso.map((id) => `${id} (${oneLine(view.title(id))})`).join(", ")}`;
+      : `See also: ${seeAlso.map((id) => `${id} (${titleText(view.title(id))})`).join(", ")}`;
   const revisions = history.map(
     (r) =>
       `${date(r.commitDate)} commit ${sha7(r.sha)} (${r.reason}${r.pr === null ? "" : `, pull request #${r.pr}`})`,
@@ -157,16 +155,21 @@ function renderFeaturePage(
   return `${fitPage(lines, seeAlsoLine, revisions, max).join("\n")}\n`;
 }
 
+/** The freshness line a caller adds under the revision line, as zero or one line. */
+const freshnessLines = (options: PageOptions): string[] =>
+  options.freshness === undefined || options.freshness === null ? [] : [oneLine(options.freshness)];
+
+/** The caller's note after a claim, or none. */
+const claimNoteOf = (options: PageOptions) => options.claimNote ?? (() => null);
+
 function renderAbout(view: WikiView, options: PageOptions): string {
   const article = view.article as Architecture;
   const lines = [
-    `${oneLine(article.title)} (page id: ${ABOUT_PAGE_ID}): the project's own article`,
+    `${titleText(article.title)} (page id: ${ABOUT_PAGE_ID}): the project's own article`,
     ...(options.banner ?? []).map(oneLine),
     `This revision: commit ${sha7(article.sha)}, ${date(article.commitDate)}.`,
-    ...(options.freshness === undefined || options.freshness === null
-      ? []
-      : [oneLine(options.freshness)]),
-    ...renderSections(view, article.sections, options.claimNote ?? (() => null)),
+    ...freshnessLines(options),
+    ...renderSections(view, article.sections, claimNoteOf(options)),
   ];
   return `${lines.join("\n")}\n`;
 }

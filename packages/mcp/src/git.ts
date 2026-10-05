@@ -53,7 +53,8 @@ export function gitOutput(repo: string, args: readonly string[]): Buffer {
 
 /**
  * The top level of the work tree `repo` is in (or `repo` itself, for a bare repository), so a
- * directory inside a repository gives the whole repository.
+ * directory inside a repository gives the whole repository: grep then names every path from the
+ * root, as list_files and read_file do.
  */
 export function topLevel(repo: string): string {
   const result = runGit(repo, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT_MS);

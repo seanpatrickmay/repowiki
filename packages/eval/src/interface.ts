@@ -42,7 +42,8 @@ export function interfaceSection(summary: EvalSummary, records: readonly RunReco
       : "## The agent interface (spec v2 #5 \u00A711.4)",
     "",
   ];
-  if (!complete) return [...lines, "Not known until every answer is judged.", ""];
+  // No question, nothing to divide by: as unknown as an unjudged run, never a vacuous pass.
+  if (!complete || n === 0) return [...lines, "Not known until every answer is judged.", ""];
   if (history) {
     const { mcp, wiki } = agents;
     const share = 100 * mcp.correct >= HISTORY_CORRECT_PERCENT * n;
@@ -56,6 +57,9 @@ export function interfaceSection(summary: EvalSummary, records: readonly RunReco
       "",
     ];
   }
+  /** The gate's own figures: the whole run's tokens against the most `percent` of `of`'s allow. */
+  const whole = (agent: AgentKind, percent: number, of: AgentKind) =>
+    `the whole run's ${count(total(agent))} against at most ${count(Math.floor((percent * total(of)) / 100))}`;
   const results: boolean[] = [];
   if (asked("repo+mcp") && asked("repo")) {
     const both = agents["repo+mcp"];
@@ -69,7 +73,7 @@ export function interfaceSection(summary: EvalSummary, records: readonly RunReco
       ) / n;
     lines.push(
       `- repo+mcp accuracy: ${both.correct} of ${n} against at least ${agents.repo.correct} (the repo agent's): ${met(accuracy)}.`,
-      `- repo+mcp tokens: ${count(total("repo+mcp") / n)} per question against at most ${count((REPO_MCP_TOKEN_PERCENT * total("repo")) / 100 / n)} (${REPO_MCP_TOKEN_PERCENT}% of the repo agent's ${count(total("repo") / n)}): ${met(tokens)}.`,
+      `- repo+mcp tokens: ${count(total("repo+mcp") / n)} per question against at most ${count((REPO_MCP_TOKEN_PERCENT * total("repo")) / 100 / n)} (${REPO_MCP_TOKEN_PERCENT}% of the repo agent's ${count(total("repo") / n)}); ${whole("repo+mcp", REPO_MCP_TOKEN_PERCENT, "repo")}: ${met(tokens)}.`,
       `- Repository tool calls per question (reported, not a bar): repo+mcp ${calls("repo+mcp").toFixed(1)}, repo ${calls("repo").toFixed(1)}.`,
     );
   }
@@ -81,7 +85,7 @@ export function interfaceSection(summary: EvalSummary, records: readonly RunReco
     results.push(accuracy, tokens);
     lines.push(
       `- mcp accuracy: ${mcp.correct} of ${n} against at least ${floor} (the wiki agent's ${wiki.correct} less ${MCP_ACCURACY_SLACK}): ${met(accuracy)}.`,
-      `- mcp tokens: ${count(total("mcp") / n)} per question against at most ${count((MCP_TOKEN_PERCENT * total("wiki")) / 100 / n)} (${MCP_TOKEN_PERCENT}% of the wiki agent's ${count(total("wiki") / n)}): ${met(tokens)}.`,
+      `- mcp tokens: ${count(total("mcp") / n)} per question against at most ${count((MCP_TOKEN_PERCENT * total("wiki")) / 100 / n)} (${MCP_TOKEN_PERCENT}% of the wiki agent's ${count(total("wiki") / n)}); ${whole("mcp", MCP_TOKEN_PERCENT, "wiki")}: ${met(tokens)}.`,
     );
   }
   const binds = info.set === "dev" && results.length === 4;

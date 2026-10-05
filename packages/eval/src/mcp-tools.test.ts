@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateRequest, Provider } from "@repowiki/llm";
+import { type McpClient, McpClientError, type McpClientOptions } from "@repowiki/mcp";
 import { combineToolSets } from "@repowiki/query";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type McpAgentTools, openMcpTools } from "./mcp-tools.ts";
@@ -27,7 +28,8 @@ beforeAll(async () => {
   mcp = await openMcpTools({ repo: sample.repo.dir, out, compareTo: sample.sha });
 }, PROCESS_TIMEOUT_MS);
 afterAll(async () => {
-  await mcp.close();
+  // A failed beforeAll leaves no server: the real error is the one to see.
+  await mcp?.close();
   sample.repo.remove();
   rmSync(out, { recursive: true, force: true });
 });
@@ -119,4 +121,110 @@ describe("the mcp and repo+mcp agents", () => {
     },
     PROCESS_TIMEOUT_MS,
   );
+});
+
+/** A fake client whose server dies when `kill()` is called; each call answers its client's number. */
+function fakeClients() {
+  const made: { kill: () => void }[] = [];
+  const logs: (((line: string) => void) | undefined)[] = [];
+  const connect = async (options: McpClientOptions): Promise<McpClient> => {
+    logs.push(options.log);
+    const n = made.length + 1;
+    let alive = true;
+    let settle: (r: { code: number | null }) => void = () => {};
+    const exit = new Promise<{ code: number | null }>((resolve) => {
+      settle = resolve;
+    });
+    made.push({
+      kill: () => {
+        alive = false;
+        settle({ code: 1 });
+      },
+    });
+    return {
+      info: {
+        protocolVersion: "2025-11-25",
+        serverInfo: { name: "fake", version: "1" },
+        instructions: null,
+      },
+      listTools: async () => [{ name: "search", description: "", inputSchema: { type: "object" } }],
+      callTool: async () => {
+        if (!alive) throw new McpClientError("the MCP server has exited");
+        return { text: `server ${n}`, isError: false };
+      },
+      stderr: () => "",
+      close: async () => {
+        settle({ code: 0 });
+        return { code: 0 };
+      },
+      exit,
+    };
+  };
+  return { made, logs, connect };
+}
+
+describe("openMcpTools when the server dies", () => {
+  it("starts the server pinned to the compare commit, with no ANTHROPIC_ variable", async () => {
+    const seen: McpClientOptions[] = [];
+    const { connect } = fakeClients();
+    const saved = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-not-a-key";
+    try {
+      const opened = await openMcpTools(
+        { repo: "/r", out: "/o", compareTo: "a".repeat(40) },
+        async (options) => {
+          seen.push(options);
+          return connect(options);
+        },
+      );
+      await opened.close();
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = saved;
+    }
+    expect(seen[0]?.args.slice(1)).toEqual(["/r", "--out", "/o", "--compare-to", "a".repeat(40)]);
+    expect(Object.keys(seen[0]?.env ?? {}).filter((k) => k.startsWith("ANTHROPIC_"))).toEqual([]);
+    expect(seen[0]?.env?.PATH).toBe(process.env.PATH);
+  });
+
+  it("passes its log to the client, for what the server writes that is no reply", async () => {
+    const { logs, connect } = fakeClients();
+    const log = (_line: string) => {};
+    const opened = await openMcpTools(
+      { repo: "/r", out: "/o", compareTo: "a".repeat(40), log },
+      connect,
+    );
+    await opened.close();
+    expect(logs).toEqual([log]);
+  });
+
+  it("starts it again once, then says the run should stop when it dies again", async () => {
+    const { made, connect } = fakeClients();
+    const opened = await openMcpTools(
+      { repo: "/r", out: "/o", compareTo: "a".repeat(40) },
+      connect,
+    );
+    try {
+      expect((await opened.tools.run("search", {})).text).toBe("server 1");
+      made[0]?.kill();
+      await Promise.resolve();
+      // Both agents of a question may call at once: one restart serves both.
+      const both = await Promise.all([
+        opened.tools.run("search", {}),
+        opened.tools.run("search", {}),
+      ]);
+      expect(both.map((o) => o.text)).toEqual(["server 2", "server 2"]);
+      expect(made).toHaveLength(2);
+      expect(opened.lost()).toBeNull();
+      made[1]?.kill();
+      await Promise.resolve();
+      expect(opened.lost()).toBe(
+        "the MCP server exited again after one restart; the run stops here (a rerun resumes it)",
+      );
+      await expect(opened.tools.run("search", {})).rejects.toThrow("the MCP server has exited");
+      expect(made).toHaveLength(2);
+    } finally {
+      await opened.close();
+    }
+  });
 });

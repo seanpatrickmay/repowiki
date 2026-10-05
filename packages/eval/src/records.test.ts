@@ -129,6 +129,11 @@ describe("openRun", () => {
     expect(defaultAgents("history")).toEqual(["wiki", "mcp"]);
   });
 
+  it("resumes with the same agents in another order, keeping the run's own order", () => {
+    openRun(dir, info);
+    expect(openRun(dir, { ...info, agents: ["repo", "wiki"] }).agents).toEqual(["wiki", "repo"]);
+  });
+
   it("refuses to resume with other agents, and a run that names an agent twice", () => {
     openRun(dir, info);
     expect(() => openRun(dir, { ...info, agents: ["wiki", "repo", "mcp"] })).toThrow(

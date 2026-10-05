@@ -90,12 +90,11 @@ export function createServer(options: ServerOptions): McpServer {
     const now = identity(options.exportFile);
     if (now === seen) return current;
     seen = now;
+    let wiki: ReturnType<typeof load>;
     try {
-      const wiki = load(options.exportFile);
-      current = serveWiki(wiki, { repo: options.repo, pinned: options.pinned });
-      goodSince = new Date().toISOString();
-      options.log(logLine(`repowiki mcp: reloaded the export: commit ${wiki.head.slice(0, 7)}`));
+      wiki = load(options.exportFile);
     } catch (error) {
+      // Only the read is the export's fault: keep the last good one, and say so.
       const why = error instanceof Error ? error.message : String(error);
       const problem = `The export changed but could not be read (${cut(oneLine(why), 160)}); this is the export loaded at ${goodSince}.`;
       current = serveWiki(current.wiki, {
@@ -104,7 +103,11 @@ export function createServer(options: ServerOptions): McpServer {
         reloadProblem: problem,
       });
       options.log(logLine(`repowiki mcp: ${problem}`));
+      return current;
     }
+    current = serveWiki(wiki, { repo: options.repo, pinned: options.pinned });
+    goodSince = new Date().toISOString();
+    options.log(logLine(`repowiki mcp: reloaded the export: commit ${wiki.head.slice(0, 7)}`));
     return current;
   };
   const tools = createAgentTools(served);

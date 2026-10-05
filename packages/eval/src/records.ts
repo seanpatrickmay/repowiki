@@ -61,7 +61,7 @@ export const AnswerRecord = z.object({
   questionId: z.string().min(1),
   agent: Agent,
   answer: z.string(),
-  stop: z.enum(["answered", "turn-limit", "max-tokens", "other"]),
+  stop: z.enum(["answered", "turn-limit", "max-tokens", "other", "tool-failure"]),
   turns: z.int().positive(),
   calls: z.array(
     z.object({
@@ -74,6 +74,8 @@ export const AnswerRecord = z.object({
   usage: TokenUsage,
   usd: z.number().nonnegative().nullable(),
   model: z.string().nullable(),
+  /** Why a "tool-failure" answer ended, as one line. */
+  failure: z.string().optional(),
   at: IsoDateTime,
 });
 export type AnswerRecord = z.infer<typeof AnswerRecord>;
@@ -145,7 +147,11 @@ export function openRun(runDir: string, info: RunInfo): RunInfo {
       throw new EvalRunError(`${runDir} holds another run: its ${field} differs from this one's`);
     }
   }
-  if (stored.agents.join(",") !== info.agents.join(",")) {
+  // The same agents in another order are the same run; it keeps its own order.
+  const sameAgents =
+    stored.agents.length === info.agents.length &&
+    info.agents.every((a) => stored.agents.includes(a));
+  if (!sameAgents) {
     throw new EvalRunError(`${runDir} holds another run: its agents differ from this one's`);
   }
   if (

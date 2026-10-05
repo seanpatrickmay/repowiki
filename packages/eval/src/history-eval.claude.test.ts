@@ -1,3 +1,5 @@
+// Re-record (live, costs money; review the diff, then run packages/llm/src/cassette-secrets.test.ts):
+// REPOWIKI_CASSETTE=record node --env-file=<RepoWiki checkout>/.env node_modules/vitest/vitest.mjs run packages/eval/src/history-eval.claude.test.ts
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +14,7 @@ import {
 } from "@repowiki/llm";
 import { createWikiTools } from "@repowiki/query";
 import { describe, expect, it } from "vitest";
-import { openMcpTools } from "./mcp-tools.ts";
+import { type McpAgentTools, openMcpTools } from "./mcp-tools.ts";
 import { loadQuestions, selectQuestions } from "./questions.ts";
 import type { RunInfo } from "./records.ts";
 import { renderReport } from "./report.ts";
@@ -34,9 +36,12 @@ describe("the history smoke questions through the MCP server with Claude (casset
       const sample = historyWiki();
       const out = mkdtempSync(join(tmpdir(), "repowiki-smoke-history-out-"));
       const runDir = mkdtempSync(join(tmpdir(), "repowiki-smoke-history-"));
-      writeFileSync(join(out, "export.json"), JSON.stringify(sample.wiki));
-      const mcp = await openMcpTools({ repo: sample.repo.dir, out, compareTo: sample.wiki.head });
+      // Everything made above is removed in finally, even when the server fails to start.
+      let opened: McpAgentTools | undefined;
       try {
+        writeFileSync(join(out, "export.json"), JSON.stringify(sample.wiki));
+        opened = await openMcpTools({ repo: sample.repo.dir, out, compareTo: sample.wiki.head });
+        const mcp = opened;
         const ledger = createLedger();
         const live = {
           models: DEFAULT_MODELS,
@@ -105,7 +110,7 @@ describe("the history smoke questions through the MCP server with Claude (casset
         expect(summary.complete).toBe(true);
         expect(renderReport(summary, result.records, null)).toContain("## The agent interface");
       } finally {
-        await mcp.close();
+        await opened?.close();
         rmSync(runDir, { recursive: true, force: true });
         rmSync(out, { recursive: true, force: true });
         sample.repo.remove();

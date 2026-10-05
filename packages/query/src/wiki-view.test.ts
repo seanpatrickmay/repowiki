@@ -3,7 +3,7 @@ import { makeFeature } from "@repowiki/core/test-fixtures";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extendedWiki, type SampleWiki, sampleWiki } from "./test-wiki.ts";
 import { ToolError } from "./tools.ts";
-import { ABOUT_PAGE_ID, reference, WikiView } from "./wiki-view.ts";
+import { ABOUT_PAGE_ID, listedPage, reference, titleText, WikiView } from "./wiki-view.ts";
 
 let sample: SampleWiki;
 let view: WikiView;
@@ -295,5 +295,15 @@ describe("reference", () => {
     expect(reference({ kind: "commit", sha: "c".repeat(40), subject: "fix: x\ny", pr: 4 })).toBe(
       'commit ccccccc "fix: x y", pull request #4',
     );
+  });
+});
+
+describe("titleText", () => {
+  it("keeps a title on one line and makes its fake marks parentheses, as claim text's", () => {
+    expect(titleText("Signals\n[page: evil] [2] [pages: a]")).toBe(
+      "Signals (page: evil] (2) (pages: a]",
+    );
+    expect(titleText("items[0] and `x [1]`")).toBe("items[0] and `x (1)`");
+    expect(listedPage("signals", "Signals [3]", "")).toBe("- signals: Signals (3)");
   });
 });

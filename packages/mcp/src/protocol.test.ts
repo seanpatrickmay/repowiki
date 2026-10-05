@@ -146,6 +146,36 @@ describe("createProtocol", () => {
     expect(errors).toEqual(["boom: git took too long\nsecond line"]);
   });
 
+  it("answers a string id, refuses a null or fractional one, and serves tools/list before initialize", async () => {
+    const fresh = createProtocol({
+      version: "0.0.0",
+      instructions: () => "",
+      tools: () => tools,
+      titles: {},
+    });
+    expect(
+      await fresh.handleLine(JSON.stringify({ jsonrpc: "2.0", id: "a-1", method: "tools/list" })),
+    ).toMatchObject({
+      id: "a-1",
+      result: { tools: [{ name: "echo" }, { name: "boom" }] },
+    });
+    for (const id of [null, 1.5]) {
+      expect(
+        await fresh.handleLine(JSON.stringify({ jsonrpc: "2.0", id, method: "ping" })),
+        String(id),
+      ).toEqual({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32600, message: "a request id is a string or an integer" },
+      });
+    }
+    expect(await fresh.handleLine(request(7, "ping"))).toEqual({
+      jsonrpc: "2.0",
+      id: 7,
+      result: {},
+    });
+  });
+
   it("refuses unknown methods, batches, non-JSON and malformed requests, and ignores notifications", async () => {
     expect(
       await transcript([
@@ -183,7 +213,7 @@ describe("createProtocol", () => {
       {
         jsonrpc: "2.0",
         id: null,
-        error: { code: -32600, message: "a request id is a string or a number" },
+        error: { code: -32600, message: "a request id is a string or an integer" },
       },
       null,
       null,

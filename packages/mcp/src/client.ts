@@ -1,5 +1,13 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { cut, oneLine, type ToolDefinition, type ToolOutput, type ToolSet } from "@repowiki/query";
+import {
+  cut,
+  oneLine,
+  type ToolDefinition,
+  type ToolOutput,
+  type ToolSet,
+  toolText,
+  unknownTool,
+} from "@repowiki/query";
 import { z } from "zod";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol.ts";
 import { encodeMessage } from "./stdio.ts";
@@ -57,6 +65,8 @@ export interface McpClient {
    * as long again. Always resolves; later calls reject.
    */
   close(): Promise<{ code: number | null }>;
+  /** Settles when the server exits, for whatever reason (close() returns it too). */
+  exit: Promise<{ code: number | null }>;
 }
 
 /** A reply to a request: an error, or a result object; never a request or a notification. */
@@ -118,6 +128,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
   let buffered = "";
   let dropping = false;
   let closing = false;
+  /** Why the server's input failed (it closed it, or died); later calls reject with it at once. */
+  let broken: string | null = null;
   let exited: { code: number | null } | null = null;
   let settle: (result: { code: number | null }) => void = () => {};
   const exit = new Promise<{ code: number | null }>((resolve) => {
@@ -129,10 +141,20 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     failAll(new McpClientError(why));
     settle(exited);
   };
-  child.on("close", (code, signal) => {
+  const exitedWith = (code: number | null, signal: NodeJS.Signals | null) => {
     const last = stderr.trim().split("\n").at(-1) ?? "";
     const how = signal === null ? `code ${code}` : `signal ${signal}`;
     finish(code, `the MCP server exited (${how})${last === "" ? "" : `: ${shown(last)}`}`);
+  };
+  // "close" comes once the output is read to its end. A child of the server (a wrapper command's)
+  // may hold the output open long after the server exited: then "exit", and a grace, is enough.
+  let lingering: NodeJS.Timeout | undefined;
+  child.on("exit", (code, signal) => {
+    lingering = setTimeout(() => exitedWith(code, signal), graceMs);
+  });
+  child.on("close", (code, signal) => {
+    clearTimeout(lingering);
+    exitedWith(code, signal);
   });
   child.on("error", (error) => {
     const why = `cannot start the MCP server: ${shown(error.message)}`;
@@ -140,10 +162,14 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     else failAll(new McpClientError(why));
   });
   child.stdin.on("error", (error) => {
-    failAll(new McpClientError(`cannot write to the MCP server: ${shown(error.message)}`));
+    broken ??= `cannot write to the MCP server: ${shown(error.message)}`;
+    failAll(new McpClientError(broken));
   });
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr = (stderr + chunk.toString("utf8")).slice(-MAX_STDERR_CHARS);
+  // Decoded as streams: a character split across two reads stays one character.
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr = (stderr + chunk).slice(-MAX_STDERR_CHARS);
   });
   const take = (line: string) => {
     let raw: unknown;
@@ -163,8 +189,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     waiting.delete(reply.data.id);
     pending.resolve(reply.data);
   };
-  child.stdout.on("data", (chunk: Buffer) => {
-    buffered += chunk.toString("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    buffered += chunk;
     for (let nl = buffered.indexOf("\n"); nl !== -1; nl = buffered.indexOf("\n")) {
       const line = buffered.slice(0, nl);
       buffered = buffered.slice(nl + 1);
@@ -181,6 +207,7 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
   const request = (method: string, params?: unknown): Promise<Record<string, unknown>> => {
     if (closing) return Promise.reject(new McpClientError("the MCP client is closed"));
     if (exited !== null) return Promise.reject(new McpClientError("the MCP server has exited"));
+    if (broken !== null) return Promise.reject(new McpClientError(broken));
     const id = ++nextId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -234,8 +261,15 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
       capabilities: {},
       clientInfo: { name: "repowiki-client", version: "0.0.0" },
     });
+    const version = init.protocolVersion;
+    if (!(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(version)) {
+      throw new McpClientError(
+        `the MCP server speaks protocol version ${shown(version)}, which this client does not`,
+      );
+    }
   } catch (error) {
     closing = true;
+    child.stdin.end();
     child.kill("SIGKILL");
     await exit;
     throw error;
@@ -253,10 +287,12 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     async callTool(name, args) {
       const result = await ask(CallToolResult, "tools/call", { name, arguments: args });
       const text = result.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("");
-      return { text, isError: result.isError === true };
+      // The server's text is data for an agent: no control or invisible character gets through.
+      return { text: toolText(text), isError: result.isError === true };
     },
     stderr: () => stderr,
     close,
+    exit,
   };
 }
 
@@ -276,13 +312,7 @@ export async function mcpToolSet(client: McpClient): Promise<ToolSet> {
   return {
     definitions,
     async run(name, input) {
-      if (!names.has(name)) {
-        return {
-          text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${[...names].join(", ")}`,
-          isError: true,
-        };
-      }
-      return client.callTool(name, input);
+      return names.has(name) ? client.callTool(name, input) : unknownTool(name, names);
     },
   };
 }

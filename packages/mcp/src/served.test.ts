@@ -40,4 +40,27 @@ describe("serveWiki", () => {
     }
     expect(served.at({ kind: "date", date: "2026-01-02" })).not.toBe(first);
   });
+
+  it("evicts the least recently used point: a view used again is kept", () => {
+    const served = serveWiki(h.wiki, { repo: h.repo.dir, pinned: null });
+    const day = (n: number) => ({
+      kind: "date" as const,
+      date: `2026-02-${String(n).padStart(2, "0")}`,
+    });
+    const first = served.at(day(1));
+    const second = served.at(day(2));
+    for (let n = 3; n <= MAX_AS_OF_VIEWS; n++) served.at(day(n));
+    expect(served.at(day(1))).toBe(first);
+    served.at(day(MAX_AS_OF_VIEWS + 1));
+    expect(served.at(day(1))).toBe(first);
+    expect(served.at(day(2))).not.toBe(second);
+  });
+
+  it("builds its search index and freshness once, on first use, and runs no git before", () => {
+    const served = serveWiki(h.wiki, { repo: "/nonexistent/repowiki-repo", pinned: null });
+    expect(served.index).toBe(served.index);
+    const freshness = served.freshness;
+    expect(served.freshness).toBe(freshness);
+    expect(freshness.status()).toMatchObject({ known: false });
+  });
 });

@@ -83,6 +83,9 @@ export function citedCode(
   if (!("text" in file)) return `${missingText(citation.path, citation.sha, file)}\n`;
   const lines = toolText(file.text).split("\n");
   if (lines.at(-1) === "") lines.pop();
+  if (citation.startLine > lines.length) {
+    return `The cited lines ${citation.startLine}-${citation.endLine} are past the end of ${shown(citation.path)}, which has ${count(lines.length, "line")} at commit ${sha7(citation.sha)}.\n`;
+  }
   const from = Math.max(1, citation.startLine - context);
   const to = Math.min(lines.length, citation.endLine + context);
   const symbol = citation.symbol === null ? "" : `, ${oneLine(citation.symbol)}`;
@@ -101,7 +104,8 @@ export function citedCode(
  * author. A commit the repository lacks is shown from the citation alone. Read with plumbing
  * (rev-list, diff-tree), so the user's config cannot verify a signature, reorder the paths or
  * run a diff driver, and with attributes read from the empty tree (and no global attributes
- * file), so neither the repository nor the user can make a changed text file read as binary.
+ * file) and git's default big-file threshold, so neither the repository nor the user can make a
+ * changed text file read as binary.
  */
 export function commitDetails(repo: string, citation: CommitCitation): string {
   assertSha(citation.sha);
@@ -132,6 +136,9 @@ export function commitDetails(repo: string, citation: CommitCitation): string {
   const fields = gitOutput(repo, [
     "-c",
     "core.attributesFile=",
+    // git's default: a user's lower threshold would make a large text file read as binary.
+    "-c",
+    "core.bigFileThreshold=512m",
     `--attr-source=${EMPTY_TREE}`,
     "diff-tree",
     "-r",

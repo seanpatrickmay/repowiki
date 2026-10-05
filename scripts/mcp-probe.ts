@@ -24,7 +24,12 @@ async function main(): Promise<void> {
   let client: Awaited<ReturnType<typeof connectMcp>> | undefined;
   try {
     const rows = await runProbe(async () => {
-      client = await connectMcp({ command: process.execPath, args, env: process.env });
+      client = await connectMcp({
+        command: process.execPath,
+        args,
+        env: process.env,
+        log: (line) => console.error(logLine(line)),
+      });
       return client;
     });
     process.stdout.write(probeReport(rows, MAX_TOOL_RESULT_CHARS));

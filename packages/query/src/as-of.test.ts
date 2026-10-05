@@ -245,6 +245,19 @@ describe("asOfBanner and historyBegins", () => {
     );
   });
 
+  it("numbers a copy of a revision (one taken from a view as of a point) as the revision it is", () => {
+    const old = (h.wiki.history.deliverables ?? [])[0];
+    if (old === undefined) throw new Error("fixture");
+    const banner = asOfBanner(
+      h.wiki,
+      "deliverables",
+      { ...old },
+      { kind: "date", date: "2026-01-03" },
+      ancestor,
+    );
+    expect(banner[0]).toMatch(/^This is the page as of 2026-01-03: revision 1 of 2, /);
+  });
+
   it("says where a page's history begins", () => {
     const first = (h.wiki.history.deliverables ?? [])[0];
     if (first === undefined) throw new Error("fixture");

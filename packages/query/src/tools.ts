@@ -100,6 +100,14 @@ export function defineTool<S extends z.ZodType>(
   };
 }
 
+/** The error result for a tool name a set does not have: one short line, naming the tools. */
+export function unknownTool(name: string, names: Iterable<string>): ToolOutput {
+  return {
+    text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${[...names].join(", ")}`,
+    isError: true,
+  };
+}
+
 /**
  * A set of tools: an unknown tool name is an error result naming the tools there are. Two tools
  * of one name are refused, as the API refuses them.
@@ -116,12 +124,7 @@ export function toolSet(tools: readonly Tool[]): LocalToolSet {
     definitions: tools.map((tool) => tool.definition),
     run(name, input) {
       const tool = byName.get(name);
-      if (tool !== undefined) return tool.run(input);
-      const names = [...byName.keys()].join(", ");
-      return {
-        text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${names}`,
-        isError: true,
-      };
+      return tool === undefined ? unknownTool(name, byName.keys()) : tool.run(input);
     },
   };
 }
@@ -142,12 +145,7 @@ export function combineToolSets(...sets: readonly ToolSet[]): ToolSet {
     definitions: sets.flatMap((set) => set.definitions),
     run(name, input) {
       const set = byName.get(name);
-      if (set !== undefined) return set.run(name, input);
-      const names = [...byName.keys()].join(", ");
-      return {
-        text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${names}`,
-        isError: true,
-      };
+      return set === undefined ? unknownTool(name, byName.keys()) : set.run(name, input);
     },
   };
 }

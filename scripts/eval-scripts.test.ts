@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -80,6 +81,17 @@ describe("eval-run.ts as a process (no network)", () => {
     );
     expect(existsSync(join(out, "eval"))).toBe(false);
   });
+
+  it("estimates the mcp agent on a dry run through a started server, writing nothing", () => {
+    const before = readdirSync(out, { recursive: true }).sort();
+    const result = evalRun("--questions", smoke, "--set", "smoke", "--agents", "mcp", "--dry-run");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(
+      /^3 questions to the mcp agent: about \$\d+\.\d\d \(mcp \$\d+\.\d\d at 5 turns a question, no cache hits\), .*\(--max-usd\)\n$/,
+    );
+    expect(readdirSync(out, { recursive: true }).sort()).toEqual(before);
+  }, 30_000);
 
   it("says on a dry run when the export records no build run, so the break-even would be unknown", () => {
     writeFileSync(join(out, "export.json"), JSON.stringify({ ...sample.wiki, runs: [] }));

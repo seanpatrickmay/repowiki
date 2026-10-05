@@ -146,9 +146,89 @@ describe("connectMcp", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it(
+    "kills a server that answers with a protocol version it does not speak",
+    async () => {
+      const { options, pid } = fake("old");
+      await expect(connectMcp(options)).rejects.toThrow(
+        "the MCP server speaks protocol version 1999-01-01, which this client does not",
+      );
+      expect(await gone(pid())).toBe(true);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "gives the agent a tool's text as data: invisible characters marked, CRLF as LF",
+    async () => {
+      const client = await connectMcp(fake("hidden").options);
+      try {
+        expect((await client.callTool("echo", {})).text).toBe("a\uFFFDb\nc");
+      } finally {
+        await client.close();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "decodes a character split across two reads of the server's output",
+    async () => {
+      const client = await connectMcp(fake("split").options);
+      try {
+        expect(await client.callTool("echo", {})).toEqual({
+          text: "caf\u00e9 au lait",
+          isError: false,
+        });
+      } finally {
+        await client.close();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
 
 describe("McpClient.close", () => {
+  it(
+    "resolves when the server has exited, though a child of it still holds its output open",
+    async () => {
+      const { options, pid } = fake("wrapper", { closeGraceMs: 200 });
+      const client = await connectMcp(options);
+      const child = Number(readFileSync(`${join(dir, `pid-${pidFiles}`)}.child`, "utf8"));
+      try {
+        const closed = await Promise.race([
+          client.close(),
+          new Promise((resolve) => setTimeout(() => resolve("pending"), 3000)),
+        ]);
+        expect(closed).toEqual({ code: null });
+        expect(await gone(pid())).toBe(true);
+      } finally {
+        process.kill(child, "SIGKILL");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "rejects a call at once once the server's input has failed",
+    async () => {
+      const client = await connectMcp(fake("shut", { timeoutMs: 5000, closeGraceMs: 200 }).options);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await expect(client.callTool("echo", { n: 1 })).rejects.toThrow(McpClientError);
+        const started = Date.now();
+        await expect(client.callTool("echo", { n: 2 })).rejects.toThrow(
+          /^cannot write to the MCP server/,
+        );
+        expect(Date.now() - started).toBeLessThan(1000);
+      } finally {
+        await client.close();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   it(
     "ends the server's input and waits for it to exit",
     async () => {

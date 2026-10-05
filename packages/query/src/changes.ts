@@ -1,5 +1,5 @@
 import { type ClaimChange, claimChanges, wordDiff } from "@repowiki/core";
-import { cut, oneLine } from "./text.ts";
+import { count, cut, oneLine } from "./text.ts";
 import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
 import { SECTION_TITLES } from "./wiki-page.ts";
 import type { WikiView } from "./wiki-view.ts";
@@ -29,9 +29,13 @@ export function wordDiffText(before: string, after: string): string {
     .join("");
 }
 
+/** Claim text with the word diff's own markers made plain, so only the diff's look like them. */
+const unmarkDiff = (text: string) =>
+  text.replace(/\[-/g, "(-").replace(/-\]/g, "-)").replace(/\{\+/g, "(+").replace(/\+\}/g, "+)");
+
 /** One change as a line: `- removed`, `+ added`, `~ changed` (a word diff), or `  context`. */
 function changeLine(view: WikiView, change: ClaimChange): string {
-  const shown = (text: string | null) => view.text(text ?? "");
+  const shown = (text: string | null) => unmarkDiff(view.text(text ?? ""));
   switch (change.kind) {
     case "removed":
       return `- ${shown(change.before)}`;
@@ -47,8 +51,9 @@ function changeLine(view: WikiView, change: ClaimChange): string {
 /**
  * page_changes (spec v2 #5 §6.2): the claim-by-claim diff between two revisions of one page, per
  * section in `keys` order, then the revisions from `from` to `to`. Fitted to `max` code points by
- * putting a count in place of unchanged claims first; claim text goes through the view's
- * neutralisation, as read_page shows it.
+ * putting a count in place of unchanged claims first, then, if that is not enough, by showing
+ * only the first changes and how many more there are; claim text goes through the view's
+ * neutralisation, as read_page shows it, and loses any bracket that would look like a marker.
  */
 export function renderChanges(
   view: WikiView,
@@ -71,8 +76,11 @@ export function renderChanges(
     "Revisions in this range, oldest first:",
     ...between.map((r) => `- ${revisionEntry(r)}`),
   ];
-  const render = (withContext: boolean) => {
+  const changed = changes.filter((c) => c.kind !== "context").length;
+  /** The diff, with unchanged claims or a count of them, and the first `shown` changes. */
+  const render = (withContext: boolean, shown = changed) => {
     const lines = [top];
+    let listed = 0;
     if (changes.length === 0)
       lines.push("", "No claim changed (only the infobox, See also or citations did).");
     let section: string | null = null;
@@ -91,12 +99,31 @@ export function renderChanges(
         hidden++;
         continue;
       }
+      if (change.kind !== "context" && listed++ >= shown) break;
       flushHidden();
       lines.push(changeLine(view, change));
     }
     flushHidden();
-    return `${[...lines, ...revisions].join("\n")}\n`;
+    const more =
+      shown < changed
+        ? [
+            "",
+            `(${count(changed - shown, "more changed claim")} not shown: give page_changes a narrower from and to, or read the page as of each point)`,
+          ]
+        : [];
+    return `${[...lines, ...more, ...revisions].join("\n")}\n`;
   };
+  const fits = (text: string) => [...text].length <= max;
   const whole = render(true);
-  return [...whole].length <= max ? whole : render(false);
+  if (fits(whole)) return whole;
+  const counted = render(false);
+  if (fits(counted)) return counted;
+  let low = 0;
+  let high = changed - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(render(false, mid))) low = mid;
+    else high = mid - 1;
+  }
+  return render(false, low);
 }

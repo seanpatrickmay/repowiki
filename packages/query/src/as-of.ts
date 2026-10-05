@@ -1,6 +1,6 @@
 import type { Feature, LineageEvent, Revision, WikiExport } from "@repowiki/core";
 import { ToolError } from "./tools.ts";
-import { WikiView } from "./wiki-view.ts";
+import { titleText, WikiView } from "./wiki-view.ts";
 
 /**
  * A point in the wiki's past (spec v2 #5 R9): a calendar date, compared with the date written in
@@ -150,7 +150,7 @@ function lineagePhrase(event: LineageEvent): string {
     case "create":
       return `created ${at}`;
     case "rename":
-      return `renamed from ${JSON.stringify(event.fromTitle)} ${at}`;
+      return `renamed from ${JSON.stringify(titleText(event.fromTitle))} ${at}`;
     case "merge":
       return `merged into ${event.into} ${at}`;
     case "split":
@@ -173,7 +173,8 @@ export function asOfBanner(
 ): string[] {
   const all = wiki.history[featureId] ?? [];
   const current = all.at(-1);
-  const k = all.indexOf(revision) + 1;
+  // By id: a copy of the revision (from a view as of a point) is still that revision.
+  const k = all.findIndex((r) => r.id === revision.id) + 1;
   const lines = [
     `This is the page as of ${asOfLabel(asOf)}: revision ${k} of ${all.length}, commit ${revision.sha.slice(0, 7)}, ${revision.commitDate.slice(0, 10)}. The current revision is ${current?.commitDate.slice(0, 10) ?? "unknown"} (commit ${current?.sha.slice(0, 7) ?? "unknown"}).`,
   ];
@@ -190,6 +191,9 @@ export function asOfBanner(
 }
 
 /** read_page's answer for a point before a feature's first revision. */
-export function historyBegins(featureId: string, first: { sha: string; commitDate: string }) {
+export function historyBegins(
+  featureId: string,
+  first: { sha: string; commitDate: string },
+): string {
   return `The wiki's history of ${featureId} begins on ${first.commitDate.slice(0, 10)} (commit ${first.sha.slice(0, 7)}).\n`;
 }

@@ -4,9 +4,11 @@ import {
   DEFAULT_MAX_FILE_BYTES,
   diffCommits,
   type FileChange,
+  GitError,
   type RemapContext,
   remapCitation,
 } from "@repowiki/engine";
+import { andList, count, cut, oneLine, SECTION_TITLES } from "@repowiki/query";
 import { fileAt } from "./code.ts";
 import { commitOf, GIT_TIMEOUT_MS, gitOutput } from "./git.ts";
 
@@ -14,7 +16,8 @@ import { commitOf, GIT_TIMEOUT_MS, gitOutput } from "./git.ts";
  * Where the repository stands against the wiki (spec v2 #5 §5): the compare commit, how far it is
  * from the wiki's head each way, and every path that differs between the two (old and new paths
  * of a rename, since renames are not paired here). `known` is false when the repository lacks the
- * wiki's head or the compare commit; then nothing is compared.
+ * wiki's head, has no HEAD, or a git call of the comparison failed (`problem` says why); then
+ * nothing is compared.
  */
 export interface HeadStatus {
   compare: string | null;
@@ -27,6 +30,8 @@ export interface HeadStatus {
   changedFiles: ReadonlySet<string>;
   /** The changed paths that are new at the compare commit. */
   addedFiles: ReadonlySet<string>;
+  /** One line saying why freshness is unknown, when a git call failed (spec v2 #5 R16). */
+  problem?: string;
 }
 
 /**
@@ -44,7 +49,7 @@ export type CitationNow =
   | { kind: "unchanged" | "moved"; path: string; startLine: number; endLine: number }
   | { kind: "changed"; path: string }
   | { kind: "deleted" }
-  | { kind: "unknown" };
+  | { kind: "unknown"; why: string };
 
 /** The most per-revision mark sets kept (spec v2 #5 §4.2). */
 export const MAX_CACHED_MARKS = 256;
@@ -52,7 +57,10 @@ export const MAX_CACHED_MARKS = 256;
 export interface Freshness {
   /** The status against the compare commit as of now (HEAD is re-resolved unless pinned). */
   status(): HeadStatus;
-  /** Each marked claim of a revision's sections, by claim id; empty when the status is unknown. */
+  /**
+   * Each marked claim of a revision's sections, by claim id; empty when the status is unknown.
+   * When computing them fails, the status turns unknown (with its problem) for that compare commit.
+   */
   marks(
     revisionId: string,
     sections: readonly { key: string; claims: readonly Claim[] }[],
@@ -67,6 +75,19 @@ export interface FreshnessOptions {
   /** The compare commit: a sha pinned by --compare-to, or null for the repository's HEAD. */
   pinned: string | null;
 }
+
+/**
+ * A lead's reason, by the sections of the changed claims it summarizes (one key per claim):
+ * read_page shows no claim ids, so it names where the marked claims are.
+ */
+function leadReason(keys: readonly string[]): string {
+  const titles = [...new Set(keys)].map((k) => SECTION_TITLES[k] ?? k);
+  return `it summarizes ${count(keys.length, "claim")} below that changed, in ${andList(titles)}`;
+}
+
+/** The failures' key for a HEAD that cannot be resolved (no sha is empty), and its reason. */
+const NO_HEAD = "";
+const NO_HEAD_PROBLEM = "the repository has no HEAD or it could not be read";
 
 /** A Map that forgets its least recently used entry past `max`. */
 function lru<V>(max: number) {
@@ -93,7 +114,9 @@ function lru<V>(max: number) {
  * (so "marked" means exactly "stale at the next update"), cached per (compare sha, revision).
  * A citation whose file no change touched between its commit and the compare commit holds
  * there unchanged, so it is not remapped (its stored hash held when it was cited). Reads only
- * git objects.
+ * git objects. A git failure (a timeout, too much output, a missing object) never escapes: freshness
+ * is unknown against that compare commit, with a one-line problem, for the rest of the session,
+ * so a slow repository is not asked again on every call (R7 "serve, mark, never refuse").
  */
 export function createFreshness(options: FreshnessOptions): Freshness {
   const { repo, wikiHead } = options;
@@ -110,64 +133,100 @@ export function createFreshness(options: FreshnessOptions): Freshness {
     }
     return found;
   };
-  const headKnown = holds(wikiHead);
+  /** Why freshness failed against a compare commit, kept for the session (the last 8). */
+  const failures = new Map<string, string>();
+  const failed = (compare: string, error: unknown): string => {
+    if (!(error instanceof GitError)) throw error;
+    const problem = cut(oneLine(error.message), 300);
+    failures.set(compare, problem);
+    if (failures.size > 8) failures.delete(failures.keys().next().value as string);
+    return problem;
+  };
+  const unknownAt = (compare: string | null, problem?: string): HeadStatus => ({
+    compare,
+    wikiHead,
+    known: false,
+    ahead: 0,
+    behind: 0,
+    changedFiles: new Set(),
+    addedFiles: new Set(),
+    ...(problem === undefined ? {} : { problem }),
+  });
 
-  const compareSha = () => options.pinned ?? commitOf(repo, "HEAD");
-
-  const statusAt = (compare: string | null): HeadStatus => {
-    const unknown: HeadStatus = {
+  /** rev-list and diff-tree from the wiki's head to the compare commit. */
+  const compute = (compare: string): HeadStatus => {
+    const [behind = "0", ahead = "0"] = gitOutput(repo, [
+      "rev-list",
+      "--left-right",
+      "--count",
+      "--end-of-options",
+      `${wikiHead}...${compare}`,
+    ])
+      .toString("utf8")
+      .trim()
+      .split(/\s+/);
+    const tokens = gitOutput(repo, [
+      "diff-tree",
+      "-r",
+      "--name-status",
+      "-z",
+      "--no-renames",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--end-of-options",
+      wikiHead,
+      compare,
+    ])
+      .toString("utf8")
+      .split("\0");
+    const changedFiles = new Set<string>();
+    const addedFiles = new Set<string>();
+    for (let i = 0; i + 1 < tokens.length; i += 2) {
+      const path = tokens[i + 1] as string;
+      changedFiles.add(path);
+      if (tokens[i] === "A") addedFiles.add(path);
+    }
+    return {
       compare,
       wikiHead,
-      known: false,
-      ahead: 0,
-      behind: 0,
-      changedFiles: new Set(),
-      addedFiles: new Set(),
+      known: true,
+      ahead: Number(ahead),
+      behind: Number(behind),
+      changedFiles,
+      addedFiles,
     };
-    if (compare === null || !headKnown) return unknown;
-    return statuses.get(compare, () => {
-      const [behind = "0", ahead = "0"] = gitOutput(repo, [
-        "rev-list",
-        "--left-right",
-        "--count",
-        "--end-of-options",
-        `${wikiHead}...${compare}`,
-      ])
-        .toString("utf8")
-        .trim()
-        .split(/\s+/);
-      const tokens = gitOutput(repo, [
-        "diff-tree",
-        "-r",
-        "--name-status",
-        "-z",
-        "--no-renames",
-        "--no-color",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--end-of-options",
-        wikiHead,
-        compare,
-      ])
-        .toString("utf8")
-        .split("\0");
-      const changedFiles = new Set<string>();
-      const addedFiles = new Set<string>();
-      for (let i = 0; i + 1 < tokens.length; i += 2) {
-        const path = tokens[i + 1] as string;
-        changedFiles.add(path);
-        if (tokens[i] === "A") addedFiles.add(path);
+  };
+
+  const statusAt = (compare: string | null): HeadStatus => {
+    if (compare === null || !holds(wikiHead)) return unknownAt(compare);
+    const problem = failures.get(compare);
+    if (problem !== undefined) return unknownAt(compare, problem);
+    try {
+      return statuses.get(compare, () => compute(compare));
+    } catch (error) {
+      return unknownAt(compare, failed(compare, error));
+    }
+  };
+
+  /** The status against the compare commit as of now; a git that cannot run is a problem too. */
+  const current = (): HeadStatus => {
+    try {
+      if (options.pinned !== null) return statusAt(options.pinned);
+      // A HEAD that cannot be resolved (unborn, or rev-parse failed) is a failure like any other,
+      // kept for the session under its own key.
+      const known = failures.get(NO_HEAD);
+      if (known !== undefined) return unknownAt(null, known);
+      const head = commitOf(repo, "HEAD");
+      if (head === null) {
+        failures.set(NO_HEAD, NO_HEAD_PROBLEM);
+        return unknownAt(null, NO_HEAD_PROBLEM);
       }
-      return {
-        compare,
-        wikiHead,
-        known: true,
-        ahead: Number(ahead),
-        behind: Number(behind),
-        changedFiles,
-        addedFiles,
-      };
-    });
+      return statusAt(head);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      return unknownAt(null, cut(oneLine(error.message), 300));
+    }
   };
 
   /**
@@ -205,63 +264,78 @@ export function createFreshness(options: FreshnessOptions): Freshness {
   };
 
   return {
-    status: () => statusAt(compareSha()),
+    status: current,
 
     marks(revisionId, sections) {
-      const status = statusAt(compareSha());
+      const status = current();
       const compare = status.compare;
       if (!status.known || compare === null) return new Map();
-      return markSets.get(`${compare}\0${revisionId}`, () => {
-        const claims = sections.flatMap((s) => s.claims.map((claim) => ({ key: s.key, claim })));
-        const code = claims.flatMap(({ claim }) =>
-          claim.staleSince === null
-            ? claim.citations.flatMap((c) => (c.kind === "code" ? [c] : []))
-            : [],
-        );
-        const fate = fates(compare, code);
-        const marks = new Map<string, ClaimMark>();
-        for (const { key, claim } of claims) {
-          if (key === "lead" || claim.staleSince !== null) continue;
-          const reasons: string[] = [];
-          let moved = 0;
-          for (const c of claim.citations) {
-            if (c.kind !== "code") continue;
-            const f = fate.get(c);
-            if (f === undefined) continue;
-            if ("stale" in f) {
-              reasons.push(`${c.path}:${c.startLine}-${c.endLine}: ${f.stale}`);
-            } else if (
-              f.fresh.path !== c.path ||
-              f.fresh.startLine !== c.startLine ||
-              f.fresh.endLine !== c.endLine
-            ) {
-              moved++;
+      try {
+        return markSets.get(`${compare}\0${revisionId}`, () => {
+          const claims = sections.flatMap((s) => s.claims.map((claim) => ({ key: s.key, claim })));
+          // A lead's own citations are never remapped: its mark comes from the claims it supports.
+          const code = claims.flatMap(({ key, claim }) =>
+            key !== "lead" && claim.staleSince === null
+              ? claim.citations.flatMap((c) => (c.kind === "code" ? [c] : []))
+              : [],
+          );
+          const fate = fates(compare, code);
+          const marks = new Map<string, ClaimMark>();
+          for (const { key, claim } of claims) {
+            if (key === "lead" || claim.staleSince !== null) continue;
+            const reasons: string[] = [];
+            let moved = 0;
+            for (const c of claim.citations) {
+              if (c.kind !== "code") continue;
+              const f = fate.get(c);
+              if (f === undefined) continue;
+              if ("stale" in f) {
+                reasons.push(`${c.path}:${c.startLine}-${c.endLine}: ${f.stale}`);
+              } else if (
+                f.fresh.path !== c.path ||
+                f.fresh.startLine !== c.startLine ||
+                f.fresh.endLine !== c.endLine
+              ) {
+                moved++;
+              }
+            }
+            if (reasons.length > 0) marks.set(claim.id, { kind: "changed", reasons });
+            else if (moved > 0) marks.set(claim.id, { kind: "moved", citations: moved });
+          }
+          // A lead claim summarizes the claims it supports: it is changed when one of them is
+          // (spec §5 rule 2).
+          const sectionOf = new Map(claims.map(({ key, claim }) => [claim.id, key]));
+          for (const { key, claim } of claims) {
+            if (key !== "lead" || claim.staleSince !== null) continue;
+            const changed = claim.supports.filter((id) => marks.get(id)?.kind === "changed");
+            if (changed.length > 0) {
+              const keys = changed.map((id) => sectionOf.get(id) ?? "");
+              marks.set(claim.id, { kind: "changed", reasons: [leadReason(keys)] });
             }
           }
-          if (reasons.length > 0) marks.set(claim.id, { kind: "changed", reasons });
-          else if (moved > 0) marks.set(claim.id, { kind: "moved", citations: moved });
-        }
-        // A lead claim summarizes the claims it supports: it is changed when one of them is
-        // (spec §5 rule 2).
-        for (const { key, claim } of claims) {
-          if (key !== "lead" || claim.staleSince !== null) continue;
-          const changed = claim.supports.filter((id) => marks.get(id)?.kind === "changed");
-          if (changed.length > 0) {
-            marks.set(claim.id, {
-              kind: "changed",
-              reasons: [`it summarizes ${changed.join(", ")}, which changed`],
-            });
-          }
-        }
-        return marks;
-      });
+          return marks;
+        });
+      } catch (error) {
+        failed(compare, error);
+        return new Map();
+      }
     },
 
     citationNow(citation) {
-      const status = statusAt(compareSha());
+      const status = current();
       const compare = status.compare;
-      if (!status.known || compare === null) return { kind: "unknown" };
-      const fate = fates(compare, [citation]).get(citation);
+      if (!status.known || compare === null) {
+        return {
+          kind: "unknown",
+          why: status.problem ?? "the repository does not hold the wiki's commit",
+        };
+      }
+      let fate: CitationFate | undefined;
+      try {
+        fate = fates(compare, [citation]).get(citation);
+      } catch (error) {
+        return { kind: "unknown", why: failed(compare, error) };
+      }
       const { path, startLine, endLine } = citation;
       if (fate === undefined) return { kind: "unchanged", path, startLine, endLine };
       if ("fresh" in fate) {

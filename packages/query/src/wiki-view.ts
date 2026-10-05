@@ -29,9 +29,15 @@ const unmark = (text: string) =>
     })
     .replace(/\[(?=\s*pages?\s*:)/giu, "(");
 
+/**
+ * A title or an alias for the agent: one line, with every bracket that would open a reference or
+ * page mark made a parenthesis, as claim text has (titles are model text too).
+ */
+export const titleText = (title: string): string => oneLine(unmark(title));
+
 /** A page in a list (search results, choices): its id, title and summary, punctuated once. */
 export function listedPage(id: string, title: string, summary: string): string {
-  const shown = oneLine(title);
+  const shown = titleText(title);
   if (summary === "") return `- ${id}: ${shown}`;
   return `- ${id}: ${shown}${/[.!?]$/.test(shown) ? "" : "."} ${summary}`;
 }
@@ -115,7 +121,7 @@ export class WikiView {
       const id = target.trim();
       const shown = label === undefined || label.trim() === "" ? undefined : unmark(label.trim());
       if (id.startsWith("wp:")) linked += shown ?? unmark(id.slice(3).trim());
-      else if (this.hasRoute(id)) linked += `${shown ?? this.title(id)} [page: ${id}]`;
+      else if (this.hasRoute(id)) linked += `${shown ?? unmark(this.title(id))} [page: ${id}]`;
       else linked += shown ?? unmark(id);
     }
     return oneLine(linked + unmark(claimText.slice(at)));

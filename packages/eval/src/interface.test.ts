@@ -44,10 +44,10 @@ describe("interfaceSection", () => {
         "## The agent interface (spec v2 #5 §11.4)",
         "",
         "- repo+mcp accuracy: 4 of 4 against at least 4 (the repo agent's): met.",
-        "- repo+mcp tokens: 40,000 per question against at most 48,000 (60% of the repo agent's 80,000): met.",
+        "- repo+mcp tokens: 40,000 per question against at most 48,000 (60% of the repo agent's 80,000); the whole run's 160,000 against at most 192,000: met.",
         "- Repository tool calls per question (reported, not a bar): repo+mcp 2.0, repo 5.0.",
         "- mcp accuracy: 2 of 4 against at least 2 (the wiki agent's 3 less 1): met.",
-        "- mcp tokens: 24,000 per question against at most 25,000 (125% of the wiki agent's 20,000): met.",
+        "- mcp tokens: 24,000 per question against at most 25,000 (125% of the wiki agent's 20,000); the whole run's 96,000 against at most 100,000: met.",
         "",
         "Result on this set: pass.",
         "",
@@ -83,6 +83,64 @@ describe("interfaceSection", () => {
         "Result on this set: fail.",
         "",
       ].join("\n"),
+    );
+  });
+
+  it("meets a token bar at exactly its share of the whole run, and not one token over", () => {
+    const run = info({ set: "dev", agents: ALL });
+    const at = (extra: number) => {
+      const records = questions.flatMap((q, i) =>
+        (
+          [
+            ["wiki", 20_000],
+            ["repo", 80_000],
+            ["mcp", 25_000 + (i === 0 ? extra : 0)],
+            ["repo+mcp", 48_000 + (i === 0 ? extra : 0)],
+          ] as const
+        ).flatMap(([agent, tokens]) => [answer(q.id, agent, tokens), judgment(q.id, agent, 1)]),
+      );
+      return interfaceSection(summarize(run, records), records).filter((l) => l.includes("tokens"));
+    };
+    expect(at(0).map((l) => l.endsWith(": met."))).toEqual([true, true]);
+    expect(at(1).map((l) => l.endsWith(": not met."))).toEqual([true, true]);
+    expect(at(1)[0]).toContain("the whole run's 192,001 against at most 192,000");
+  });
+
+  it("passes the history suite at 70% and 2 more than the wiki agent", () => {
+    const run = info({ set: "history", agents: ["wiki", "mcp"] });
+    const records = questions.flatMap((q, i) => [
+      answer(q.id, "wiki", 20_000),
+      judgment(q.id, "wiki", i === 0 ? 1 : 0),
+      answer(q.id, "mcp", 24_000),
+      judgment(q.id, "mcp", i < 3 ? 1 : 0),
+    ]);
+    expect(interfaceSection(summarize(run, records), records)).toEqual([
+      "## History suite (spec v2 #5 \u00A711.5)",
+      "",
+      "- Correct: mcp 3 of 4 against at least 3 (70%): met.",
+      "- Margin: mcp 3 against at least 3 (the wiki agent's 1 plus 2): met.",
+      "",
+      "Result on this set: pass.",
+      "",
+    ]);
+  });
+
+  it("says nothing is known yet for a run of no questions", () => {
+    const run = info({ set: "dev", agents: ALL, questions: [] });
+    expect(interfaceSection(summarize(run, []), [])).toContain(
+      "Not known until every answer is judged.",
+    );
+  });
+
+  it("names how many agents the report's header says each question went to", () => {
+    const header = (agents: AgentKind[]) =>
+      renderReport(summarize(info({ agents }), []), [], null).split("\n")[2] ?? "";
+    expect(header("wiki,repo".split(",") as AgentKind[])).toBe(
+      "4 questions, each asked to both agents with claude-haiku-4-5 and a limit of 15 turns, and judged by claude-haiku-4-5. The wiki is the export at commit aaaaaaa; the repo agent read the repository at the same commit. The author wrote the questions on 2026-10-01, by his statement. The run began 2026-10-04T12:00:00.000Z.",
+    );
+    expect(header(["mcp"])).toMatch(/^4 questions, each asked to the mcp agent with /);
+    expect(header(["wiki", "repo", "mcp"])).toMatch(
+      /^4 questions, each asked to the 3 agents with /,
     );
   });
 

@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CodeCitation, CommitCitation } from "@repowiki/core";
@@ -6,7 +7,7 @@ import { createTestRepo, type TestRepo } from "@repowiki/engine/test-repo";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { citedCode, commitDetails, fileAt, MAX_CHANGED_PATHS, MAX_CODE_BYTES } from "./code.ts";
-import { commitOf } from "./git.ts";
+import { commitOf, topLevel } from "./git.ts";
 
 let sample: SampleWiki;
 let odd: TestRepo;
@@ -85,6 +86,13 @@ describe("citedCode", () => {
     );
   });
 
+  it("says when the cited lines are past the end of the file at their commit", () => {
+    const past = { ...codeOf("signals", 1), startLine: 40, endLine: 42 };
+    expect(citedCode(sample.repo.dir, past, 2)).toBe(
+      "The cited lines 40-42 are past the end of src/signals/ingest.py, which has 31 lines at commit 6767d44.\n",
+    );
+  });
+
   it("says when the repository lacks the cited commit", () => {
     const gone = { ...codeOf("signals", 0), sha: "f".repeat(40) };
     expect(citedCode(sample.repo.dir, gone, 5)).toBe(
@@ -130,6 +138,27 @@ describe("commitDetails", () => {
     expect(text).not.toMatch(/Fixture|example\.com/);
   });
 
+  it("labels a merge, whose changes are counted against its first parent", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write("a.txt", "a\n");
+      repo.commit("feat: start");
+      repo.git("checkout", "-q", "-b", "side");
+      repo.write("b.txt", "b\n");
+      repo.commit("feat: side");
+      repo.git("checkout", "-q", "-");
+      repo.write("c.txt", "c\n");
+      repo.commit("feat: main");
+      repo.git("merge", "-q", "--no-ff", "-m", "Merge side", "side");
+      const merge = repo.git("rev-parse", "HEAD").trim();
+      expect(commitDetails(repo.dir, commit(merge, "Merge side", null))).toContain(
+        "1 changed file (a merge: changes against its first parent):\n- b.txt: +1 -0\n",
+      );
+    } finally {
+      repo.remove();
+    }
+  });
+
   it("shows a commit the repository lacks from the citation alone", () => {
     expect(commitDetails(sample.repo.dir, commit("e".repeat(40), "fix: gone\nline", 3))).toBe(
       [
@@ -166,13 +195,16 @@ describe("commitDetails, whatever the user's config and the repository's attribu
   });
 
   it("lists every change in path order, with no signature check and no attribute hiding a diff", () => {
-    // The repository's own attributes call its Python files binary; the user's call text files so.
+    // The repository's own attributes call its Python files binary; the user's call text files so,
+    // and the user's core.bigFileThreshold calls any file over 1 KiB binary.
     repo.write(".gitattributes", "*.py -diff\n");
     repo.write("a.py", "x = 1\n");
     repo.write("b.txt", "one\n");
+    repo.write("c.md", "line\n".repeat(1000));
     repo.commit("feat: start");
     repo.write("a.py", "x = 2\n");
     repo.write("b.txt", "two\n");
+    repo.write("c.md", `${"line\n".repeat(999)}last\n`);
     const changed = repo.commit("feat: change both");
     // A commit carrying a signature: showing it with log.showSignature would run gpg.program.
     const tree = repo.git("rev-parse", `${changed}^{tree}`);
@@ -205,14 +237,14 @@ describe("commitDetails, whatever the user's config and the repository's attribu
         "[log]\n\tshowSignature = true",
         `[gpg]\n\tprogram = ${gpg}`,
         `[diff]\n\torderFile = ${join(home, "order")}\n\trelative = true`,
-        `[core]\n\tattributesFile = ${join(home, "attributes")}`,
+        `[core]\n\tattributesFile = ${join(home, "attributes")}\n\tbigFileThreshold = 1k`,
         "",
       ].join("\n"),
     );
     process.env.GIT_CONFIG_GLOBAL = join(home, "config");
 
     expect(commitDetails(repo.dir, commit(changed, "feat: change both", null))).toContain(
-      "2 changed files:\n- a.py: +1 -1\n- b.txt: +1 -1\n",
+      "3 changed files:\n- a.py: +1 -1\n- b.txt: +1 -1\n- c.md: +1 -1\n",
     );
     expect(commitDetails(repo.dir, commit(signed, "feat: signed", null))).toBe(
       [`commit ${signed}, 2026-01-04`, "Subject: feat: signed", "0 changed files:", ""].join("\n"),
@@ -227,5 +259,45 @@ describe("commitOf", () => {
     expect(commitOf(sample.repo.dir, sample.sha)).toBe(sample.sha);
     expect(commitOf(sample.repo.dir, "f".repeat(40))).toBeNull();
     expect(commitOf(sample.repo.dir, "--output=/tmp/x")).toBeNull();
+  });
+
+  it("refuses a short sha that names more than one commit", () => {
+    const repo = createTestRepo();
+    try {
+      repo.write("a.txt", "a\n");
+      repo.commit("feat: start");
+      const tree = repo.git("rev-parse", "HEAD^{tree}");
+      // Commit objects whose shas share a four-character prefix, found by hashing them here.
+      const body = (i: number) =>
+        `tree ${tree}\nauthor A <a@example.com> 1767484800 +0000\ncommitter A <a@example.com> 1767484800 +0000\n\nc${i}\n`;
+      const shaOf = (text: string) =>
+        createHash("sha1")
+          .update(`commit ${Buffer.byteLength(text)}\0${text}`)
+          .digest("hex");
+      const seen = new Map<string, number>();
+      let pair: [number, number] | null = null;
+      for (let i = 0; pair === null; i++) {
+        const prefix = shaOf(body(i)).slice(0, 4);
+        const before = seen.get(prefix);
+        if (before !== undefined) pair = [before, i];
+        seen.set(prefix, i);
+      }
+      const written = pair.map((i) => {
+        const file = join(repo.dir, `.git/c${i}.txt`);
+        writeFileSync(file, body(i));
+        return repo.git("hash-object", "-t", "commit", "-w", file);
+      });
+      expect(written).toEqual(pair.map((i) => shaOf(body(i))));
+      expect(commitOf(repo.dir, (written[0] ?? "").slice(0, 4))).toBeNull();
+      expect(commitOf(repo.dir, written[0] ?? "")).toBe(written[0]);
+    } finally {
+      repo.remove();
+    }
+  });
+});
+
+describe("topLevel", () => {
+  it("gives a subdirectory's repository, whose root grep and the repo tools name paths from", () => {
+    expect(topLevel(join(sample.repo.dir, "src", "signals"))).toBe(realpathSync(sample.repo.dir));
   });
 });

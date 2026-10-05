@@ -145,7 +145,8 @@ export const PROBE_QUERIES = ["how does it start", "configuration", "tests"] as 
 
 /**
  * One probed call: its time, its result's size in code points, and whether it was an error; a
- * call that got no result (it was refused, timed out, or the server died) has the reason why.
+ * call that got no result (it was refused, timed out, or the server died) has the reason why. A
+ * call the probe skipped has `isError` null and its reason (as the start row has no error).
  */
 export interface ProbeRow {
   call: string;
@@ -168,7 +169,8 @@ export interface ProbeClient {
  * tools/list, list_pages, three searches, read_page of the first result, cited_code of its
  * reference 1, read_page as of its first revision's date, and page_changes of it. A call that
  * fails is an error row with its reason, and the probe goes on (a dead server's calls all fail,
- * each row saying so). No LLM.
+ * each row saying so); a call it cannot make (no page id, no history date) is a row saying why.
+ * No LLM.
  */
 export async function runProbe(
   connect: () => Promise<ProbeClient>,
@@ -227,12 +229,31 @@ export async function runProbe(
     id ??= pageId(found);
   }
   id ??= pageId(listed);
-  if (id === null) return rows;
+  const skip = (label: string, reason: string) =>
+    rows.push({
+      call: label,
+      ms: 0,
+      codePoints: null,
+      isError: null,
+      problem: `skipped: ${reason}`,
+    });
+  if (id === null) {
+    for (const label of ["read_page", "cited_code", "read_page as_of", "page_changes"])
+      skip(label, "no page id in list_pages or the searches");
+    return rows;
+  }
   const page = await call(`read_page ${id}`, "read_page", { id });
   await call(`cited_code ${id} 1`, "cited_code", { id, ref: 1 });
-  const first = /Page history, oldest first: (\d{4}-\d{2}-\d{2})/.exec(page)?.[1];
-  if (first !== undefined)
-    await call(`read_page ${id} as_of ${first}`, "read_page", { id, as_of: first });
+  // The page's own history line starts a line; a claim is always a bullet, so it cannot.
+  const first = [...page.matchAll(/^Page history, oldest first: (\d{4}-\d{2}-\d{2})/gm)].at(
+    -1,
+  )?.[1];
+  if (first === undefined) {
+    skip(
+      `read_page ${id} as_of`,
+      page === "" ? "read_page gave no page" : "read_page shows no history date",
+    );
+  } else await call(`read_page ${id} as_of ${first}`, "read_page", { id, as_of: first });
   await call(`page_changes ${id}`, "page_changes", { id });
   return rows;
 }
@@ -244,10 +265,12 @@ export function probeReport(rows: readonly ProbeRow[], cap: number): string {
     const size = r.codePoints === null ? "-" : r.codePoints.toLocaleString("en-US");
     const error = r.isError === null ? "-" : r.isError ? "yes" : "no";
     const problem = r.problem === undefined ? "" : `: ${cut(oneLine(r.problem), 160)}`;
+    const ms = r.isError === null && r.problem !== undefined ? "-" : Math.round(r.ms).toString();
     lines.push(
-      `${Math.round(r.ms).toString().padStart(8)}  ${size.padStart(11)}  ${error.padStart(5)}  ${r.call}${problem}`,
+      `${ms.padStart(8)}  ${size.padStart(11)}  ${error.padStart(5)}  ${r.call}${problem}`,
     );
   }
+  // The calls made: not the start, tools/list or a skipped call.
   const calls = rows.filter((r) => r.isError !== null && r.call !== "tools/list");
   const slowest = calls.reduce<ProbeRow | null>(
     (a, r) => (a === null || r.ms > a.ms ? r : a),

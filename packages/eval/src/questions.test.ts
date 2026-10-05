@@ -223,6 +223,24 @@ describe("the history suite", () => {
     ).toThrow(QuestionFileError);
   });
 
+  it("refuses more than 20 questions, a question of another set, and a smoke file as the history set", () => {
+    const more = (q: Record<string, unknown>[]) => {
+      for (let i = q.length; i < 21; i++) {
+        q.push({
+          ...q[i % 10],
+          id: `h${i + 1}`,
+          question: `Placeholder history question ${i + 1}?`,
+        });
+      }
+    };
+    expect(() => loadQuestions(write(historyFile(more)))).toThrow(QuestionFileError);
+    expect(() =>
+      loadQuestions(write(historyFile((q) => Object.assign(q[0] ?? {}, { set: "dev" })))),
+    ).toThrow(QuestionFileError);
+    const smoke = loadQuestions(HISTORY_SMOKE).file;
+    expect(() => selectQuestions(smoke, "history")).toThrow(/^this is the smoke question file/);
+  });
+
   it("keeps the as-of kind out of the author's exit-criteria file", () => {
     expect(() =>
       loadQuestions(

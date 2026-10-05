@@ -42,5 +42,9 @@ export function markdownText(text: string, max: number): string {
   return cut(plain, max).replace(/[\\`*_[\]()<>!#|~&]/g, (c) => `\\${c}`);
 }
 
+/** "a", "a and b", "a, b and c". */
+export const andList = (items: readonly string[]): string =>
+  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
 /** "1 file", "2 files". */
 export const count = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;

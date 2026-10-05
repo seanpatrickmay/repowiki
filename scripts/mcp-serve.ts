@@ -28,8 +28,9 @@ async function main(): Promise<void> {
   const dir = resolve(args.repo ?? ".");
   if (!existsSync(dir) || !statSync(dir).isDirectory())
     throw new CliError(`no such repository: ${args.repo}`);
+  // A subdirectory serves its repository, whose wiki is named after the top level.
   const repo = topLevel(dir);
-  const out = resolve(args.out ?? join(homedir(), ".repowiki", basename(dir)));
+  const out = resolve(args.out ?? join(homedir(), ".repowiki", basename(repo)));
   let pinned: string | null = null;
   if (args.compareTo !== null) {
     pinned = commitOf(repo, args.compareTo);
@@ -44,9 +45,24 @@ async function main(): Promise<void> {
   });
   const { wiki, headDate } = server.served();
   console.error(startLine({ repo: wiki.repo, head: wiki.head, headDate, out, pinned }));
-  process.on("SIGTERM", () => process.exit(0));
-  process.on("SIGINT", () => process.exit(0));
-  await serveStdio(server.protocol, { input: process.stdin, output: process.stdout });
+  // On a signal, the replies already written reach the client before the exit; a client that
+  // stopped reading would hold that up for ever, so the exit comes after a second regardless.
+  const stop = () => {
+    setTimeout(() => process.exit(0), 1000).unref();
+    process.stdout.write("", () => process.exit(0));
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  // The client stopped reading (EPIPE): no one is left to answer, so end quietly.
+  process.stdout.on("error", () => process.exit(0));
+  await serveStdio(server.protocol, {
+    input: process.stdin,
+    output: process.stdout,
+    onError: (error) => {
+      const why = error instanceof Error ? error.message : String(error);
+      console.error(logLine(`repowiki mcp: internal error: ${why}`));
+    },
+  });
 }
 
 try {

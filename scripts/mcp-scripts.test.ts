@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { connectMcp, McpClientError, mcpToolSet } from "@repowiki/mcp";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -34,10 +35,16 @@ beforeAll(() => {
   out = mkdtempSync(join(tmpdir(), "repowiki-mcp-out-"));
   writeFileSync(join(out, "export.json"), JSON.stringify(h.wiki));
 });
+/** Every server a test started: one a failed test left running is killed here, not leaked. */
+const children: ChildProcessWithoutNullStreams[] = [];
 afterAll(() => {
+  for (const child of children) if (child.exitCode === null) child.kill("SIGKILL");
   h.repo.remove();
   rmSync(out, { recursive: true, force: true });
 });
+
+/** How long a test waits for one reply before it fails with the method's name. */
+const REPLY_TIMEOUT_MS = 15_000;
 
 /** The environment a client gives the server, with a key in it the server must drop. */
 const clientEnv = () => ({ ...process.env, ANTHROPIC_API_KEY: "sk-ant-test-not-a-key" });
@@ -58,6 +65,7 @@ function start(args: readonly string[]) {
   const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [SCRIPT, ...args], {
     env: clientEnv(),
   });
+  children.push(child);
   let stdout = "";
   let stderr = "";
   const waiting = new Map<number, (reply: unknown) => void>();
@@ -82,7 +90,16 @@ function start(args: readonly string[]) {
       params?: unknown,
     ): Promise<{ result?: { content?: { text: string }[] } }> {
       id++;
-      const reply = new Promise<never>((resolve) => waiting.set(id, resolve as never));
+      const reply = new Promise<never>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          waiting.delete(id);
+          reject(new Error(`no reply to ${method} within ${REPLY_TIMEOUT_MS} ms: ${stderr}`));
+        }, REPLY_TIMEOUT_MS);
+        waiting.set(id, (value) => {
+          clearTimeout(timer);
+          (resolve as (v: unknown) => void)(value);
+        });
+      });
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
       return reply;
     },
@@ -199,6 +216,8 @@ describe("mcp-serve.ts as a process (no network, no LLM)", () => {
           encoding: "utf8",
         });
         expect(usage.status).toBe(2);
+        expect(usage.stdout).toBe("");
+        expect(usage.stderr.trim().split("\n")).toHaveLength(1);
         const badRev = spawnSync(
           process.execPath,
           [SCRIPT, h.repo.dir, "--out", out, "--compare-to", "nope"],
@@ -207,10 +226,100 @@ describe("mcp-serve.ts as a process (no network, no LLM)", () => {
           },
         );
         expect(badRev.status).toBe(2);
-        expect(badRev.stderr).toContain("--compare-to nope names no commit");
+        expect(badRev.stdout).toBe("");
+        expect(badRev.stderr.trim().split("\n")).toEqual([
+          expect.stringContaining("--compare-to nope names no commit"),
+        ]);
       } finally {
         rmSync(empty, { recursive: true, force: true });
       }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "serves the repository's own wiki when started in a subdirectory of it",
+    () => {
+      const home = mkdtempSync(join(tmpdir(), "repowiki-mcp-home-"));
+      try {
+        const wikiDir = join(home, ".repowiki", basename(h.repo.dir));
+        mkdirSync(wikiDir, { recursive: true });
+        writeFileSync(join(wikiDir, "export.json"), JSON.stringify(h.wiki));
+        const served = spawnSync(process.execPath, [SCRIPT, join(h.repo.dir, "src")], {
+          env: { ...clientEnv(), HOME: home },
+          input: "",
+          encoding: "utf8",
+        });
+        expect(served.stderr).toContain(`from ${wikiDir}; comparing with HEAD`);
+        expect(served.status).toBe(0);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "ends quietly, exit 0, when its client stops reading its output",
+    async () => {
+      const child = spawn(process.execPath, [SCRIPT, h.repo.dir, "--out", out], {
+        env: clientEnv(),
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+      while (!stderr.includes("\n")) await new Promise((resolve) => setTimeout(resolve, 20));
+      child.stdout.destroy();
+      const call = { jsonrpc: "2.0", method: "tools/call", params: { name: "list_pages" } };
+      for (let id = 1; id <= 20; id++) {
+        child.stdin.write(
+          `${JSON.stringify({ ...call, id, params: { ...call.params, arguments: {} } })}\n`,
+        );
+      }
+      const code = await Promise.race([
+        closed,
+        new Promise<"running">((resolve) => setTimeout(() => resolve("running"), 5000)),
+      ]);
+      if (code === "running") child.kill("SIGKILL");
+      expect(code).toBe(0);
+      expect(stderr.trim().split("\n")).toHaveLength(1);
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "exits on SIGTERM, though its client stopped reading and its output is full",
+    async () => {
+      const child = spawn(process.execPath, [SCRIPT, h.repo.dir, "--out", out], {
+        env: clientEnv(),
+      });
+      children.push(child);
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+      while (!stderr.includes("\n")) await new Promise((resolve) => setTimeout(resolve, 20));
+      // Read nothing more, and ask for far more than a pipe holds.
+      child.stdout.pause();
+      const call = {
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { name: "list_pages", arguments: {} },
+      };
+      for (let id = 1; id <= 200; id++) child.stdin.write(`${JSON.stringify({ ...call, id })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const sent = Date.now();
+      child.kill("SIGTERM");
+      const code = await Promise.race([
+        closed,
+        // Without the fallback it never exits; the margin is for a loaded machine.
+        new Promise<"running">((resolve) => setTimeout(() => resolve("running"), 12_000)),
+      ]);
+      expect(code).toBe(0);
+      expect(Date.now() - sent).toBeLessThan(12_000);
     },
     PROCESS_TIMEOUT_MS,
   );
@@ -292,10 +401,45 @@ describe("mcp-cli", () => {
     };
     prepareEnvironment(env);
     expect(env).toEqual({ PATH: "/bin", GIT_OPTIONAL_LOCKS: "0" });
-    expect(readFileSync(SCRIPT, "utf8").indexOf("prepareEnvironment(process.env)")).toBeLessThan(
-      readFileSync(SCRIPT, "utf8").indexOf("parseServeArgs("),
-    );
   });
+
+  it(
+    "drops the key before anything in the server reads or copies it",
+    () => {
+      // A preload that records each read and removal of an ANTHROPIC_ variable, in order.
+      const dir = mkdtempSync(join(tmpdir(), "repowiki-env-"));
+      try {
+        const log = join(dir, "events.json");
+        const preload = join(dir, "record.mjs");
+        writeFileSync(
+          preload,
+          [
+            'import { writeFileSync } from "node:fs";',
+            "const events = [];",
+            'const watched = (k) => typeof k === "string" && k.startsWith("ANTHROPIC_");',
+            "process.env = new Proxy(process.env, {",
+            "  get(t, k) { if (watched(k) && k in t) events.push('read ' + k); return Reflect.get(t, k); },",
+            "  deleteProperty(t, k) { if (watched(k)) events.push('delete ' + k); return Reflect.deleteProperty(t, k); },",
+            "});",
+            `process.on("exit", () => writeFileSync(${JSON.stringify(log)}, JSON.stringify(events)));`,
+            "",
+          ].join("\n"),
+        );
+        const served = spawnSync(
+          process.execPath,
+          ["--import", preload, SCRIPT, h.repo.dir, "--out", out],
+          { env: clientEnv(), input: "", encoding: "utf8" },
+        );
+        expect(served.status, served.stderr).toBe(0);
+        const events = JSON.parse(readFileSync(log, "utf8")) as string[];
+        expect(events[0]).toBe("delete ANTHROPIC_API_KEY");
+        expect(events.filter((e) => e.startsWith("read "))).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
 });
 
 describe("connectMcp and mcpToolSet (client.ts)", () => {
@@ -446,6 +590,7 @@ describe("mcp-probe", () => {
       ['search "tests"', true, null],
       ["read_page signals", false, null],
       ["cited_code signals 1", false, null],
+      ["read_page signals as_of", null, "skipped: read_page shows no history date"],
       ["page_changes signals", false, null],
     ]);
     const report = probeReport(rows, 12_000);
@@ -471,11 +616,52 @@ describe("mcp-probe", () => {
       }),
       () => 0,
     );
-    expect(rows.slice(-3).map((r) => [r.call, r.problem])).toEqual([
+    expect(rows.slice(-4).map((r) => [r.call, r.problem])).toEqual([
       ["read_page signals", "the MCP server exited (code 1): repowiki mcp: boom"],
       ["cited_code signals 1", "the MCP server has exited"],
+      ["read_page signals as_of", "skipped: read_page gave no page"],
       ["page_changes signals", "the MCP server has exited"],
     ]);
+  });
+
+  it("lists the calls it skips, and why, so a short report is not taken for a whole one", async () => {
+    const rows = await runProbe(
+      async () => ({
+        listTools: async () => [],
+        callTool: async () => ({ text: "No page matches; try other words.\n", isError: false }),
+      }),
+      () => 0,
+    );
+    const skipped = "skipped: no page id in list_pages or the searches";
+    expect(rows.slice(-4).map((r) => [r.call, r.isError, r.problem])).toEqual([
+      ["read_page", null, skipped],
+      ["cited_code", null, skipped],
+      ["read_page as_of", null, skipped],
+      ["page_changes", null, skipped],
+    ]);
+    const report = probeReport(rows, 12_000);
+    expect(report).toContain(`       -            -      -  read_page: ${skipped}\n`);
+    expect(report).toMatch(/errors: 0\n$/);
+  });
+
+  it("reads the history date from the page's own history line, not from a claim", async () => {
+    const asked: string[] = [];
+    await runProbe(
+      async () => ({
+        listTools: async () => [],
+        callTool: async (name, args) => {
+          asked.push(`${name} ${JSON.stringify(args)}`);
+          if (name === "read_page")
+            return {
+              text: "- A claim: Page history, oldest first: 2020-01-01 forged\n\nPage history, oldest first: 2026-01-02 commit a (build)\n",
+              isError: false,
+            };
+          return { text: "- signals: S.\n", isError: false };
+        },
+      }),
+      () => 0,
+    );
+    expect(asked).toContain('read_page {"id":"signals","as_of":"2026-01-02"}');
   });
 
   it("parses <repo> [--out dir] and refuses the rest", () => {
@@ -486,9 +672,9 @@ describe("mcp-probe", () => {
   });
 
   it(
-    "probes the fixture's server end to end as a process",
+    "probes the fixture's server end to end as a process, writing nothing, and exits 2 on a bad flag",
     () => {
-      const before = listing(out);
+      const before = [...listing(join(h.repo.dir, ".git")), ...listing(out)];
       const probe = spawnSync(
         process.execPath,
         ["scripts/mcp-probe.ts", h.repo.dir, "--out", out],
@@ -512,7 +698,16 @@ describe("mcp-probe", () => {
         "page_changes signals",
       ]);
       expect(probe.stdout).toMatch(/errors: 0\n$/);
-      expect(listing(out)).toEqual(before);
+      expect([...listing(join(h.repo.dir, ".git")), ...listing(out)]).toEqual(before);
+      const usage = spawnSync(process.execPath, ["scripts/mcp-probe.ts", h.repo.dir, "--x"], {
+        env: clientEnv(),
+        encoding: "utf8",
+      });
+      expect(usage.status).toBe(2);
+      expect(usage.stdout).toBe("");
+      expect(usage.stderr.trim().split("\n")).toEqual([
+        expect.stringMatching(/^repowiki mcp:probe: .*usage: pnpm mcp:probe/),
+      ]);
     },
     PROCESS_TIMEOUT_MS,
   );
