@@ -1,0 +1,29 @@
+{
+  "data": {
+    "repository": {
+      "issues": {
+        "totalCount": 3,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "number": 9,
+            "title": "Docs typo",
+            "body": null,
+            "createdAt": "2026-09-20T09:00:00Z",
+            "updatedAt": "2026-09-30T09:00:00Z",
+            "author": {
+              "__typename": "User",
+              "login": "helper"
+            },
+            "labels": {
+              "nodes": []
+            }
+          }
+        ]
+      }
+    }
+  }
+}

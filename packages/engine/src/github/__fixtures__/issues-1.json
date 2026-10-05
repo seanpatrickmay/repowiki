@@ -1,0 +1,48 @@
+{
+  "data": {
+    "repository": {
+      "issues": {
+        "totalCount": 3,
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOmlzc3Vlcw=="
+        },
+        "nodes": [
+          {
+            "number": 7,
+            "title": "Long chunks lose signals",
+            "body": "A chunk past 50 sentences loses the rest. CANARY-BODY-7f3a",
+            "createdAt": "2026-09-20T09:00:00Z",
+            "updatedAt": "2026-10-02T09:00:00Z",
+            "author": {
+              "__typename": "User",
+              "login": "reporter"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "bug"
+                }
+              ]
+            }
+          },
+          {
+            "number": 8,
+            "title": "\u2066Deliverables\u2069 export\tfails",
+            "body": "See src/deliverables/crud.py. CANARY-BODY-7f3a",
+            "createdAt": "2026-09-20T09:00:00Z",
+            "updatedAt": "2026-10-01T09:00:00Z",
+            "author": null,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:deliverables"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
