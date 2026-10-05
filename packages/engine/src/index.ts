@@ -86,6 +86,17 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  ensureInflightRepo,
+  type FetchedHeads,
+  fetchHeads,
+  githubFetchUrl,
+  type HeadState,
+  headStates,
+  INFLIGHT_DIR,
+  isMissingObject,
+  removeInflightRepo,
+} from "./inflight/index.ts";
+export {
   architectureLinksWithoutPage,
   architectureLinkViolations,
   codeAliases,
