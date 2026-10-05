@@ -101,6 +101,7 @@ export {
   isMissingObject,
   removeInflightRepo,
   type StaleClaim,
+  type Suggest,
   type SummaryEstimate,
   type SummaryStatus,
   staleClaims,
