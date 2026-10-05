@@ -7,7 +7,7 @@ import {
   remapCitation,
 } from "@repowiki/engine";
 import { fileAt } from "./code.ts";
-import { commitOf, gitOutput } from "./git.ts";
+import { commitOf, GIT_TIMEOUT_MS, gitOutput } from "./git.ts";
 
 /**
  * Where the repository stands against the wiki (spec v2 #5 §5): the compare commit, how far it is
@@ -176,7 +176,7 @@ export function createFreshness(options: FreshnessOptions): Freshness {
     const key = [...paths].sort().join("\0");
     return (from: string) =>
       changes.get(`${from}\0${compare}\0${key}`, () =>
-        holds(from) ? diffCommits(repo, from, compare, paths) : [],
+        holds(from) ? diffCommits(repo, from, compare, paths, { timeoutMs: GIT_TIMEOUT_MS }) : [],
       );
   };
 

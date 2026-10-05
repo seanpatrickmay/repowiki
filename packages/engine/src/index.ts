@@ -46,6 +46,8 @@ export {
   diffCommits,
   type FileChange,
   GitError,
+  type GitOptions,
+  GitTimeoutError,
   gitFailureCause,
   type Hunk,
   type ImportEdge,
