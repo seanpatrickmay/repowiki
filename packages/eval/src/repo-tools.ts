@@ -7,9 +7,18 @@ import {
   scrubbedGitEnv,
   type TreeBlob,
 } from "@repowiki/engine";
+import {
+  count,
+  cut,
+  defineTool,
+  MAX_TOOL_RESULT_CHARS,
+  oneLine,
+  ToolError,
+  type ToolSet,
+  toolSet,
+  toolText,
+} from "@repowiki/query";
 import { z } from "zod";
-import { count, cut, oneLine, toolText } from "./text.ts";
-import { defineTool, MAX_TOOL_RESULT_CHARS, ToolError, type ToolSet, toolSet } from "./tools.ts";
 
 /** The most paths list_files names before it summarizes by directory instead. */
 export const MAX_LISTED_FILES = 400;

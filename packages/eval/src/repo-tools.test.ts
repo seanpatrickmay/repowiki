@@ -3,10 +3,10 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTestRepo, type TestRepo } from "@repowiki/engine/test-repo";
+import { MAX_TOOL_RESULT_CHARS } from "@repowiki/query";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRepoTools, MAX_GREP_MATCHES } from "./repo-tools.ts";
 import { type SampleWiki, sampleWiki } from "./test-wiki.ts";
-import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
 
 let sample: SampleWiki;
 let big: TestRepo;

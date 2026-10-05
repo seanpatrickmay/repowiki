@@ -1,4 +1,5 @@
 import { callCostUsd, type Provider, priceFor, type ToolProvider } from "@repowiki/llm";
+import type { ToolSet } from "@repowiki/query";
 import { runAgent } from "./agent.ts";
 import { JudgeError, judgeAnswer } from "./judge.ts";
 import { type AgentKind, agentSystemPrompt } from "./prompts.ts";
@@ -14,7 +15,6 @@ import {
   type RunRecord,
   readRecords,
 } from "./records.ts";
-import type { ToolSet } from "./tools.ts";
 
 export interface EvalRunOptions {
   runDir: string;

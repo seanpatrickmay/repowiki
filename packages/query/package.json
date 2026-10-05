@@ -1,17 +1,18 @@
 {
-  "name": "@repowiki/eval",
+  "name": "@repowiki/query",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./test-boundaries": "./src/test-boundaries.ts",
     "./test-wiki": "./src/test-wiki.ts"
   },
   "dependencies": {
     "@repowiki/core": "workspace:*",
-    "@repowiki/engine": "workspace:*",
-    "@repowiki/llm": "workspace:*",
-    "@repowiki/query": "workspace:*",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@repowiki/engine": "workspace:*"
   }
 }

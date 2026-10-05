@@ -1,6 +1,6 @@
-import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/eval/test-wiki";
+import { WikiView } from "@repowiki/query";
+import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WikiView } from "../packages/eval/src/wiki-view.ts";
 import { buildSiteModel, finalTarget, hasArticleRoute } from "../packages/site/src/model.ts";
 
 let sample: SampleWiki;
@@ -10,7 +10,7 @@ beforeAll(() => {
 afterAll(() => sample.repo.remove());
 
 /**
- * The wiki agent's view routes ids as the reader site does (eval cannot depend on the site, so
+ * The wiki agent's view routes ids as the reader site does (query cannot depend on the site, so
  * WikiView keeps its own copy of the rules): this pins the two copies to each other.
  */
 describe("WikiView and the site's model", () => {

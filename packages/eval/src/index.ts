@@ -1,4 +1,10 @@
 export {
+  ABOUT_PAGE_ID,
+  createWikiTools,
+  MAX_TOOL_RESULT_CHARS,
+  type ToolSet,
+} from "@repowiki/query";
+export {
   type AccuracyTally,
   accuracySheet,
   CLAIMS_PER_FALSE_CLAIM,
@@ -56,6 +62,3 @@ export {
   TOKEN_SHARE,
   tokensOf,
 } from "./summary.ts";
-export { MAX_TOOL_RESULT_CHARS, type ToolSet } from "./tools.ts";
-export { createWikiTools } from "./wiki-tools.ts";
-export { ABOUT_PAGE_ID } from "./wiki-view.ts";

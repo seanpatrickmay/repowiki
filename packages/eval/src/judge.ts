@@ -1,8 +1,8 @@
 import type { TokenUsage } from "@repowiki/core";
 import { LlmOutputError, type Provider } from "@repowiki/llm";
+import { cut, oneLine, toolText } from "@repowiki/query";
 import { z } from "zod";
 import type { EvalQuestion } from "./questions.ts";
-import { cut, oneLine, toolText } from "./text.ts";
 
 /** The most characters of an answer the judge reads; the agents are asked for 200 words. */
 export const MAX_JUDGED_ANSWER_CHARS = 4000;

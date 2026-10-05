@@ -1,7 +1,7 @@
+import { createWikiTools } from "@repowiki/query";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRepoTools } from "./repo-tools.ts";
 import { extendedWiki, type SampleWiki, sampleWiki } from "./test-wiki.ts";
-import { createWikiTools } from "./wiki-tools.ts";
 
 let sample: SampleWiki;
 beforeAll(() => {

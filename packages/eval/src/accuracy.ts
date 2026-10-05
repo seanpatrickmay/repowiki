@@ -4,8 +4,7 @@ import {
   plainClaimText,
   type WikiExport,
 } from "@repowiki/core";
-import { markdownText } from "./text.ts";
-import { SECTION_TITLES } from "./wiki-page.ts";
+import { markdownText, SECTION_TITLES } from "@repowiki/query";
 
 /** Spec §9's second exit criterion: at most 1 false claim per 50 claims reviewed. */
 export const CLAIMS_PER_FALSE_CLAIM = 50;

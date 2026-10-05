@@ -10,6 +10,7 @@ import {
   createLedger,
   DEFAULT_MODELS,
 } from "@repowiki/llm";
+import { createWikiTools } from "@repowiki/query";
 import { describe, expect, it } from "vitest";
 import { loadQuestions, selectQuestions } from "./questions.ts";
 import type { RunInfo } from "./records.ts";
@@ -18,7 +19,6 @@ import { renderReport } from "./report.ts";
 import { runEval } from "./run.ts";
 import { summarize } from "./summary.ts";
 import { SMOKE_QUESTIONS, sampleWiki } from "./test-wiki.ts";
-import { createWikiTools } from "./wiki-tools.ts";
 
 const mode = cassetteMode();
 const cassette = (name: string) =>
