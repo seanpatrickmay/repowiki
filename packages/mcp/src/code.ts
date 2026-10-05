@@ -83,6 +83,9 @@ export function citedCode(
   if (!("text" in file)) return `${missingText(citation.path, citation.sha, file)}\n`;
   const lines = toolText(file.text).split("\n");
   if (lines.at(-1) === "") lines.pop();
+  if (citation.startLine > lines.length) {
+    return `The cited lines ${citation.startLine}-${citation.endLine} are past the end of ${shown(citation.path)}, which has ${count(lines.length, "line")} at commit ${sha7(citation.sha)}.\n`;
+  }
   const from = Math.max(1, citation.startLine - context);
   const to = Math.min(lines.length, citation.endLine + context);
   const symbol = citation.symbol === null ? "" : `, ${oneLine(citation.symbol)}`;

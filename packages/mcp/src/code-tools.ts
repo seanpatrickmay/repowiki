@@ -39,15 +39,20 @@ const PAGE_ID = z.string().trim().min(1).max(200);
 const AS_OF = z.string().trim().min(1).max(40);
 const shownPath = (path: string) => cut(oneLine(path), 200);
 
+/** macOS's /var, /tmp and /etc are links into /private: either spelling names the same path. */
+const unprivate = (path: string) => path.replace(/^\/private(?=\/(?:var|tmp|etc)(?:\/|$))/, "");
+
 /**
  * A path an agent gave, as a repository path, by string rules alone (it never reaches git or the
- * file system): an absolute path must lie under the repository's top level; "./" and repeated or
- * trailing slashes go; ".." is refused.
+ * file system): an absolute path must lie under the repository's top level (either side may
+ * spell macOS's /private links either way); "./" and repeated or trailing slashes go; ".." is
+ * refused; a backslash reads as a slash.
  */
 export function repoRelative(repo: string, raw: string): string {
-  let path = raw.trim().replace(/\\/g, "/");
-  const top = repo.replace(/\\/g, "/").replace(/\/+$/, "");
+  let path = unprivate(raw.trim().replace(/\\/g, "/"));
+  const top = unprivate(repo.replace(/\\/g, "/").replace(/\/+$/, ""));
   if (path.startsWith("/")) {
+    if (path.replace(/\/+$/, "") === top) path = `${top}/`;
     if (!path.startsWith(`${top}/`)) {
       throw new ToolError(
         `${JSON.stringify(cut(oneLine(raw), 200))} is outside the repository; give a path relative to its root`,
@@ -63,14 +68,20 @@ export function repoRelative(repo: string, raw: string): string {
   return posix.join(...segments);
 }
 
-/** The sections a resolved page id reads, current or as of a point. */
-function pageSections(view: WikiView, id: string) {
+/** What a page id resolves to, refusing one that names several pages. */
+function resolveOne(view: WikiView, id: string) {
   const resolved = view.resolve(id);
   if (resolved.kind === "choices") {
     throw new ToolError(
       `${JSON.stringify(cut(oneLine(id), 80))} may refer to several pages: ${resolved.targets.join(", ")}; name one`,
     );
   }
+  return resolved;
+}
+
+/** The sections a resolved page id reads, current or as of a point. */
+function pageSections(view: WikiView, id: string) {
+  const resolved = resolveOne(view, id);
   if (resolved.kind === "about") {
     const article = view.article;
     if (article === undefined) throw new ToolError("the wiki has no About article");
@@ -233,16 +244,13 @@ function pageChanges(
   input: { id: string; from?: string | undefined; to?: string | undefined },
 ): string {
   const { view, wiki } = served;
-  const resolved = view.resolve(input.id);
-  if (resolved.kind === "choices") {
-    throw new ToolError(
-      `${JSON.stringify(cut(oneLine(input.id), 80))} may refer to several pages: ${resolved.targets.join(", ")}; name one`,
-    );
-  }
+  const resolved = resolveOne(view, input.id);
   const about = resolved.kind === "about";
   const id = about ? ABOUT_PAGE_ID : resolved.featureId;
   const history: readonly ChangedRevision[] = about ? wiki.architecture : (wiki.history[id] ?? []);
   const title = about ? (view.article?.title ?? "About") : view.title(id);
+  if (history.length === 0) throw new ToolError(`${id} has no revisions`);
+  const heading = `Changes to ${titleText(title)} (page id: ${id})`;
   const at = (text: string | undefined, fallback: number) => {
     if (text === undefined) return fallback;
     const found = revisionAt(history, parseAsOf(text, served.resolveCommit), served.isAncestor);
@@ -260,12 +268,14 @@ function pageChanges(
   const before = history[a];
   const after = history[b];
   if (before === undefined || after === undefined) throw new ToolError(`${id} has no revisions`);
-  const heading = `Changes to ${titleText(title)} (page id: ${id})`;
   if (history.length === 1) {
     return `${heading}: the page has one revision, ${revisionEntry(after)}; nothing to compare it with.\n`;
   }
+  if (input.from === undefined && toIndex === 0) {
+    return `${heading}: revision 1, ${revisionEntry(after)}, is its first; nothing before it to compare with.\n`;
+  }
   const keys = about ? ArchitectureSectionKey.options : SectionKey.options;
-  return renderChanges(
+  const changes = renderChanges(
     view,
     heading,
     { revision: before, n: a + 1 },
@@ -273,6 +283,10 @@ function pageChanges(
     history.slice(a, b + 1),
     keys,
   );
+  if (fromIndex <= toIndex) return changes;
+  // Said under the heading: the agent asked in the other order.
+  const nl = changes.indexOf("\n");
+  return `${changes.slice(0, nl)}\n(from is later than to, so this runs from the earlier point to the later)${changes.slice(nl)}`;
 }
 
 /** The last three of the six tools (spec v2 #5 §6.2): pages_for_file, cited_code, page_changes. */

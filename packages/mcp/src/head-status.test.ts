@@ -174,4 +174,55 @@ describe("createFreshness: per-claim marks", () => {
       why: "the repository does not hold the wiki's commit",
     });
   });
+
+  it("does not mark a claim already marked stale, nor a lead that summarizes only it", () => {
+    const { sections } = page("signals");
+    const stale = sections.map((s) => ({
+      ...s,
+      claims: s.claims.map((c) => (c.id === "s-3" ? { ...c, staleSince: h.sha } : c)),
+    }));
+    const marks = createFreshness({ repo: h.repo.dir, wikiHead: h.sha, pinned: null }).marks(
+      "signals-3-stale",
+      stale,
+    );
+    expect(marks.has("s-3")).toBe(false);
+    expect(marks.has("s-lead")).toBe(false);
+  });
+
+  it("marks a claim whose cited file was deleted, and says where its lines are now", () => {
+    h.repo.git("rm", "-q", "src/deliverables/crud.py");
+    const gone = h.repo.commit("chore: drop crud");
+    try {
+      const freshness = createFreshness({ repo: h.repo.dir, wikiHead: h.sha, pinned: gone });
+      const { id, sections } = page("deliverables");
+      const marks = freshness.marks(id, sections);
+      expect([...marks.values()].every((m) => m.kind === "changed")).toBe(true);
+      expect(marks.size).toBeGreaterThan(0);
+      const crud = sections[1]?.claims[0]?.citations[0];
+      if (crud?.kind !== "code") throw new Error("fixture");
+      expect(freshness.citationNow(crud)).toEqual({ kind: "deleted" });
+    } finally {
+      h.repo.git("reset", "-q", "--hard", h.commits.after);
+    }
+  });
+
+  it("marks a claim whose citation's commit the repository lacks by its lines at the compare commit", () => {
+    const { sections } = page("signals");
+    const store = sections.flatMap((s) => s.claims).find((c) => c.id === "s-3");
+    const cited = store?.citations[0];
+    if (cited?.kind !== "code") throw new Error("fixture");
+    const lost = { ...cited, sha: "e".repeat(40) };
+    const freshness = createFreshness({ repo: h.repo.dir, wikiHead: h.sha, pinned: null });
+    expect(freshness.citationNow(lost)).toEqual({ kind: "changed", path: "src/signals/store.py" });
+  });
+
+  it("is unknown, saying why, when the pinned compare commit is not in the repository", () => {
+    const status = createFreshness({
+      repo: h.repo.dir,
+      wikiHead: h.sha,
+      pinned: "e".repeat(40),
+    }).status();
+    expect(status).toMatchObject({ known: false, compare: "e".repeat(40) });
+    expect(status.problem).toMatch(/^git rev-list failed in /);
+  });
 });

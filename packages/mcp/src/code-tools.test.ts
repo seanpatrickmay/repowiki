@@ -32,6 +32,17 @@ describe("repoRelative", () => {
     expect(() => repoRelative("/r/repo", "src/../../x")).toThrow(/cannot use \.\./);
     expect(() => repoRelative("/r/repo", "./")).toThrow(/give the path of a file/);
   });
+
+  it("reads the root itself as no file, and a macOS /private path as the path it names", () => {
+    expect(() => repoRelative("/r/repo", "/r/repo")).toThrow(/give the path of a file/);
+    expect(() => repoRelative("/r/repo", "/r/repo/")).toThrow(/give the path of a file/);
+    expect(repoRelative("/private/var/folders/x/repo", "/var/folders/x/repo/src/a.py")).toBe(
+      "src/a.py",
+    );
+    expect(repoRelative("/var/folders/x/repo", "/private/var/folders/x/repo/src/a.py")).toBe(
+      "src/a.py",
+    );
+  });
 });
 
 describe("pages_for_file", () => {
@@ -228,6 +239,27 @@ describe("page_changes", () => {
     expect(text("page_changes", { id: "special:about" })).toContain(
       "\nLead\n~ **sample** turns chunks of text into [-signals.-]{+signals, and signals into deliverables.+}\n",
     );
+  });
+
+  it("says when the page's first revision has nothing before it, and when from and to are swapped", () => {
+    expect(text("page_changes", { id: "signals", to: "2026-01-02" })).toBe(
+      "Changes to Signal ingestion (page id: signals): revision 1, 2026-01-02 commit d08c5a4 (build), is its first; nothing before it to compare with.\n",
+    );
+    const swapped = text("page_changes", { id: "signals", from: "2026-01-04", to: "2026-01-02" });
+    expect(swapped.split("\n").slice(0, 2)).toEqual([
+      "Changes to Signal ingestion (page id: signals) from revision 1 (commit d08c5a4, 2026-01-02) to revision 3 (commit 3d751d3, 2026-01-04):",
+      "(from is later than to, so this runs from the earlier point to the later)",
+    ]);
+  });
+
+  it("says a page has no revisions rather than naming an empty commit", () => {
+    const wiki: WikiExport = { ...h.wiki, history: { signals: h.wiki.history.signals ?? [] } };
+    const served = serveWiki(wiki, { repo: h.repo.dir, pinned: null });
+    const out = createAgentTools(() => served).run("page_changes", {
+      id: "deliverables",
+      from: "2026-01-03",
+    }) as { text: string; isError: boolean };
+    expect(out).toEqual({ text: "deliverables has no revisions", isError: true });
   });
 
   it("says when both points have the same revision, and where a history begins", () => {

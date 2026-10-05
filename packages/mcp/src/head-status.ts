@@ -263,8 +263,9 @@ export function createFreshness(options: FreshnessOptions): Freshness {
       try {
         return markSets.get(`${compare}\0${revisionId}`, () => {
           const claims = sections.flatMap((s) => s.claims.map((claim) => ({ key: s.key, claim })));
-          const code = claims.flatMap(({ claim }) =>
-            claim.staleSince === null
+          // A lead's own citations are never remapped: its mark comes from the claims it supports.
+          const code = claims.flatMap(({ key, claim }) =>
+            key !== "lead" && claim.staleSince === null
               ? claim.citations.flatMap((c) => (c.kind === "code" ? [c] : []))
               : [],
           );
