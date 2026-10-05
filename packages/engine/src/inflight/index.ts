@@ -1,4 +1,12 @@
 export {
+  fileLevelEffects,
+  mergeTree,
+  type PullImpact,
+  pullImpact,
+  type StaleClaim,
+  staleClaims,
+} from "./effects.ts";
+export {
   ensureInflightRepo,
   FETCH_TIMEOUT_MS,
   type FetchedHeads,

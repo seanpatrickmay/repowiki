@@ -95,6 +95,8 @@ export {
   INFLIGHT_DIR,
   isMissingObject,
   removeInflightRepo,
+  type StaleClaim,
+  staleClaims,
 } from "./inflight/index.ts";
 export {
   architectureLinksWithoutPage,
