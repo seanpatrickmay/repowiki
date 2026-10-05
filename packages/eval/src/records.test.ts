@@ -14,6 +14,7 @@ import {
   appendRecord,
   checkRecords,
   createOnce,
+  defaultAgents,
   EvalRunError,
   openRun,
   RESULTS_FILE,
@@ -121,6 +122,11 @@ describe("openRun", () => {
     writeFileSync(join(dir, RUN_INFO_FILE), JSON.stringify(m7));
     expect(readRunInfo(dir).agents).toEqual(["wiki", "repo"]);
     expect(openRun(dir, info)).toEqual(info);
+  });
+
+  it("asks the wiki and repo agents by default, and the wiki and mcp agents on the history suite", () => {
+    expect(defaultAgents("dev")).toEqual(["wiki", "repo"]);
+    expect(defaultAgents("history")).toEqual(["wiki", "mcp"]);
   });
 
   it("refuses to resume with other agents, and a run that names an agent twice", () => {

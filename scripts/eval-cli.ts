@@ -36,7 +36,7 @@ import { CliError } from "./manifest-cli.ts";
 import { badOption, once, priced, problemLine } from "./wiki-cli.ts";
 
 export const EVAL_USAGE =
-  "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|smoke [--agents wiki,repo,mcp,repo+mcp] [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
+  "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|history|smoke [--agents wiki,repo,mcp,repo+mcp] [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
 
 /** Both agents' turn limit unless --turns says otherwise (spec \u00A79: the same for both). */
 export const DEFAULT_TURN_LIMIT = 15;
@@ -76,7 +76,7 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
   const [repo, ...extra] = parsed.positionals;
   if (repo === undefined || repo === "" || extra.length > 0) throw new CliError(EVAL_USAGE);
   const set = QuestionSet.safeParse(once("--set", v.set, EVAL_USAGE));
-  if (!set.success) throw fail("--set must be dev, held-out or smoke");
+  if (!set.success) throw fail("--set must be dev, held-out, history or smoke");
   const questions = once("--questions", v.questions, EVAL_USAGE);
   if (questions === undefined) throw fail("--questions is required");
   const runDir = once("--run-dir", v["run-dir"], EVAL_USAGE) ?? null;

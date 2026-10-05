@@ -16,7 +16,7 @@ import {
   combineToolSets,
   createRepoTools,
   createWikiTools,
-  DEFAULT_AGENTS,
+  defaultAgents,
   EvalRunError,
   loadQuestions,
   type McpAgentTools,
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
       );
     }
   }
-  const agents = args.agents ?? [...DEFAULT_AGENTS];
+  const agents = args.agents ?? [...defaultAgents(args.set)];
   // The mcp agents use the MCP server through its real stdio transport, pinned at the wiki's head
   // (spec v2 #5 R19). A dry run starts it too: the estimate counts its tool definitions. The
   // server makes no call and writes nothing.
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
       head: wiki.head,
       exportHash: createHash("sha256").update(exportBytes).digest("hex"),
       questionsHash: loaded.hash,
-      writtenOn: loaded.file.suite === "exit-criteria" ? loaded.file.writtenOn : null,
+      writtenOn: loaded.file.suite === "smoke" ? null : loaded.file.writtenOn,
       turnLimit: args.turnLimit,
       agents,
       models: { evalAgent: models.evalAgent, evalJudge: models.evalJudge },
