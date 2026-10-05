@@ -4,6 +4,7 @@ export {
   revisionEntry,
   wordDiffText,
 } from "./changes.ts";
+export { ExportLoadError, loadExport } from "./load.ts";
 export {
   type SearchDoc,
   type SearchField,

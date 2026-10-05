@@ -1,0 +1,42 @@
+import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  fetchCalls,
+  NETWORK_MODULES,
+  refusedImports,
+  sourceImports,
+} from "@repowiki/query/test-boundaries";
+import { describe, expect, it } from "vitest";
+
+const SRC = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The MCP server spends no LLM tokens and opens no socket (spec v2 #5 R1, R6): no source of
+ * @repowiki/mcp imports @repowiki/llm or a network module, or calls fetch. engine loads llm as a
+ * package, but nothing here can construct a provider.
+ */
+describe("@repowiki/mcp's boundaries", () => {
+  const sources = sourceImports(SRC);
+
+  it("finds the package's sources", () => {
+    expect(sources.has("git.ts")).toBe(true);
+    expect(sources.has("code.ts")).toBe(true);
+  });
+
+  it("depends on core, engine, query and zod", () => {
+    const pkg = JSON.parse(readFileSync(`${SRC}/../package.json`, "utf8"));
+    expect(Object.keys(pkg.dependencies).sort()).toEqual([
+      "@repowiki/core",
+      "@repowiki/engine",
+      "@repowiki/query",
+      "zod",
+    ]);
+  });
+
+  it("imports no LLM or network module and calls no fetch", () => {
+    const refused = new Set<string>(["@repowiki/llm", "@anthropic-ai/sdk", ...NETWORK_MODULES]);
+    expect(refusedImports(sources, (s) => !refused.has(s))).toEqual([]);
+    expect(fetchCalls(sources)).toEqual([]);
+  });
+});
