@@ -1,4 +1,6 @@
 import { parseArgs } from "node:util";
+import { logLine } from "@repowiki/mcp";
+import { cut, oneLine } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 
 export const SERVE_USAGE =
@@ -89,6 +91,24 @@ export function prepareEnvironment(env: NodeJS.ProcessEnv): void {
     if (name.startsWith("ANTHROPIC_")) delete env[name];
   }
   env.GIT_OPTIONAL_LOCKS = "0";
+}
+
+/**
+ * The server's start line on stderr: the wiki's repository name (one line, at most 80 code points,
+ * as the initialize instructions show it), its commit and date, the out dir and the compare commit.
+ */
+export function startLine(at: {
+  repo: string;
+  head: string;
+  headDate: string | null;
+  out: string;
+  pinned: string | null;
+}): string {
+  const date = at.headDate === null ? "" : ` (${at.headDate})`;
+  const compare = at.pinned === null ? "HEAD" : `commit ${at.pinned.slice(0, 7)}`;
+  return logLine(
+    `repowiki mcp: serving the wiki of ${cut(oneLine(at.repo), 80)} at commit ${at.head.slice(0, 7)}${date} from ${at.out}; comparing with ${compare}`,
+  );
 }
 
 export const PROBE_USAGE = "usage: pnpm mcp:probe <repo-path> [--out dir]";

@@ -4,7 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { commitOf, createServer, logLine, serveStdio, topLevel } from "@repowiki/mcp";
 import { CliError } from "./manifest-cli.ts";
-import { parseServeArgs, prepareEnvironment, registrationHelp } from "./mcp-cli.ts";
+import { parseServeArgs, prepareEnvironment, registrationHelp, startLine } from "./mcp-cli.ts";
 
 /**
  * pnpm mcp:serve <repo> [--out dir] [--compare-to rev], or `node scripts/mcp-serve.ts …`, which
@@ -43,11 +43,7 @@ async function main(): Promise<void> {
     log: (line) => console.error(line),
   });
   const { wiki, headDate } = server.served();
-  console.error(
-    logLine(
-      `repowiki mcp: serving the wiki of ${wiki.repo} at commit ${wiki.head.slice(0, 7)}${headDate === null ? "" : ` (${headDate})`} from ${out}; comparing with ${pinned === null ? "HEAD" : `commit ${pinned.slice(0, 7)}`}`,
-    ),
-  );
+  console.error(startLine({ repo: wiki.repo, head: wiki.head, headDate, out, pinned }));
   process.on("SIGTERM", () => process.exit(0));
   process.on("SIGINT", () => process.exit(0));
   await serveStdio(server.protocol, { input: process.stdin, output: process.stdout });

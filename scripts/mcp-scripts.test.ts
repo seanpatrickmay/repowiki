@@ -20,6 +20,7 @@ import {
   probeReport,
   registrationHelp,
   runProbe,
+  startLine,
 } from "./mcp-cli.ts";
 
 const SCRIPT = "scripts/mcp-serve.ts";
@@ -230,6 +231,31 @@ describe("mcp-serve.ts as a process (no network, no LLM)", () => {
 });
 
 describe("mcp-cli", () => {
+  it("keeps a hostile repository name on the start line short and on one line", () => {
+    const line = startLine({
+      repo: `evil\nname\u202E${"x".repeat(300)}`,
+      head: "3d751d3".padEnd(40, "0"),
+      headDate: "2026-01-04",
+      out: "/out",
+      pinned: null,
+    });
+    expect(line).toMatch(
+      /^repowiki mcp: serving the wiki of evil name\uFFFDx+\u2026 at commit 3d751d3 \(2026-01-04\) from \/out; comparing with HEAD$/,
+    );
+    expect([...line].length).toBeLessThanOrEqual(300);
+    expect(
+      startLine({
+        repo: "sample",
+        head: "a".repeat(40),
+        headDate: null,
+        out: "/o",
+        pinned: "b".repeat(40),
+      }),
+    ).toBe(
+      "repowiki mcp: serving the wiki of sample at commit aaaaaaa from /o; comparing with commit bbbbbbb",
+    );
+  });
+
   it("parses a repo with --out and --compare-to, or --help alone, and refuses the rest", () => {
     expect(parseServeArgs(["repo", "--out", "o", "--compare-to", "abc"])).toEqual({
       repo: "repo",
