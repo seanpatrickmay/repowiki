@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import type { RunKind } from "@repowiki/core";
 import {
   type ArchitectureOutcome,
   type BuildJournal,
@@ -195,7 +196,13 @@ function parse(argv: readonly string[], limit: boolean) {
 }
 
 /** The commands that make live calls and so need the key. */
-export type LiveCommand = "wiki:build" | "wiki:update" | "wiki:replay" | "eval:run" | "ask:eval";
+export type LiveCommand =
+  | "wiki:build"
+  | "wiki:update"
+  | "wiki:replay"
+  | "wiki:inflight"
+  | "eval:run"
+  | "ask:eval";
 
 /** Why a run that needs a call cannot make one; the commands load .env only if present. */
 export function keylessMessage(command: LiveCommand): string {
@@ -212,7 +219,7 @@ export interface LazyClaudeOptions {
   models: ModelConfig;
   ledger: TokenLedger;
   runId: string;
-  run: { kind: "build" | "update"; sha: string };
+  run: { kind: RunKind; sha: string };
   journal: BuildJournal;
   deadlineMinutes: number | null;
   log: (line: string) => void;
