@@ -1,12 +1,4 @@
-import {
-  assertSha,
-  BINARY_SNIFF_BYTES,
-  GitError,
-  git,
-  isSha,
-  listBlobs,
-  readBlobs,
-} from "./git.ts";
+import { assertSha, GitError, git, isSha, listBlobs, streamBlobs } from "./git.ts";
 
 /** One commit reachable from the indexed sha. */
 export interface CommitInfo {
@@ -120,19 +112,35 @@ function assignPullRequests(commits: CommitInfo[]): void {
   for (const commit of chain.reverse()) mark(commit.sha);
 }
 
-/** UTF-8 text of every regular file at `sha` up to maxBytes, by path; binary files are left out. */
-export function readSources(repo: string, sha: string, maxBytes: number): Map<string, string> {
+/**
+ * UTF-8 text of every regular file at `sha` up to maxBytes, by path; binary files are left out.
+ * The blobs are streamed through one `cat-file --batch` (each distinct blob once, held whole only
+ * up to maxBytes, which none of the listed blobs exceeds), so no git output is buffered whole.
+ */
+export async function readSources(
+  repo: string,
+  sha: string,
+  maxBytes: number,
+): Promise<Map<string, string>> {
   assertSha(sha);
   const blobs = listBlobs(repo, sha).filter((blob) => blob.size <= maxBytes);
-  const contents = readBlobs(
-    repo,
-    blobs.map((blob) => blob.oid),
-  );
+  const oids = [...new Set(blobs.map((blob) => blob.oid))];
+  // The text of each distinct blob (null for a binary one), decoded as it streams past.
+  const texts = new Map<string, string | null>();
+  let next = 0;
+  for await (const data of streamBlobs(repo, oids, maxBytes)) {
+    const oid = oids[next++] as string;
+    if (data.oid !== oid) throw new GitError(`cat-file returned ${data.oid} for ${oid}`);
+    if (data.content === null) throw new GitError(`cat-file held no content for blob ${oid}`);
+    texts.set(oid, data.head.includes(0) ? null : data.content.toString("utf8"));
+  }
+  const missing = oids[next];
+  if (missing !== undefined) throw new GitError(`missing content for blob ${missing}`);
   const sources = new Map<string, string>();
   for (const blob of blobs) {
-    const content = contents.get(blob.oid);
-    if (content === undefined || content.subarray(0, BINARY_SNIFF_BYTES).includes(0)) continue;
-    sources.set(blob.path, content.toString("utf8"));
+    const text = texts.get(blob.oid);
+    if (text === undefined || text === null) continue;
+    sources.set(blob.path, text);
   }
   return sources;
 }

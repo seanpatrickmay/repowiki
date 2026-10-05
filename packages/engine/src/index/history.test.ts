@@ -65,7 +65,7 @@ describe("readHistory", () => {
     expect(prs).toEqual({ [merge]: 9, [topic]: 9, [direct]: null, [base]: null });
   });
 
-  it("refuses anything but a 40-hex sha before it reaches git", () => {
+  it("refuses anything but a 40-hex sha before it reaches git", async () => {
     repo.write("a.py", "x = 1\n");
     repo.commit("init");
     for (const bad of ["HEAD", "main", "--all", "-n1", "abc123", "A".repeat(40)]) {
@@ -187,20 +187,20 @@ describe("readHistory", () => {
 });
 
 describe("readSources", () => {
-  it("reads text files at the sha, never the working tree, and skips binary and large ones", () => {
+  it("reads text files at the sha, never the working tree, and skips binary and large ones", async () => {
     repo.write("a.py", "x = 1\n");
     repo.write("logo.png", Buffer.from([0x89, 0x50, 0x00, 0x01]));
     repo.write("big.txt", "z".repeat(500));
     const sha = repo.commit("files");
     repo.write("a.py", "uncommitted\n");
-    expect([...readSources(repo.dir, sha, 100)]).toEqual([["a.py", "x = 1\n"]]);
+    expect([...(await readSources(repo.dir, sha, 100))]).toEqual([["a.py", "x = 1\n"]]);
   });
 
-  it("refuses anything but a 40-hex sha before it reaches git", () => {
+  it("refuses anything but a 40-hex sha before it reaches git", async () => {
     repo.write("a.py", "x = 1\n");
     repo.commit("init");
     for (const bad of ["HEAD", "--help", "abc123"]) {
-      expect(() => readSources(repo.dir, bad, 100)).toThrow(GitError);
+      await expect(readSources(repo.dir, bad, 100)).rejects.toThrow(GitError);
     }
   });
 });

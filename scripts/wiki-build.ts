@@ -74,7 +74,7 @@ async function runBuild(
   const repoName = basename(repo);
   const index = await indexRepo(repo, args.rev);
   const history = readHistory(repo, index.sha);
-  const sources = readSources(repo, index.sha, DEFAULT_MAX_FILE_BYTES);
+  const sources = await readSources(repo, index.sha, DEFAULT_MAX_FILE_BYTES);
   const graph = buildFileGraph(index);
   const store = openStore(join(out, "wiki.db"));
   try {
