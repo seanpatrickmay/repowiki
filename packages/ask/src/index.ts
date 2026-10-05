@@ -50,3 +50,11 @@ export {
   MAX_ANSWER_WORDS,
   MAX_TURNS,
 } from "./prompt.ts";
+export {
+  type AskSession,
+  type AskSessionOptions,
+  BusyError,
+  createAskSession,
+  type SessionTotals,
+} from "./session.ts";
+export { type AskToolEvents, createAskTools } from "./tools.ts";
