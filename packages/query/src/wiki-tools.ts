@@ -1,7 +1,7 @@
 import type { Claim, WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { type SearchDoc, type SearchIndex, searchIndex } from "./search.ts";
-import { defineTool, type ToolSet, toolSet } from "./tools.ts";
+import { defineTool, type LocalToolSet, toolSet } from "./tools.ts";
 import { readPage } from "./wiki-page.ts";
 import { ABOUT_PAGE_ID, listedPage, reference, WikiView } from "./wiki-view.ts";
 
@@ -85,7 +85,7 @@ export function searchResults(
  * About article by their titles, aliases, leads, claims and cited paths; `read_page(id)` returns
  * one page as plain text (readPage).
  */
-export function createWikiTools(wiki: WikiExport): ToolSet {
+export function createWikiTools(wiki: WikiExport): LocalToolSet {
   const view = new WikiView(wiki);
   const index = pageSearchIndex(view);
   return toolSet([

@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { connectMcp, McpClientError, mcpToolSet } from "@repowiki/mcp";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseServeArgs, prepareEnvironment, registrationHelp } from "./mcp-cli.ts";
@@ -262,4 +263,75 @@ describe("mcp-cli", () => {
       readFileSync(SCRIPT, "utf8").indexOf("parseServeArgs("),
     );
   });
+});
+
+describe("connectMcp and mcpToolSet (client.ts)", () => {
+  it(
+    "initializes a spawned server and serves its six tools as an agent's ToolSet",
+    async () => {
+      const client = await connectMcp({
+        command: process.execPath,
+        args: [SCRIPT, h.repo.dir, "--out", out, "--compare-to", h.sha],
+        env: clientEnv(),
+      });
+      try {
+        expect(client.info).toMatchObject({
+          protocolVersion: "2025-11-25",
+          serverInfo: { name: "repowiki", title: "RepoWiki" },
+        });
+        expect(client.info.instructions).toContain("at commit 3d751d3 (2026-01-04)");
+        const tools = await mcpToolSet(client);
+        expect(tools.definitions.map((d) => d.name)).toEqual([
+          "search",
+          "list_pages",
+          "read_page",
+          "pages_for_file",
+          "cited_code",
+          "page_changes",
+        ]);
+        expect(Object.keys(tools.definitions[0] ?? {})).toEqual([
+          "name",
+          "description",
+          "inputSchema",
+        ]);
+        expect((await tools.run("read_page", { id: "signals" })).text).toMatch(
+          /^Signal ingestion \(page id: signals\)\n/,
+        );
+        expect(await tools.run("read_page", {})).toMatchObject({ isError: true });
+        expect(await tools.run("grep", {})).toEqual({
+          text: "no tool named grep; the tools are search, list_pages, read_page, pages_for_file, cited_code, page_changes",
+          isError: true,
+        });
+      } finally {
+        expect(await client.close()).toEqual({ code: 0 });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "fails with the server's last stderr line when it exits before answering",
+    async () => {
+      const empty = mkdtempSync(join(tmpdir(), "repowiki-mcp-empty-"));
+      try {
+        await expect(
+          connectMcp({
+            command: process.execPath,
+            args: [SCRIPT, h.repo.dir, "--out", empty],
+            env: clientEnv(),
+          }),
+        ).rejects.toThrow(McpClientError);
+        await expect(
+          connectMcp({
+            command: process.execPath,
+            args: [SCRIPT, h.repo.dir, "--out", empty],
+            env: clientEnv(),
+          }),
+        ).rejects.toThrow(/^the MCP server exited \(code 1\): repowiki mcp: cannot read export/);
+      } finally {
+        rmSync(empty, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
 });

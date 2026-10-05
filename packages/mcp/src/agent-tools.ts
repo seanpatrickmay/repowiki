@@ -8,6 +8,7 @@ import {
   cut,
   defineTool,
   historyBegins,
+  type LocalToolSet,
   listedPage,
   MAX_TOOL_RESULT_CHARS,
   oneLine,
@@ -15,7 +16,6 @@ import {
   readPage,
   searchResults,
   type Tool,
-  type ToolSet,
   toolSet,
   type WikiView,
 } from "@repowiki/query";
@@ -290,6 +290,6 @@ export function wikiTools(served: () => ServedWiki): Tool[] {
 }
 
 /** The six MCP tools over the wiki `served()` returns at each call. */
-export function createAgentTools(served: () => ServedWiki): ToolSet {
+export function createAgentTools(served: () => ServedWiki): LocalToolSet {
   return toolSet([...wikiTools(served), ...codeTools(served)]);
 }

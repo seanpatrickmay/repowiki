@@ -1,4 +1,4 @@
-import { defineTool, ToolError, toolSet } from "@repowiki/query";
+import { defineTool, ToolError, type ToolSet, toolSet } from "@repowiki/query";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { MAX_TURN_OUTPUT_TOKENS, runAgent } from "./agent.ts";
@@ -269,5 +269,27 @@ describe("agentSystemPrompt", () => {
     }
     expect(wiki).toContain("[page: id] links");
     expect(repo).toContain("grep for names");
+  });
+
+  it("awaits a tool that answers later, as the MCP client's tools do", async () => {
+    const later: ToolSet = {
+      definitions: tools.definitions,
+      run: async (name, input) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return tools.run(name, input);
+      },
+    };
+    const { provider, requests } = scriptedToolProvider([
+      { tool: "lookup", input: { word: "widget" } },
+      { answer: "A thing." },
+    ]);
+    const answer = await runAgent({ ...base, tools: later, provider });
+    expect(answer.answer).toBe("A thing.");
+    expect(requests[1]?.messages[2]).toEqual({
+      role: "user",
+      content: [
+        { type: "tool_result", toolUseId: "tu_1", content: "widget means a thing", isError: false },
+      ],
+    });
   });
 });

@@ -28,6 +28,7 @@ export {
 export { count, cut, markdownText, oneLine, toolText } from "./text.ts";
 export {
   defineTool,
+  type LocalToolSet,
   MAX_TOOL_ERROR_CHARS,
   MAX_TOOL_RESULT_CHARS,
   type Tool,
