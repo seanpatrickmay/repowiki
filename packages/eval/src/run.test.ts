@@ -320,4 +320,45 @@ describe("runEval", () => {
     const judged = readRecords(dir).filter((r) => r.kind === "judgment");
     expect(judged.map((r) => r.agent)).toEqual(["wiki", "wiki", "wiki"]);
   });
+
+  it("records an answer whose tool call failed, goes on, and stops after a question when halted", async () => {
+    const wiki = createWikiTools(sample.wiki);
+    let failures = 0;
+    const tools = {
+      wiki: {
+        definitions: wiki.definitions,
+        run: async () => {
+          failures++;
+          throw new Error("the MCP server has exited");
+        },
+      },
+      repo: createRepoTools(sample.repo.dir, sample.sha),
+    };
+    // The wiki agent calls search first; the repo agent answers at once.
+    const agents = scriptedToolProvider([], (_q, request) =>
+      request.system.includes("wiki") && request.messages.length === 1
+        ? { tool: "search", input: { query: "signals" } }
+        : { answer: "repo answer" },
+    ).provider;
+    const lines: string[] = [];
+    const halted = () => (failures >= 2 ? "the MCP server exited again" : null);
+    const result = await runEval(options({ tools, agents, halted, log: (l) => lines.push(l) }));
+    expect(result.stopped).toBe("halted");
+    expect(lines).toContain(
+      "smoke-where (wiki): search: the MCP server has exited; recorded as failed",
+    );
+    expect(lines).toContain("stopped after smoke-how: the MCP server exited again");
+    const answers = result.records.flatMap((r) => (r.kind === "answer" ? [r] : []));
+    expect(answers.map((r) => `${r.questionId}/${r.agent}/${r.stop}`)).toEqual([
+      "smoke-where/wiki/tool-failure",
+      "smoke-where/repo/answered",
+      "smoke-how/wiki/tool-failure",
+      "smoke-how/repo/answered",
+    ]);
+    // The failed answers' turns are paid and counted; an empty answer is graded 0 for free.
+    expect(result.spentUsd).toBeCloseTo(4 * 0.0015 + 2 * 0.0005, 10);
+    const grades = result.records.flatMap((r) => (r.kind === "judgment" ? [r] : []));
+    expect(grades.filter((r) => r.agent === "wiki").map((r) => r.score)).toEqual([0, 0]);
+    expect(readRecords(dir)).toEqual(result.records);
+  });
 });

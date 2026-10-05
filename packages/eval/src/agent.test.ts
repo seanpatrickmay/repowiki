@@ -255,6 +255,30 @@ describe("runAgent", () => {
     ]);
     expect(answer).toMatchObject({ answer: "Done.", stop: "answered" });
   });
+
+  it("ends the answer as a tool failure when a tool call rejects, keeping its turns and tokens", async () => {
+    const rejecting: ToolSet = {
+      definitions: tools.definitions,
+      run: async () => {
+        throw new Error("the MCP server exited (code 1):\nboom");
+      },
+    };
+    const { provider, requests } = scriptedToolProvider([
+      { tool: "lookup", input: { word: "widget" }, text: "Looking it up." },
+    ]);
+    const answer = await runAgent({ ...base, tools: rejecting, provider });
+    expect(answer).toEqual({
+      answer: "",
+      stop: "tool-failure",
+      failure: "lookup: the MCP server exited (code 1): boom",
+      turns: 1,
+      calls: [{ turn: 1, name: "lookup", input: { word: "widget" }, isError: true }],
+      usage: TURN_USAGE,
+      usd: (1000 * 1 + 100 * 5) / 1_000_000,
+      model: SCRIPTED_MODEL,
+    });
+    expect(requests).toHaveLength(1);
+  });
 });
 
 describe("agentSystemPrompt", () => {

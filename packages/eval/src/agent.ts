@@ -5,7 +5,7 @@ import {
   type ToolResultBlock,
   type TurnMessage,
 } from "@repowiki/llm";
-import type { ToolSet } from "@repowiki/query";
+import { cut, oneLine, type ToolSet } from "@repowiki/query";
 import { LAST_TURN_NOTE, questionTurn } from "./prompts.ts";
 
 /** The output cap of one agent turn: a tool call, or an answer of ANSWER_WORDS words. */
@@ -24,9 +24,10 @@ export interface ToolCall {
 
 /**
  * How the agent stopped: it answered; it answered on the last turn, where tools are forbidden;
- * its answer was cut at the output cap; or the API stopped it for another reason (a refusal).
+ * its answer was cut at the output cap; the API stopped it for another reason (a refusal); or a
+ * tool call failed outright (the MCP server timed out or died), which ends the answer empty.
  */
-export type AgentStop = "answered" | "turn-limit" | "max-tokens" | "other";
+export type AgentStop = "answered" | "turn-limit" | "max-tokens" | "other" | "tool-failure";
 
 export interface AgentAnswer {
   answer: string;
@@ -40,6 +41,8 @@ export interface AgentAnswer {
   usd: number | null;
   /** The model id the API reported for the last turn (a run always takes at least one turn). */
   model: string | null;
+  /** Why the answer ended with a tool failure, as one line; absent otherwise. */
+  failure?: string;
 }
 
 export interface AgentOptions {
@@ -71,7 +74,8 @@ function withLastTurnNote(messages: readonly TurnMessage[]): TurnMessage[] {
  * reads what came before from the cache once it passes the model's minimum. The last turn sets
  * no breakpoint: changing tool_choice invalidates the message cache, so a write there would
  * cost something no later turn reads. The last turn also ends with LAST_TURN_NOTE, telling the
- * agent to answer now.
+ * agent to answer now. A tool call that rejects (rather than answering with an error) ends the
+ * answer as a "tool-failure", empty, with the turns and tokens it took: they were paid for.
  */
 export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
   const { provider, system, tools, turnLimit } = options;
@@ -128,7 +132,15 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
         continue;
       }
       // A tool may answer later (the MCP client's do), so every call is awaited.
-      const output = await tools.run(use.name, use.input);
+      let output: Awaited<ReturnType<ToolSet["run"]>>;
+      try {
+        output = await tools.run(use.name, use.input);
+      } catch (error) {
+        calls.push({ turn, name: use.name, input: use.input, isError: true });
+        const why = error instanceof Error ? error.message : String(error);
+        const failure = cut(oneLine(`${use.name}: ${why}`), 300);
+        return { answer: "", stop: "tool-failure", failure, turns: turn, calls, usage, usd, model };
+      }
       calls.push({ turn, name: use.name, input: use.input, isError: output.isError });
       results.push({
         type: "tool_result",

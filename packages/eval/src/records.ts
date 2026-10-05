@@ -61,7 +61,7 @@ export const AnswerRecord = z.object({
   questionId: z.string().min(1),
   agent: Agent,
   answer: z.string(),
-  stop: z.enum(["answered", "turn-limit", "max-tokens", "other"]),
+  stop: z.enum(["answered", "turn-limit", "max-tokens", "other", "tool-failure"]),
   turns: z.int().positive(),
   calls: z.array(
     z.object({
@@ -74,6 +74,8 @@ export const AnswerRecord = z.object({
   usage: TokenUsage,
   usd: z.number().nonnegative().nullable(),
   model: z.string().nullable(),
+  /** Why a "tool-failure" answer ended, as one line. */
+  failure: z.string().optional(),
   at: IsoDateTime,
 });
 export type AnswerRecord = z.infer<typeof AnswerRecord>;

@@ -26,6 +26,8 @@ export interface EvalRunOptions {
   batchJudge: boolean;
   /** Ask no further question once this invocation's agent calls have cost this much. */
   maxUsd: number;
+  /** Checked after each question: a line saying why to ask no further question, or null. */
+  halted?: () => string | null;
   now?: () => Date;
   log?: (line: string) => void;
 }
@@ -33,7 +35,7 @@ export interface EvalRunOptions {
 export interface EvalRunResult {
   records: RunRecord[];
   /** Why the run stopped before asking every question, or null when it asked them all. */
-  stopped: "budget" | null;
+  stopped: "budget" | "halted" | null;
   /** What this invocation's calls cost (agents and judge), at the models' prices. */
   spentUsd: number;
   /** Answers the judge could not grade this time; a rerun grades them. */
@@ -167,10 +169,19 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
         at: now().toISOString(),
       });
       answered.add(key({ questionId: question.id, agent }));
+      if (answer.failure !== undefined) {
+        log(`${question.id} (${agent}): ${answer.failure}; recorded as failed`);
+      }
     }
     const failure = outcomes.find((o) => o.status === "rejected");
     if (failure !== undefined) throw failure.reason;
     if (unpriced !== null) throw new UnpricedModelError(unpriced);
+    const halt = options.halted?.() ?? null;
+    if (halt !== null) {
+      stopped = "halted";
+      log(`stopped after ${question.id}: ${halt}`);
+      break;
+    }
   }
   const questions = new Map(info.questions.map((q) => [q.id, q]));
   const unjudged = unjudgedAnswers();

@@ -57,6 +57,8 @@ export interface McpClient {
    * as long again. Always resolves; later calls reject.
    */
   close(): Promise<{ code: number | null }>;
+  /** Settles when the server exits, for whatever reason (close() returns it too). */
+  exit: Promise<{ code: number | null }>;
 }
 
 /** A reply to a request: an error, or a result object; never a request or a notification. */
@@ -260,6 +262,7 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     },
     stderr: () => stderr,
     close,
+    exit,
   };
 }
 

@@ -211,11 +211,13 @@ async function main(): Promise<void> {
       judge: createJudgeProvider({ models, ledger, runId, journal, log }),
       batchJudge: args.batch,
       maxUsd: args.maxUsd,
+      // A dead MCP server is started again once; a second death stops the run (it resumes).
+      halted: () => mcp?.lost() ?? null,
       log,
     });
     const { summary, reportPath } = writeReport(runDir);
     console.log(
-      `${scoreLine(summary)}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
+      `${scoreLine(summary)}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.stopped === "halted" ? "; stopped: the MCP server died twice" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
     );
     console.log(`Wrote ${reportPath}`);
   } finally {
