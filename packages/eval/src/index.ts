@@ -13,6 +13,15 @@ export {
 } from "./accuracy.ts";
 export { AGENT_TEMPERATURE, type AgentAnswer, MAX_TURN_OUTPUT_TOKENS, runAgent } from "./agent.ts";
 export {
+  HISTORY_CORRECT_PERCENT,
+  HISTORY_MARGIN,
+  interfaceSection,
+  MCP_ACCURACY_SLACK,
+  MCP_TOKEN_PERCENT,
+  REPO_MCP_TOKEN_PERCENT,
+  REPO_TOOL_NAMES,
+} from "./interface.ts";
+export {
   JUDGE_MAX_TOKENS,
   JUDGE_SYSTEM,
   judgeAnswer,

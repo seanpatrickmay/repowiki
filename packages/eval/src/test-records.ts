@@ -1,3 +1,4 @@
+import type { AgentKind } from "./prompts.ts";
 import type { EvalQuestion } from "./questions.ts";
 import type { AnswerRecord, JudgmentRecord, RunInfo, RunRecord } from "./records.ts";
 
@@ -32,8 +33,9 @@ export function info(overrides: Partial<RunInfo> = {}): RunInfo {
 export const AT = "2026-10-04T12:30:00.000Z";
 export const answer = (
   questionId: string,
-  agent: "wiki" | "repo",
+  agent: AgentKind,
   tokens: number,
+  calls: AnswerRecord["calls"] = [],
 ): AnswerRecord => ({
   kind: "answer",
   questionId,
@@ -41,17 +43,13 @@ export const answer = (
   answer: `${agent} answer to ${questionId}`,
   stop: tokens > 100_000 ? "turn-limit" : "answered",
   turns: 3,
-  calls: [],
+  calls,
   usage: { in: tokens - 1000, out: 1000, cacheRead: 0, cacheWrite: 0 },
   usd: tokens / 1_000_000,
   model: "claude-haiku-4-5-20251001",
   at: AT,
 });
-export const judgment = (
-  questionId: string,
-  agent: "wiki" | "repo",
-  score: 0 | 1,
-): JudgmentRecord => ({
+export const judgment = (questionId: string, agent: AgentKind, score: 0 | 1): JudgmentRecord => ({
   kind: "judgment",
   questionId,
   agent,

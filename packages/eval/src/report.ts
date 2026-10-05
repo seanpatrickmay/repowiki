@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { markdownText, oneLine } from "@repowiki/query";
+import { interfaceSection } from "./interface.ts";
 import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import { QuestionKind } from "./questions.ts";
@@ -56,7 +57,7 @@ export function renderReport(
   const lines = [
     `# Eval: ${cell(info.repo, 80)}, ${info.set} set`,
     "",
-    `${n} questions, each asked to both agents with ${cell(info.models.evalAgent, 60)} and a limit of ${info.turnLimit} turns, and judged by ${cell(info.models.evalJudge, 60)}. The wiki is the export at commit ${info.head.slice(0, 7)}; the repo agent read the repository at the same commit.${info.writtenOn === null ? "" : ` The author wrote the questions on ${info.writtenOn}, by his statement.`} The run began ${info.startedAt}.`,
+    `${n} questions, each asked to ${info.agents.length === 2 ? "both agents" : `the ${info.agents.length} agents`} with ${cell(info.models.evalAgent, 60)} and a limit of ${info.turnLimit} turns, and judged by ${cell(info.models.evalJudge, 60)}. The wiki is the export at commit ${info.head.slice(0, 7)}${info.agents.some((a) => a === "repo" || a === "repo+mcp") ? "; the repo agent read the repository at the same commit" : ""}.${info.writtenOn === null ? "" : ` The author wrote the questions on ${info.writtenOn}, by his statement.`} The run began ${info.startedAt}.`,
     "",
   ];
   if (info.set === "smoke") {
@@ -92,6 +93,7 @@ export function renderReport(
     }),
     "",
   );
+  lines.push(...interfaceSection(summary, records));
   const v1 = info.agents.includes("wiki") && info.agents.includes("repo");
   if (complete && v1 && agents.repo.correct === 0) {
     lines.push(
