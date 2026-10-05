@@ -147,7 +147,11 @@ export function openRun(runDir: string, info: RunInfo): RunInfo {
       throw new EvalRunError(`${runDir} holds another run: its ${field} differs from this one's`);
     }
   }
-  if (stored.agents.join(",") !== info.agents.join(",")) {
+  // The same agents in another order are the same run; it keeps its own order.
+  const sameAgents =
+    stored.agents.length === info.agents.length &&
+    info.agents.every((a) => stored.agents.includes(a));
+  if (!sameAgents) {
     throw new EvalRunError(`${runDir} holds another run: its agents differ from this one's`);
   }
   if (

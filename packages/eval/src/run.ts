@@ -1,5 +1,5 @@
 import { callCostUsd, type Provider, priceFor, type ToolProvider } from "@repowiki/llm";
-import type { ToolSet } from "@repowiki/query";
+import { andList, type ToolSet } from "@repowiki/query";
 import { runAgent } from "./agent.ts";
 import { JudgeError, judgeAnswer } from "./judge.ts";
 import { type AgentKind, agentSystemPrompt } from "./prompts.ts";
@@ -80,10 +80,6 @@ async function settleAll<T>(
   return settled;
 }
 
-/** "a", "a and b", "a, b and c". */
-const listed = (items: readonly string[]) =>
-  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-
 const key = (r: { questionId: string; agent: AgentKind }) => `${r.questionId}\0${r.agent}`;
 
 /**
@@ -98,11 +94,12 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
   const { runDir, agents, judge } = options;
   const now = options.now ?? (() => new Date());
   const log = options.log ?? (() => {});
-  const info = openRun(runDir, options.info);
-  for (const agent of info.agents) {
+  // Before openRun: a run asked of an agent with no tools writes nothing.
+  for (const agent of options.info.agents) {
     if (options.tools[agent] === undefined)
       throw new EvalRunError(`no tools for the ${agent} agent`);
   }
+  const info = openRun(runDir, options.info);
   const records = readRecords(runDir);
   checkRecords(runDir, info, records);
   const append = (record: RunRecord) => {
@@ -140,7 +137,7 @@ export async function runEval(options: EvalRunOptions): Promise<EvalRunResult> {
       break;
     }
     log(
-      `[${i + 1}/${info.questions.length}] ${question.id}: asking the ${listed(pending)} agent${pending.length > 1 ? "s" : ""}`,
+      `[${i + 1}/${info.questions.length}] ${question.id}: asking the ${andList(pending)} agent${pending.length > 1 ? "s" : ""}`,
     );
     const outcomes = await Promise.allSettled(
       pending.map((agent) =>

@@ -47,10 +47,14 @@ import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
 
+/** The MCP server the mcp agents use, when they run; closed however the run ends. */
+const started: { mcp: McpAgentTools | null } = { mcp: null };
+
 /**
  * pnpm eval:run <repo> --questions <file> --set <set>: spec §9's Q&A eval. Asks each question of
- * the set to the wiki agent (the export in the out dir) and the repo agent (the repository at the
- * wiki's commit), judges every answer, and writes run.json, results.jsonl, report.md and, once
+ * the set to every agent --agents names (by default the wiki agent, on the export in the out dir,
+ * and the repo agent, on the repository at the wiki's commit; the history suite's are wiki and
+ * mcp, the MCP server pinned at the wiki's commit), judges every answer, and writes run.json, results.jsonl, report.md and, once
  * every answer is judged, spot-check.json in the run directory (writeReport). States its estimate before any
  * call; --dry-run stops there. The held-out set runs once: a second run resumes an unfinished one
  * and refuses a finished one. Holds the out dir's lock (and refuses an export that changed before
@@ -58,9 +62,6 @@ import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
  * Message Batch is journaled in the wiki store (<out>/wiki.db, as wiki:build does), so a run
  * killed while it is in flight collects that batch on a rerun (with --run-dir, for the dev set).
  */
-/** The MCP server the mcp agents use, when they run; closed however the run ends. */
-const started: { mcp: McpAgentTools | null } = { mcp: null };
-
 async function main(): Promise<void> {
   const args = parseEvalArgs(process.argv.slice(2));
   const repo = resolve(args.repo);

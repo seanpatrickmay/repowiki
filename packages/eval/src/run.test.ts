@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateRequest, Provider, ToolProvider } from "@repowiki/llm";
@@ -319,6 +319,13 @@ describe("runEval", () => {
     await expect(runEval(options({ judge: down.provider }))).rejects.toThrow("connection reset");
     const judged = readRecords(dir).filter((r) => r.kind === "judgment");
     expect(judged.map((r) => r.agent)).toEqual(["wiki", "wiki", "wiki"]);
+  });
+
+  it("refuses an asked agent with no tools before it writes anything", async () => {
+    await expect(runEval(options({ info: info({ agents: ["wiki", "mcp"] }) }))).rejects.toThrow(
+      new EvalRunError("no tools for the mcp agent"),
+    );
+    expect(existsSync(join(dir, RUN_INFO_FILE))).toBe(false);
   });
 
   it("records an answer whose tool call failed, goes on, and stops after a question when halted", async () => {

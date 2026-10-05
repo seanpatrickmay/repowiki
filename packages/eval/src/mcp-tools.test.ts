@@ -28,7 +28,8 @@ beforeAll(async () => {
   mcp = await openMcpTools({ repo: sample.repo.dir, out, compareTo: sample.sha });
 }, PROCESS_TIMEOUT_MS);
 afterAll(async () => {
-  await mcp.close();
+  // A failed beforeAll leaves no server: the real error is the one to see.
+  await mcp?.close();
   sample.repo.remove();
   rmSync(out, { recursive: true, force: true });
 });
@@ -163,6 +164,29 @@ function fakeClients() {
 }
 
 describe("openMcpTools when the server dies", () => {
+  it("starts the server pinned to the compare commit, with no ANTHROPIC_ variable", async () => {
+    const seen: McpClientOptions[] = [];
+    const { connect } = fakeClients();
+    const saved = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-not-a-key";
+    try {
+      const opened = await openMcpTools(
+        { repo: "/r", out: "/o", compareTo: "a".repeat(40) },
+        async (options) => {
+          seen.push(options);
+          return connect(options);
+        },
+      );
+      await opened.close();
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = saved;
+    }
+    expect(seen[0]?.args.slice(1)).toEqual(["/r", "--out", "/o", "--compare-to", "a".repeat(40)]);
+    expect(Object.keys(seen[0]?.env ?? {}).filter((k) => k.startsWith("ANTHROPIC_"))).toEqual([]);
+    expect(seen[0]?.env?.PATH).toBe(process.env.PATH);
+  });
+
   it("passes its log to the client, for what the server writes that is no reply", async () => {
     const { logs, connect } = fakeClients();
     const log = (_line: string) => {};

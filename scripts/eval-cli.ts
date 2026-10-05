@@ -7,6 +7,7 @@ import {
   type AgentKind,
   ANSWER_WORDS,
   agentSystemPrompt,
+  DEFAULT_AGENTS,
   type EvalQuestion,
   EvalRunError,
   type EvalRunOptions,
@@ -32,6 +33,7 @@ import {
   type TokenLedger,
   type ToolDefinition,
 } from "@repowiki/llm";
+import { andList } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 import { badOption, once, priced, problemLine } from "./wiki-cli.ts";
 
@@ -50,7 +52,10 @@ export interface EvalArgs {
   repo: string;
   questions: string;
   set: QuestionSet;
-  /** --agents, in the order given; null when not given (the set's default). */
+  /**
+   * --agents, in the order given (the held-out set's, in v1's order); null when not given, for
+   * the set's default: wiki,repo, or wiki,mcp on the history suite.
+   */
   agents: AgentKind[] | null;
   out: string | null;
   runDir: string | null;
@@ -83,11 +88,17 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
   if (set.data === "held-out" && runDir !== null) {
     throw fail("the held-out set always runs in <out>/eval/held-out, so --run-dir cannot be given");
   }
-  const agents = parseAgents(once("--agents", v.agents, EVAL_USAGE));
-  if (set.data === "held-out" && agents !== null && agents.join(",") !== "wiki,repo") {
-    throw fail(
-      "the held-out set is v1's single-use sign-off of the wiki and repo agents, so --agents can only be wiki,repo with it",
-    );
+  let agents = parseAgents(once("--agents", v.agents, EVAL_USAGE));
+  if (set.data === "held-out" && agents !== null) {
+    const same =
+      agents.length === DEFAULT_AGENTS.length && DEFAULT_AGENTS.every((a) => agents?.includes(a));
+    if (!same) {
+      throw fail(
+        "the held-out set is v1's single-use sign-off of the wiki and repo agents, so --agents can only be wiki,repo with it",
+      );
+    }
+    // In any order, the same run as v1's: asked, stored and reported in v1's order.
+    agents = [...DEFAULT_AGENTS];
   }
   const turnsText = once("--turns", v.turns, EVAL_USAGE) ?? String(DEFAULT_TURN_LIMIT);
   const turns = Number(turnsText);
@@ -256,8 +267,6 @@ export function estimateEval(input: EvalEstimateInput): EvalEstimate {
 }
 
 /** "a", "a and b", "a, b and c". */
-const listed = (items: readonly string[]) =>
-  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 
 /** The estimate as the one line eval:run prints before any call, each agent's share named. */
 export function estimateLine(
@@ -269,7 +278,7 @@ export function estimateLine(
   const shares = estimate.agents.map(
     (a) => `${a} ${money(estimate.byAgent[a] ?? 0)} at ${turns(a)} turns`,
   );
-  return `${estimate.questions} questions to the ${listed(estimate.agents)} agent${estimate.agents.length === 1 ? "" : "s"}: about ${money(estimate.agentsUsd)} (${shares.join(", ")} a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}, at most ${money(estimate.judgeCeilingUsd)} if every judgment is retried; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
+  return `${estimate.questions} questions to the ${andList(estimate.agents)} agent${estimate.agents.length === 1 ? "" : "s"}: about ${money(estimate.agentsUsd)} (${shares.join(", ")} a question, no cache hits), at most ${money(estimate.ceilingUsd)} if every question takes all ${args.turnLimit} turns with full tool results; judging about ${money(estimate.judgeUsd)}${args.batch ? " (batched)" : ""}, at most ${money(estimate.judgeCeilingUsd)} if every judgment is retried; no question is asked once the run has spent ${money(args.maxUsd)} (--max-usd)`;
 }
 
 /** A run's scores, one per agent it asked, in the order asked: "wiki 7 of 10, repo 5 of 10". */

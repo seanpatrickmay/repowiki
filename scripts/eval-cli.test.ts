@@ -84,10 +84,6 @@ describe("parseEvalArgs", () => {
       "the held-out set is v1's single-use sign-off of the wiki and repo agents, so --agents can only be wiki,repo with it",
     ],
     [
-      ["r", "--questions", "q", "--set", "held-out", "--agents", "repo,wiki"],
-      "--agents can only be wiki,repo with it",
-    ],
-    [
       ["r", "--questions", "q", "--set", "held-out", "--agents", "wiki,repo,mcp"],
       "--agents can only be wiki,repo with it",
     ],
@@ -133,6 +129,8 @@ describe("parseEvalArgs and the held-out set", () => {
       parseEvalArgs(["r", "--questions", "q", "--set", "held-out", ...more]).agents;
     expect(parse()).toBeNull();
     expect(parse("--agents", "wiki,repo")).toEqual(["wiki", "repo"]);
+    // The same two agents in another order are the same run, in v1's order.
+    expect(parse("--agents", "repo,wiki")).toEqual(["wiki", "repo"]);
   });
 });
 

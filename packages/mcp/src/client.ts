@@ -6,6 +6,7 @@ import {
   type ToolOutput,
   type ToolSet,
   toolText,
+  unknownTool,
 } from "@repowiki/query";
 import { z } from "zod";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol.ts";
@@ -311,13 +312,7 @@ export async function mcpToolSet(client: McpClient): Promise<ToolSet> {
   return {
     definitions,
     async run(name, input) {
-      if (!names.has(name)) {
-        return {
-          text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${[...names].join(", ")}`,
-          isError: true,
-        };
-      }
-      return client.callTool(name, input);
+      return names.has(name) ? client.callTool(name, input) : unknownTool(name, names);
     },
   };
 }

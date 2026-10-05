@@ -8,7 +8,7 @@ import {
   type RemapContext,
   remapCitation,
 } from "@repowiki/engine";
-import { count, cut, oneLine, SECTION_TITLES } from "@repowiki/query";
+import { andList, count, cut, oneLine, SECTION_TITLES } from "@repowiki/query";
 import { fileAt } from "./code.ts";
 import { commitOf, GIT_TIMEOUT_MS, gitOutput } from "./git.ts";
 
@@ -82,11 +82,7 @@ export interface FreshnessOptions {
  */
 function leadReason(keys: readonly string[]): string {
   const titles = [...new Set(keys)].map((k) => SECTION_TITLES[k] ?? k);
-  const where =
-    titles.length <= 2
-      ? titles.join(" and ")
-      : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
-  return `it summarizes ${count(keys.length, "claim")} below that changed, in ${where}`;
+  return `it summarizes ${count(keys.length, "claim")} below that changed, in ${andList(titles)}`;
 }
 
 /** A Map that forgets its least recently used entry past `max`. */
