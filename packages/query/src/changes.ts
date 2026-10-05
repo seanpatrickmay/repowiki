@@ -1,5 +1,5 @@
 import { type ClaimChange, claimChanges, wordDiff } from "@repowiki/core";
-import { cut, oneLine } from "./text.ts";
+import { count, cut, oneLine } from "./text.ts";
 import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
 import { SECTION_TITLES } from "./wiki-page.ts";
 import type { WikiView } from "./wiki-view.ts";
@@ -108,7 +108,7 @@ export function renderChanges(
       shown < changed
         ? [
             "",
-            `(${changed - shown} more changed claims not shown: give page_changes a narrower from and to, or read the page as of each point)`,
+            `(${count(changed - shown, "more changed claim")} not shown: give page_changes a narrower from and to, or read the page as of each point)`,
           ]
         : [];
     return `${[...lines, ...more, ...revisions].join("\n")}\n`;

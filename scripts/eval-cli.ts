@@ -266,8 +266,6 @@ export function estimateEval(input: EvalEstimateInput): EvalEstimate {
   };
 }
 
-/** "a", "a and b", "a, b and c". */
-
 /** The estimate as the one line eval:run prints before any call, each agent's share named. */
 export function estimateLine(
   estimate: EvalEstimate,

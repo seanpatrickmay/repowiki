@@ -1,8 +1,10 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { GitError } from "@repowiki/engine";
 import type { GenerateRequest, Provider, ToolProvider } from "@repowiki/llm";
 import { LlmOutputError } from "@repowiki/llm";
+import { McpClientError } from "@repowiki/mcp";
 import { createWikiTools } from "@repowiki/query";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { JudgeVerdict } from "./judge.ts";
@@ -328,6 +330,27 @@ describe("runEval", () => {
     expect(existsSync(join(dir, RUN_INFO_FILE))).toBe(false);
   });
 
+  it("stops the run when a repository tool fails, as M7's did, recording no answer for it", async () => {
+    const wiki = createWikiTools(sample.wiki);
+    const repo = createRepoTools(sample.repo.dir, sample.sha);
+    const tools = {
+      wiki,
+      repo: {
+        definitions: repo.definitions,
+        run: async () => {
+          throw new GitError("git cat-file failed: fatal: bad object");
+        },
+      },
+    };
+    const agents = scriptedToolProvider([], (_q, request) =>
+      !request.system.includes("wiki") && request.messages.length === 1
+        ? { tool: "read_file", input: { path: "README.md" } }
+        : { answer: "wiki answer" },
+    ).provider;
+    await expect(runEval(options({ tools, agents }))).rejects.toThrow(GitError);
+    expect(readRecords(dir).map((r) => `${r.kind}/${r.agent}`)).toEqual(["answer/wiki"]);
+  });
+
   it("records an answer whose tool call failed, goes on, and stops after a question when halted", async () => {
     const wiki = createWikiTools(sample.wiki);
     let failures = 0;
@@ -336,7 +359,7 @@ describe("runEval", () => {
         definitions: wiki.definitions,
         run: async () => {
           failures++;
-          throw new Error("the MCP server has exited");
+          throw new McpClientError("the MCP server has exited");
         },
       },
       repo: createRepoTools(sample.repo.dir, sample.sha),

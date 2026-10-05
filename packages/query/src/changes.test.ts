@@ -131,4 +131,16 @@ describe("renderChanges", () => {
     );
     expect(text).toContain("\nRevisions in this range, oldest first:\n");
   });
+
+  it("says one more changed claim in the singular", () => {
+    const long = " and it went on at length about what it did".repeat(4);
+    const before = [`first claim said one thing${long}`, `second claim said one thing${long}`];
+    const after = before.map((t) => t.replace("one", "another"));
+    let text = "";
+    for (let max = 200; max < 2000 && !/\(1 more/.test(text); max += 10)
+      text = diff(before, after, max);
+    expect(text).toContain(
+      "\n(1 more changed claim not shown: give page_changes a narrower from and to, or read the page as of each point)\n",
+    );
+  });
 });

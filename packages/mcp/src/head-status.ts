@@ -85,6 +85,10 @@ function leadReason(keys: readonly string[]): string {
   return `it summarizes ${count(keys.length, "claim")} below that changed, in ${andList(titles)}`;
 }
 
+/** The failures' key for a HEAD that cannot be resolved (no sha is empty), and its reason. */
+const NO_HEAD = "";
+const NO_HEAD_PROBLEM = "the repository has no HEAD or it could not be read";
+
 /** A Map that forgets its least recently used entry past `max`. */
 function lru<V>(max: number) {
   const map = new Map<string, V>();
@@ -208,7 +212,17 @@ export function createFreshness(options: FreshnessOptions): Freshness {
   /** The status against the compare commit as of now; a git that cannot run is a problem too. */
   const current = (): HeadStatus => {
     try {
-      return statusAt(options.pinned ?? commitOf(repo, "HEAD"));
+      if (options.pinned !== null) return statusAt(options.pinned);
+      // A HEAD that cannot be resolved (unborn, or rev-parse failed) is a failure like any other,
+      // kept for the session under its own key.
+      const known = failures.get(NO_HEAD);
+      if (known !== undefined) return unknownAt(null, known);
+      const head = commitOf(repo, "HEAD");
+      if (head === null) {
+        failures.set(NO_HEAD, NO_HEAD_PROBLEM);
+        return unknownAt(null, NO_HEAD_PROBLEM);
+      }
+      return statusAt(head);
     } catch (error) {
       if (!(error instanceof GitError)) throw error;
       return unknownAt(null, cut(oneLine(error.message), 300));

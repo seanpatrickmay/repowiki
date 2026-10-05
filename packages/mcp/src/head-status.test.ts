@@ -225,4 +225,20 @@ describe("createFreshness: per-claim marks", () => {
     expect(status).toMatchObject({ known: false, compare: "e".repeat(40) });
     expect(status.problem).toMatch(/^git rev-list failed in /);
   });
+
+  it("names a HEAD it cannot resolve as such, in cited_code too, and keeps that answer", () => {
+    const freshness = createFreshness({ repo: h.repo.dir, wikiHead: h.sha, pinned: null });
+    const crud = page("deliverables").sections[1]?.claims[0]?.citations[0];
+    if (crud?.kind !== "code") throw new Error("fixture");
+    const why = "the repository has no HEAD or it could not be read";
+    h.repo.git("symbolic-ref", "HEAD", "refs/heads/unborn");
+    try {
+      expect(freshness.status()).toMatchObject({ known: false, compare: null, problem: why });
+      expect(freshness.citationNow(crud)).toEqual({ kind: "unknown", why });
+    } finally {
+      h.repo.git("symbolic-ref", "HEAD", "refs/heads/main");
+    }
+    // Kept for the session, like any freshness failure: HEAD is not asked again.
+    expect(freshness.status()).toMatchObject({ known: false, problem: why });
+  });
 });

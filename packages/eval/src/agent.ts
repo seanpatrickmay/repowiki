@@ -5,6 +5,7 @@ import {
   type ToolResultBlock,
   type TurnMessage,
 } from "@repowiki/llm";
+import { McpClientError } from "@repowiki/mcp";
 import { cut, oneLine, type ToolSet } from "@repowiki/query";
 import { LAST_TURN_NOTE, questionTurn } from "./prompts.ts";
 
@@ -74,8 +75,9 @@ function withLastTurnNote(messages: readonly TurnMessage[]): TurnMessage[] {
  * reads what came before from the cache once it passes the model's minimum. The last turn sets
  * no breakpoint: changing tool_choice invalidates the message cache, so a write there would
  * cost something no later turn reads. The last turn also ends with LAST_TURN_NOTE, telling the
- * agent to answer now. A tool call that rejects (rather than answering with an error) ends the
- * answer as a "tool-failure", empty, with the turns and tokens it took: they were paid for.
+ * agent to answer now. An MCP server call that rejects (an McpClientError: a timeout, a dead
+ * server) ends the answer as a "tool-failure", empty, with the turns and tokens it took: they
+ * were paid for. Any other tool's rejection is thrown, as in M7.
  */
 export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
   const { provider, system, tools, turnLimit } = options;
@@ -136,6 +138,9 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
       try {
         output = await tools.run(use.name, use.input);
       } catch (error) {
+        // Only the MCP server's calls (a timeout, a dead server) end the answer; any other
+        // tool's rejection stops the run, as in M7, so a resume asks the agent again.
+        if (!(error instanceof McpClientError)) throw error;
         calls.push({ turn, name: use.name, input: use.input, isError: true });
         const why = error instanceof Error ? error.message : String(error);
         const failure = cut(oneLine(`${use.name}: ${why}`), 300);

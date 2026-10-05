@@ -93,6 +93,24 @@ export function renderReport(
     }),
     "",
   );
+  // Answers an MCP server failure ended (agent.ts), so a low score is read for what it is.
+  const toolFailures = info.agents.flatMap((a) => {
+    const ended = info.questions.flatMap((q) => {
+      const r = answers.get(`${q.id}\0${a}`);
+      return r?.stop === "tool-failure" ? [`  - ${cell(q.id)}: ${cell(r.failure ?? "", 200)}`] : [];
+    });
+    return ended.length === 0 ? [] : [`- ${a} (${ended.length}):`, ...ended];
+  });
+  if (toolFailures.length > 0) {
+    lines.push(
+      "## Failed answers",
+      "",
+      "Each ended when a call to the MCP server failed; it is graded 0, and a resumed run does not ask it again.",
+      "",
+      ...toolFailures,
+      "",
+    );
+  }
   lines.push(...interfaceSection(summary, records));
   const v1 = info.agents.includes("wiki") && info.agents.includes("repo");
   if (complete && v1 && agents.repo.correct === 0) {

@@ -290,6 +290,41 @@ describe("mcp-serve.ts as a process (no network, no LLM)", () => {
   );
 
   it(
+    "exits on SIGTERM, though its client stopped reading and its output is full",
+    async () => {
+      const child = spawn(process.execPath, [SCRIPT, h.repo.dir, "--out", out], {
+        env: clientEnv(),
+      });
+      children.push(child);
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+      while (!stderr.includes("\n")) await new Promise((resolve) => setTimeout(resolve, 20));
+      // Read nothing more, and ask for far more than a pipe holds.
+      child.stdout.pause();
+      const call = {
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { name: "list_pages", arguments: {} },
+      };
+      for (let id = 1; id <= 200; id++) child.stdin.write(`${JSON.stringify({ ...call, id })}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const sent = Date.now();
+      child.kill("SIGTERM");
+      const code = await Promise.race([
+        closed,
+        // Without the fallback it never exits; the margin is for a loaded machine.
+        new Promise<"running">((resolve) => setTimeout(() => resolve("running"), 12_000)),
+      ]);
+      expect(code).toBe(0);
+      expect(Date.now() - sent).toBeLessThan(12_000);
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
     "prints the registration line with absolute paths for --help",
     () => {
       const help = spawnSync(process.execPath, [SCRIPT, "--help", h.repo.dir], {

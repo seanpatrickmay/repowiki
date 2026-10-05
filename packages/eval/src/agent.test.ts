@@ -1,3 +1,5 @@
+import { GitError } from "@repowiki/engine";
+import { McpClientError } from "@repowiki/mcp";
 import { defineTool, ToolError, type ToolSet, toolSet } from "@repowiki/query";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -260,7 +262,7 @@ describe("runAgent", () => {
     const rejecting: ToolSet = {
       definitions: tools.definitions,
       run: async () => {
-        throw new Error("the MCP server exited (code 1):\nboom");
+        throw new McpClientError("the MCP server exited (code 1):\nboom");
       },
     };
     const { provider, requests } = scriptedToolProvider([
@@ -278,6 +280,17 @@ describe("runAgent", () => {
       model: SCRIPTED_MODEL,
     });
     expect(requests).toHaveLength(1);
+  });
+
+  it("lets any other tool's rejection stop the agent, as M7's did", async () => {
+    const failing: ToolSet = {
+      definitions: tools.definitions,
+      run: async () => {
+        throw new GitError("git cat-file failed in /repo: fatal: bad object");
+      },
+    };
+    const { provider } = scriptedToolProvider([{ tool: "lookup", input: { word: "widget" } }]);
+    await expect(runAgent({ ...base, tools: failing, provider })).rejects.toThrow(GitError);
   });
 });
 
