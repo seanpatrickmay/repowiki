@@ -18,3 +18,4 @@ export {
   type HeadStatus,
   MAX_CACHED_MARKS,
 } from "./head-status.ts";
+export { MAX_AS_OF_VIEWS, type ServedWiki, type ServeOptions, serveWiki } from "./served.ts";

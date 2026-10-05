@@ -1,6 +1,6 @@
 import type { Claim, WikiExport } from "@repowiki/core";
 import { z } from "zod";
-import { type SearchDoc, searchIndex } from "./search.ts";
+import { type SearchDoc, type SearchIndex, searchIndex } from "./search.ts";
 import { defineTool, type ToolSet, toolSet } from "./tools.ts";
 import { readPage } from "./wiki-page.ts";
 import { ABOUT_PAGE_ID, listedPage, reference, WikiView } from "./wiki-view.ts";
@@ -54,6 +54,32 @@ function searchDocs(view: WikiView): SearchDoc[] {
   return docs;
 }
 
+/** The page search over a view: BM25F over every active page and the About article (R6 of M7). */
+export function pageSearchIndex(view: WikiView): SearchIndex {
+  return searchIndex(searchDocs(view));
+}
+
+/**
+ * Up to MAX_SEARCH_RESULTS pages for `query`, best first, one line each (id, title, first lead
+ * sentence), then `hint`. `note` adds a few words after a page's line (the MCP server's
+ * "(cites changed files)"); without it the text is v1's search result.
+ */
+export function searchResults(
+  view: WikiView,
+  index: SearchIndex,
+  query: string,
+  options: { note?: (id: string) => string | null; hint?: string } = {},
+): string {
+  const ids = index.search(query, MAX_SEARCH_RESULTS);
+  if (ids.length === 0) return "No page matches; try other words.\n";
+  const lines = ids.map((id) => {
+    const title = id === ABOUT_PAGE_ID ? (view.article?.title ?? "About") : view.title(id);
+    const note = options.note?.(id) ?? null;
+    return `${listedPage(id, title, view.summary(id))}${note === null ? "" : ` ${note}`}`;
+  });
+  return `${lines.join("\n")}\n${options.hint ?? "Read one with read_page(id)."}\n`;
+}
+
 /**
  * The wiki agent's tools over an export (spec §9): `search(query)` ranks the active pages and the
  * About article by their titles, aliases, leads, claims and cited paths; `read_page(id)` returns
@@ -61,21 +87,13 @@ function searchDocs(view: WikiView): SearchDoc[] {
  */
 export function createWikiTools(wiki: WikiExport): ToolSet {
   const view = new WikiView(wiki);
-  const index = searchIndex(searchDocs(view));
+  const index = pageSearchIndex(view);
   return toolSet([
     defineTool(
       "search",
       `Search the wiki. Returns up to ${MAX_SEARCH_RESULTS} pages, best match first, each with its id, title and the first sentence of its lead.`,
       z.strictObject({ query: z.string().trim().min(1).max(200) }),
-      ({ query }) => {
-        const ids = index.search(query, MAX_SEARCH_RESULTS);
-        if (ids.length === 0) return "No page matches; try other words.\n";
-        const lines = ids.map((id) => {
-          const title = id === ABOUT_PAGE_ID ? (view.article?.title ?? "About") : view.title(id);
-          return listedPage(id, title, view.summary(id));
-        });
-        return `${lines.join("\n")}\nRead one with read_page(id).\n`;
-      },
+      ({ query }) => searchResults(view, index, query),
     ),
     defineTool(
       "read_page",
