@@ -45,7 +45,12 @@ export interface AskFetchResponse {
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
-  body: { getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array }> } } | null;
+  body: {
+    getReader(): {
+      read(): Promise<{ done: boolean; value?: Uint8Array }>;
+      cancel?(): Promise<void>;
+    };
+  } | null;
 }
 
 /** The slice of Pagefind's JS API the fallback uses (`/pagefind/pagefind.js`). */
@@ -75,9 +80,11 @@ export interface AskEnv {
   storage(): StorageLike | null;
   fetch(
     url: string,
-    init?: { method: string; headers: Record<string, string>; body: string },
+    init?: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
   ): Promise<AskFetchResponse>;
   pagefind(): Promise<Pagefind>;
+  /** How long a question may take before the sidebar gives up on it; ASK_TIMEOUT_MS if unset. */
+  askTimeoutMs?: number;
 }
 
 /** sessionStorage keys: the sidebar's open state, and the last answers. */
@@ -88,6 +95,11 @@ export const KEPT_ANSWERS = 10;
 /** The most pages the static fallback lists. */
 export const ROUTES = 5;
 export const PAGEFIND_URL = "/pagefind/pagefind.js";
+/**
+ * How long the sidebar waits for an answer, POST to last frame, before it cancels the stream and
+ * routes the question: past the slowest bounded question (five turns).
+ */
+export const ASK_TIMEOUT_MS = 120_000;
 
 /** Words too common to search for, removed before a question goes to Pagefind. */
 const STOP_WORDS = new Set(
@@ -152,13 +164,20 @@ export function installAsk(env: AskEnv): void {
   const keep = (entry: Kept) =>
     store.set(ANSWERS_KEY, JSON.stringify([...kept(), entry].slice(-KEPT_ANSWERS)));
 
+  // The status is asked once per page; a probe that found no status is asked again next time.
   let status: Promise<AskStatus | null> | null = null;
   const probe = () => {
-    status ??= env
-      .fetch("/api/ask/status")
-      .then(async (response) => (response.ok ? guardStatus(await response.json()) : null))
-      .catch(() => null);
-    return status;
+    if (status === null) {
+      status = env
+        .fetch("/api/ask/status")
+        .then(async (response) => (response.ok ? guardStatus(await response.json()) : null))
+        .catch(() => null);
+    }
+    const asked = status;
+    void asked.then((found) => {
+      if (found === null && status === asked) status = null;
+    });
+    return asked;
   };
 
   for (const panel of Array.from(document.querySelectorAll("[data-ask]"))) {
@@ -233,54 +252,77 @@ export function installAsk(env: AskEnv): void {
               : "Answers are off on this server; here are the pages that match.",
           );
         }
-        let response: AskFetchResponse;
-        try {
-          response = await env.fetch("/api/ask", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ question, page: pageHint(env.location.pathname), fresh }),
-          });
-        } catch {
-          return await routes(
-            question,
-            "The server did not answer; here are the pages that match.",
-          );
-        }
-        if (response.status === 429) {
-          live.textContent = "Another question is being answered; ask again in a moment.";
-          return;
-        }
-        if (!response.ok || response.body === null) {
-          return await routes(
-            question,
-            "The question could not be answered; here are the pages that match.",
-          );
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        const sse = sseReader();
+        // One deadline for the whole answer: it aborts the POST and cancels the stream's reader.
+        const controller = new AbortController();
+        const expired = new Promise<never>((_resolve, reject) => {
+          controller.signal.addEventListener("abort", () => reject(new Error("timed out")));
+        });
+        expired.catch(() => {});
+        const timer = setTimeout(() => controller.abort(), env.askTimeoutMs ?? ASK_TIMEOUT_MS);
+        const tooLong = "The answer took too long; here are the pages that match.";
+        let reader: ReturnType<NonNullable<AskFetchResponse["body"]>["getReader"]> | null = null;
         let answer: AskResponse | null = null;
         try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            const text = done ? decoder.decode() : decoder.decode(value, { stream: true });
-            for (const frame of sse.feed(text)) {
-              const data: unknown = JSON.parse(frame.data);
-              if (frame.event === "status") {
-                const progress = guardProgress(data);
-                if (progress !== null) live.textContent = progressText(progress);
-              } else if (frame.event === "answer") answer = guardResponse(data);
-            }
-            if (done || answer !== null) break;
+          let response: AskFetchResponse;
+          try {
+            response = await Promise.race([
+              env.fetch("/api/ask", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ question, page: pageHint(env.location.pathname), fresh }),
+                signal: controller.signal,
+              }),
+              expired,
+            ]);
+          } catch {
+            return await routes(
+              question,
+              controller.signal.aborted
+                ? tooLong
+                : "The server did not answer; here are the pages that match.",
+            );
           }
-        } catch {
-          answer = null;
-        }
-        if (answer === null) {
-          return await routes(
-            question,
-            "The answer could not be shown; here are the pages that match.",
-          );
+          if (response.status === 429) {
+            live.textContent = "Another question is being answered; ask again in a moment.";
+            return;
+          }
+          if (!response.ok || response.body === null) {
+            return await routes(
+              question,
+              "The question could not be answered; here are the pages that match.",
+            );
+          }
+          reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          const sse = sseReader();
+          try {
+            for (;;) {
+              const { done, value } = await Promise.race([reader.read(), expired]);
+              const text = done ? decoder.decode() : decoder.decode(value, { stream: true });
+              for (const frame of sse.feed(text)) {
+                const data: unknown = JSON.parse(frame.data);
+                if (frame.event === "status") {
+                  const progress = guardProgress(data);
+                  if (progress !== null) live.textContent = progressText(progress);
+                } else if (frame.event === "answer") answer = guardResponse(data);
+              }
+              if (done || answer !== null) break;
+            }
+          } catch {
+            answer = null;
+          }
+          if (answer === null) {
+            return await routes(
+              question,
+              controller.signal.aborted
+                ? tooLong
+                : "The answer could not be shown; here are the pages that match.",
+            );
+          }
+        } finally {
+          clearTimeout(timer);
+          // Release the connection whatever happened: answered, failed or timed out.
+          reader?.cancel?.().catch(() => {});
         }
         show(question, answer);
         keep({ question, response: answer });
