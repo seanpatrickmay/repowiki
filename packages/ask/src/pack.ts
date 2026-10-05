@@ -1,4 +1,4 @@
-import { ASK_QUESTION_MAX_LENGTH } from "@repowiki/core";
+import { ASK_QUESTION_MAX_LENGTH, ASK_TITLE_MAX_LENGTH } from "@repowiki/core";
 import {
   ABOUT_PAGE_ID,
   type ClaimIndex,
@@ -9,7 +9,9 @@ import {
   oneLine,
   pageSearchIndex,
   type SearchIndex,
+  titleText,
   toolText,
+  unmarkHandles,
   type WikiView,
 } from "@repowiki/query";
 
@@ -56,7 +58,8 @@ export interface Pack {
  * The first user turn (spec v2 #4 §6.2): the question; the page the reader is on; the top pages
  * of the page search, the hinted page first; and the top claims of the claim search, at most
  * PACK_CLAIMS_PER_PAGE from one page, each starting with its handle. Every repository-derived
- * string goes through query's neutralisation.
+ * string goes through query's neutralisation: the reader's page title through `titleText`, cut
+ * at ASK_TITLE_MAX_LENGTH, and every page line and title with its handle-shaped text unmarked.
  */
 export function turnOnePack(
   view: WikiView,
@@ -67,14 +70,17 @@ export function turnOnePack(
   const asked = cut(oneLine(toolText(question)), ASK_QUESTION_MAX_LENGTH);
   const lines = [`Question: ${asked}`];
   if (hint !== null) {
-    lines.push(`The reader is on: ${oneLine(pageTitle(view, hint))} (page id: ${hint})`);
+    const title = cut(titleText(pageTitle(view, hint)), ASK_TITLE_MAX_LENGTH);
+    lines.push(`The reader is on: ${unmarkHandles(`${title} (page id: ${hint})`)}`);
   }
   const found = indexes.pages.search(asked, PACK_PAGES);
   const pages =
     hint === null || found.includes(hint) ? found : [hint, ...found].slice(0, PACK_PAGES);
   lines.push("", "Pages that match:");
   if (pages.length === 0) lines.push("- none");
-  for (const id of pages) lines.push(listedPage(id, pageTitle(view, id), view.summary(id)));
+  for (const id of pages) {
+    lines.push(unmarkHandles(listedPage(id, pageTitle(view, id), view.summary(id))));
+  }
   const shown = indexes.claims.search(asked, PACK_CLAIMS, PACK_CLAIMS_PER_PAGE);
   lines.push("", "Claims that match:");
   if (shown.length === 0) lines.push("- none");
