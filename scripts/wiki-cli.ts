@@ -6,6 +6,7 @@ import {
   type ArchitectureOutcome,
   type BuildJournal,
   type ContextPack,
+  EDGE_WINDOW_SHARE,
   estimateTokens,
   markdownCodeSpan,
   type PageOutcome,
@@ -488,8 +489,9 @@ export function estimateBuild(
 
 /**
  * The Architecture call's cost, stated before any call. Its pack needs the pages' leads, so it
- * cannot be built yet: the estimate takes the whole pack budget, the system prompt and
- * ASSUMED_ARCHITECTURE_OUTPUT_TOKENS, priced like a page (an upper-side figure).
+ * cannot be built yet: the estimate takes the whole pack budget, with the EDGE_WINDOW_SHARE of it
+ * the lines around edge sites may add, the system prompt and ASSUMED_ARCHITECTURE_OUTPUT_TOKENS,
+ * priced like a page (an upper-side figure).
  */
 export function estimateArchitecture(
   system: string,
@@ -497,7 +499,8 @@ export function estimateArchitecture(
   model: string,
   batch: boolean,
 ): { inputTokens: number; outputTokens: number; usd: number } {
-  const inputTokens = estimateTokens(system) + budgetTokens;
+  const pack = budgetTokens + Math.ceil(budgetTokens * EDGE_WINDOW_SHARE);
+  const inputTokens = estimateTokens(system) + pack;
   const outputTokens = ASSUMED_ARCHITECTURE_OUTPUT_TOKENS;
   return { inputTokens, outputTokens, usd: priced(model, inputTokens, outputTokens, batch) };
 }

@@ -48,6 +48,10 @@ const claim = (
   hook: false,
 });
 const options = { repoName: "sample", driftThreshold: Number.POSITIVE_INFINITY };
+/** A Wikipedia fetch that always fails: a title the store has not cached is left plain. */
+const unreachable = async (): Promise<Response> => {
+  throw new TypeError("no network in tests");
+};
 
 /** A journal whose flush is observable; it holds no rows. */
 function spyJournal() {
@@ -347,9 +351,6 @@ describe("updateWiki", () => {
         ],
         diagram: { nodes: [], edges: [] },
       }));
-      const unreachable = async (): Promise<Response> => {
-        throw new TypeError("no network in tests");
-      };
       const result = await updateWiki(store, await inputAt(repo, merge), {
         ...options,
         provider: p,
@@ -700,6 +701,7 @@ describe("updateWiki", () => {
           driftThreshold: 0,
           clusterOptions,
           provider: p,
+          wikipediaFetch: unreachable,
         });
       }
 
@@ -797,6 +799,143 @@ describe("updateWiki", () => {
         expect(historyOf("deliverables")).toEqual([
           ["Deliverables was added first.", [first]],
           ["Both commits shaped it.", [first, branch]],
+        ]);
+      });
+
+      it("keeps the Wikipedia link of a carried History claim", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const stored = store.getCurrentRevision("deliverables");
+        if (stored === null) throw new Error("no page");
+        const linked = "Deliverables began as a [[wp:Message queue]] reader.";
+        store.putRevision({
+          ...stored,
+          id: "deliverables-linked",
+          parentId: stored.id,
+          reason: "update",
+          sections: stored.sections.map((s) => ({
+            ...s,
+            claims: s.claims.map((c) => (c.id === "c3" ? { ...c, text: linked } : c)),
+          })),
+        });
+        store.putWikipediaSummary(
+          "Message queue",
+          {
+            title: "Message queue",
+            extract: "A message queue is a form of communication.",
+            url: "https://en.wikipedia.org/wiki/Message_queue",
+          },
+          "2026-10-01T00:00:00Z",
+        );
+        const { merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () =>
+            wholePage(
+              "Work records",
+              "`complete()` marks a deliverable done.",
+              "src/deliverables/crud.py:4-7",
+            ),
+        );
+        expect(store.getCurrentRevision("deliverables")?.reason).toBe("manifest-change");
+        expect(historyOf("deliverables")).toEqual([[linked, [first]]]);
+      });
+
+      it("drops a new History claim whose commits a carried one already cites, and repoints the lead", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { branch, merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () =>
+            withHistory(
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Both commits shaped it.", [first, branch]],
+            ),
+        );
+        // A second whole write regroups what the first one already said, and adds one new fact;
+        // its lead summarizes only the regrouped claim.
+        repo.write("src/deliverables/log.py", "def log(entry):\n    return entry\n");
+        const later = repo.commit("feat: keep a work log");
+        await updateWith(
+          later,
+          [op({ kind: "rename", feature: "deliverables", title: "Work log" })],
+          () => {
+            const page = withHistory(
+              wholePage(
+                "Work log",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Paging arrived in PR 7.", [branch]],
+              ["It was renamed Work log later.", [later]],
+            );
+            return {
+              ...page,
+              sections: page.sections.map((s) =>
+                s.key === "lead"
+                  ? { ...s, claims: s.claims.map((c) => ({ ...c, supports: ["h1"] })) }
+                  : s,
+              ),
+            };
+          },
+        );
+        expect(historyOf("deliverables")).toEqual([
+          ["Deliverables was added first.", [first]],
+          ["Both commits shaped it.", [first, branch]],
+          ["It was renamed Work log later.", [later]],
+        ]);
+        const page = store.getCurrentRevision("deliverables");
+        const both = page?.sections
+          .find((s) => s.key === "history")
+          ?.claims.find((c) => c.text === "Both commits shaped it.");
+        const lead = page?.sections.find((s) => s.key === "lead")?.claims;
+        expect(lead?.map((c) => c.supports)).toEqual([[both?.id]]);
+      });
+
+      it("gives a dropped duplicate's hook to the carried claim, and keeps one citing more than commits", async () => {
+        ({ repo, store, first } = await builtWiki());
+        const { merge } = mergePaging();
+        await updateWith(
+          merge,
+          [op({ kind: "rename", feature: "deliverables", title: "Work records" })],
+          () => {
+            const page = withHistory(
+              wholePage(
+                "Work records",
+                "`complete()` marks a deliverable done.",
+                "src/deliverables/crud.py:4-7",
+              ),
+              ["Work records began with the first commit.", [first]],
+              ["The first commit added complete().", [first]],
+            );
+            return {
+              ...page,
+              sections: page.sections.map((s) =>
+                s.key === "history"
+                  ? {
+                      ...s,
+                      claims: s.claims.map((c) =>
+                        c.id === "h1"
+                          ? { ...c, hook: true }
+                          : { ...c, cite: [...c.cite, "src/deliverables/crud.py:4-7"] },
+                      ),
+                    }
+                  : s,
+              ),
+            };
+          },
+        );
+        const history = store
+          .getCurrentRevision("deliverables")
+          ?.sections.find((s) => s.key === "history")?.claims;
+        expect(history?.map((c) => [c.text, c.hook, c.citations.map((x) => x.kind)])).toEqual([
+          ["Deliverables was added first.", true, ["commit"]],
+          ["The first commit added complete().", false, ["commit", "code"]],
         ]);
       });
 

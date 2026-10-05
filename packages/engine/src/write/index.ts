@@ -5,7 +5,7 @@ export {
   MAX_ARCHITECTURE_OUTPUT_TOKENS,
   writeArchitecture,
 } from "./architecture.ts";
-export { DEFAULT_ARCHITECTURE_BUDGET_TOKENS } from "./architecture-pack.ts";
+export { DEFAULT_ARCHITECTURE_BUDGET_TOKENS, EDGE_WINDOW_SHARE } from "./architecture-pack.ts";
 export { architectureSystemPrompt } from "./architecture-prompt.ts";
 export {
   checkTitles,

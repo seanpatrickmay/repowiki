@@ -267,6 +267,49 @@ describe("buildArchitecturePack", () => {
     expect([...(built.shown.get("src/deliverables/f59.py") ?? [])]).toEqual([5, 20]);
   });
 
+  it("cuts the lines around edge sites before anything else, at any budget, within its share", () => {
+    const input = testArchitectureInput();
+    const long = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+    addFiles(input, { "src/deliverables/long.py": long });
+    input.edges = [
+      {
+        ...(input.edges[0] as (typeof input.edges)[number]),
+        sites: [
+          { path: "src/deliverables/long.py", line: 2, kind: "import" },
+          { path: "src/deliverables/long.py", line: 20, kind: "call" },
+        ],
+      },
+    ];
+    // The same pack with no text to show around the sites: what the windows must never displace.
+    const bare = { ...input, sources: new Map(input.sources) };
+    bare.sources.delete("src/deliverables/long.py");
+    /** The pack's text without its window blocks (a `####` heading and its numbered lines). */
+    const withoutWindows = (text: string) => {
+      let inWindow = false;
+      return text
+        .split("\n")
+        .filter((line) => {
+          if (/^#### .* \(around its sites; \d+ lines\)$/.test(line)) inWindow = true;
+          else if (!/^ *\d+\| /.test(line)) inWindow = false;
+          return !inWindow;
+        })
+        .join("\n");
+    };
+    let windowed = 0;
+    for (let budget = 300; budget <= 1400; budget += 10) {
+      const built = pack(input, budget);
+      const plain = pack(bare, budget);
+      expect(withoutWindows(built.text), `budget ${budget}`).toBe(plain.text);
+      const extra = built.text.length - plain.text.length;
+      expect(extra).toBeLessThanOrEqual(budget * 2.5 * EDGE_WINDOW_SHARE);
+      expect(built.tokens).toBeLessThanOrEqual(Math.ceil(budget * (1 + EDGE_WINDOW_SHARE)));
+      if (extra > 0) windowed += 1;
+    }
+    // Some budgets fit the bare edge alone, and the larger ones its windows too.
+    expect(windowed).toBeGreaterThan(0);
+    expect(pack(input, 300).text).not.toContain("#### src/deliverables/long.py");
+  });
+
   it("says so when no edge joins two features", () => {
     const input = testArchitectureInput();
     expect(pack({ ...input, edges: [] }).text).toContain(

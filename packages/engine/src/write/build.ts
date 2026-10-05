@@ -55,7 +55,7 @@ export interface WritePagesInput {
   /**
    * History claims a feature's new page carries forward, as stored, from the pages it continues
    * (spec §5 rule 4: History is append-only). They go ahead of the page's new History claims;
-   * a new one that cites exactly the commits of a carried one is dropped.
+   * a new one citing only commits that one carried claim already cites, all of them, is dropped.
    */
   carry?: ReadonlyMap<string, readonly Claim[]>;
 }
@@ -195,18 +195,16 @@ export async function checkTitles(
   return wikipedia;
 }
 
-/** The commits a claim cites, as one comparable key. */
-const commitsOf = (claim: Claim): string =>
-  claim.citations
-    .flatMap((c) => (c.kind === "commit" ? [c.sha] : []))
-    .sort()
-    .join(" ");
+/** The commits a claim cites. */
+const commitsOf = (claim: Claim): Set<string> =>
+  new Set(claim.citations.flatMap((c) => (c.kind === "commit" ? [c.sha] : [])));
 
 /**
  * A page's verified claims with `carried` History claims ahead of its new ones (spec §5 rule 4).
- * A new History claim citing exactly the commits of a carried one is dropped, and a lead claim
- * that summarized it summarizes the carried one instead. Carried claims take draft ids no
- * verified claim uses; the page's own numbering replaces every id anyway.
+ * A new History claim that cites only commits, all of which one carried claim already cites, is
+ * dropped: the first such carried claim takes its hook flag, and a lead claim that summarized it
+ * summarizes that carried claim instead. Carried claims take draft ids no verified claim uses;
+ * the page's own numbering replaces every id anyway.
  */
 function withCarried(
   verified: readonly { key: SectionKey; claim: Claim }[],
@@ -225,23 +223,35 @@ function withCarried(
     key: "history" as const,
     claim: { ...claim, id: fresh() },
   }));
-  const byCommits = new Map(kept.map((k) => [commitsOf(k.claim), k.claim.id]));
+  const cited = kept.map((k) => ({ id: k.claim.id, commits: commitsOf(k.claim) }));
   const replaced = new Map<string, string>();
+  const hooked = new Set<string>();
   for (const { key, claim } of verified) {
-    const same = key === "history" ? byCommits.get(commitsOf(claim)) : undefined;
-    if (same !== undefined) replaced.set(claim.id, same);
+    if (key !== "history" || claim.citations.some((c) => c.kind !== "commit")) continue;
+    const commits = [...commitsOf(claim)];
+    if (commits.length === 0) continue;
+    const covering = cited.find((c) => commits.every((sha) => c.commits.has(sha)));
+    if (covering === undefined) continue;
+    replaced.set(claim.id, covering.id);
+    if (claim.hook) hooked.add(covering.id);
   }
+  const carriedClaims = kept.map((k) =>
+    hooked.has(k.claim.id) ? { ...k, claim: { ...k.claim, hook: true } } : k,
+  );
   const rest = verified
     .filter((v) => !(v.key === "history" && replaced.has(v.claim.id)))
     .map((v) =>
       v.key === "lead" && replaced.size > 0
         ? {
             ...v,
-            claim: { ...v.claim, supports: v.claim.supports.map((s) => replaced.get(s) ?? s) },
+            claim: {
+              ...v.claim,
+              supports: [...new Set(v.claim.supports.map((s) => replaced.get(s) ?? s))],
+            },
           }
         : v,
     );
-  return [...kept, ...rest];
+  return [...carriedClaims, ...rest];
 }
 
 /**
@@ -409,12 +419,16 @@ export async function writePages(
     }
   });
 
-  // Wikipedia titles of every surviving claim of a page still being written, checked once for
-  // the whole run: a failed page's links are never shown, so they cost no lookup.
+  // Wikipedia titles of every surviving claim of a page still being written, and of the History
+  // claims it carries (which keep a link only through the same check), checked once for the
+  // whole run: a failed page's links are never shown, so they cost no lookup.
   const titles = states.flatMap((s) =>
     s.failure !== null
       ? []
-      : [...s.verified.values()].flatMap(({ claim }) => wikipediaTitlesIn(claim.text)),
+      : [
+          ...[...s.verified.values()].map(({ claim }) => claim),
+          ...(input.carry?.get(s.pack.featureId) ?? []),
+        ].flatMap((claim) => wikipediaTitlesIn(claim.text)),
   );
   const wikipedia = await checkTitles(titles, options.wikipedia, log);
 

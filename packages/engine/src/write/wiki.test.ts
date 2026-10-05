@@ -104,6 +104,17 @@ describe("buildWiki", () => {
     expect(requests[0]?.system).toBe(first.requests[0]?.system);
   });
 
+  it("clears the pending whole write of every page a rerun writes, and only theirs", async () => {
+    const first = setup(["signals"]);
+    await buildWiki(first.store, first.input, first.options);
+    // As an update leaves it when a page's manifest-change write failed (a new feature's too).
+    first.store.setPendingWhole(["deliverables", "signals"]);
+    const { options } = setup();
+    const build = await buildWiki(first.store, first.input, options);
+    expect(build.stored.map((r) => r.featureId)).toEqual(["signals"]);
+    expect(first.store.getPendingWhole()).toEqual(["deliverables"]);
+  });
+
   it("refuses a store built at another sha, or without a manifest for this one", async () => {
     const { store, input, options, requests } = setup();
     store.setHead(SHA_B);
