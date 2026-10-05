@@ -1,3 +1,4 @@
+export { createAgentTools, TOOL_TITLES, wikiTools } from "./agent-tools.ts";
 export {
   citedCode,
   commitDetails,
