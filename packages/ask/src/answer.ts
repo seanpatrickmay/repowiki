@@ -92,9 +92,31 @@ function groundText(view: WikiView, claims: readonly HandleClaim[]): string {
     .join("\n");
 }
 
+/** A character a name is made of: one next to a match makes the match part of a longer name. */
+const NAME_CHARACTER = /[A-Za-z0-9_]/;
+
+/**
+ * True when `ground` writes `token` as a whole name: at some place where neither the character
+ * before it nor the one after it continues an identifier the token starts or ends with, so
+ * `sign` is not written by `signal` or `save_signal`, but `ingest.py` is by `src/ingest.py`.
+ */
+function writes(ground: string, token: string): boolean {
+  const opens = NAME_CHARACTER.test(token.charAt(0));
+  const closes = NAME_CHARACTER.test(token.charAt(token.length - 1));
+  for (let at = ground.indexOf(token); at !== -1; at = ground.indexOf(token, at + 1)) {
+    const before = ground.charAt(at - 1);
+    const after = ground.charAt(at + token.length);
+    if (!(opens && NAME_CHARACTER.test(before)) && !(closes && NAME_CHARACTER.test(after))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * The first code-like token of `text` that its cited claims do not write (spec v2 #4 R6), or
- * null when every one is grounded. `foo()` is grounded by `foo`.
+ * null when every one is grounded. A token is written only as a whole name (see `writes`);
+ * `foo()` is grounded by `foo`.
  */
 export function ungroundedToken(
   view: WikiView,
@@ -104,7 +126,7 @@ export function ungroundedToken(
   const ground = groundText(view, claims);
   for (const token of codeTokens(text)) {
     const base = token.endsWith("()") ? token.slice(0, -2) : token;
-    if (!ground.includes(token) && (base === "" || !ground.includes(base))) return token;
+    if (!writes(ground, token) && (base === "" || !writes(ground, base))) return token;
   }
   return null;
 }
@@ -243,7 +265,8 @@ export interface ResponseInput {
 
 /**
  * The response the sidebar shows (spec v2 #4 §6.3): sources numbered in order of first citation
- * (at most 12; a sentence left with none is refused), links built by the server from handles,
+ * (at most 12; a sentence left with none, or left naming a file, function or setting its kept
+ * sources do not write, is refused and adds no source), links built by the server from handles,
  * and Read next filled from the page search. An answered or partial answer left with no sentence
  * is not-found, whose one sentence is R26's fixed text; budget and error answers have none.
  * Parsed with core's AskResponse before it is returned.
@@ -256,20 +279,36 @@ export function buildResponse(input: ResponseInput): AskResponse {
   let refused = input.refused;
   const answering = input.status === "answered" || input.status === "partial";
   for (const sentence of answering ? input.sentences : []) {
-    const cited: number[] = [];
+    // Cap the sources first, then ground the sentence on the claims it keeps (R6): a claim the
+    // cap drops cannot be what lets the sentence name a file or function.
+    const kept: { handle: string; found: HandleClaim }[] = [];
+    let added = 0;
     for (const handle of sentence.handles) {
+      if (kept.some((k) => k.handle === handle)) continue;
+      const found = handleClaim(view, handle);
+      if (found === null) continue;
+      if (!numbers.has(handle)) {
+        if (sources.length + added === ASK_MAX_SOURCES) continue;
+        added++;
+      }
+      kept.push({ handle, found });
+    }
+    const claims = kept.map((k) => k.found);
+    if (kept.length === 0 || ungroundedToken(view, sentence.text, claims) !== null) {
+      refused++;
+      continue;
+    }
+    const cited: number[] = [];
+    for (const { handle, found } of kept) {
       let n = numbers.get(handle);
       if (n === undefined) {
-        const found = handleClaim(view, handle);
-        if (found === null || sources.length === ASK_MAX_SOURCES) continue;
         n = sources.length + 1;
         numbers.set(handle, n);
         sources.push(sourceOf(view, n, found));
       }
       if (!cited.includes(n)) cited.push(n);
     }
-    if (cited.length === 0) refused++;
-    else sentences.push({ text: sentence.text, sources: cited });
+    sentences.push({ text: sentence.text, sources: cited });
   }
   let status = input.status;
   if (answering && sentences.length === 0) status = "not-found";
