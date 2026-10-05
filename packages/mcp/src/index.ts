@@ -9,6 +9,7 @@ export {
   MAX_CODE_BYTES,
   MAX_CONTEXT_LINES,
 } from "./code.ts";
+export { codeTools, repoRelative } from "./code-tools.ts";
 export { commitOf, GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitOutput, runGit, topLevel } from "./git.ts";
 export {
   type CitationNow,

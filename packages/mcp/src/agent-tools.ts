@@ -20,6 +20,7 @@ import {
   type WikiView,
 } from "@repowiki/query";
 import { z } from "zod";
+import { codeTools } from "./code-tools.ts";
 import type { ClaimMark, HeadStatus } from "./head-status.ts";
 import type { ServedWiki } from "./served.ts";
 
@@ -290,5 +291,5 @@ export function wikiTools(served: () => ServedWiki): Tool[] {
 
 /** The six MCP tools over the wiki `served()` returns at each call. */
 export function createAgentTools(served: () => ServedWiki): ToolSet {
-  return toolSet(wikiTools(served));
+  return toolSet([...wikiTools(served), ...codeTools(served)]);
 }
