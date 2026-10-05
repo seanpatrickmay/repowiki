@@ -148,6 +148,36 @@ describe("createAskSession", () => {
     expect(s.status()).toEqual({ mode: "routing", head: sample.sha, reason: "budget" });
   });
 
+  it("still answers when the cache cannot be written, and logs it on one line", async () => {
+    const wiki = extendedWiki(sample);
+    const lines: string[] = [];
+    const s = createAskSession({
+      wiki,
+      provider: scriptedProvider([ANSWER]).provider,
+      model: "claude-haiku-4-5",
+      questionUsd: 0.05,
+      maxUsd: 1,
+      cache: {
+        path: join(dir, "ask", "answers.jsonl"),
+        skipped: 0,
+        get: () => undefined,
+        append() {
+          throw new Error("ENOSPC: no space left on device\nwrite");
+        },
+      },
+      log: (line) => lines.push(line),
+      now: () => new Date("2026-10-05T12:00:00Z"),
+    });
+    const answered = await s.ask(ask("Where are signals made?"));
+    expect(answered).toMatchObject({ status: "answered", cached: false });
+    expect(s.totals()).toEqual({ questions: 1, cached: 0, usd: TURN_USD });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe(
+      "ask cache: the answer was not saved (ENOSPC: no space left on device write)",
+    );
+    expect(lines[1]).toMatch(/^ask "Where are signals made\?" \u2192 answered, 1 turn/);
+  });
+
   it("keeps a hostile question on one short line in the log", async () => {
     const { session: s, lines } = session([ANSWER]);
     await s.ask(ask(`evil\n\u001b[31m${"x".repeat(100)}`));

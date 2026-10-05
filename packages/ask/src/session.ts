@@ -172,16 +172,22 @@ export function createAskSession(options: AskSessionOptions): AskSession {
         spent += usd;
         totals.usd = spent;
         if (["answered", "partial", "not-found"].includes(response.status)) {
-          cache.append({
-            v: 1,
-            key,
-            exportHash: hash,
-            model,
-            promptVersion: ASK_PROMPT_VERSION,
-            response,
-            tokens,
-            at: now().toISOString(),
-          });
+          // A cache that cannot be written loses only the saving: the reader still gets the answer.
+          try {
+            cache.append({
+              v: 1,
+              key,
+              exportHash: hash,
+              model,
+              promptVersion: ASK_PROMPT_VERSION,
+              response,
+              tokens,
+              at: now().toISOString(),
+            });
+          } catch (failure) {
+            const message = failure instanceof Error ? failure.message : String(failure);
+            log(`ask cache: the answer was not saved (${cut(oneLine(message), 120)})`);
+          }
         }
         const why = error === null ? "" : ` (${cut(oneLine(error), 120)})`;
         log(

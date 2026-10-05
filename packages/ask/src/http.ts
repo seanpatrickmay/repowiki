@@ -84,7 +84,8 @@ export const sseFrame = (event: string, data: unknown): string =>
  * The Ask endpoints of wiki:serve (spec v2 #4 §4.2): `GET /api/ask/status` and `POST /api/ask`,
  * behind R18's guard. A POST answers as Server-Sent Events: `status` frames while the question is
  * answered, then one `answer` frame with the validated AskResponse. A refusal before the answer
- * starts is a JSON error with its status code. A client that disconnects does not cancel a turn
+ * starts is a JSON error with its status code; a failure after the stream started is one `error`
+ * frame before the stream ends, and every failure but busy is logged on one line. A client that disconnects does not cancel a turn
  * in flight. Returns false for a path that is not the ask's, which the caller serves as a file.
  */
 export function createAskHandler(
@@ -187,14 +188,18 @@ export function createAskHandler(
       send("answer", AskResponse.parse(answer));
       if (!response.writableEnded && !response.destroyed) response.end();
     } catch (error) {
-      if (started) {
-        if (!response.writableEnded && !response.destroyed) response.end();
-      } else if (error instanceof BusyError) {
+      if (!started && error instanceof BusyError) {
         refuse(response, 429, "busy", "another question is being answered; ask again in a moment");
-      } else {
-        refuse(response, 500, "error", "the question could not be answered");
-        const why = error instanceof Error ? error.message : String(error);
-        options.log?.(`ask failed: ${cut(oneLine(why), 200)}`);
+        return true;
+      }
+      const why = error instanceof Error ? error.message : String(error);
+      options.log?.(`ask failed: ${cut(oneLine(why), 200)}`);
+      const failed = { code: "error", message: "the question could not be answered" };
+      if (!started) refuse(response, 500, failed.code, failed.message);
+      else {
+        // The stream is open: say so in a frame of its own, so the reader is not left waiting.
+        send("error", failed);
+        if (!response.writableEnded && !response.destroyed) response.end();
       }
     }
     return true;
