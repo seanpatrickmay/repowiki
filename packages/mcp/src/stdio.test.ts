@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Protocol } from "./protocol.ts";
 import { MAX_QUEUED_LINES, serveStdio } from "./stdio.ts";
@@ -95,5 +95,57 @@ describe("serveStdio", () => {
     expect(output.lines.map((l) => (JSON.parse(l) as { id: number }).id)).toEqual(
       Array.from({ length: total }, (_, i) => i + 1),
     );
+  });
+
+  it("answers no notification or stray response whose handling throws, and tells onError", async () => {
+    const errors: unknown[] = [];
+    const protocol: Protocol = {
+      handle: async () => null,
+      handleLine: async (line) => {
+        if (!line.includes('"method":"ping"')) throw new Error(`failed on ${line}`);
+        return answer(line);
+      },
+    };
+    const input = new PassThrough();
+    let out = "";
+    const done = serveStdio(protocol, {
+      input,
+      output: { write: (t: string) => (out += t) },
+      onError: (error) => errors.push(error),
+    });
+    input.write('{"jsonrpc":"2.0","method":"notifications/cancelled"}\n');
+    input.write('{"jsonrpc":"2.0","id":5,"result":{}}\n');
+    input.write(`${request(6)}\n`);
+    input.end();
+    await done;
+    expect(out).toBe(`${JSON.stringify({ jsonrpc: "2.0", id: 6, result: {} })}\n`);
+    expect(errors.map((e) => (e as Error).message)).toEqual([
+      'failed on {"jsonrpc":"2.0","method":"notifications/cancelled"}',
+      'failed on {"jsonrpc":"2.0","id":5,"result":{}}',
+    ]);
+  });
+
+  it("ends when its output has closed, instead of waiting for a drain that never comes", async () => {
+    const protocol: Protocol = { handle: async () => null, handleLine: answer };
+    const output = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    });
+    output.on("error", () => {});
+    output.destroy();
+    await tick();
+    const input = new PassThrough();
+    const done = serveStdio(protocol, { input, output });
+    input.write(`${request(1)}\n${request(2)}\n`);
+    input.end();
+    const settled = await Promise.race([
+      done.then(
+        () => "settled",
+        () => "settled",
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), 1000)),
+    ]);
+    expect(settled).toBe("settled");
   });
 });

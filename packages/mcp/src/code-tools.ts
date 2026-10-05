@@ -165,6 +165,16 @@ function nowLine(served: ServedWiki, citation: CodeCitation): string {
   }
 }
 
+/** Whether `id` resolves in `view` (to a page, the About article or a choice of pages). */
+function namesSomething(view: WikiView, id: string): boolean {
+  try {
+    view.resolve(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * read_page's answer for a point before a page's history: where it begins, or null when the page
  * has no history (or `id` names several pages).
@@ -190,8 +200,12 @@ function citedCodeTool(
   try {
     page = pageSections(view, input.id);
   } catch (error) {
-    // Not in the wiki then: read_page's answer, where its history begins.
-    const begins = input.as_of === undefined ? null : historyStart(served, input.id);
+    // Not in the wiki then (the id named no page; not several): read_page's answer, where its
+    // history begins.
+    const begins =
+      input.as_of === undefined || namesSomething(view, input.id)
+        ? null
+        : historyStart(served, input.id);
     if (begins === null) throw error;
     return begins;
   }

@@ -14,8 +14,12 @@
  * - stubborn: as deaf, and ignores SIGTERM too.
  * - split: writes each tools/call reply in two writes 50 ms apart, split inside a two-byte
  *   character, so the client reads it in two chunks.
+ * - wrapper: as deaf, and starts a child that holds its stdout and stderr open for 30 s (its pid
+ *   in `<pid file>.child`), as a wrapper command's server would.
+ * - shut: closes its stdin after answering initialize, and stays alive.
  */
-import { writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, writeFileSync } from "node:fs";
 
 const [mode = "ok", pidFile] = process.argv.slice(2);
 if (pidFile !== undefined) writeFileSync(pidFile, String(process.pid));
@@ -23,7 +27,13 @@ const send = (message: unknown) =>
   process.stdout.write(`${typeof message === "string" ? message : JSON.stringify(message)}\n`);
 const seen = Object.keys(process.env).filter((name) => name.startsWith("ANTHROPIC_"));
 process.stderr.write(`env: ${JSON.stringify(seen)}\n`);
-const ignoresEnd = mode === "deaf" || mode === "stubborn";
+const ignoresEnd = mode === "deaf" || mode === "stubborn" || mode === "wrapper" || mode === "shut";
+if (mode === "wrapper") {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  if (pidFile !== undefined) writeFileSync(`${pidFile}.child`, String(child.pid));
+}
 if (mode === "stubborn") process.on("SIGTERM", () => {});
 if (ignoresEnd) setInterval(() => {}, 1000);
 
@@ -55,6 +65,12 @@ function handle(message: Message): void {
     }
     if (mode === "bad-init")
       return void send({ jsonrpc: "2.0", id, result: { protocolVersion: 5 } });
+    if (mode === "shut") {
+      setTimeout(() => {
+        process.stdin.destroy();
+        closeSync(0);
+      }, 50);
+    }
     return void send({
       jsonrpc: "2.0",
       id,

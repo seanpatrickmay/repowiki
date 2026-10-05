@@ -25,6 +25,8 @@ export interface McpAgentToolsOptions {
   out: string;
   /** The compare commit, pinned: the wiki's head, so freshness adds no noise the repo agent lacks (R19). */
   compareTo: string;
+  /** Told, one line each, of what the server writes that is no reply (the client ignores it). */
+  log?: (line: string) => void;
 }
 
 /**
@@ -55,6 +57,7 @@ export async function openMcpTools(
         options.compareTo,
       ],
       env,
+      ...(options.log === undefined ? {} : { log: options.log }),
     });
     try {
       const served = { client, tools: await mcpToolSet(client), alive: true };

@@ -49,7 +49,14 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => process.exit(0));
   // The client stopped reading (EPIPE): no one is left to answer, so end quietly.
   process.stdout.on("error", () => process.exit(0));
-  await serveStdio(server.protocol, { input: process.stdin, output: process.stdout });
+  await serveStdio(server.protocol, {
+    input: process.stdin,
+    output: process.stdout,
+    onError: (error) => {
+      const why = error instanceof Error ? error.message : String(error);
+      console.error(logLine(`repowiki mcp: internal error: ${why}`));
+    },
+  });
 }
 
 try {

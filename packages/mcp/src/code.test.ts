@@ -166,13 +166,16 @@ describe("commitDetails, whatever the user's config and the repository's attribu
   });
 
   it("lists every change in path order, with no signature check and no attribute hiding a diff", () => {
-    // The repository's own attributes call its Python files binary; the user's call text files so.
+    // The repository's own attributes call its Python files binary; the user's call text files so,
+    // and the user's core.bigFileThreshold calls any file over 1 KiB binary.
     repo.write(".gitattributes", "*.py -diff\n");
     repo.write("a.py", "x = 1\n");
     repo.write("b.txt", "one\n");
+    repo.write("c.md", "line\n".repeat(1000));
     repo.commit("feat: start");
     repo.write("a.py", "x = 2\n");
     repo.write("b.txt", "two\n");
+    repo.write("c.md", `${"line\n".repeat(999)}last\n`);
     const changed = repo.commit("feat: change both");
     // A commit carrying a signature: showing it with log.showSignature would run gpg.program.
     const tree = repo.git("rev-parse", `${changed}^{tree}`);
@@ -205,14 +208,14 @@ describe("commitDetails, whatever the user's config and the repository's attribu
         "[log]\n\tshowSignature = true",
         `[gpg]\n\tprogram = ${gpg}`,
         `[diff]\n\torderFile = ${join(home, "order")}\n\trelative = true`,
-        `[core]\n\tattributesFile = ${join(home, "attributes")}`,
+        `[core]\n\tattributesFile = ${join(home, "attributes")}\n\tbigFileThreshold = 1k`,
         "",
       ].join("\n"),
     );
     process.env.GIT_CONFIG_GLOBAL = join(home, "config");
 
     expect(commitDetails(repo.dir, commit(changed, "feat: change both", null))).toContain(
-      "2 changed files:\n- a.py: +1 -1\n- b.txt: +1 -1\n",
+      "3 changed files:\n- a.py: +1 -1\n- b.txt: +1 -1\n- c.md: +1 -1\n",
     );
     expect(commitDetails(repo.dir, commit(signed, "feat: signed", null))).toBe(
       [`commit ${signed}, 2026-01-04`, "Subject: feat: signed", "0 changed files:", ""].join("\n"),

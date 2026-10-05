@@ -1,3 +1,4 @@
+import type { WikiExport } from "@repowiki/core";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAgentTools } from "./agent-tools.ts";
@@ -150,6 +151,41 @@ describe("cited_code", () => {
     }
     expect(text("cited_code", { id: "deliverables", ref: 1, as_of: "2026-01-02" })).toBe(
       "The wiki's history of deliverables begins on 2026-01-03 (commit 594d833).\n",
+    );
+  });
+
+  it("lists the choices, as read_page does, for an id that named several pages then", () => {
+    // "Deliverable records" is signals' alias and deliverables' old title; deliverables is merged
+    // into signals later, so the name is ambiguous at the second commit and signals' now.
+    const [signals, deliverables] = h.wiki.manifest.features;
+    if (signals === undefined || deliverables === undefined) throw new Error("fixture");
+    const wiki: WikiExport = {
+      ...h.wiki,
+      manifest: {
+        ...h.wiki.manifest,
+        features: [
+          { ...signals, aliases: ["Deliverable records"] },
+          {
+            ...deliverables,
+            status: { kind: "redirect", to: "signals" },
+            lineage: [
+              ...deliverables.lineage,
+              { kind: "merge", sha: h.commits.after, into: "signals" },
+            ],
+          },
+        ],
+      },
+    };
+    const served = serveWiki(wiki, { repo: h.repo.dir, pinned: null });
+    const set = createAgentTools(() => served);
+    const run = (name: string, input: unknown) => {
+      const out = set.run(name, input) as { text: string; isError: boolean };
+      return out.isError ? `ERROR ${out.text}` : out.text;
+    };
+    const asOf = { id: "Deliverable records", as_of: h.commits.second.slice(0, 7) };
+    expect(run("read_page", asOf)).toMatch(/^"?Deliverable records"? may refer to/);
+    expect(run("cited_code", { ...asOf, ref: 1 })).toBe(
+      'ERROR "Deliverable records" may refer to several pages: signals, deliverables; name one',
     );
   });
 });

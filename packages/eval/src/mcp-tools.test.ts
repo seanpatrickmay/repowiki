@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateRequest, Provider } from "@repowiki/llm";
-import { type McpClient, McpClientError } from "@repowiki/mcp";
+import { type McpClient, McpClientError, type McpClientOptions } from "@repowiki/mcp";
 import { combineToolSets } from "@repowiki/query";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type McpAgentTools, openMcpTools } from "./mcp-tools.ts";
@@ -125,7 +125,9 @@ describe("the mcp and repo+mcp agents", () => {
 /** A fake client whose server dies when `kill()` is called; each call answers its client's number. */
 function fakeClients() {
   const made: { kill: () => void }[] = [];
-  const connect = async (): Promise<McpClient> => {
+  const logs: (((line: string) => void) | undefined)[] = [];
+  const connect = async (options: McpClientOptions): Promise<McpClient> => {
+    logs.push(options.log);
     const n = made.length + 1;
     let alive = true;
     let settle: (r: { code: number | null }) => void = () => {};
@@ -157,10 +159,21 @@ function fakeClients() {
       exit,
     };
   };
-  return { made, connect };
+  return { made, logs, connect };
 }
 
 describe("openMcpTools when the server dies", () => {
+  it("passes its log to the client, for what the server writes that is no reply", async () => {
+    const { logs, connect } = fakeClients();
+    const log = (_line: string) => {};
+    const opened = await openMcpTools(
+      { repo: "/r", out: "/o", compareTo: "a".repeat(40), log },
+      connect,
+    );
+    await opened.close();
+    expect(logs).toEqual([log]);
+  });
+
   it("starts it again once, then says the run should stop when it dies again", async () => {
     const { made, connect } = fakeClients();
     const opened = await openMcpTools(

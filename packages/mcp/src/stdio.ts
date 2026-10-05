@@ -9,14 +9,24 @@ export const MAX_QUEUED_LINES = 64;
 /** JSON-RPC's internal error code: handling a line threw. */
 const INTERNAL_ERROR = -32603;
 
-/** The id of a request line, when it has a usable one; null otherwise. */
-function idOf(line: string): string | number | null {
+/**
+ * How to answer a line whose handling threw: with its id when it is a request with a usable one,
+ * with a null id when it is no message at all, and not at all when it is a notification (no id)
+ * or a response (a result or an error), which JSON-RPC never answers.
+ */
+function failedReplyId(line: string): { id: string | number | null } | null {
+  let message: unknown;
   try {
-    const id = (JSON.parse(line) as { id?: unknown } | null)?.id;
-    return typeof id === "string" || typeof id === "number" ? id : null;
+    message = JSON.parse(line);
   } catch {
-    return null;
+    return { id: null };
   }
+  if (typeof message !== "object" || message === null || Array.isArray(message)) {
+    return { id: null };
+  }
+  if (!("id" in message) || "result" in message || "error" in message) return null;
+  const { id } = message as { id: unknown };
+  return { id: typeof id === "string" || typeof id === "number" ? id : null };
 }
 
 /**
@@ -36,14 +46,23 @@ export interface StdioOptions {
     write(text: string): unknown;
     once?(event: "drain" | "close" | "error", listener: () => void): unknown;
     off?(event: "drain" | "close" | "error", listener: () => void): unknown;
+    destroyed?: boolean;
+    writableEnded?: boolean;
+    closed?: boolean;
   };
   maxLineBytes?: number;
+  /** Told of each error a line's handling threw (the client gets -32603, or nothing). */
+  onError?: (error: unknown) => void;
 }
 
-/** Resolves once `output` takes writes again, or never will (it closed or failed). */
+/** Resolves once `output` takes writes again, or never will (it closed, ended or failed). */
 function drained(output: StdioOptions["output"]): Promise<void> {
   const { once, off } = output;
   if (once === undefined) return Promise.resolve();
+  // Its "close" may have come already: nothing would ever resolve the wait.
+  if (output.destroyed === true || output.writableEnded === true || output.closed === true) {
+    return Promise.resolve();
+  }
   return new Promise((resolve) => {
     const done = () => {
       for (const event of ["drain", "close", "error"] as const) off?.call(output, event, done);
@@ -57,8 +76,8 @@ function drained(output: StdioOptions["output"]): Promise<void> {
  * Serves `protocol` over newline-delimited JSON (the MCP stdio transport): each UTF-8 line of
  * input is one message (a trailing CR dropped, blank lines skipped), handled one at a time in
  * arrival order, each reply written as one line. A line over `maxLineBytes` is answered with
- * -32600 and dropped up to its end; a line whose handling throws is answered with -32603, and
- * the session goes on. Input is paused while more than MAX_QUEUED_LINES lines wait, which is the
+ * -32600 and dropped up to its end; a line whose handling throws is answered with -32603 (a
+ * notification or a response, not at all) and told to `onError`, and the session goes on. Input is paused while more than MAX_QUEUED_LINES lines wait, which is the
  * case while a reply waits for the output to drain. Resolves when the input ends and every reply
  * is written. Nothing else may write to the output.
  */
@@ -102,12 +121,17 @@ export function serveStdio(protocol: Protocol, options: StdioOptions): Promise<v
       let message: object | null;
       try {
         message = await protocol.handleLine(line);
-      } catch {
-        message = {
-          jsonrpc: "2.0",
-          id: idOf(line),
-          error: { code: INTERNAL_ERROR, message: "internal error" },
-        };
+      } catch (error) {
+        options.onError?.(error);
+        const answer = failedReplyId(line);
+        message =
+          answer === null
+            ? null
+            : {
+                jsonrpc: "2.0",
+                id: answer.id,
+                error: { code: INTERNAL_ERROR, message: "internal error" },
+              };
       }
       await reply(message);
     });

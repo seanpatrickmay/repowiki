@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   // (spec v2 #5 R19). A dry run starts it too: the estimate counts its tool definitions. The
   // server makes no call and writes nothing.
   if (agents.some((a) => a === "mcp" || a === "repo+mcp")) {
-    started.mcp = await openMcpTools({ repo, out, compareTo: wiki.head });
+    started.mcp = await openMcpTools({ repo, out, compareTo: wiki.head, log: logLine });
   }
   const mcp = started.mcp;
   const tools: Partial<Record<AgentKind, ToolSet>> = {

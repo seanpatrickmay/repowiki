@@ -101,7 +101,8 @@ export function citedCode(
  * author. A commit the repository lacks is shown from the citation alone. Read with plumbing
  * (rev-list, diff-tree), so the user's config cannot verify a signature, reorder the paths or
  * run a diff driver, and with attributes read from the empty tree (and no global attributes
- * file), so neither the repository nor the user can make a changed text file read as binary.
+ * file) and git's default big-file threshold, so neither the repository nor the user can make a
+ * changed text file read as binary.
  */
 export function commitDetails(repo: string, citation: CommitCitation): string {
   assertSha(citation.sha);
@@ -132,6 +133,9 @@ export function commitDetails(repo: string, citation: CommitCitation): string {
   const fields = gitOutput(repo, [
     "-c",
     "core.attributesFile=",
+    // git's default: a user's lower threshold would make a large text file read as binary.
+    "-c",
+    "core.bigFileThreshold=512m",
     `--attr-source=${EMPTY_TREE}`,
     "diff-tree",
     "-r",

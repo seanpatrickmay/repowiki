@@ -120,6 +120,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
   let buffered = "";
   let dropping = false;
   let closing = false;
+  /** Why the server's input failed (it closed it, or died); later calls reject with it at once. */
+  let broken: string | null = null;
   let exited: { code: number | null } | null = null;
   let settle: (result: { code: number | null }) => void = () => {};
   const exit = new Promise<{ code: number | null }>((resolve) => {
@@ -131,10 +133,20 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     failAll(new McpClientError(why));
     settle(exited);
   };
-  child.on("close", (code, signal) => {
+  const exitedWith = (code: number | null, signal: NodeJS.Signals | null) => {
     const last = stderr.trim().split("\n").at(-1) ?? "";
     const how = signal === null ? `code ${code}` : `signal ${signal}`;
     finish(code, `the MCP server exited (${how})${last === "" ? "" : `: ${shown(last)}`}`);
+  };
+  // "close" comes once the output is read to its end. A child of the server (a wrapper command's)
+  // may hold the output open long after the server exited: then "exit", and a grace, is enough.
+  let lingering: NodeJS.Timeout | undefined;
+  child.on("exit", (code, signal) => {
+    lingering = setTimeout(() => exitedWith(code, signal), graceMs);
+  });
+  child.on("close", (code, signal) => {
+    clearTimeout(lingering);
+    exitedWith(code, signal);
   });
   child.on("error", (error) => {
     const why = `cannot start the MCP server: ${shown(error.message)}`;
@@ -142,7 +154,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     else failAll(new McpClientError(why));
   });
   child.stdin.on("error", (error) => {
-    failAll(new McpClientError(`cannot write to the MCP server: ${shown(error.message)}`));
+    broken ??= `cannot write to the MCP server: ${shown(error.message)}`;
+    failAll(new McpClientError(broken));
   });
   // Decoded as streams: a character split across two reads stays one character.
   child.stdout.setEncoding("utf8");
@@ -186,6 +199,7 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
   const request = (method: string, params?: unknown): Promise<Record<string, unknown>> => {
     if (closing) return Promise.reject(new McpClientError("the MCP client is closed"));
     if (exited !== null) return Promise.reject(new McpClientError("the MCP server has exited"));
+    if (broken !== null) return Promise.reject(new McpClientError(broken));
     const id = ++nextId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -241,6 +255,7 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     });
   } catch (error) {
     closing = true;
+    child.stdin.end();
     child.kill("SIGKILL");
     await exit;
     throw error;
