@@ -157,7 +157,9 @@ describe("oldRevisionView", () => {
     expect(view.featureId).toBe("signals");
     expect(view.title).toBe("Signal ingestion");
     expect(view.notice).toBe(oldRevisionNotice(site, first));
-    expect(view.leadHtml).toBe("<b>Signal ingestion</b> turns chunks into signals.");
+    expect(view.leadHtml).toBe(
+      '<span class="claim" id="claim-lead-1"><b>Signal ingestion</b> turns chunks into signals.</span>',
+    );
     expect(view.sections[0]?.html).toContain("Signals are built from chunks.");
   });
 

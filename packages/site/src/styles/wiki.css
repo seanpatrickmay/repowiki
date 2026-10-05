@@ -292,6 +292,14 @@ sup.reference {
   background: var(--bg-subtle);
 }
 
+/* A claim an Ask answer links to (#claim-<id>): highlighted when the page opens at it. */
+.claim:target {
+  background: var(--notice-bg);
+  outline: 2px solid var(--notice-border);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 .ref-backs {
   user-select: none;
 }

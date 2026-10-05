@@ -1,5 +1,5 @@
 import type { ArchitectureClaim, ArchitectureSectionKey } from "@repowiki/core";
-import { revisionHtml, type SectionView } from "./article.ts";
+import { anchoredClaim, revisionHtml, type SectionView } from "./article.ts";
 import { formatDate } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
@@ -47,6 +47,7 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
   if (article === null) return null;
   const refs = collectReferences(article);
   const links = inlineOptions(site);
+  const anchored = new Set<string>();
   const paragraph = (claims: readonly ArchitectureClaim[]): string =>
     claims
       .map((claim) => {
@@ -58,8 +59,10 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
         });
         const pages =
           backing.length === 0 ? "" : ` <span class="page-ref">(see ${backing.join(", ")})</span>`;
-        return (
-          renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []) + pages
+        return anchoredClaim(
+          claim.id,
+          renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []) + pages,
+          anchored,
         );
       })
       .join(" ");
