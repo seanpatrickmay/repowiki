@@ -3,8 +3,11 @@ import { FeatureId } from "./feature.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 import { TokenUsage } from "./revision.ts";
 
-/** What an LLM call is for. Each role has its own model id in config (spec §4). */
-export const LlmRole = z.enum(["manifest", "write", "tieBreak", "evalAgent", "evalJudge"]);
+/**
+ * What an LLM call is for. Each role has its own model id in config (spec §4). `ask` is the Ask
+ * sidebar's (spec v2 #4 R13): its calls are ledgered in memory per serve session, never stored.
+ */
+export const LlmRole = z.enum(["manifest", "write", "tieBreak", "evalAgent", "evalJudge", "ask"]);
 export type LlmRole = z.infer<typeof LlmRole>;
 
 /**
