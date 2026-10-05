@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { writeReport } from "@repowiki/eval";
+import { scoreLine } from "./eval-cli.ts";
 import { CliError } from "./manifest-cli.ts";
 import { exitWithError } from "./wiki-cli.ts";
 
@@ -19,11 +20,7 @@ function main(): void {
     throw new CliError(`no such run directory: ${dirArg}; ${USAGE}`);
   }
   const { summary, reportPath } = writeReport(runDir);
-  const { wiki, repo } = summary.agents;
-  const n = summary.info.questions.length;
-  console.log(
-    `wiki ${wiki.correct} of ${n}, repo ${repo.correct} of ${n}${summary.complete ? "" : " (incomplete)"}`,
-  );
+  console.log(`${scoreLine(summary)}${summary.complete ? "" : " (incomplete)"}`);
   console.log(`Wrote ${reportPath}`);
 }
 
