@@ -27,9 +27,9 @@ export function terms(text: string): string[] {
 }
 
 /** A searchable document: its id and the text of each weighted field. */
-export interface SearchDoc {
+export interface SearchDoc<F extends string = SearchField> {
   id: string;
-  fields: Readonly<Record<SearchField, string>>;
+  fields: Readonly<Record<F, string>>;
 }
 
 export type SearchField = "title" | "aliases" | "lead" | "body";
@@ -44,17 +44,23 @@ export interface SearchIndex {
   search(query: string, limit: number): string[];
 }
 
-/** BM25F over the documents' fields: a small, deterministic ranking with no dependency. */
-export function searchIndex(docs: readonly SearchDoc[]): SearchIndex {
-  const fields = Object.keys(BOOST) as SearchField[];
+/**
+ * BM25F over the documents' fields: a small, deterministic ranking with no dependency. `boost`
+ * names the fields and how much a match in each counts; the default is the page search's.
+ */
+export function searchIndex<F extends string = SearchField>(
+  docs: readonly SearchDoc<F>[],
+  boost: Readonly<Record<F, number>> = BOOST as Readonly<Record<F, number>>,
+): SearchIndex {
+  const fields = Object.keys(boost) as F[];
   const counted = docs.map((doc) => {
-    const tf = new Map<string, Map<SearchField, number>>();
-    const lengths = {} as Record<SearchField, number>;
+    const tf = new Map<string, Map<F, number>>();
+    const lengths = {} as Record<F, number>;
     for (const field of fields) {
       const words = terms(doc.fields[field]);
       lengths[field] = words.length;
       for (const word of words) {
-        const byField = tf.get(word) ?? new Map<SearchField, number>();
+        const byField = tf.get(word) ?? new Map<F, number>();
         byField.set(field, (byField.get(field) ?? 0) + 1);
         tf.set(word, byField);
       }
@@ -63,7 +69,7 @@ export function searchIndex(docs: readonly SearchDoc[]): SearchIndex {
   });
   const average = Object.fromEntries(
     fields.map((f) => [f, counted.reduce((n, d) => n + d.lengths[f], 0) / (counted.length || 1)]),
-  ) as Record<SearchField, number>;
+  ) as Record<F, number>;
   const df = new Map<string, number>();
   for (const doc of counted)
     for (const word of doc.tf.keys()) df.set(word, (df.get(word) ?? 0) + 1);
@@ -79,7 +85,7 @@ export function searchIndex(docs: readonly SearchDoc[]): SearchIndex {
           let weighted = 0;
           for (const [field, count] of byField) {
             const norm = 1 - B + B * (doc.lengths[field] / (average[field] || 1));
-            weighted += (BOOST[field] * count) / norm;
+            weighted += (boost[field] * count) / norm;
           }
           const d = df.get(word) ?? 0;
           const idf = Math.log(1 + (n - d + 0.5) / (d + 0.5));

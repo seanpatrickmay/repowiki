@@ -26,6 +26,15 @@ export {
   revisionEntry,
   wordDiffText,
 } from "./changes.ts";
+export {
+  CLAIM_BOOST,
+  CLAIM_LINE_REFERENCES,
+  CLAIM_LINE_TEXT_LENGTH,
+  type ClaimEntry,
+  type ClaimIndex,
+  claimLine,
+  claimSearchIndex,
+} from "./claim-index.ts";
 export { claimHref, pageHref, sectionHref } from "./hrefs.ts";
 export { ExportLoadError, loadExport } from "./load.ts";
 export {

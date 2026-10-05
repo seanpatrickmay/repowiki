@@ -48,4 +48,13 @@ describe("searchIndex", () => {
     expect(index.search("signals", -1)).toEqual([]);
     expect(index.search("signals", 1.5)).toEqual(["signals"]);
   });
+
+  it("takes other fields and boosts, the default staying the page search's", () => {
+    const fields = [
+      { id: "a", fields: { name: "queue", text: "worker" } },
+      { id: "b", fields: { name: "worker", text: "queue" } },
+    ];
+    expect(searchIndex(fields, { name: 1, text: 5 }).search("queue", 8)).toEqual(["b", "a"]);
+    expect(searchIndex(fields, { name: 5, text: 1 }).search("queue", 8)).toEqual(["a", "b"]);
+  });
 });
