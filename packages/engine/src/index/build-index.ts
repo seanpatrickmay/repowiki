@@ -145,7 +145,7 @@ export async function indexRepo(
     const parsed = parser.parse(language, content.toString("utf8"));
     try {
       file.parseError = parsed.hasError;
-      file.symbols = extractSymbols(language, parsed.root).map((s) => ({
+      file.symbols = extractSymbols(language, parsed.root, parser).map((s) => ({
         ...s,
         id: memberId(blob.path, s.qualifiedName),
       }));

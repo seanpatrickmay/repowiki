@@ -49,7 +49,7 @@ function isImportTypeArgsMisparse(error: Node): boolean {
 }
 
 /** True when the tree holds a syntax error other than the tolerated import-type misparse. */
-function hasSyntaxError(node: Node): boolean {
+export function hasSyntaxError(node: Node): boolean {
   if (node.isMissing) return true;
   if (node.isError) return !isImportTypeArgsMisparse(node);
   if (!node.hasError) return false;
