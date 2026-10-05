@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 // Wikipedia-style page previews: hovering (or focusing) a link with data-preview shows the
-// target's lead and key facts, fetched from /api/preview/<id>.json.
+// target's lead and key facts, fetched from /api/preview/<id>.json (a Wikipedia article's summary
+// from /api/preview/wp/<hash>.json). Everything is precomputed at build time and same-origin.
 
 interface Preview {
   title: string;
@@ -32,10 +33,16 @@ export function installPreviews({ document, window, fetch }: PreviewEnv): void {
   let anchor: HTMLAnchorElement | null = null;
 
   // The id comes from an attribute, so it is encoded into one path segment of a same-origin URL.
+  // "wp:<hash>" names a Wikipedia article's preview, which the build wrote under /api/preview/wp/;
+  // feature ids are kebab-case, so none can start with "wp:".
+  function previewPath(id: string): string {
+    return id.startsWith("wp:") ? `wp/${encodeURIComponent(id.slice(3))}` : encodeURIComponent(id);
+  }
+
   function load(id: string): Promise<Preview | null> {
     let pending = cache.get(id);
     if (pending === undefined) {
-      pending = fetch(`/api/preview/${encodeURIComponent(id)}.json`)
+      pending = fetch(`/api/preview/${previewPath(id)}.json`)
         .then((response) => (response.ok ? (response.json() as Promise<Preview | null>) : null))
         .catch(() => null);
       cache.set(id, pending);

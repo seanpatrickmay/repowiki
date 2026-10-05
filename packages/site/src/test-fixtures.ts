@@ -347,6 +347,14 @@ export const ARCHITECTURE: Architecture = {
   ],
 };
 
+/** The Wikipedia summary the fixture's [[wp:Exponential backoff]] link is previewed with. */
+export const EXPONENTIAL_BACKOFF = {
+  title: "Exponential backoff",
+  extract:
+    "Exponential backoff is an algorithm that uses feedback to multiplicatively decrease the rate of some process.",
+  url: "https://en.wikipedia.org/wiki/Exponential_backoff",
+};
+
 /** A small but complete export: every feature status, two revisions, stale and hook claims. */
 export function fixtureExport(): WikiExport {
   return WikiExport.parse({
@@ -410,6 +418,7 @@ export function fixtureExport(): WikiExport {
       "legacy-signals": [legacy],
       signals: [signalsV1, signalsV2],
     },
+    wikipedia: { "Exponential backoff": EXPONENTIAL_BACKOFF },
     architecture: [ARCHITECTURE],
   });
 }

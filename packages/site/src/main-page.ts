@@ -2,7 +2,7 @@ import type { Revision } from "@repowiki/core";
 import { formatDate } from "./format.ts";
 import { renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
-import { articleLink } from "./preview.ts";
+import { inlineOptions } from "./preview.ts";
 import { leadSummary } from "./summary.ts";
 import { ARCHITECTURE_URL, articleUrl } from "./urls.ts";
 
@@ -93,7 +93,7 @@ function compareStrings(a: string, b: string): number {
 
 export function mainPageView(site: SiteModel): MainPageView {
   // Hook text can hold [[links]]; articleLink asks for a hover preview only where one is served.
-  const link = (id: string) => articleLink(site, id);
+  const links = inlineOptions(site);
   const active = activePages(site);
 
   const pick = active[rotation(site.wiki.head, active.length)];
@@ -114,7 +114,7 @@ export function mainPageView(site: SiteModel): MainPageView {
           if (text === null) return [];
           return [
             {
-              html: renderInline(text, { link }),
+              html: renderInline(text, links),
               href: articleUrl(page.featureId),
               title: site.features.get(page.featureId)?.title ?? page.featureId,
             },
@@ -152,7 +152,7 @@ export function mainPageView(site: SiteModel): MainPageView {
       : {
           href: ARCHITECTURE_URL,
           title: site.architecture.title,
-          leadHtml: lead.map((claim) => renderInline(claim.text, { link })).join(" "),
+          leadHtml: lead.map((claim) => renderInline(claim.text, links)).join(" "),
         };
 
   return { articleCount: active.length, architecture, featured, didYouKnow, recent };

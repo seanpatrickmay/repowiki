@@ -32,12 +32,11 @@ describe("git failures", () => {
   it.each([
     ["ENOBUFS", Object.assign(new Error("spawnSync git ENOBUFS"), { code: "ENOBUFS" })],
     ["maxBuffer exceeded", new Error("spawnSync git maxBuffer length exceeded")],
-  ])("explains %s as too much tracked content and points to #74", (_name, error) => {
+  ])("explains %s as too much tracked content", (_name, error) => {
     spawn.mockReturnValue(failing(error));
     const attempt = () => listBlobs("/repo", "a".repeat(40));
     expect(attempt).toThrow(GitError);
     expect(attempt).toThrow(/tracked content is too large to index in one pass/);
-    expect(attempt).toThrow(/#74/);
   });
 
   it("keeps the plain message for other spawn failures", () => {

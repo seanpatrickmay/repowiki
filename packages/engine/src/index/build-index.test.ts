@@ -72,6 +72,23 @@ describe("indexRepo", () => {
     expect(file("docs/C#.md")).toMatchObject({ language: null, skipped: null, loc: 1 });
   });
 
+  it("indexes an import type in call type arguments without a parse error (#75)", async () => {
+    repo.write(
+      "web/mock.ts",
+      [
+        'import { b } from "./b";',
+        'export const loaded = await importOriginal<typeof import("./b")>();',
+        "export function after() {}",
+        "",
+      ].join("\n"),
+    );
+    repo.commit("mock with an import type argument");
+    const index = await indexRepo(repo.dir, "HEAD");
+    const mock = index.files.find((f) => f.path === "web/mock.ts");
+    expect(mock).toMatchObject({ skipped: null, parseError: false });
+    expect(mock?.symbols.map((s) => s.qualifiedName)).toEqual(["loaded", "after"]);
+  });
+
   it("records each resolved import once, at its first line", async () => {
     const index = await indexRepo(repo.dir, "HEAD");
     expect(index.imports).toEqual([

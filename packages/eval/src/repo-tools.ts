@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { assertSha, GitError, listBlobs, scrubbedGitEnv, type TreeBlob } from "@repowiki/engine";
+import {
+  assertSha,
+  GitError,
+  gitFailureCause,
+  listBlobs,
+  scrubbedGitEnv,
+  type TreeBlob,
+} from "@repowiki/engine";
 import { z } from "zod";
 import { count, cut, oneLine, toolText } from "./text.ts";
 import { defineTool, MAX_TOOL_RESULT_CHARS, ToolError, type ToolSet, toolSet } from "./tools.ts";
@@ -148,7 +155,7 @@ interface GrepInput {
   ignore_case?: boolean | undefined;
 }
 
-function grep(repo: string, sha: string, input: GrepInput): string {
+function grep(repo: string, sha: string, input: GrepInput, timeoutMs: number): string {
   const path = repoPath(input.path ?? "");
   // Pinned like the engine's diff calls. Global options come before the command: the path is a path,
   // never a pathspec like ":(glob)*"; attributes come from the commit, not the working tree or a
@@ -173,16 +180,22 @@ function grep(repo: string, sha: string, input: GrepInput): string {
   ];
   if (input.ignore_case === true) args.push("-i");
   args.push("-e", input.pattern, sha, "--", path === "" ? "." : path);
-  const result = git(repo, args, GREP_TIMEOUT_MS, GREP_MAX_BUFFER);
+  const result = git(repo, args, timeoutMs, GREP_MAX_BUFFER);
   if (result.error !== undefined && "code" in result.error && result.error.code === "ENOBUFS") {
     throw new ToolError("grep produced too much output; narrow the pattern or the path");
   }
   if (result.signal !== null) {
     throw new ToolError("grep took too long; narrow the pattern or the path");
   }
-  if (result.status === 1) return "No matches.\n";
+  // No match is exit 1 with nothing on stderr. Any other message (a partial clone's "unable to
+  // read <oid>", say) means files went unsearched, so "No matches." would be a false answer.
+  // Warning lines alone do not stop the search from having finished.
+  const stderr = result.stderr.toString("utf8");
+  const complaints = stderr.split("\n").filter((l) => l.trim() !== "" && !l.startsWith("warning:"));
+  if (result.status === 1 && complaints.length === 0) return "No matches.\n";
   if (result.status !== 0) {
-    const why = cut(oneLine(result.stderr.toString("utf8")).replace(/^fatal: /, ""), 200);
+    const cause = gitFailureCause(repo, stderr, { unreadableObject: result.status === 1 });
+    const why = cause ?? cut(oneLine(stderr).replace(/^fatal: /, ""), 200);
     throw new ToolError(`grep failed: ${why}`);
   }
   // Each match is "<sha>:<path>\0<line>\0<text>\n"; the path may hold any character but NUL.
@@ -225,9 +238,15 @@ function grep(repo: string, sha: string, input: GrepInput): string {
  * The repo agent's tools (spec §9): `list_files`, `read_file` and `grep` over the repository at
  * `sha`, read through git objects only (ls-tree, cat-file, grep on the commit), never the working
  * tree, so the agent sees exactly the code the wiki was built from. A directory inside a
- * repository gives the whole repository.
+ * repository gives the whole repository. `grepTimeoutMs` (default GREP_TIMEOUT_MS) is how long one
+ * grep may run; a test gives a tiny one.
  */
-export function createRepoTools(repoDir: string, sha: string): ToolSet {
+export function createRepoTools(
+  repoDir: string,
+  sha: string,
+  options: { grepTimeoutMs?: number } = {},
+): ToolSet {
+  const grepTimeoutMs = options.grepTimeoutMs ?? GREP_TIMEOUT_MS;
   assertSha(sha);
   const repo = topLevel(repoDir);
   // The engine's listBlobs: regular files at `sha` (symlinks and submodules have no text), sorted.
@@ -258,7 +277,7 @@ export function createRepoTools(repoDir: string, sha: string): ToolSet {
         path: z.string().max(500).optional(),
         ignore_case: z.boolean().optional(),
       }),
-      (input) => grep(repo, sha, input),
+      (input) => grep(repo, sha, input, grepTimeoutMs),
     ),
   ]);
 }

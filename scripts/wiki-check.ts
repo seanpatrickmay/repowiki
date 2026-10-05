@@ -74,7 +74,7 @@ try {
       console.error(`${db} has no pages yet; run pnpm wiki:build first`);
       process.exitCode = 1;
     } else if (history !== null) {
-      const check = checkWiki(store, repo, history);
+      const check = await checkWiki(store, repo, history);
       for (const problem of check.problems) console.error(problemLine(problem));
       const n = check.problems.length;
       console.log(

@@ -6,6 +6,15 @@ import { IsoDateTime } from "./primitives.ts";
 export const WIKIPEDIA_EXTRACT_MAX_LENGTH = 1200;
 
 /**
+ * Wikipedia's form of a title for comparing and caching: spaces for underscores, runs of
+ * whitespace collapsed, the first letter upper case (Wikipedia ignores its case).
+ */
+export function normalizeWikipediaTitle(title: string): string {
+  const spaced = title.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  return spaced === "" ? "" : `${spaced[0]?.toUpperCase()}${spaced.slice(1)}`;
+}
+
+/**
  * Characters the reader must never be handed inside a preview: C0/C1 controls (including
  * newlines and tabs), the Unicode line and paragraph separators, and every invisible format
  * character (\p{Cf}): the bidirectional marks, embeddings, overrides and isolates that reorder

@@ -23,6 +23,7 @@ export {
 export {
   assertSha,
   GitError,
+  gitFailureCause,
   listBlobs,
   resolveCommit,
   scrubbedGitEnv,

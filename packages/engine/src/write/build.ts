@@ -3,6 +3,7 @@ import {
   type Claim,
   IsoDateTime,
   type Manifest,
+  normalizeWikipediaTitle,
   type Revision,
   type SectionKey,
   type TokenUsage,
@@ -21,7 +22,6 @@ import type { CommitInfo, RepoIndex } from "../index/index.ts";
 import {
   checkWikipediaTitles,
   featureNeighbours,
-  normalizeWikipediaTitle,
   type WikipediaCheck,
   type WikipediaOptions,
   wikipediaTitlesIn,

@@ -40,6 +40,7 @@ export {
   DEFAULT_MAX_FILES_PER_COMMIT,
   diffCommits,
   GitError,
+  gitFailureCause,
   type ImportEdge,
   type IndexedFile,
   type IndexedSymbol,

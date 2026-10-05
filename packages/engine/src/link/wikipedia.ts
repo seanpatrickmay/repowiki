@@ -1,11 +1,11 @@
 import {
   INVISIBLE_CHARACTERS,
+  normalizeWikipediaTitle,
   WIKIPEDIA_EXTRACT_MAX_LENGTH,
   type WikipediaCacheEntry,
   WikipediaSummary,
 } from "@repowiki/core";
 import { CassetteMissError, type FetchLike } from "@repowiki/llm";
-import { normalizeWikipediaTitle } from "./links.ts";
 
 /** Wikimedia asks every API client to identify itself; requests without a User-Agent fail. */
 export const WIKIPEDIA_USER_AGENT = "RepoWiki/0.1 (https://github.com/seanpatrickmay/repowiki)";

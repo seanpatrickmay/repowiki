@@ -1,13 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
-const dropBlobs = vi.hoisted(() => ({ on: false }));
+const dropBlobs = vi.hoisted(() => ({ on: false, wrongOid: false }));
 vi.mock("./git.ts", async (importOriginal) => {
   const real: typeof import("./git.ts") = await importOriginal();
   return {
     ...real,
-    readBlobs: (repo: string, oids: readonly string[]) =>
-      dropBlobs.on ? new Map<string, Buffer>() : real.readBlobs(repo, oids),
+    streamBlobs: (repo: string, oids: readonly string[], holdLimit: number) =>
+      dropBlobs.on
+        ? (async function* () {})()
+        : dropBlobs.wrongOid
+          ? (async function* () {
+              for await (const blob of real.streamBlobs(repo, oids, holdLimit)) {
+                yield { ...blob, oid: "f".repeat(40) };
+              }
+            })()
+          : real.streamBlobs(repo, oids, holdLimit),
   };
 });
 
@@ -22,6 +30,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   dropBlobs.on = false;
+  dropBlobs.wrongOid = false;
   repo.remove();
 });
 
@@ -31,5 +40,12 @@ describe("indexRepo with an incomplete blob read", () => {
     const attempt = indexRepo(repo.dir, "HEAD");
     await expect(attempt).rejects.toThrow(GitError);
     await expect(attempt).rejects.toThrow(/missing content for a\.py/);
+  });
+
+  it("throws GitError for a blob whose returned oid is not the one requested", async () => {
+    dropBlobs.wrongOid = true;
+    const attempt = indexRepo(repo.dir, "HEAD");
+    await expect(attempt).rejects.toThrow(GitError);
+    await expect(attempt).rejects.toThrow(/cat-file returned f{40} for a\.py/);
   });
 });
