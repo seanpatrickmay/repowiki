@@ -18,6 +18,7 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `packages/engine` — pipeline modules (`store/` first; later `index/`, `cluster/`, `manifest/`, `write/`, `verify/`, `link/`, `freshness/`). Modules import each other only through their own `index.ts`.
 - `packages/query` — the wiki as text an agent reads (search, page rendering, tool helpers, as-of views); shared by eval, mcp and the Ask sidebar; depends on `core` and `zod` only: no engine, LLM, process or network
 - `packages/mcp` — the stdio MCP server over one wiki (JSON-RPC by hand, ADR-0004), its client and the git reads it needs; makes no LLM call and writes nothing
+- `packages/ask` — the Ask sidebar's answering (turn-1 pack, bounded tool loop, answer validation, answer cache, session caps) and its `/api/ask` handler; depends on `core`, `llm`, `query` and `zod`: no engine, eval or site
 - `packages/llm` — the `Provider` interface, the Claude implementation (structured output, prompt caching, Message Batches), the `TokenLedger`, and record/replay cassettes
 - `site`, `cli`, `eval` — added in later milestones
 - `scripts/tracker` — seeds GitHub labels and issues from `seed.json`

@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@repowiki/ask": "workspace:*",
     "@repowiki/core": "workspace:*",
     "@repowiki/engine": "workspace:*",
     "@repowiki/eval": "workspace:*",
