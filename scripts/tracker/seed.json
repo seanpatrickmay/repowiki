@@ -1260,6 +1260,126 @@
       "labels": ["v1", "type:task", "area:eval"],
       "parent": "F25",
       "body": "**Deliverable:** issue templates for false claims and rabbit-hole sessions; llms.txt regenerated for the stored wikis (no call); the author's runbook for spec section 9 posted on #29.\n\n**Done when:** the templates are merged and the runbook is on #29. The scored run is the author's. Plan: docs/superpowers/plans/2026-10-04-repowiki-m7-eval.md Task 22."
+    },
+    {
+      "key": "M8-1",
+      "title": "[M8] tracker: M8 tickets and ADR-0004",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F07",
+      "closed": true,
+      "body": "**Deliverable:** M8 tickets in seed.json, and ADR-0004 (the hand-rolled stdio MCP protocol).\n\n**Done when:** the seed creates M8-2..M8-17 under F07 and F08, and docs/decisions/0004-hand-rolled-stdio-mcp.md is merged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 1."
+    },
+    {
+      "key": "M8-2",
+      "title": "[M8] query: extract @repowiki/query from the eval",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** packages/query (@repowiki/query, runtime deps core and zod only): text, tools (with a local ToolDefinition), search, wiki-view, wiki-page, wiki-tools and the test-wiki fixture moved from eval byte for byte; the boundary test; the v1 tool-parity pin (v1-tools.txt); the CLAUDE.md layout line.\n\n**Done when:** tests pass, v1-tools.txt is unchanged by the move, and M7's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 2."
+    },
+    {
+      "key": "M8-3",
+      "title": "[M8] core: move diffSequence to core, add claimChanges and renderChanges",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F08",
+      "body": "**Deliverable:** core's diff-sequence.ts (diffSequence moved from the site, wordDiff, claimChanges as data); the site's wordDiffHtml and revisionDiff built on it with snapshots unchanged; query's changes.ts (renderChanges, wordDiffText, revisionEntry) for page_changes.\n\n**Done when:** tests pass and the site's snapshots are unchanged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 3."
+    },
+    {
+      "key": "M8-4",
+      "title": "[M8] mcp: create @repowiki/mcp with cited code, commit details and loadExport",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** packages/mcp (@repowiki/mcp: core, engine, query) and its boundary test; git.ts (the read-only git runner moved out of eval's repo-tools.ts, which re-imports it); code.ts (cited lines at a sha with context, commit details); query's load.ts (loadExport with the site's schema-version message); the CLAUDE.md layout line.\n\n**Done when:** tests pass and M7's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 4."
+    },
+    {
+      "key": "M8-5",
+      "title": "[M8] query: read the wiki as of a date or a commit",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F08",
+      "body": "**Deliverable:** query's as-of.ts: parseAsOf (resolveCommit passed in), revisionAt, architectureAt, pointAt, viewAt (isAncestor passed in), asOfBanner and historyBegins; the historyWiki() fixture (four dated commits, a rename, an About article history).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 5."
+    },
+    {
+      "key": "M8-6",
+      "title": "[M8] mcp: head status and per-claim marks",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** mcp's head-status.ts: the compare commit (HEAD re-resolved per call, or pinned), commits ahead and behind, changed and added files, per-claim marks through engine's remapCitation with caches; engine's diffCommits gains an optional path filter; engine's index exports remapCitation, remapClaims, CitationFate, RemapContext, RemappedClaim, FileChange and Hunk.\n\n**Done when:** tests pass, including the marks-equal-remapClaims test. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 6."
+    },
+    {
+      "key": "M8-7",
+      "title": "[M8] mcp: the served wiki, and readPage's banner, freshness and claim notes",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F08",
+      "body": "**Deliverable:** mcp's served.ts (serveWiki: the view, a lazy search index and freshness, as-of views in an LRU of 8, resolveCommit and a memoised isAncestor); query's readPage options { banner, freshness, claimNote } and referenceList; wiki-tools' pageSearchIndex and searchResults; v1 output unchanged.\n\n**Done when:** tests pass, v1-tools.txt is unchanged and M7's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 7."
+    },
+    {
+      "key": "M8-8",
+      "title": "[M8] mcp: list_pages, search and read_page",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F08",
+      "body": "**Deliverable:** mcp's agent-tools.ts: list_pages (the status header, every page with its first lead sentence, redirects and disambiguations, shortened to fit), search (v1's results noting pages that cite changed files; as_of), read_page (v1's page plus a freshness line and claim marks; as_of with its banner and lineage), TOOL_TITLES and createAgentTools.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 8."
+    },
+    {
+      "key": "M8-9",
+      "title": "[M8] mcp: pages_for_file, cited_code and page_changes",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F08",
+      "body": "**Deliverable:** mcp's code-tools.ts: pages_for_file (a string lookup: the owning feature, the pages citing the file with their reference numbers, whether it changed or is new), cited_code (read_page's reference numbering; the cited lines at their commit with context and where they are now; a commit's details), page_changes (claim-by-claim diff between two points); the hostile-text test across all six tools.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 9."
+    },
+    {
+      "key": "M8-10",
+      "title": "[M8] mcp: JSON-RPC lifecycle and stdio framing",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** mcp's protocol.ts (initialize with version negotiation, ping, tools/list with titles and read-only annotations, tools/call, JSON-RPC errors, batches refused, notifications ignored) and stdio.ts (UTF-8 lines, a 1 MiB cap, U+2028/U+2029 escaped, replies in order); transcript tests; the boundary test banning console.log and process.stdout.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 10."
+    },
+    {
+      "key": "M8-11",
+      "title": "[M8] mcp: the stdio server and pnpm mcp:serve",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** mcp's server.ts (the export holder that reloads a replaced export and keeps the last good one, the initialize instructions, one-line stderr logs); scripts/mcp-serve.ts and scripts/mcp-cli.ts (arguments, --help's registration line, --compare-to, the environment scrub, exit codes); pnpm mcp:serve; spawn tests that check stdout carries only protocol lines and nothing is written.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 11."
+    },
+    {
+      "key": "M8-12",
+      "title": "[M8] mcp: the stdio client and async tool sets",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** mcp's client.ts (connectMcp: spawn, initialize, tools/list, tools/call, the server's last stderr line on exit; mcpToolSet); query's ToolSet.run may return a promise, LocalToolSet for synchronous sets; eval's runAgent awaits tool calls.\n\n**Done when:** tests pass and M7's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 12."
+    },
+    {
+      "key": "M8-13",
+      "title": "[M8] mcp: pnpm mcp:probe",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F07",
+      "body": "**Deliverable:** scripts/mcp-probe.ts and mcp-cli.ts's runProbe, probeReport and parseProbeArgs: spawn the server, run the spec's fixed calls, print each call's time, size and error, then the slowest call and the largest result; pnpm mcp:probe.\n\n**Done when:** tests pass, and the probe of the fixture leaves its out dir unchanged. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 13."
+    },
+    {
+      "key": "M8-14",
+      "title": "[M8] eval: the mcp and repo+mcp agents and --agents",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F07",
+      "body": "**Deliverable:** agent kinds mcp and repo+mcp (the server's six tools through a spawned server; those and the repo agent's three); RunInfo.agents with a default; --agents; the estimate per agent; the report's tables over the asked agents; combineToolSets; mcp-eval.claude.test.ts and its cassette smoke-mcp.json, recorded live once (about $0.10).\n\n**Done when:** tests pass, M7's cassettes replay unchanged, smoke-mcp.json replays in CI with no network, and the secret scan passes. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 14."
+    },
+    {
+      "key": "M8-15",
+      "title": "[M8] eval: the history suite",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F08",
+      "body": "**Deliverable:** the history question file (suite history, 8-20 questions, kinds as-of and what-changed, set history); QuestionKind as-of (never in the exit-criteria file); --set history with default agents wiki,mcp and run directory <out>/eval/history-<time>; the committed history smoke file about historyWiki(); the report's note for the history set.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 15."
+    },
+    {
+      "key": "M8-16",
+      "title": "[M8] eval: the report's M8 bars and the recorded history smoke run",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F08",
+      "body": "**Deliverable:** interface.ts's interfaceSection: spec v2 #5 §11.4's four bars and the repository calls per question on a dev run, §11.5's two bars on a history run; the report's header for any number of agents; history-eval.claude.test.ts and its cassette smoke-history.json, recorded live once (about $0.05).\n\n**Done when:** tests pass, smoke-history.json replays in CI with no network, and the secret scan passes. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 16."
+    },
+    {
+      "key": "M8-17",
+      "title": "[M8] final review fixes and the owner's runbook",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F07",
+      "body": "**Deliverable:** the fixes the whole-milestone review asks for, and the owner's runbook for spec v2 #5 section 11 posted on #11 and #12.\n\n**Done when:** the review's findings are fixed or ruled on, and the runbook is on #11 and #12. The scored runs are the owner's. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 17."
     }
   ]
 }
