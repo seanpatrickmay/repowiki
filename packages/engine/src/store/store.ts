@@ -2,10 +2,15 @@ import {
   Architecture,
   aliasProblem,
   FeatureId,
+  GitHubSnapshot,
   GitSha,
+  InFlight,
+  InFlightSummary,
+  IsoDateTime,
   LedgerEntry,
   Manifest,
   Revision,
+  Sha256Hex,
   WikipediaCacheEntry,
   type WikipediaSummary,
 } from "@repowiki/core";
@@ -129,6 +134,25 @@ export interface Store {
   listArchitectureHistory(): Architecture[];
   /** How many revisions of the Architecture article are stored. */
   countArchitectureRevisions(): number;
+  /**
+   * Replaces the stored GitHub snapshot (spec v2 #9 §5.2): the normalised API answer, bodies
+   * included, so it is never exported.
+   */
+  putGitHubSnapshot(snapshot: GitHubSnapshot): void;
+  getGitHubSnapshot(): GitHubSnapshot | null;
+  /** Replaces the derived work-in-flight snapshot that the export carries. */
+  putInFlight(inflight: InFlight): void;
+  getInFlight(): InFlight | null;
+  /** Removes both snapshots (wiki:inflight --clear); the summary cache stays. */
+  clearInFlight(): void;
+  /**
+   * A cached pull-request summary by its request key (a SHA-256 hex digest), or null. A row that
+   * does not parse as read back is a miss, never an error: the next run asks again.
+   */
+  getInFlightSummary(requestKey: string): InFlightSummary | null;
+  putInFlightSummary(requestKey: string, summary: InFlightSummary, createdAt: string): void;
+  /** Drops every cached summary whose key is not in `keep`; returns how many were dropped. */
+  pruneInFlightSummaries(keep: readonly string[]): number;
 }
 
 /** The features an update must write whole again (Store.getPendingWhole). */
@@ -531,5 +555,74 @@ export function openStore(path: string): Store {
 
     countArchitectureRevisions: () =>
       (db.prepare("SELECT COUNT(*) AS n FROM architecture_revisions").get() as { n: number }).n,
+
+    putGitHubSnapshot(snapshot) {
+      const parsed = GitHubSnapshot.parse(snapshot);
+      db.prepare("INSERT OR REPLACE INTO github_snapshot (id, body) VALUES (1, ?)").run(
+        JSON.stringify(parsed),
+      );
+    },
+
+    getGitHubSnapshot() {
+      const row = db.prepare("SELECT body FROM github_snapshot WHERE id = 1").get() as
+        | BodyRow
+        | undefined;
+      return row === undefined ? null : GitHubSnapshot.parse(JSON.parse(row.body));
+    },
+
+    putInFlight(inflight) {
+      const parsed = InFlight.parse(inflight);
+      db.prepare("INSERT OR REPLACE INTO inflight (id, body) VALUES (1, ?)").run(
+        JSON.stringify(parsed),
+      );
+    },
+
+    getInFlight() {
+      const row = db.prepare("SELECT body FROM inflight WHERE id = 1").get() as BodyRow | undefined;
+      return row === undefined ? null : InFlight.parse(JSON.parse(row.body));
+    },
+
+    clearInFlight() {
+      db.transaction(() => {
+        db.prepare("DELETE FROM github_snapshot").run();
+        db.prepare("DELETE FROM inflight").run();
+      })();
+    },
+
+    getInFlightSummary(requestKey) {
+      const row = db
+        .prepare("SELECT body FROM inflight_summaries WHERE request_key = ?")
+        .get(requestKey) as BodyRow | undefined;
+      if (row === undefined) return null;
+      let json: unknown;
+      try {
+        json = JSON.parse(row.body);
+      } catch {
+        return null;
+      }
+      const parsed = InFlightSummary.safeParse(json);
+      return parsed.success ? parsed.data : null;
+    },
+
+    putInFlightSummary(requestKey, summary, createdAt) {
+      const key = Sha256Hex.parse(requestKey);
+      const body = InFlightSummary.parse(summary);
+      db.prepare(
+        "INSERT OR REPLACE INTO inflight_summaries (request_key, body, created_at) VALUES (?, ?, ?)",
+      ).run(key, JSON.stringify(body), IsoDateTime.parse(createdAt));
+    },
+
+    pruneInFlightSummaries(keep) {
+      const kept = new Set(keep);
+      const keys = (
+        db.prepare("SELECT request_key AS key FROM inflight_summaries").all() as { key: string }[]
+      ).map((row) => row.key);
+      const remove = db.prepare("DELETE FROM inflight_summaries WHERE request_key = ?");
+      const dropped = keys.filter((key) => !kept.has(key));
+      db.transaction(() => {
+        for (const key of dropped) remove.run(key);
+      })();
+      return dropped.length;
+    },
   };
 }

@@ -2,6 +2,7 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   type Architecture,
+  inflightProblems,
   LLMS_TXT_FILE,
   type Revision,
   renderLlmsTxt,
@@ -35,7 +36,12 @@ function linkedWikipediaTitles(pages: readonly (Revision | Architecture)[]): str
   return [...titles].sort();
 }
 
-/** Assembles and validates the export consumed by the reader site and by agents. */
+/**
+ * Assembles and validates the export consumed by the reader site and by agents. The stored
+ * work-in-flight snapshot rides along only while it agrees with the export (inflightProblems): a
+ * snapshot that names a claim the current pages no longer hold is left out (null) rather than
+ * failing the export; wiki:inflight derives a new one.
+ */
 export function buildExport(store: Store, options: ExportOptions): WikiExport {
   const head = store.getHead();
   const manifest = store.getLatestManifest();
@@ -52,6 +58,11 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     const summary = store.getWikipediaSummary(title)?.summary;
     if (summary) wikipedia[title] = summary;
   }
+  const stored = store.getInFlight();
+  const inflight =
+    stored !== null && inflightProblems(stored, { head, manifest, pages }).length === 0
+      ? stored
+      : null;
   return WikiExport.parse({
     schemaVersion: SCHEMA_VERSION,
     repo: options.repo,
@@ -63,6 +74,7 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     wikipedia,
     architecture,
     runs: runTotals(store.listLedger()),
+    inflight,
   });
 }
 
