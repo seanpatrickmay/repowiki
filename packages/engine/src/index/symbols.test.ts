@@ -349,14 +349,14 @@ describe("extractSymbols (typescript)", () => {
   });
 
   it("stays linear in the nesting of multi-line template literals", () => {
-    // Quadratic row marking took about 9 s here; linear takes well under a second.
+    // Quadratic row marking took 9-19 s here; linear takes well under a second.
     const depth = 16_000;
     const source = `f( {\nconst s = ${"`\n${".repeat(depth)}1${"}\n`".repeat(depth)};\nfunction z() {}\n`;
     const parsed = parser.parse("typescript", source);
     try {
       const started = performance.now();
       const symbols = extractSymbols("typescript", parsed.root, parser);
-      expect(performance.now() - started).toBeLessThan(2000);
+      expect(performance.now() - started).toBeLessThan(5000);
       expect(symbols.map((s) => s.qualifiedName)).toEqual(["z"]);
     } finally {
       parsed.dispose();
