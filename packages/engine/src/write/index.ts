@@ -18,7 +18,13 @@ export {
   writePages,
 } from "./build.ts";
 export { type Ancestry, ancestry, carriedHistory } from "./carry.ts";
-export { buildPack, type ContextPack, DEFAULT_CONTEXT_BUDGET_TOKENS } from "./pack.ts";
+export {
+  buildPack,
+  type ContextPack,
+  clean,
+  clip,
+  DEFAULT_CONTEXT_BUDGET_TOKENS,
+} from "./pack.ts";
 export { featureFiles, STYLE_GUIDE, writeSystemPrompt } from "./prompt.ts";
 export {
   MAX_UPDATE_OUTPUT_TOKENS,
