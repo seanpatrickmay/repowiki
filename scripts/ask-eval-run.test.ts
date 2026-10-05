@@ -1,7 +1,7 @@
 import { askIndexes } from "@repowiki/ask";
-import { answerTurn, scriptedProvider } from "@repowiki/ask/test-provider";
+import { answerTurn, scriptedProvider, TURN_USAGE } from "@repowiki/ask/test-provider";
 import type { EvalQuestion } from "@repowiki/eval";
-import type { GenerateRequest, Provider } from "@repowiki/llm";
+import { callCostUsd, type GenerateRequest, LlmOutputError, type Provider } from "@repowiki/llm";
 import { WikiView } from "@repowiki/query";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -67,6 +67,7 @@ describe("runAskEval", () => {
       provider,
       judge,
       model: "claude-haiku-4-5",
+      judgeModel: "claude-haiku-4-5",
       batchJudge: true,
       maxUsd,
       perQuestionCeilingUsd: [0.06, 0.06],
@@ -95,6 +96,127 @@ describe("runAskEval", () => {
     expect(overBudget).toEqual(["q-how"]);
   });
 
+  const JUDGE_USAGE = { in: 800, out: 100, cacheRead: 0, cacheWrite: 0 };
+  /** runAskEval over `count` copies of the first question, each answered, judged by `judge`. */
+  const runWith = (judge: Provider, options: { count?: number; batchJudge?: boolean } = {}) => {
+    const view = new WikiView(sample.wiki);
+    const count = options.count ?? 2;
+    const questions = Array.from({ length: count }, (_, i) => ({
+      ...(QUESTIONS[0] as EvalQuestion),
+      id: `q-${i}`,
+    }));
+    const { provider, requests } = scriptedProvider(Array(count).fill(ANSWER));
+    const lines: string[] = [];
+    const result = runAskEval({
+      view,
+      indexes: askIndexes(view),
+      questions,
+      provider,
+      judge,
+      model: "claude-haiku-4-5",
+      judgeModel: "claude-haiku-4-5",
+      batchJudge: options.batchJudge ?? true,
+      maxUsd: 10,
+      perQuestionCeilingUsd: questions.map(() => 0.06),
+      log: (line) => lines.push(line),
+    });
+    return { result, requests, lines };
+  };
+  const ASK_USD = callCostUsd("claude-haiku-4-5-20251001", TURN_USAGE, false) ?? 0;
+
+  it("counts a judgment that failed twice, logs it on one line and leaves it unjudged", async () => {
+    const judge: Provider = {
+      async generate() {
+        throw new LlmOutputError("not JSON", "{", {
+          usage: JUDGE_USAGE,
+          model: "claude-haiku-4-5-20251001",
+        });
+      },
+    };
+    const { result, lines } = runWith(judge, { count: 1 });
+    const { rows, spentUsd } = await result;
+    const twice =
+      callCostUsd("claude-haiku-4-5", { ...JUDGE_USAGE, in: 1600, out: 200 }, true) ?? 0;
+    expect(rows[0]).toMatchObject({ score: null, judgeUsd: twice });
+    expect(spentUsd).toBeCloseTo(ASK_USD + twice, 10);
+    expect(lines.filter((l) => l.includes("q-0") && l.includes("unjudged"))).toHaveLength(1);
+  });
+
+  it("counts an unpriced judgment at the judge model's price", async () => {
+    const judge: Provider = {
+      async generate<T>() {
+        const output = {
+          facts: [{ fact: "x", essential: true, present: true }],
+          contradicts: false,
+          reason: "ok",
+        } as T;
+        return { output, usage: JUDGE_USAGE, model: "claude-unknown-9" };
+      },
+    };
+    const { rows, spentUsd } = await runWith(judge, { count: 1 }).result;
+    const usd = callCostUsd("claude-haiku-4-5", JUDGE_USAGE, true) ?? 0;
+    expect(rows[0]?.judgeUsd).toBe(usd);
+    expect(spentUsd).toBeCloseTo(ASK_USD + usd, 10);
+  });
+
+  it("rethrows a judge failure that is not an unusable answer, after the other judgments", async () => {
+    let calls = 0;
+    const { judge: good } = fakeJudge();
+    const judge: Provider = {
+      async generate(request) {
+        if (++calls === 1) throw new Error("overloaded");
+        return good.generate(request);
+      },
+    };
+    await expect(runWith(judge).result).rejects.toThrow("overloaded");
+    expect(calls).toBe(2);
+  });
+
+  it("with --no-batch, has at most four judge calls in flight", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const { judge: good } = fakeJudge();
+    const judge: Provider = {
+      async generate(request) {
+        inFlight++;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight--;
+        return good.generate(request);
+      },
+    };
+    const { rows } = await runWith(judge, { count: 7, batchJudge: false }).result;
+    expect(rows).toHaveLength(7);
+    expect(most).toBe(4);
+  });
+
+  it("refuses a question longer than the ask takes before any call", async () => {
+    const view = new WikiView(sample.wiki);
+    const { provider, requests } = scriptedProvider([ANSWER]);
+    const { judge, requests: judged } = fakeJudge();
+    const long = {
+      ...(QUESTIONS[0] as EvalQuestion),
+      id: "q-long",
+      question: `${"x".repeat(500)}?`,
+    };
+    await expect(
+      runAskEval({
+        view,
+        indexes: askIndexes(view),
+        questions: [QUESTIONS[0] as EvalQuestion, long],
+        provider,
+        judge,
+        model: "claude-haiku-4-5",
+        judgeModel: "claude-haiku-4-5",
+        batchJudge: true,
+        maxUsd: 10,
+        perQuestionCeilingUsd: [0.06, 0.06],
+      }),
+    ).rejects.toThrow(/at most 500 characters; longer: q-long$/);
+    expect(requests).toEqual([]);
+    expect(judged).toEqual([]);
+  });
+
   it("gives the judge the sentences joined as one answer", () => {
     const response = { sentences: [{ text: "One." }, { text: "Two." }] };
     expect(answerText(response as never)).toBe("One. Two.");
@@ -115,6 +237,7 @@ describe("renderAskReport", () => {
       provider,
       judge: fakeJudge().judge,
       model: "claude-haiku-4-5",
+      judgeModel: "claude-haiku-4-5",
       batchJudge: true,
       maxUsd: 1.5,
       perQuestionCeilingUsd: [0.06, 0.06],

@@ -14,7 +14,7 @@ import { loadQuestions, QuestionFileError, selectQuestions } from "@repowiki/eva
 import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@repowiki/llm";
 import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
-import { renderAskReport, runAskEval } from "./ask-eval-run.ts";
+import { checkAskableQuestions, renderAskReport, runAskEval } from "./ask-eval-run.ts";
 import { criteriaLines, devBaseline, supportSheet, tallySupport } from "./ask-eval-sheet.ts";
 import { logLine } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       `the question file is about ${JSON.stringify(loaded.file.repo)}, but the wiki in ${out} is ${JSON.stringify(wiki.repo)}`,
     );
   }
+  checkAskableQuestions(questions);
   const models = loadModels(args.config);
   const estimate = estimateAskEval({
     questions,
@@ -94,6 +95,7 @@ async function main(): Promise<void> {
     provider: createClaudeToolProvider({ models, ledger, runId }),
     judge: createClaudeProvider({ models, ledger, runId }),
     model: models.ask,
+    judgeModel: models.evalJudge,
     batchJudge: args.batch,
     maxUsd: args.maxUsd,
     perQuestionCeilingUsd: estimate.perQuestionCeilingUsd,
