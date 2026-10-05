@@ -9,6 +9,17 @@ export {
   ungroundedToken,
 } from "./answer.ts";
 export {
+  ANSWERS_FILE,
+  type AnswerCache,
+  type AnswerKeyParts,
+  AskRecord,
+  answerKey,
+  COMPACT_BYTES,
+  exportHash,
+  normalizeQuestion,
+  openAnswerCache,
+} from "./cache.ts";
+export {
   ASK_MAX_TOKENS,
   ASK_TEMPERATURE,
   AskError,
@@ -39,4 +50,3 @@ export {
   MAX_ANSWER_WORDS,
   MAX_TURNS,
 } from "./prompt.ts";
-export { type AskToolEvents, createAskTools } from "./tools.ts";
