@@ -123,7 +123,13 @@ async function main(): Promise<void> {
     csp: CONTENT_SECURITY_POLICY,
     log: (line) => console.error(line),
   });
-  handle = serveRequests({ siteDir, csp: CONTENT_SECURITY_POLICY, port: () => port, ask });
+  handle = serveRequests({
+    siteDir,
+    csp: CONTENT_SECURITY_POLICY,
+    port: () => port,
+    ask,
+    log: (line) => console.error(line),
+  });
   console.log(
     `serving http://127.0.0.1:${port}/ (the wiki at ${wiki.head.slice(0, 7)}; Ctrl-C to stop)`,
   );
