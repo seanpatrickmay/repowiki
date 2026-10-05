@@ -26,6 +26,9 @@ importers:
       '@repowiki/llm':
         specifier: workspace:*
         version: link:packages/llm
+      '@repowiki/query':
+        specifier: workspace:*
+        version: link:packages/query
       '@types/node':
         specifier: 24.19.0
         version: 24.19.0
@@ -84,6 +87,9 @@ importers:
       '@repowiki/llm':
         specifier: workspace:*
         version: link:../llm
+      '@repowiki/query':
+        specifier: workspace:*
+        version: link:../query
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -99,6 +105,19 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+
+  packages/query:
+    dependencies:
+      '@repowiki/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@repowiki/engine':
+        specifier: workspace:*
+        version: link:../engine
 
   packages/site:
     dependencies:

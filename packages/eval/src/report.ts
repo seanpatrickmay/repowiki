@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { markdownText, oneLine } from "@repowiki/query";
 import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import type { QuestionKind } from "./questions.ts";
@@ -29,7 +30,6 @@ import {
   TOKEN_SHARE,
   tokensOf,
 } from "./summary.ts";
-import { markdownText, oneLine } from "./text.ts";
 
 const count = (n: number) => Math.round(n).toLocaleString("en-US");
 const percent = (x: number) => `${Math.round(x * 1000) / 10}%`;

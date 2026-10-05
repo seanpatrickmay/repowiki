@@ -5,8 +5,8 @@ import {
   type ToolResultBlock,
   type TurnMessage,
 } from "@repowiki/llm";
+import type { ToolSet } from "@repowiki/query";
 import { LAST_TURN_NOTE, questionTurn } from "./prompts.ts";
-import type { ToolSet } from "./tools.ts";
 
 /** The output cap of one agent turn: a tool call, or an answer of ANSWER_WORDS words. */
 export const MAX_TURN_OUTPUT_TOKENS = 1024;

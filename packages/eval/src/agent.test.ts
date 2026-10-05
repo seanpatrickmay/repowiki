@@ -1,9 +1,9 @@
+import { defineTool, ToolError, toolSet } from "@repowiki/query";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { MAX_TURN_OUTPUT_TOKENS, runAgent } from "./agent.ts";
 import { agentSystemPrompt, LAST_TURN_NOTE } from "./prompts.ts";
 import { SCRIPTED_MODEL, scriptedToolProvider, TURN_USAGE } from "./test-provider.ts";
-import { defineTool, ToolError, toolSet } from "./tools.ts";
 
 const tools = toolSet([
   defineTool("lookup", "Looks a word up.", z.strictObject({ word: z.string() }), ({ word }) => {

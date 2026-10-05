@@ -1,6 +1,16 @@
-import type { ToolDefinition } from "@repowiki/llm";
 import { z } from "zod";
 import { cut, oneLine, toolText } from "./text.ts";
+
+/**
+ * A tool the model may call: its name, what it does, and its input's JSON schema. The same shape
+ * as @repowiki/llm's ToolDefinition, declared here so query never imports llm; structural typing
+ * joins the two.
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: { type: "object"; [key: string]: unknown };
+}
 
 /** What one tool call returns to the model. */
 export interface ToolOutput {

@@ -1,4 +1,4 @@
-import { cut, oneLine } from "./text.ts";
+import { cut, oneLine } from "@repowiki/query";
 
 /** Which agent: the one reading the wiki, or the one reading the repository's files. */
 export type AgentKind = "wiki" | "repo";

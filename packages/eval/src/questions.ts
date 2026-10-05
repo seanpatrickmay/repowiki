@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { INVISIBLE_CHARACTERS } from "@repowiki/core";
+import { cut, oneLine } from "@repowiki/query";
 import { z } from "zod";
-import { cut, oneLine } from "./text.ts";
 
 /** Spec §9's four kinds of question. */
 export const QuestionKind = z.enum(["where", "how", "why", "what-changed"]);

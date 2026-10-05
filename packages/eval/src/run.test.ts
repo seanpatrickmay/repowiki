@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateRequest, Provider, ToolProvider } from "@repowiki/llm";
 import { LlmOutputError } from "@repowiki/llm";
+import { createWikiTools } from "@repowiki/query";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { JudgeVerdict } from "./judge.ts";
 import { loadQuestions, selectQuestions } from "./questions.ts";
@@ -11,7 +12,6 @@ import { createRepoTools } from "./repo-tools.ts";
 import { type EvalRunOptions, MAX_DIRECT_JUDGE_CALLS, runEval, UnpricedModelError } from "./run.ts";
 import { scriptedToolProvider } from "./test-provider.ts";
 import { type SampleWiki, SMOKE_QUESTIONS, sampleWiki } from "./test-wiki.ts";
-import { createWikiTools } from "./wiki-tools.ts";
 
 let sample: SampleWiki;
 let dir: string;
