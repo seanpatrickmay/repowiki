@@ -34,9 +34,17 @@ function partialClone(): string {
   return dir;
 }
 
-/** Runs `attempt` as if the repository belonged to another user, as git's own tests do. */
+/**
+ * Runs `attempt` as if the repository belonged to another user, as git's own tests do. The system
+ * and global config are left out: a CI runner's `safe.directory = *` would trust every repository.
+ */
 function asAnotherOwner<T>(attempt: () => T, env: Record<string, string> = {}): T {
-  const set = { GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", ...env };
+  const set = {
+    GIT_TEST_ASSUME_DIFFERENT_OWNER: "1",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    ...env,
+  };
   const before = Object.fromEntries(Object.keys(set).map((name) => [name, process.env[name]]));
   Object.assign(process.env, set);
   try {
