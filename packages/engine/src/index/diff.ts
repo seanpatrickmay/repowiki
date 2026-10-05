@@ -86,9 +86,16 @@ function blobHunks(
  * rename detection (-M) pairs a moved file with its new path. Read-only plumbing, NUL-separated,
  * so no path text can forge an entry. A symlink or submodule is not a file: one that became a
  * file is added, a file that became one is deleted. A copy that the caller's git config reports
- * counts as an added file.
+ * counts as an added file. With `only`, just the changes whose old path (a new file's new path) is
+ * in it are returned, and only they are diffed for hunks; renames are still paired over the whole
+ * tree, so a cited file that moved is followed (the MCP server's per-claim marks, M8).
  */
-export function diffCommits(repo: string, from: string, to: string): FileChange[] {
+export function diffCommits(
+  repo: string,
+  from: string,
+  to: string,
+  only?: ReadonlySet<string>,
+): FileChange[] {
   assertSha(from);
   assertSha(to);
   if (from === to) return [];
@@ -121,6 +128,7 @@ export function diffCommits(repo: string, from: string, to: string): FileChange[
     const first = tokens[i + 1] ?? "";
     const second = twoPaths ? (tokens[i + 2] ?? "") : first;
     i += twoPaths ? 3 : 2;
+    if (only !== undefined && !only.has(status.startsWith("A") ? second : first)) continue;
     const was = isFile(srcMode);
     const is = isFile(dstMode);
     const kind = status[0];
