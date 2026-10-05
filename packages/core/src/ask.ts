@@ -15,6 +15,8 @@ export const ASK_MAX_SOURCES = 12;
 export const ASK_MAX_READ_NEXT = 3;
 /** The longest excerpt of a cited claim a source shows, in code points. */
 export const ASK_EXCERPT_LENGTH = 160;
+/** The longest page hint a request may carry: the longest page id an answer names. */
+export const ASK_PAGE_MAX_LENGTH = 64;
 /** The longest page summary in Read next, and the longest title, in code points. */
 export const ASK_SUMMARY_MAX_LENGTH = 200;
 export const ASK_TITLE_MAX_LENGTH = 200;
@@ -59,8 +61,11 @@ export const AskRequest = z.strictObject({
       (q) => q.length > 0 && codePoints(q) <= ASK_QUESTION_MAX_LENGTH,
       `expected a question of 1 to ${ASK_QUESTION_MAX_LENGTH} characters`,
     ),
-  /** A feature id or "special:about"; anything that resolves to no page is ignored. */
-  page: z.string().nullable().default(null),
+  /**
+   * A feature id or "special:about", at most ASK_PAGE_MAX_LENGTH characters (it comes from the
+   * browser); anything that resolves to no page is ignored.
+   */
+  page: z.string().max(ASK_PAGE_MAX_LENGTH).nullable().default(null),
   /** True bypasses the answer cache. */
   fresh: z.boolean().default(false),
 });
