@@ -1,7 +1,12 @@
 import type { WikiExport } from "@repowiki/core";
 import { bodyClaim, codeCitation } from "@repowiki/core/test-fixtures";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { claimLine, claimSearchIndex } from "./claim-index.ts";
+import {
+  CLAIM_LINE_REFERENCE_LENGTH,
+  CLAIM_SEARCH_LIMIT,
+  claimLine,
+  claimSearchIndex,
+} from "./claim-index.ts";
 import { extendedWiki, type SampleWiki, sampleWiki } from "./test-wiki.ts";
 import { ABOUT_PAGE_ID, WikiView } from "./wiki-view.ts";
 
@@ -40,6 +45,16 @@ describe("claimSearchIndex", () => {
     expect(index.search("signal", 2, 4)).toHaveLength(2);
     expect(index.search("signal", 12, 4)).toEqual(index.search("signal", 12, 4));
     expect(index.search("kubernetes", 12, 4)).toEqual([]);
+  });
+
+  it("treats a fractional limit as its whole part and a NaN limit as the default", () => {
+    const index = claimSearchIndex(new WikiView(sample.wiki));
+    expect(index.search("signal", 1.5, 4)).toHaveLength(1);
+    expect(index.search("signal", Number.NaN, 4)).toEqual(
+      index.search("signal", CLAIM_SEARCH_LIMIT, 4),
+    );
+    expect(index.search("signal", Number.NaN, 4).length).toBeLessThanOrEqual(CLAIM_SEARCH_LIMIT);
+    expect(index.search("signal", 0, 4)).toHaveLength(1);
   });
 
   it("covers the active pages and the About article, not a retired page", () => {
@@ -89,5 +104,32 @@ describe("claimLine", () => {
     expect(line).not.toContain("\n");
     expect(line).toContain("\u2026 (cites: src/(p#c)/f1.py:");
     expect(line).toMatch(/f3\.py:\d+-\d+, and 1 more\)$/);
+  });
+
+  it("unmarks a handle formed across the text and a reference", () => {
+    const view = withClaims([
+      bodyClaim({
+        id: "s-9",
+        text: "see {a#b",
+        citations: [codeCitation({ path: "src/c}/page.ts", startLine: 1, endLine: 2 })],
+      }),
+    ]);
+    const entry = claimSearchIndex(view).entries.get("signals#s-9");
+    if (entry === undefined) throw new Error("no s-9");
+    const line = claimLine(view, entry);
+    expect(line).toBe("- {signals#s-9} see (a#b (cites: src/c)/page.ts:1-2)");
+    expect(line.slice("- {signals#s-9}".length)).not.toMatch(/\{[^{}\n]*#[^{}\n]*\}/);
+  });
+
+  it("cuts a long reference path", () => {
+    const path = `src/${"a".repeat(4000)}.py`;
+    const view = withClaims([
+      bodyClaim({ id: "s-9", text: "Long.", citations: [codeCitation({ path })] }),
+    ]);
+    const entry = claimSearchIndex(view).entries.get("signals#s-9");
+    if (entry === undefined) throw new Error("no s-9");
+    const line = claimLine(view, entry);
+    expect(line.length).toBeLessThan(CLAIM_LINE_REFERENCE_LENGTH + 60);
+    expect(line).toMatch(/a\u2026:10-24\)$/);
   });
 });

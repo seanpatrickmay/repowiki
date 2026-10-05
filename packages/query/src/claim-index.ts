@@ -13,6 +13,17 @@ export const CLAIM_LINE_TEXT_LENGTH = 300;
 /** The most references a pack line names. */
 export const CLAIM_LINE_REFERENCES = 3;
 
+/** The longest path a pack line's reference shows, in code points (a path has no maximum). */
+export const CLAIM_LINE_REFERENCE_LENGTH = 120;
+
+/** The claim search's `limit` and `perPage` when the caller's is not a number. */
+export const CLAIM_SEARCH_LIMIT = 12;
+export const CLAIM_SEARCH_PER_PAGE = 4;
+
+/** `n` as a whole count of at least 1, or `fallback` when it is not a finite number. */
+const atLeastOne = (n: number, fallback: number): number =>
+  Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : fallback;
+
 /** A claim that can be cited, with its page. */
 export interface ClaimEntry {
   handle: string;
@@ -25,7 +36,8 @@ export interface ClaimIndex {
   entries: ReadonlyMap<string, ClaimEntry>;
   /**
    * Handles of the best claims for `query`, best first, ties by handle: at most `limit`, and at
-   * most `perPage` from one page.
+   * most `perPage` from one page. Each is taken as a whole number of at least 1; one that is not
+   * a finite number is CLAIM_SEARCH_LIMIT or CLAIM_SEARCH_PER_PAGE.
    */
   search(query: string, limit: number, perPage: number): string[];
 }
@@ -76,7 +88,9 @@ export function claimSearchIndex(view: WikiView): ClaimIndex {
   );
   return {
     entries: byHandle,
-    search(query, limit, perPage) {
+    search(query, limitAsked, perPageAsked) {
+      const limit = atLeastOne(limitAsked, CLAIM_SEARCH_LIMIT);
+      const perPage = atLeastOne(perPageAsked, CLAIM_SEARCH_PER_PAGE);
       const counts = new Map<string, number>();
       const picked: string[] = [];
       for (const handle of index.search(query, entries.length)) {
@@ -92,22 +106,27 @@ export function claimSearchIndex(view: WikiView): ClaimIndex {
   };
 }
 
-/** A citation as a pack line names it: `path:start-end`, or `commit <sha7>`. */
+/**
+ * A citation as a pack line names it: `path:start-end`, its path cut at
+ * CLAIM_LINE_REFERENCE_LENGTH, or `commit <sha7>`.
+ */
 const shortReference = (citation: Citation): string =>
   citation.kind === "code"
-    ? `${oneLine(citation.path)}:${citation.startLine}-${citation.endLine}`
+    ? `${cut(oneLine(citation.path), CLAIM_LINE_REFERENCE_LENGTH)}:${citation.startLine}-${citation.endLine}`
     : `commit ${citation.sha.slice(0, 7)}`;
 
 /**
  * One claim as the turn-1 pack lists it: `- {page#claim} <text> (cites: a.ts:1-9, …)`, its text
- * one line, unmarked and cut at CLAIM_LINE_TEXT_LENGTH, with at most CLAIM_LINE_REFERENCES
- * distinct references.
+ * one line and cut at CLAIM_LINE_TEXT_LENGTH, with at most CLAIM_LINE_REFERENCES distinct
+ * references. Everything after the line's own handle is unmarked as one string, so a mark cannot
+ * be formed across the text and a reference (an open `{a#b` and a path holding `}`).
  */
 export function claimLine(view: WikiView, entry: ClaimEntry): string {
-  const text = cut(unmarkHandles(view.text(entry.claim.text)), CLAIM_LINE_TEXT_LENGTH);
+  const text = cut(view.text(entry.claim.text), CLAIM_LINE_TEXT_LENGTH);
   const refs = [...new Set(entry.claim.citations.map(shortReference))];
-  const shown = refs.slice(0, CLAIM_LINE_REFERENCES).map(unmarkHandles);
+  const shown = refs.slice(0, CLAIM_LINE_REFERENCES);
   const more =
     refs.length > CLAIM_LINE_REFERENCES ? `, and ${refs.length - CLAIM_LINE_REFERENCES} more` : "";
-  return `- {${entry.handle}} ${text}${shown.length === 0 ? "" : ` (cites: ${shown.join(", ")}${more})`}`;
+  const cites = shown.length === 0 ? "" : ` (cites: ${shown.join(", ")}${more})`;
+  return `- {${entry.handle}} ${unmarkHandles(`${text}${cites}`)}`;
 }
