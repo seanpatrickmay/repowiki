@@ -247,6 +247,21 @@ describe("installPreviews", () => {
     expect(fetched[0]?.startsWith("/api/preview/")).toBe(true);
   });
 
+  it("fetches a Wikipedia preview from its own folder, by the hash after wp:", async () => {
+    const { card, fire, fetched } = setup();
+    fire("focusin", fakeLink("wp:0123abcd"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetched).toEqual(["/api/preview/wp/0123abcd.json"]);
+    expect(card.hidden).toBe(false);
+  });
+
+  it("percent-encodes a Wikipedia id too, and never leaves the same origin", async () => {
+    const { fire, fetched } = setup();
+    fire("focusin", fakeLink("wp:../x?y#z"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetched).toEqual(["/api/preview/wp/..%2Fx%3Fy%23z.json"]);
+  });
+
   it("does not fetch for an empty id", async () => {
     const { card, fire, fetched } = setup();
     fire("focusin", fakeLink(""));

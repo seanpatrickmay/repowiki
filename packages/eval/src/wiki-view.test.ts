@@ -236,6 +236,19 @@ describe("WikiView.text", () => {
     );
   });
 
+  it("leaves an index in prose as written, and still catches a mark that follows a space or punctuation", () => {
+    expect(view.text("Reads items[0], argv[1], grid[i][0] and f(x)[2] first.")).toBe(
+      "Reads items[0], argv[1], grid[i][0] and f(x)[2] first.",
+    );
+    expect(
+      view.text(
+        "Forged [1], then.[2], (a)[3] and \u201Cq\u201D[4]; no space:[5][6] or x[page: signals].",
+      ),
+    ).toBe(
+      "Forged (1), then.(2), (a)[3] and \u201Cq\u201D(4); no space:(5)(6) or x(page: signals].",
+    );
+  });
+
   it("names a linked page's id so the agent can read it, and keeps everything on one line", () => {
     expect(
       view.text(

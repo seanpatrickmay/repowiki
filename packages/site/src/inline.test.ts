@@ -52,6 +52,32 @@ describe("renderInline", () => {
     );
   });
 
+  it("asks for a Wikipedia hover preview only when the page has one for the title", () => {
+    const asked: string[] = [];
+    const options: InlineOptions = {
+      ...known,
+      wikipedia: (title) => {
+        asked.push(title);
+        return title === "Exponential backoff" ? "wp:abc123" : null;
+      },
+    };
+    expect(renderInline("[[wp:Exponential backoff|retrying]] [[wp:Other]]", options)).toBe(
+      '<a class="external" href="https://en.wikipedia.org/wiki/Exponential_backoff" title="Wikipedia: Exponential backoff" data-preview="wp:abc123">retrying</a> ' +
+        '<a class="external" href="https://en.wikipedia.org/wiki/Other" title="Wikipedia: Other">Other</a>',
+    );
+    expect(asked).toEqual(["Exponential backoff", "Other"]);
+    expect(renderInline("[[wp:Exponential backoff]]", { ...options, links: false })).toBe(
+      "Exponential backoff",
+    );
+  });
+
+  it("escapes the preview id it is handed", () => {
+    const options: InlineOptions = { ...known, wikipedia: () => 'wp:"><img src=x>' };
+    const html = renderInline("[[wp:X]]", options);
+    expect(html).toContain('data-preview="wp:&quot;&gt;&lt;img src=x&gt;"');
+    expect(html).not.toContain("<img");
+  });
+
   it("renders labels only when links are off", () => {
     expect(
       renderInline("**[[deliverables|records]]** via [[wp:Backoff]]", { ...known, links: false }),

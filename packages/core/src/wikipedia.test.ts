@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { WIKIPEDIA_EXTRACT_MAX_LENGTH, WikipediaSummary } from "./wikipedia.ts";
+import {
+  normalizeWikipediaTitle,
+  WIKIPEDIA_EXTRACT_MAX_LENGTH,
+  WikipediaSummary,
+} from "./wikipedia.ts";
 
 const good = {
   title: "Message queue",
@@ -110,5 +114,12 @@ describe("WikipediaSummary title", () => {
     expect(accepts({ title: "A\u2060B" })).toBe(false);
     expect(accepts({ title: "A\u200dB" })).toBe(true);
     expect(accepts({ title: "A\nB" })).toBe(false);
+  });
+});
+
+describe("normalizeWikipediaTitle", () => {
+  it("normalizes like Wikipedia: underscores, spaces, first letter", () => {
+    expect(normalizeWikipediaTitle("  message_queue  telemetry ")).toBe("Message queue telemetry");
+    expect(normalizeWikipediaTitle(" ")).toBe("");
   });
 });

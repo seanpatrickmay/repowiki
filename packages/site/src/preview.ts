@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
+import { normalizeWikipediaTitle } from "@repowiki/core";
 import { formatDate, formatNumber } from "./format.ts";
-import { escapeHtml } from "./inline.ts";
+import { escapeHtml, type InlineOptions } from "./inline.ts";
 import { featureLink, finalTarget, hasArticleRoute, type SiteModel } from "./model.ts";
 import { leadSummary } from "./summary.ts";
 import { articleUrl } from "./urls.ts";
 
-/** Body of /api/preview/<id>.json, shown when a reader hovers or focuses a link to <id>. */
+/** Body of /api/preview/<id>.json and /api/preview/wp/<hash>.json, shown when a reader hovers or focuses a link to <id>. */
 export interface Preview {
   /** Plain text: the client inserts it with textContent. */
   title: string;
@@ -59,10 +61,57 @@ function computePreview(site: SiteModel, id: string): Preview | null {
 }
 
 /** Link target for a [[id]] token in an article; it asks for a hover preview only if one is served. */
-export function articleLink(
+function articleLink(
   site: SiteModel,
   id: string,
 ): { href: string; title: string; preview: boolean } | null {
   const link = featureLink(site, id);
   return link === null ? null : { ...link, preview: previewData(site, id) !== null };
+}
+
+/** File name of a title's preview: titles hold any character, so the name is a hash, never the title. */
+const wikipediaHash = (title: string): string =>
+  createHash("sha256")
+    .update(normalizeWikipediaTitle(title).toWellFormed(), "utf8")
+    .digest("hex")
+    .slice(0, 32);
+
+const wikipediaByHash = new WeakMap<SiteModel, Map<string, Preview>>();
+
+/**
+ * One preview per Wikipedia article in the export, by the hash of its normalized title. The
+ * summary came from the network, so its text is escaped like any other preview's; the title is
+ * plain text for the client's textContent. Built before any link asks, from the export alone: the
+ * browser never contacts Wikipedia. A summary without text has no preview.
+ */
+export function wikipediaPreviews(site: SiteModel): ReadonlyMap<string, Preview> {
+  let byHash = wikipediaByHash.get(site);
+  if (byHash === undefined) {
+    byHash = new Map();
+    for (const [title, summary] of Object.entries(site.wiki.wikipedia)) {
+      const hash = wikipediaHash(title);
+      if (summary.extract.trim() === "" || byHash.has(hash)) continue;
+      byHash.set(hash, {
+        title: summary.title,
+        url: summary.url,
+        html: `<p>${escapeHtml(summary.extract)}</p><p class="preview-facts">From Wikipedia</p>`,
+      });
+    }
+    wikipediaByHash.set(site, byHash);
+  }
+  return byHash;
+}
+
+/** The data-preview value of a [[wp:Title]] link ("wp:" and the hash), or null without a preview. */
+function wikipediaPreviewId(site: SiteModel, title: string): string | null {
+  const hash = wikipediaHash(title);
+  return wikipediaPreviews(site).has(hash) ? `wp:${hash}` : null;
+}
+
+/** Link options for rendering claim text on a page: feature links and Wikipedia links both ask for previews. */
+export function inlineOptions(site: SiteModel): InlineOptions {
+  return {
+    link: (id) => articleLink(site, id),
+    wikipedia: (title) => wikipediaPreviewId(site, title),
+  };
 }

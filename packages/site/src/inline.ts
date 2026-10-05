@@ -6,6 +6,11 @@ export interface InlineOptions {
    * out the data-preview attribute, for a target that has no preview file.
    */
   link(id: string): { href: string; title: string; preview?: boolean } | null;
+  /**
+   * The data-preview value for a [[wp:Title]] link, or null when the page serves no preview of
+   * that Wikipedia article. Omitted: no wp: link asks for one.
+   */
+  wikipedia?(title: string): string | null;
   /** False renders every link token as its plain label (hover previews). Default true. */
   links?: boolean;
 }
@@ -63,7 +68,9 @@ function renderLink(
     if (title === "") return escapeHtml(originalToken);
     const text = escapeHtml(label ?? title);
     if (!links) return text;
-    return `<a class="external" href="${escapeHtml(wikipediaUrl(title.toWellFormed()))}" title="Wikipedia: ${escapeHtml(title)}">${text}</a>`;
+    const previewId = options.wikipedia?.(title) ?? null;
+    const preview = previewId === null ? "" : ` data-preview="${escapeHtml(previewId)}"`;
+    return `<a class="external" href="${escapeHtml(wikipediaUrl(title.toWellFormed()))}" title="Wikipedia: ${escapeHtml(title)}"${preview}>${text}</a>`;
   }
   if (target === "") return escapeHtml(originalToken);
   const resolved = options.link(target);

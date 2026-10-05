@@ -209,8 +209,8 @@ async function replay(
     const history = readHistory(repo, step.sha);
     const problems =
       step.sha === head
-        ? checkWiki(store, repo, history).problems
-        : checkStoredAt(store, repo, step.sha, history);
+        ? (await checkWiki(store, repo, history)).problems
+        : await checkStoredAt(store, repo, step.sha, history);
     for (const problem of problems) log(problemLine(`${short}: ${problem}`));
     records.push({
       step,
@@ -267,7 +267,7 @@ async function replay(
         join(out, `update-${step.sha.slice(0, 7)}.md`),
         renderUpdateSummary(repoName, update, estimate, totals),
       );
-      const check = checkWiki(store, repo, readHistory(repo, step.sha));
+      const check = await checkWiki(store, repo, readHistory(repo, step.sha));
       // Problem lines quote model-derived ids and paths: one printable line each.
       for (const problem of check.problems) log(problemLine(`${step.sha.slice(0, 7)}: ${problem}`));
       records.push({

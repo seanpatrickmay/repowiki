@@ -6,9 +6,9 @@ import {
   commitFiles,
   GitError,
   listBlobs,
-  readBlobs,
   resolveCommit,
   scrubbedGitEnv,
+  streamBlobs,
 } from "./git.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
@@ -44,7 +44,7 @@ describe("inherited git environment", () => {
     "GIT_COMMON_DIR",
   ] as const;
 
-  it.each(VARS)("ignores an inherited %s", (name) => {
+  it.each(VARS)("ignores an inherited %s", async (name) => {
     const saved = process.env[name];
     try {
       process.env[name] = join(tmpdir(), "repowiki-bogus-git-env", name);
@@ -53,12 +53,14 @@ describe("inherited git environment", () => {
       expect(resolveCommit(repo.dir, "HEAD")).toBe(sha);
       const blobs = listBlobs(repo.dir, sha);
       expect(blobs.map((b) => b.path)).toEqual(["a.py"]);
-      expect(
-        readBlobs(
-          repo.dir,
-          blobs.map((b) => b.oid),
-        ).size,
-      ).toBe(1);
+      let streamed = 0;
+      for await (const _blob of streamBlobs(
+        repo.dir,
+        blobs.map((b) => b.oid),
+        100,
+      ))
+        streamed++;
+      expect(streamed).toBe(1);
       expect(commitFiles(repo.dir, sha)).toEqual([["a.py"]]);
     } finally {
       if (saved === undefined) delete process.env[name];
@@ -102,6 +104,37 @@ describe("scrubbedGitEnv", () => {
   });
 });
 
+describe("scrubbedGitEnv locale", () => {
+  const NAMES = ["LC_ALL", "LANGUAGE", "LC_MESSAGES", "LC_CTYPE", "LANG"] as const;
+
+  function withLocale(values: Partial<Record<(typeof NAMES)[number], string>>) {
+    const saved = Object.fromEntries(NAMES.map((n) => [n, process.env[n]]));
+    try {
+      for (const name of NAMES) delete process.env[name];
+      Object.assign(process.env, values);
+      return scrubbedGitEnv();
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }
+
+  it("asks for English messages: LC_MESSAGES=C, with LC_ALL and LANGUAGE (which override it) removed", () => {
+    const env = withLocale({ LC_ALL: "de_DE.UTF-8", LANGUAGE: "de", LC_MESSAGES: "de_DE.UTF-8" });
+    expect(env.LC_MESSAGES).toBe("C");
+    expect(env.LC_ALL).toBeUndefined();
+    expect(env.LANGUAGE).toBeUndefined();
+  });
+
+  it("keeps the user's character-type locale, folding an LC_ALL into LC_CTYPE", () => {
+    expect(withLocale({ LANG: "en_US.UTF-8" }).LANG).toBe("en_US.UTF-8");
+    expect(withLocale({ LC_CTYPE: "en_US.UTF-8", LC_ALL: "C" }).LC_CTYPE).toBe("en_US.UTF-8");
+    expect(withLocale({ LC_ALL: "en_US.UTF-8" }).LC_CTYPE).toBe("en_US.UTF-8");
+  });
+});
+
 describe("listBlobs", () => {
   it("lists regular files with awkward names, sorted by path", () => {
     repo.write("src/my file.py", "a = 1\n");
@@ -133,32 +166,65 @@ describe("listBlobs", () => {
   });
 });
 
-describe("readBlobs", () => {
-  it("returns exact bytes, including binary and empty files", () => {
+describe("streamBlobs", () => {
+  async function stream(oids: string[], holdLimit: number) {
+    const out = [];
+    for await (const blob of streamBlobs(repo.dir, oids, holdLimit)) out.push(blob);
+    return out;
+  }
+
+  it("yields every requested blob in order, repeats included, with whole contents when small", async () => {
     const binary = Buffer.from([0x89, 0x50, 0x00, 0x0a, 0xff]);
     repo.write("img.png", binary);
     repo.write("empty.py", "");
     repo.write("a.py", "x = 1\n");
+    repo.write("copy.py", "x = 1\n");
+    repo.write("tail.txt", "one\ntwo");
     const sha = repo.commit("add files");
     const blobs = listBlobs(repo.dir, sha);
-    const contents = readBlobs(
-      repo.dir,
+    const got = await stream(
       blobs.map((blob) => blob.oid),
+      1000,
     );
-    const byPath = (path: string) => contents.get(blobs.find((b) => b.path === path)?.oid ?? "");
-    expect(byPath("img.png")).toEqual(binary);
-    expect(byPath("empty.py")).toEqual(Buffer.alloc(0));
-    expect(byPath("a.py")?.toString("utf8")).toBe("x = 1\n");
+    expect(got.map((blob) => blob.oid)).toEqual(blobs.map((blob) => blob.oid));
+    const byPath = (path: string) => got[blobs.findIndex((b) => b.path === path)];
+    expect(byPath("img.png")?.content).toEqual(binary);
+    expect(byPath("empty.py")?.content).toEqual(Buffer.alloc(0));
+    expect(byPath("empty.py")?.lines).toBe(0);
+    expect(byPath("a.py")?.content?.toString("utf8")).toBe("x = 1\n");
+    expect(byPath("a.py")?.lines).toBe(1);
+    expect(byPath("copy.py")?.content?.toString("utf8")).toBe("x = 1\n");
+    expect(byPath("tail.txt")?.lines).toBe(2);
+    expect(byPath("tail.txt")?.size).toBe(7);
   });
 
-  it("returns an empty map for no oids", () => {
-    expect(readBlobs(repo.dir, []).size).toBe(0);
+  it("counts an oversized blob's lines and keeps only its first 8000 bytes", async () => {
+    repo.write("big.txt", "line\n".repeat(5000));
+    repo.write("big-tail.txt", `${"line\n".repeat(5000)}end`);
+    repo.write("big.bin", Buffer.concat([Buffer.alloc(9000, 0x41), Buffer.from([0])]));
+    const sha = repo.commit("add big files");
+    const blobs = listBlobs(repo.dir, sha);
+    const got = await stream(
+      blobs.map((blob) => blob.oid),
+      100,
+    );
+    const byPath = (path: string) => got[blobs.findIndex((b) => b.path === path)];
+    expect(byPath("big.txt")?.content).toBeNull();
+    expect(byPath("big.txt")?.size).toBe(25_000);
+    expect(byPath("big.txt")?.lines).toBe(5000);
+    expect(byPath("big.txt")?.head).toEqual(Buffer.from("line\n".repeat(1600)));
+    expect(byPath("big-tail.txt")?.lines).toBe(5001);
+    expect(byPath("big.bin")?.content).toBeNull();
+    expect(byPath("big.bin")?.head.includes(0)).toBe(false);
+    expect(byPath("big.bin")?.head.length).toBe(8000);
   });
 
-  it("throws GitError for an object that does not exist", () => {
+  it("yields nothing for no oids and throws GitError for an object that does not exist", async () => {
+    expect(await stream([], 100)).toEqual([]);
     repo.write("a.py", "x = 1\n");
     repo.commit("add a");
-    expect(() => readBlobs(repo.dir, ["0".repeat(40)])).toThrow(GitError);
+    await expect(stream(["0".repeat(40)], 100)).rejects.toThrow(GitError);
+    await expect(stream(["0".repeat(40)], 100)).rejects.toThrow(/unexpected cat-file header/);
   });
 });
 

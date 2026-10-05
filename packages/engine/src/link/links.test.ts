@@ -9,7 +9,6 @@ import {
   createPageLinker,
   createTargetResolver,
   linkTokensIn,
-  normalizeWikipediaTitle,
   unlinkText,
   wikipediaTitlesIn,
 } from "./links.ts";
@@ -88,11 +87,6 @@ describe("createPageLinker", () => {
 });
 
 describe("Wikipedia titles", () => {
-  it("normalizes like Wikipedia: underscores, spaces, first letter", () => {
-    expect(normalizeWikipediaTitle("  message_queue  telemetry ")).toBe("Message queue telemetry");
-    expect(normalizeWikipediaTitle(" ")).toBe("");
-  });
-
   it("finds every wp title outside code spans", () => {
     expect(
       wikipediaTitlesIn("[[wp:Cron]] `[[wp:Not this]]` [[wp:message_queue|q]] [[billing]]"),

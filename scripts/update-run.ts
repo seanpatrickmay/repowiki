@@ -45,7 +45,7 @@ export async function readInput(repo: string, sha: string): Promise<UpdateInput>
   return {
     repo,
     index,
-    sources: readSources(repo, index.sha, DEFAULT_MAX_FILE_BYTES),
+    sources: await readSources(repo, index.sha, DEFAULT_MAX_FILE_BYTES),
     history: readHistory(repo, index.sha),
     graph: buildFileGraph(index),
   };

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,27 @@ afterAll(() => {
   sample.repo.remove();
   big.remove();
 });
+
+/** Runs `body` on a blobless clone of a one-file repository, so its blob is missing locally. */
+function withPartialClone(body: (clone: string, sha: string) => void): void {
+  const source = createTestRepo();
+  const scratch = mkdtempSync(join(tmpdir(), "repowiki-partial-"));
+  try {
+    source.write("a.txt", "hello\n");
+    const at = source.commit("init");
+    source.git("config", "uploadpack.allowFilter", "true");
+    const clone = join(scratch, "clone");
+    execFileSync(
+      "git",
+      ["clone", "-q", "--no-checkout", "--filter=blob:none", `file://${source.dir}`, clone],
+      { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+    );
+    body(clone, at);
+  } finally {
+    source.remove();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
 
 describe("createRepoTools", () => {
   it("lists the files at the commit, under a directory or all of them", () => {
@@ -346,5 +368,44 @@ describe("createRepoTools against hostile config and content", () => {
       text: "grep produced too much output; narrow the pattern or the path",
       isError: true,
     });
+  });
+
+  it("refuses a grep that outlives its timeout, and keeps the default timeout generous", () => {
+    // git cannot start, search and answer within a millisecond, so the kill is certain.
+    const slow = createRepoTools(big.dir, bigSha, { grepTimeoutMs: 1 });
+    expect(slow.run("grep", { pattern: "export const" })).toEqual({
+      text: "grep took too long; narrow the pattern or the path",
+      isError: true,
+    });
+    // The other tools do not use the grep timeout, and the default one lets an ordinary grep finish.
+    expect(slow.run("list_files", { path: "docs" }).isError).toBe(false);
+    expect(createRepoTools(big.dir, bigSha).run("grep", { pattern: "export const" }).isError).toBe(
+      false,
+    );
+  });
+
+  it("does not call a grep that could not read a file in a partial clone 'No matches.'", () => {
+    withPartialClone((clone, at) => {
+      const result = createRepoTools(clone, at).run("grep", { pattern: "hello" });
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/^grep failed: .*partial clone/);
+      expect(result.text).toMatch(/git fetch --refetch/);
+      expect(result.text).not.toBe("No matches.\n");
+    });
+  });
+
+  it("does not take a bad pattern that mentions promisor for a partial clone's problem", () => {
+    withPartialClone((clone, at) => {
+      const result = createRepoTools(clone, at).run("grep", { pattern: "promisor(" });
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/^grep failed: -e option, 'promisor\(': /);
+      expect(result.text).not.toMatch(/partial clone/);
+    });
+  });
+
+  it("still says 'No matches.' when git exits 1 with nothing on stderr", () => {
+    expect(createRepoTools(big.dir, bigSha).run("grep", { pattern: "zzz_not_here" }).text).toBe(
+      "No matches.\n",
+    );
   });
 });
