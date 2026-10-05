@@ -86,7 +86,7 @@ async function main(): Promise<void> {
       model: models.ask,
       questionUsd: args.questionUsd,
       maxUsd: args.maxUsd,
-      cache: openAnswerCache(join(out, "ask"), exportHash(wiki)),
+      cache: openAnswerCache(join(out, "ask"), exportHash(wiki), (line) => console.error(line)),
       log: (line) => console.error(line),
     });
   }

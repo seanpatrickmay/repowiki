@@ -1,8 +1,18 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeAskResponse } from "@repowiki/core/test-fixtures";
-import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
+import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   ANSWERS_FILE,
@@ -10,6 +20,7 @@ import {
   answerKey,
   COMPACT_BYTES,
   exportHash,
+  MAX_CACHE_BYTES,
   normalizeQuestion,
   openAnswerCache,
 } from "./cache.ts";
@@ -87,6 +98,20 @@ describe("exportHash", () => {
     expect(exportHash({ ...wiki, architecture: [] })).toBe(hash);
     expect(exportHash({ ...wiki, head: "f".repeat(40) })).not.toBe(hash);
   });
+
+  it("changes with the About article and with the manifest alone", () => {
+    const wiki = extendedWiki(sample);
+    const hash = exportHash(wiki);
+    expect(wiki.architecture.length).toBeGreaterThan(0);
+    expect(exportHash({ ...wiki, architecture: [] })).not.toBe(hash);
+    const changed = structuredClone(wiki);
+    const claim = changed.architecture[0]?.sections[0]?.claims[0];
+    if (claim === undefined) throw new Error("no About claim");
+    claim.text = `${claim.text} Changed.`;
+    expect(exportHash(changed)).not.toBe(hash);
+    const manifest = { ...wiki.manifest, features: wiki.manifest.features.slice(1) };
+    expect(exportHash({ ...wiki, manifest })).not.toBe(hash);
+  });
 });
 
 describe("openAnswerCache", () => {
@@ -143,5 +168,53 @@ describe("openAnswerCache", () => {
     expect(readFileSync(path, "utf8")).toBe(`${JSON.stringify(record(key(1)))}\n`);
     expect(cache.get(key(1))).toEqual(record(key(1)));
     expect(readdirSync(dir)).toEqual([ANSWERS_FILE]);
+  });
+
+  it("past 5 MB, keeps only the latest record of each key", () => {
+    const path = join(dir, ANSWERS_FILE);
+    const copy = (n: number) =>
+      `${JSON.stringify({ ...record(key(1)), at: `2026-10-05T12:00:${String(n % 60).padStart(2, "0")}.000Z` })}\n`;
+    const count = Math.ceil(COMPACT_BYTES / copy(0).length) + 1;
+    const last = { ...record(key(1)), at: "2026-10-06T00:00:00.000Z" };
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path,
+      `${Array.from({ length: count }, (_, n) => copy(n)).join("")}${JSON.stringify(last)}\n`,
+    );
+    const cache = openAnswerCache(dir, HASH);
+    expect(readFileSync(path, "utf8")).toBe(`${JSON.stringify(last)}\n`);
+    expect(cache.get(key(1))).toEqual(last);
+  });
+
+  it("past 5 MB, leaves a file it would remove nothing from as it is", () => {
+    const path = join(dir, ANSWERS_FILE);
+    const line = (n: number) => `${JSON.stringify(record(key(n)))}\n`;
+    const count = Math.ceil(COMPACT_BYTES / line(0).length) + 1;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, Array.from({ length: count }, (_, n) => line(n)).join(""));
+    const before = statSync(path);
+    const cache = openAnswerCache(dir, HASH);
+    const after = statSync(path);
+    expect([after.ino, after.mtimeMs, after.size]).toEqual([
+      before.ino,
+      before.mtimeMs,
+      before.size,
+    ]);
+    expect(cache.get(key(count - 1))).toBeDefined();
+  });
+
+  it("drops a file past its size bound before reading it, logging one line", () => {
+    const path = join(dir, ANSWERS_FILE);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, "");
+    truncateSync(path, MAX_CACHE_BYTES + 1);
+    const lines: string[] = [];
+    const cache = openAnswerCache(dir, HASH, (line) => lines.push(line));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/answers\.jsonl.*started again/);
+    expect(existsSync(path)).toBe(false);
+    expect(cache.skipped).toBe(0);
+    cache.append(record(key(1)));
+    expect(readFileSync(path, "utf8")).toBe(`${JSON.stringify(record(key(1)))}\n`);
   });
 });
