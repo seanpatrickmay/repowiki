@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, utimesSync } from "node:fs";
+import { join } from "node:path";
 import { type HistoryWiki, historyWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { serveWiki } from "./served.ts";
@@ -52,6 +53,29 @@ describe("createServer", () => {
         log: () => {},
       }),
     ).toThrow(ServerStartError);
+  });
+
+  it("clears a reload's problem once the export can be read again", () => {
+    const loads = [h.wiki, null, { ...h.wiki, exportedAt: "2026-10-06T00:00:00Z" }];
+    let n = 0;
+    let stamp = 0;
+    const server = createServer({
+      repo: h.repo.dir,
+      exportFile: join(h.repo.dir, "README.md"),
+      pinned: null,
+      log: () => {},
+      load: () => {
+        const next = loads[n++];
+        if (next === null || next === undefined) throw new Error("not json");
+        return next;
+      },
+    });
+    const touch = () => utimesSync(join(h.repo.dir, "README.md"), ++stamp, ++stamp);
+    touch();
+    expect(server.served().reloadProblem).toMatch(/^The export changed but could not be read/);
+    touch();
+    expect(server.served().reloadProblem).toBeNull();
+    expect(server.served().wiki.exportedAt).toBe("2026-10-06T00:00:00Z");
   });
 
   it("reports the package's version", () => {

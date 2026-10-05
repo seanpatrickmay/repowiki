@@ -45,8 +45,10 @@ async function main(): Promise<void> {
   });
   const { wiki, headDate } = server.served();
   console.error(startLine({ repo: wiki.repo, head: wiki.head, headDate, out, pinned }));
-  process.on("SIGTERM", () => process.exit(0));
-  process.on("SIGINT", () => process.exit(0));
+  // On a signal, the replies already written reach the client before the exit.
+  const stop = () => process.stdout.write("", () => process.exit(0));
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
   // The client stopped reading (EPIPE): no one is left to answer, so end quietly.
   process.stdout.on("error", () => process.exit(0));
   await serveStdio(server.protocol, {

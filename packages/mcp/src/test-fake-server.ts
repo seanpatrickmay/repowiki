@@ -17,6 +17,8 @@
  * - wrapper: as deaf, and starts a child that holds its stdout and stderr open for 30 s (its pid
  *   in `<pid file>.child`), as a wrapper command's server would.
  * - shut: closes its stdin after answering initialize, and stays alive.
+ * - old: answers initialize with a protocol version no client speaks.
+ * - hidden: answers tools/call with text holding a bidi override and a CRLF.
  */
 import { spawn } from "node:child_process";
 import { closeSync, writeFileSync } from "node:fs";
@@ -65,6 +67,14 @@ function handle(message: Message): void {
     }
     if (mode === "bad-init")
       return void send({ jsonrpc: "2.0", id, result: { protocolVersion: 5 } });
+    if (mode === "old") {
+      const serverInfo = { name: "fake", version: "1" };
+      return void send({
+        jsonrpc: "2.0",
+        id,
+        result: { protocolVersion: "1999-01-01", serverInfo },
+      });
+    }
     if (mode === "shut") {
       setTimeout(() => {
         process.stdin.destroy();
@@ -93,6 +103,9 @@ function handle(message: Message): void {
       id,
       result: { content: [{ type: "text", text: `echo ${JSON.stringify(args)}` }] },
     };
+    if (mode === "hidden") {
+      reply.result.content[0] = { type: "text", text: "a\u202Eb\r\nc" };
+    }
     if (mode === "split") {
       reply.result.content[0] = { type: "text", text: "caf\u00e9 au lait" };
       const bytes = Buffer.from(`${JSON.stringify(reply)}\n`, "utf8");

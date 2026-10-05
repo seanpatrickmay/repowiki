@@ -1,5 +1,12 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { cut, oneLine, type ToolDefinition, type ToolOutput, type ToolSet } from "@repowiki/query";
+import {
+  cut,
+  oneLine,
+  type ToolDefinition,
+  type ToolOutput,
+  type ToolSet,
+  toolText,
+} from "@repowiki/query";
 import { z } from "zod";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "./protocol.ts";
 import { encodeMessage } from "./stdio.ts";
@@ -253,6 +260,12 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
       capabilities: {},
       clientInfo: { name: "repowiki-client", version: "0.0.0" },
     });
+    const version = init.protocolVersion;
+    if (!(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(version)) {
+      throw new McpClientError(
+        `the MCP server speaks protocol version ${shown(version)}, which this client does not`,
+      );
+    }
   } catch (error) {
     closing = true;
     child.stdin.end();
@@ -273,7 +286,8 @@ export async function connectMcp(options: McpClientOptions): Promise<McpClient> 
     async callTool(name, args) {
       const result = await ask(CallToolResult, "tools/call", { name, arguments: args });
       const text = result.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("");
-      return { text, isError: result.isError === true };
+      // The server's text is data for an agent: no control or invisible character gets through.
+      return { text: toolText(text), isError: result.isError === true };
     },
     stderr: () => stderr,
     close,

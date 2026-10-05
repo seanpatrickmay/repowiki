@@ -43,8 +43,9 @@ export interface Protocol {
 }
 
 type Id = string | number;
+/** A JSON-RPC id MCP allows: a string or an integer (never null, never a fraction). */
 const isId = (id: unknown): id is Id =>
-  typeof id === "string" || (typeof id === "number" && Number.isFinite(id));
+  typeof id === "string" || (typeof id === "number" && Number.isSafeInteger(id));
 
 const error = (id: Id | null, code: number, message: string) => ({
   jsonrpc: "2.0",
@@ -81,7 +82,7 @@ export function createProtocol(options: ProtocolOptions): Protocol {
       );
     }
     if (!hasId) return null;
-    if (!isId(id)) return error(null, INVALID_REQUEST, "a request id is a string or a number");
+    if (!isId(id)) return error(null, INVALID_REQUEST, "a request id is a string or an integer");
     const args =
       typeof params === "object" && params !== null ? (params as Record<string, unknown>) : {};
     switch (method) {

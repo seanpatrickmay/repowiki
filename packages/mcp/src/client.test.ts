@@ -148,6 +148,31 @@ describe("connectMcp", () => {
   );
 
   it(
+    "kills a server that answers with a protocol version it does not speak",
+    async () => {
+      const { options, pid } = fake("old");
+      await expect(connectMcp(options)).rejects.toThrow(
+        "the MCP server speaks protocol version 1999-01-01, which this client does not",
+      );
+      expect(await gone(pid())).toBe(true);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "gives the agent a tool's text as data: invisible characters marked, CRLF as LF",
+    async () => {
+      const client = await connectMcp(fake("hidden").options);
+      try {
+        expect((await client.callTool("echo", {})).text).toBe("a\uFFFDb\nc");
+      } finally {
+        await client.close();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "decodes a character split across two reads of the server's output",
     async () => {
       const client = await connectMcp(fake("split").options);
