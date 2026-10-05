@@ -28,9 +28,10 @@ import {
   SHA_A,
   SHA_B,
 } from "@repowiki/core/test-fixtures";
-import { openStore } from "@repowiki/engine";
+import { openStore, readHistory } from "@repowiki/engine";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILD_LOCK } from "./wiki-cli.ts";
+import { checkWiki } from "./wiki-problems.ts";
 
 /** Damages every stored page body, as a hand-edited or half-migrated store would be. */
 function corruptPages(out: string): void {
@@ -1325,5 +1326,75 @@ describe("wiki-export.ts as a process (no network)", () => {
     expect(missing.status).toBe(1);
     expect(missing.stderr).toBe(`no wiki at ${join(out, "wiki.db")}; run pnpm wiki:build first\n`);
     expect(existsSync(join(repo, "wiki"))).toBe(false);
+  });
+});
+
+describe("checkWiki, in process, when a cited sha cannot be read", () => {
+  /** A store whose one page cites src/app.ts:1 at `cited`, with the head at the repo's sha. */
+  function citingStore(sha: string, cited: string) {
+    const store = openStore(join(dir, "wiki.db"));
+    store.putManifest(makeManifest({ sha }), { llmRevised: true });
+    store.putRevision(
+      makeRevision({
+        sha,
+        sections: [
+          { key: "lead", claims: [leadClaim({ supports: ["c-1"] })] },
+          {
+            key: "overview",
+            claims: [
+              bodyClaim({
+                citations: [
+                  codeCitation({
+                    path: "src/app.ts",
+                    startLine: 1,
+                    endLine: 1,
+                    sha: cited,
+                    symbol: null,
+                    contentHash: contentHash("export const app = 1;\n"),
+                  }),
+                ],
+              }),
+            ],
+          },
+        ],
+      }),
+    );
+    store.setHead(sha);
+    return store;
+  }
+
+  it("reports a sha the repository no longer holds as no such commit, not as a crash", async () => {
+    const { repo, sha } = gitRepo();
+    const store = citingStore(sha, SHA_B);
+    try {
+      const check = await checkWiki(store, repo, readHistory(repo, sha));
+      expect(check.problems).toHaveLength(1);
+      expect(check.problems[0]).toMatch(/^signals c-1 src\/app\.ts:1-1: no such commit b{40}$/);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reports nothing when the cited sha resolves", async () => {
+    const { repo, sha } = gitRepo();
+    const store = citingStore(sha, sha);
+    try {
+      expect((await checkWiki(store, repo, readHistory(repo, sha))).problems).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reports a cited sha as unreadable, and does not throw, when git fails for another reason", async () => {
+    const { repo, sha } = gitRepo();
+    const history = readHistory(repo, sha);
+    const store = citingStore(sha, sha);
+    try {
+      const check = await checkWiki(store, join(dir, "not-a-repo"), history);
+      expect(check.problems).toHaveLength(1);
+      expect(check.problems[0]).toContain(`no such commit ${sha}`);
+    } finally {
+      store.close();
+    }
   });
 });

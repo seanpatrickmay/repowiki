@@ -61,9 +61,8 @@ function spawnError(error: NodeJS.ErrnoException): GitError {
 }
 
 /** Runs a read-only git command against `repo`; never touches its working tree or index. */
-export function git(repo: string, args: readonly string[], input?: string): Buffer {
+export function git(repo: string, args: readonly string[]): Buffer {
   const result = spawnSync("git", ["-C", repo, ...args], {
-    input,
     maxBuffer: 1 << 30,
     env: scrubbedGitEnv(),
   });
@@ -127,28 +126,6 @@ export function listBlobs(repo: string, sha: string): TreeBlob[] {
     blobs.push({ path: entry.slice(tab + 1), oid, size: Number(size) });
   }
   return blobs.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-}
-
-/** Contents of the given blobs, keyed by object id. */
-export function readBlobs(repo: string, oids: readonly string[]): Map<string, Buffer> {
-  const unique = [...new Set(oids)];
-  const blobs = new Map<string, Buffer>();
-  if (unique.length === 0) return blobs;
-  const out = git(repo, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
-  let offset = 0;
-  while (offset < out.length) {
-    const headerEnd = out.indexOf(0x0a, offset);
-    const [oid, type, size] = out.subarray(offset, headerEnd).toString("utf8").split(" ");
-    if (oid === undefined || type !== "blob" || size === undefined) {
-      throw new GitError(
-        `unexpected cat-file header: ${out.subarray(offset, headerEnd).toString("utf8")}`,
-      );
-    }
-    const start = headerEnd + 1;
-    blobs.set(oid, out.subarray(start, start + Number(size)));
-    offset = start + Number(size) + 1;
-  }
-  return blobs;
 }
 
 /** How much of a blob's start is kept to decide whether it is binary. */

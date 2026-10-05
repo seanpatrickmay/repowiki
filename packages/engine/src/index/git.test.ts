@@ -6,7 +6,6 @@ import {
   commitFiles,
   GitError,
   listBlobs,
-  readBlobs,
   resolveCommit,
   scrubbedGitEnv,
   streamBlobs,
@@ -45,7 +44,7 @@ describe("inherited git environment", () => {
     "GIT_COMMON_DIR",
   ] as const;
 
-  it.each(VARS)("ignores an inherited %s", (name) => {
+  it.each(VARS)("ignores an inherited %s", async (name) => {
     const saved = process.env[name];
     try {
       process.env[name] = join(tmpdir(), "repowiki-bogus-git-env", name);
@@ -54,12 +53,14 @@ describe("inherited git environment", () => {
       expect(resolveCommit(repo.dir, "HEAD")).toBe(sha);
       const blobs = listBlobs(repo.dir, sha);
       expect(blobs.map((b) => b.path)).toEqual(["a.py"]);
-      expect(
-        readBlobs(
-          repo.dir,
-          blobs.map((b) => b.oid),
-        ).size,
-      ).toBe(1);
+      let streamed = 0;
+      for await (const _blob of streamBlobs(
+        repo.dir,
+        blobs.map((b) => b.oid),
+        100,
+      ))
+        streamed++;
+      expect(streamed).toBe(1);
       expect(commitFiles(repo.dir, sha)).toEqual([["a.py"]]);
     } finally {
       if (saved === undefined) delete process.env[name];
@@ -131,35 +132,6 @@ describe("listBlobs", () => {
     repo.write("a.txt", "hello\n");
     const sha = repo.commit("add a");
     expect(listBlobs(repo.dir, sha)).toEqual([expect.objectContaining({ path: "a.txt", size: 6 })]);
-  });
-});
-
-describe("readBlobs", () => {
-  it("returns exact bytes, including binary and empty files", () => {
-    const binary = Buffer.from([0x89, 0x50, 0x00, 0x0a, 0xff]);
-    repo.write("img.png", binary);
-    repo.write("empty.py", "");
-    repo.write("a.py", "x = 1\n");
-    const sha = repo.commit("add files");
-    const blobs = listBlobs(repo.dir, sha);
-    const contents = readBlobs(
-      repo.dir,
-      blobs.map((blob) => blob.oid),
-    );
-    const byPath = (path: string) => contents.get(blobs.find((b) => b.path === path)?.oid ?? "");
-    expect(byPath("img.png")).toEqual(binary);
-    expect(byPath("empty.py")).toEqual(Buffer.alloc(0));
-    expect(byPath("a.py")?.toString("utf8")).toBe("x = 1\n");
-  });
-
-  it("returns an empty map for no oids", () => {
-    expect(readBlobs(repo.dir, []).size).toBe(0);
-  });
-
-  it("throws GitError for an object that does not exist", () => {
-    repo.write("a.py", "x = 1\n");
-    repo.commit("add a");
-    expect(() => readBlobs(repo.dir, ["0".repeat(40)])).toThrow(GitError);
   });
 });
 

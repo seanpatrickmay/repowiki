@@ -26,15 +26,43 @@ export interface WikiCheck {
   pageless: number;
 }
 
-/** readSources at each sha it is asked for, read once per sha. */
-function sourcesReader(repo: string): (sha: string) => ReadonlyMap<string, string> {
-  const bySha = new Map<string, ReadonlyMap<string, string>>();
-  return (sha) => {
-    let sources = bySha.get(sha);
-    if (sources === undefined) {
-      sources = readSources(repo, sha, DEFAULT_MAX_FILE_BYTES);
-      bySha.set(sha, sources);
+/** What the stored checks cite: a page revision or the article. */
+interface Cited {
+  sections: readonly {
+    claims: readonly { citations: readonly { kind: string; sha?: string }[] }[];
+  }[];
+}
+
+/**
+ * readSources at every sha the given pages cite code at, each read once. The check itself is
+ * synchronous, so the reads happen up front; a sha git cannot read (a commit the repository no
+ * longer holds) throws when the check asks for it, so it is reported against its citations.
+ */
+async function sourcesReader(
+  repo: string,
+  pages: readonly Cited[],
+): Promise<(sha: string) => ReadonlyMap<string, string>> {
+  const shas = new Set(
+    pages.flatMap((p) =>
+      p.sections.flatMap((s) =>
+        s.claims.flatMap((c) =>
+          c.citations.flatMap((x) => (x.kind === "code" && x.sha !== undefined ? [x.sha] : [])),
+        ),
+      ),
+    ),
+  );
+  const bySha = new Map<string, ReadonlyMap<string, string> | Error>();
+  for (const sha of shas) {
+    try {
+      bySha.set(sha, await readSources(repo, sha, DEFAULT_MAX_FILE_BYTES));
+    } catch (error) {
+      bySha.set(sha, error instanceof Error ? error : new Error(String(error)));
     }
+  }
+  return (sha) => {
+    const sources = bySha.get(sha);
+    if (sources === undefined) throw new Error(`sources at ${sha} were not read`);
+    if (sources instanceof Error) throw sources;
     return sources;
   };
 }
@@ -46,16 +74,16 @@ function sourcesReader(repo: string): (sha: string) => ReadonlyMap<string, strin
  * commits reachable from `sha`), and every diagram is safe. Links are checked on the current
  * wiki only (checkWiki), since the pages that held them may have changed since.
  */
-export function checkStoredAt(
+export async function checkStoredAt(
   store: Store,
   repo: string,
   sha: string,
   history: ReturnType<typeof readHistory>,
-): string[] {
-  const sourcesAt = sourcesReader(repo);
+): Promise<string[]> {
   const features = store.getLatestManifest()?.features ?? [];
   const pages = features.flatMap((f) => store.listHistory(f.id).filter((r) => r.sha === sha));
   const articles = store.listArchitectureHistory().filter((a) => a.sha === sha);
+  const sourcesAt = await sourcesReader(repo, [...pages, ...articles]);
   return [
     ...pages.flatMap((page) => [
       ...revisionProblems(page, sourcesAt),
@@ -72,18 +100,18 @@ export function checkStoredAt(
  * and every link and See also entry was valid in the manifest at its page's own sha (a link may
  * name a disambiguation page) and still leads to a page today, the About article included.
  */
-export function checkWiki(
+export async function checkWiki(
   store: Store,
   repo: string,
   history: ReturnType<typeof readHistory>,
-): WikiCheck {
+): Promise<WikiCheck> {
   const manifest = store.getLatestManifest();
   const pages = store.listCurrentRevisions();
   if (manifest === null) {
     return { pages: 0, article: false, code: 0, commits: 0, problems: [], pageless: 0 };
   }
-  const sourcesAt = sourcesReader(repo);
   const article = store.getCurrentArchitecture();
+  const sourcesAt = await sourcesReader(repo, [...pages, ...(article === null ? [] : [article])]);
   // The manifest a page or the article was written against, read and parsed once per sha.
   // Manifests are append-only, so a sha with none means a damaged or imported store; the
   // check then falls back to the current manifest, which judges the page as if it were
