@@ -39,9 +39,17 @@ const BOOST: Readonly<Record<SearchField, number>> = { title: 3, aliases: 2, lea
 const K1 = 1.2;
 const B = 0.75;
 
+/** One match and its BM25F score. */
+export interface RankedMatch {
+  id: string;
+  score: number;
+}
+
 export interface SearchIndex {
   /** Ids of the best matches for `query`, best first, ties by id; at most `limit`. */
   search(query: string, limit: number): string[];
+  /** The same matches in the same order, with their scores (issue mapping's `search`, C3). */
+  ranked(query: string, limit: number): RankedMatch[];
 }
 
 /**
@@ -82,27 +90,29 @@ export function searchIndex<F extends string>(
   for (const doc of counted)
     for (const word of doc.tf.keys()) df.set(word, (df.get(word) ?? 0) + 1);
   const n = counted.length;
-  return {
-    search(query, limit) {
-      const words = [...new Set(terms(query))];
-      const scored = counted.flatMap((doc) => {
-        let score = 0;
-        for (const word of words) {
-          const byField = doc.tf.get(word);
-          if (byField === undefined) continue;
-          let weighted = 0;
-          for (const [field, count] of byField) {
-            const norm = 1 - B + B * (doc.lengths[field] / (average[field] || 1));
-            weighted += (boost[field] * count) / norm;
-          }
-          const d = df.get(word) ?? 0;
-          const idf = Math.log(1 + (n - d + 0.5) / (d + 0.5));
-          score += (idf * (weighted * (K1 + 1))) / (weighted + K1);
+  const ranked = (query: string, limit: number): RankedMatch[] => {
+    const words = [...new Set(terms(query))];
+    const scored = counted.flatMap((doc) => {
+      let score = 0;
+      for (const word of words) {
+        const byField = doc.tf.get(word);
+        if (byField === undefined) continue;
+        let weighted = 0;
+        for (const [field, count] of byField) {
+          const norm = 1 - B + B * (doc.lengths[field] / (average[field] || 1));
+          weighted += (boost[field] * count) / norm;
         }
-        return score > 0 ? [{ id: doc.id, score }] : [];
-      });
-      scored.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      return scored.slice(0, Math.max(0, Math.trunc(limit))).map((s) => s.id);
-    },
+        const d = df.get(word) ?? 0;
+        const idf = Math.log(1 + (n - d + 0.5) / (d + 0.5));
+        score += (idf * (weighted * (K1 + 1))) / (weighted + K1);
+      }
+      return score > 0 ? [{ id: doc.id, score }] : [];
+    });
+    scored.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return scored.slice(0, Math.max(0, Math.trunc(limit)));
+  };
+  return {
+    search: (query, limit) => ranked(query, limit).map((match) => match.id),
+    ranked,
   };
 }
