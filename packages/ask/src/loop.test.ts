@@ -5,7 +5,7 @@ import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ASK_MAX_TOKENS, AskError, askQuestion, CALL_ANSWER_NOW, turnBound } from "./loop.ts";
 import { askIndexes } from "./pack.ts";
-import { answerTool } from "./prompt.ts";
+import { answerTool, MAX_TURNS } from "./prompt.ts";
 import {
   answerTurn,
   SCRIPTED_MODEL,
@@ -234,5 +234,23 @@ describe("askQuestion", () => {
       (Math.ceil(chars / 2.5) * 1 + 1000 * 5) / 1_000_000,
       12,
     );
+  });
+
+  it("stops after its last allowed turn when the provider ignores the forced answer", async () => {
+    const search: ScriptedTurn = { tool: "search", input: { query: "signals" } };
+    const { response, requests } = await ask(Array(12).fill(search), { questionUsd: 1 });
+    expect(requests).toHaveLength(MAX_TURNS);
+    expect(requests.at(-1)?.toolChoice).toEqual({ tool: "answer" });
+    expect(response).toMatchObject({ status: "not-found", refused: 1, cost: { turns: MAX_TURNS } });
+  });
+
+  it("takes at most one turn more than MAX_TURNS for a retry the provider does not answer", async () => {
+    const search: ScriptedTurn = { tool: "search", input: { query: "signals" } };
+    const refused = answerTurn([["It is in `nowhere_at_all`.", ["signals#s-1"]]]);
+    const { response, requests } = await ask([search, search, search, refused, search, search], {
+      questionUsd: 1,
+    });
+    expect(requests).toHaveLength(MAX_TURNS + 1);
+    expect(response).toMatchObject({ status: "not-found", cost: { turns: MAX_TURNS + 1 } });
   });
 });

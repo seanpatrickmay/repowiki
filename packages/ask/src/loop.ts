@@ -108,7 +108,9 @@ export function retryText(checked: CheckedAnswer): string {
  * the loop); turn MAX_TURNS forces `answer`, as does the turn after one answered in prose, and
  * any turn whose upper bound leaves no room under the question's cap for another. A turn whose
  * bound would cross the cap is not taken (status budget). An answer with every sentence refused,
- * or more than half, is asked once more with the reasons; the second result stands. No prompt
+ * or more than half, is asked once more with the reasons; the second result stands. A forced
+ * turn that does not call `answer` ends the question with no answer whatever the provider sent,
+ * so a question takes at most MAX_TURNS turns, plus one for the retry. No prompt
  * caching (R11), temperature 0, purpose `ask`.
  */
 export async function askQuestion(options: AskQuestionOptions): Promise<AskResult> {
@@ -209,12 +211,13 @@ export async function askQuestion(options: AskQuestionOptions): Promise<AskResul
       checked = answer;
       break;
     }
+    if (next.toolChoice !== "auto") {
+      // A forced turn that did not answer (prose, or another tool when the provider ignored
+      // tool_choice) ends the question: the turn bound is the loop's, not the provider's.
+      checked = { status: null, sentences: [], readNext: [], refusals: [] };
+      break;
+    }
     if (first === undefined) {
-      if (next.toolChoice !== "auto") {
-        // A forced turn that did not answer: nothing to show.
-        checked = { status: null, sentences: [], readNext: [], refusals: [] };
-        break;
-      }
       messages.push({
         role: "assistant",
         content: echoed.length > 0 ? echoed : [{ type: "text", text: "(no answer yet)" }],
