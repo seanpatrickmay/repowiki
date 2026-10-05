@@ -230,7 +230,11 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  await started.mcp?.close();
-  exitWithError(err);
+  // The run's own error is the one to report, even if stopping the server fails too.
+  try {
+    await started.mcp?.close();
+  } finally {
+    exitWithError(err);
+  }
 }
 await started.mcp?.close();

@@ -170,6 +170,29 @@ describe("checkRecords", () => {
       ),
     );
   });
+
+  it("refuses a record of an agent the run did not ask, so a resume never judges it", () => {
+    const failure = {
+      kind: "judge-failure" as const,
+      questionId: "smoke-where",
+      agent: "repo+mcp" as const,
+      reason: "r",
+      usage: { in: 1, out: 1, cacheRead: 0, cacheWrite: 0 },
+      usd: 0,
+      model: "m",
+      batch: true,
+      at: "2026-10-04T12:02:00.000Z",
+    };
+    expect(() => checkRecords(dir, info, [{ ...answer, agent: "mcp" }])).toThrow(
+      new EvalRunError(
+        `${join(dir, RESULTS_FILE)} holds a record of the mcp agent, which this run does not ask (it asks wiki, repo)`,
+      ),
+    );
+    expect(() => checkRecords(dir, info, [failure])).toThrow(/of the repo\+mcp agent, which/);
+    expect(() =>
+      checkRecords(dir, { ...info, agents: ["wiki", "repo", "repo+mcp"] }, [failure]),
+    ).not.toThrow();
+  });
 });
 
 describe("readRecords", () => {
