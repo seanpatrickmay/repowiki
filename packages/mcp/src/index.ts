@@ -1,5 +1,15 @@
 export { createAgentTools, TOOL_TITLES, wikiTools } from "./agent-tools.ts";
 export {
+  connectMcp,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  type McpClient,
+  McpClientError,
+  type McpClientOptions,
+  type McpServerInfo,
+  type McpTool,
+  mcpToolSet,
+} from "./client.ts";
+export {
   citedCode,
   commitDetails,
   DEFAULT_CONTEXT_LINES,

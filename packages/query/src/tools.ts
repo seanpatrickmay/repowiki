@@ -18,9 +18,17 @@ export interface ToolOutput {
   isError: boolean;
 }
 
-/** The tools one agent has, and how to run a call to one of them. */
+/**
+ * The tools one agent has, and how to run a call to one of them. A call may answer at once or
+ * later (the MCP client's tools answer over stdio), so the agent loop awaits it.
+ */
 export interface ToolSet {
   definitions: readonly ToolDefinition[];
+  run(name: string, input: unknown): ToolOutput | Promise<ToolOutput>;
+}
+
+/** A ToolSet run in this process, whose calls answer at once. */
+export interface LocalToolSet extends ToolSet {
   run(name: string, input: unknown): ToolOutput;
 }
 
@@ -96,7 +104,7 @@ export function defineTool<S extends z.ZodType>(
  * A set of tools: an unknown tool name is an error result naming the tools there are. Two tools
  * of one name are refused, as the API refuses them.
  */
-export function toolSet(tools: readonly Tool[]): ToolSet {
+export function toolSet(tools: readonly Tool[]): LocalToolSet {
   const byName = new Map<string, Tool>();
   for (const tool of tools) {
     if (byName.has(tool.definition.name)) {

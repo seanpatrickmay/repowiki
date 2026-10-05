@@ -4,10 +4,10 @@ import {
   count,
   cut,
   defineTool,
+  type LocalToolSet,
   MAX_TOOL_RESULT_CHARS,
   oneLine,
   ToolError,
-  type ToolSet,
   toolSet,
   toolText,
 } from "@repowiki/query";
@@ -217,7 +217,7 @@ export function createRepoTools(
   repoDir: string,
   sha: string,
   options: { grepTimeoutMs?: number } = {},
-): ToolSet {
+): LocalToolSet {
   const grepTimeoutMs = options.grepTimeoutMs ?? GREP_TIMEOUT_MS;
   assertSha(sha);
   const repo = topLevel(repoDir);

@@ -120,20 +120,23 @@ export async function runAgent(options: AgentOptions): Promise<AgentAnswer> {
     // The API refuses a whitespace-only text block, which a model may write before a tool call.
     const echoed = result.content.filter((b) => b.type !== "text" || b.text.trim() !== "");
     messages.push({ role: "assistant", content: echoed });
-    const results = uses.map((use, i): ToolResultBlock => {
+    const results: ToolResultBlock[] = [];
+    for (const [i, use] of uses.entries()) {
       if (i > 0) {
         const content = "Not run: call one tool per turn.";
-        return { type: "tool_result", toolUseId: use.id, content, isError: true };
+        results.push({ type: "tool_result", toolUseId: use.id, content, isError: true });
+        continue;
       }
-      const output = tools.run(use.name, use.input);
+      // A tool may answer later (the MCP client's do), so every call is awaited.
+      const output = await tools.run(use.name, use.input);
       calls.push({ turn, name: use.name, input: use.input, isError: output.isError });
-      return {
+      results.push({
         type: "tool_result",
         toolUseId: use.id,
         content: output.text,
         isError: output.isError,
-      };
-    });
+      });
+    }
     messages.push({ role: "user", content: results });
   }
 }
