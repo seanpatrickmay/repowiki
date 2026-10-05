@@ -20,4 +20,16 @@ export {
   type HeadStatus,
   MAX_CACHED_MARKS,
 } from "./head-status.ts";
+export {
+  createProtocol,
+  INVALID_PARAMS,
+  INVALID_REQUEST,
+  METHOD_NOT_FOUND,
+  PARSE_ERROR,
+  type Protocol,
+  type ProtocolOptions,
+  type ProtocolTools,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "./protocol.ts";
 export { MAX_AS_OF_VIEWS, type ServedWiki, type ServeOptions, serveWiki } from "./served.ts";
+export { encodeMessage, MAX_LINE_BYTES, type StdioOptions, serveStdio } from "./stdio.ts";
