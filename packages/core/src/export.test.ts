@@ -4,8 +4,12 @@ import type { Revision } from "./revision.ts";
 import {
   architectureClaim,
   makeArchitecture,
+  makeInFlight,
+  makeInFlightIssue,
+  makeInFlightPull,
   makeManifest,
   makeRevision,
+  SHA_A,
   SHA_B,
 } from "./test-fixtures.ts";
 
@@ -24,6 +28,7 @@ function makeExport(overrides: Partial<WikiExport> = {}): WikiExport {
     wikipedia: {},
     architecture: [],
     runs: [],
+    inflight: null,
     ...overrides,
   };
 }
@@ -96,6 +101,43 @@ describe("WikiExport", () => {
       "architecture claim a-2 names deliverables, which has no page",
       "architecture edge deliverables -> signals joins a feature with no page",
     ]);
+  });
+
+  it("carries a work-in-flight snapshot, and defaults it to null (spec v2 #9 R14)", () => {
+    const inflight = makeInFlight();
+    expect(WikiExport.parse(makeExport({ inflight })).inflight).toEqual(inflight);
+    const { inflight: _omitted, ...without } = makeExport();
+    expect(WikiExport.parse(without).inflight).toBeNull();
+  });
+
+  it("refuses a snapshot naming a feature the manifest lacks", () => {
+    const pull = makeInFlightPull();
+    const ghost = { ...pull.features[0], featureId: "ghost" } as (typeof pull.features)[number];
+    const issue = makeInFlightIssue({
+      features: [{ featureId: "ghost", kind: "name", detail: "x" }],
+    });
+    const inflight = makeInFlight({
+      pulls: [{ ...pull, features: [...pull.features, ghost], summary: null }],
+      issues: [issue],
+    });
+    expect(messages(makeExport({ inflight }))).toEqual([
+      "ghost is not in the manifest",
+      "ghost is not in the manifest",
+    ]);
+  });
+
+  it("checks effects against the current pages only when derived at the export's head", () => {
+    // Derived against SHA_A, an older head than the export's SHA_B: shown as stale, not refused.
+    expect(messages(makeExport({ inflight: makeInFlight({ wikiHead: SHA_A }) }))).toEqual([]);
+    expect(messages(makeExport({ inflight: makeInFlight({ wikiHead: SHA_B }) }))).toEqual([
+      "claim c-1 is not on the current page of signals",
+      "claim lead-1 is not on the current page of signals",
+    ]);
+    const current = makeInFlightPull({
+      effects: makeInFlightPull().effects.map((e) => ({ ...e, revisionId: "rev-2" })),
+    });
+    const inflight = makeInFlight({ wikiHead: SHA_B, pulls: [current] });
+    expect(messages(makeExport({ inflight }))).toEqual([]);
   });
 
   it("accepts a consistent export with full revision bodies in history", () => {

@@ -85,8 +85,18 @@ export {
   INFLIGHT_MAX_SUMMARY_CLAIMS,
   INFLIGHT_REASON_MAX_LENGTH,
   INFLIGHT_TITLE_MAX_LENGTH,
+  InFlight,
+  InFlightClaim,
+  InFlightEffect,
+  InFlightFeature,
+  InFlightFile,
+  InFlightIssue,
+  InFlightPull,
+  InFlightSummary,
+  IssueEvidence,
   inflightBody,
   inflightLine,
+  inflightProblems,
 } from "./inflight.ts";
 export { LedgerEntry, LlmConfigFile, LlmRole, RunKind } from "./llm.ts";
 export {

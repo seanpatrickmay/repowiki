@@ -4,7 +4,14 @@ import type { CodeCitation, CommitCitation } from "./citation.ts";
 import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
 import type { Feature } from "./feature.ts";
-import type { GitHubIssue, GitHubPull, GitHubSnapshot } from "./inflight.ts";
+import type {
+  GitHubIssue,
+  GitHubPull,
+  GitHubSnapshot,
+  InFlight,
+  InFlightIssue,
+  InFlightPull,
+} from "./inflight.ts";
 import type { LedgerEntry } from "./llm.ts";
 import type { Manifest } from "./manifest.ts";
 import type { Revision } from "./revision.ts";
@@ -280,6 +287,110 @@ export const DEMO_REPO = {
   private: false,
   defaultBranch: "main",
 };
+
+/**
+ * Open pull request #12 at SHA_C: it changes ingest.py in signals, would make the signals page's
+ * c-1 (and the lead that summarizes it) stale, closes issue #7, and has a one-claim summary.
+ */
+export function makeInFlightPull(overrides: Partial<InFlightPull> = {}): InFlightPull {
+  return {
+    number: 12,
+    title: "Page through long chunks",
+    author: { login: "octo-dev", bot: false },
+    draft: false,
+    createdAt: "2026-10-01T09:00:00Z",
+    updatedAt: "2026-10-03T09:00:00Z",
+    baseRef: "main",
+    labels: ["area:signals"],
+    closes: [7],
+    head: "fetched",
+    headSha: SHA_C,
+    mergeBase: SHA_A,
+    merge: "clean",
+    files: [
+      {
+        path: "src/signals/ingest.py",
+        oldPath: "src/signals/ingest.py",
+        status: "modified",
+        additions: 6,
+        deletions: 2,
+        featureId: "signals",
+        placement: "member",
+      },
+    ],
+    filesTruncated: 0,
+    features: [
+      {
+        featureId: "signals",
+        files: 1,
+        changedLines: 8,
+        added: 0,
+        removed: 0,
+        churn: 0,
+        drifts: false,
+      },
+    ],
+    effects: [
+      {
+        featureId: "signals",
+        revisionId: "rev-1",
+        claimId: "c-1",
+        reason: "src/signals/ingest.py:10-24 at aaaaaaa: the cited lines changed",
+        certain: true,
+      },
+      {
+        featureId: "signals",
+        revisionId: "rev-1",
+        claimId: "lead-1",
+        reason: "it summarizes c-1, which changed",
+        certain: true,
+      },
+    ],
+    summary: {
+      model: "claude-haiku-4-5-20251001",
+      generatedAt: "2026-10-03T10:00:00Z",
+      tokens: { in: 4000, out: 300, cacheRead: 0, cacheWrite: 0 },
+      claims: [
+        {
+          id: "p12-c1",
+          text: "The pull request makes `ingest_chunk` page through long chunks.",
+          citations: [codeCitation({ sha: SHA_C })],
+          features: ["signals"],
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+/** Open issue #7, which #12 closes and which maps to signals through it. */
+export function makeInFlightIssue(overrides: Partial<InFlightIssue> = {}): InFlightIssue {
+  return {
+    number: 7,
+    title: "Long chunks lose signals",
+    author: { login: "reporter", bot: false },
+    labels: ["bug"],
+    createdAt: "2026-09-20T09:00:00Z",
+    updatedAt: "2026-10-02T09:00:00Z",
+    features: [{ featureId: "signals", kind: "pull", detail: "#12" }],
+    pulls: [12],
+    ...overrides,
+  };
+}
+
+/** A snapshot of acme/demo derived against SHA_A, the head of makeRevision()'s page. */
+export function makeInFlight(overrides: Partial<InFlight> = {}): InFlight {
+  return {
+    repo: DEMO_REPO,
+    fetchedAt: "2026-10-03T09:30:00Z",
+    derivedAt: "2026-10-03T10:00:00Z",
+    wikiHead: SHA_A,
+    pulls: [makeInFlightPull()],
+    issues: [makeInFlightIssue()],
+    omitted: { pulls: 0, issues: 0 },
+    ...overrides,
+  };
+}
 
 /** Pull request #12 as the GitHub snapshot stores it. */
 export function makeGitHubPull(overrides: Partial<GitHubPull> = {}): GitHubPull {
