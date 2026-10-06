@@ -99,12 +99,78 @@ function featureLookup(manifests: readonly Manifest[]): (path: string) => string
 }
 
 /** A pull request's merge commit or squash commit (R6). */
-interface Landing {
+export interface Landing {
   number: number;
+  /** The landing commit: the merge, or the squash commit. */
+  sha: string;
   title: string | null;
   mergedAt: string;
   /** The merge's author group; null for a squash. */
   merger: number | null;
+}
+
+/**
+ * Each pull request's landing (R6), from the commits newest first (topologicalNewestFirst): a
+ * "Merge pull request #N" merge with its body's title line, or a non-merge "Title (#N)" squash.
+ * The newest landing of a number wins.
+ */
+export function pullRequestLandings(
+  commits: readonly AuthoredCommit[],
+  groupOf: (c: AuthoredCommit) => number,
+): Map<number, Landing> {
+  const landings = new Map<number, Landing>();
+  for (const commit of commits) {
+    const number = pullRequestOf(commit.subject);
+    if (number === null || landings.has(number)) continue;
+    const merge = commit.parents.length > 1;
+    if (merge && /^Merge pull request #/.test(commit.subject)) {
+      landings.set(number, {
+        number,
+        sha: commit.sha,
+        title: commit.mergeTitle === null ? null : cleanPullTitle(commit.mergeTitle),
+        mergedAt: commit.authorDate,
+        merger: groupOf(commit),
+      });
+    } else if (!merge) {
+      landings.set(number, {
+        number,
+        sha: commit.sha,
+        title: cleanPullTitle(commit.subject.replace(/\s*\(#\d{1,9}\)\s*$/, "")),
+        mergedAt: commit.authorDate,
+        merger: null,
+      });
+    }
+  }
+  return landings;
+}
+
+/**
+ * Each pull request's author group (R6): the group with most of its non-merge commits, ties to
+ * the earliest first commit, then the lower group. A pull request whose commits are all unknown
+ * has none.
+ */
+export function pullRequestAuthors(
+  landings: ReadonlyMap<number, Landing>,
+  commits: readonly AuthoredCommit[],
+  groupOf: (c: AuthoredCommit) => number,
+): Map<number, number> {
+  const tallies = new Map<number, Map<number, { n: number; first: number }>>();
+  for (const commit of commits) {
+    if (commit.pr === null || commit.parents.length > 1 || !landings.has(commit.pr)) continue;
+    const tally = tallies.get(commit.pr) ?? new Map<number, { n: number; first: number }>();
+    tallies.set(commit.pr, tally);
+    const g = groupOf(commit);
+    const was = tally.get(g) ?? { n: 0, first: Number.POSITIVE_INFINITY };
+    tally.set(g, { n: was.n + 1, first: Math.min(was.first, Date.parse(commit.authorDate)) });
+  }
+  const authors = new Map<number, number>();
+  for (const [number, tally] of tallies) {
+    const best = [...tally].sort(
+      ([ga, a], [gb, b]) => b.n - a.n || a.first - b.first || ga - gb,
+    )[0];
+    if (best !== undefined && best[0] !== -1) authors.set(number, best[0]);
+  }
+  return authors;
 }
 
 /**
@@ -203,41 +269,8 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
   for (const { path, lines: n } of input.ownership.timedOut) add(path, -1, n);
 
   // Pull requests (R6): landed by a "Merge pull request #N" merge, or a "Title (#N)" squash.
-  const landings = new Map<number, Landing>();
-  for (const commit of commits) {
-    const number = pullRequestOf(commit.subject);
-    if (number === null || landings.has(number)) continue;
-    const merge = commit.parents.length > 1;
-    if (merge && /^Merge pull request #/.test(commit.subject)) {
-      landings.set(number, {
-        number,
-        title: commit.mergeTitle === null ? null : cleanPullTitle(commit.mergeTitle),
-        mergedAt: commit.authorDate,
-        merger: groupOf(commit),
-      });
-    } else if (!merge) {
-      landings.set(number, {
-        number,
-        title: cleanPullTitle(commit.subject.replace(/\s*\(#\d{1,9}\)\s*$/, "")),
-        mergedAt: commit.authorDate,
-        merger: null,
-      });
-    }
-  }
-  const prAuthor = new Map<number, number>();
-  for (const number of landings.keys()) {
-    const tally = new Map<number, { n: number; first: number }>();
-    for (const commit of commits) {
-      if (commit.pr !== number || commit.parents.length > 1) continue;
-      const g = groupOf(commit);
-      const was = tally.get(g) ?? { n: 0, first: Number.POSITIVE_INFINITY };
-      tally.set(g, { n: was.n + 1, first: Math.min(was.first, Date.parse(commit.authorDate)) });
-    }
-    const best = [...tally].sort(
-      ([ga, a], [gb, b]) => b.n - a.n || a.first - b.first || ga - gb,
-    )[0];
-    if (best !== undefined && best[0] !== -1) prAuthor.set(number, best[0]);
-  }
+  const landings = pullRequestLandings(commits, groupOf);
+  const prAuthor = pullRequestAuthors(landings, commits, groupOf);
 
   const people: PersonFacts[] = [];
   const others = new Map<string, ActivityDay>();

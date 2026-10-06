@@ -27,6 +27,16 @@ export {
   type Ownership,
 } from "./ownership.ts";
 export {
+  ancestorsOf,
+  buildPersonPack,
+  MAX_MERGED_LISTED,
+  type PackInput,
+  PERSON_BUDGET_TOKENS,
+  type PersonPack,
+  packFor,
+  packText,
+} from "./pack.ts";
+export {
   type PeopleRead,
   type ReadInput,
   type Refreshed,
@@ -38,6 +48,9 @@ export { type Assigned, assignIds } from "./registry.ts";
 export {
   type ComputedSnapshot,
   computeSnapshot,
+  type Landing,
+  pullRequestAuthors,
+  pullRequestLandings,
   type SnapshotInput,
   topologicalNewestFirst,
 } from "./snapshot.ts";
