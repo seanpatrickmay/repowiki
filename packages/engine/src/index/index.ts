@@ -1,4 +1,5 @@
 export { type AuthoredCommit, type AuthoredFile, readAuthorship } from "./authorship.ts";
+export { MAX_BLOB_BYTES, readBlobAt } from "./blob.ts";
 export {
   DEFAULT_MAX_FILE_BYTES,
   type ImportEdge,
