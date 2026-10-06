@@ -1,5 +1,6 @@
 import {
   ASK_EXCERPT_LENGTH,
+  ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
   ASK_MAX_SENTENCES,
@@ -303,7 +304,8 @@ export function buildResponse(input: ResponseInput): AskResponse {
     for (const handle of sentence.handles) {
       if (kept.some((k) => k.handle === handle)) continue;
       const found = handleClaim(view, handle);
-      if (found === null) continue;
+      // A claim id longer than an answer may carry cannot be a source: drop it, not the answer.
+      if (found === null || found.claim.id.length > ASK_ID_MAX_LENGTH) continue;
       if (!numbers.has(handle)) {
         if (sources.length + added === ASK_MAX_SOURCES) continue;
         added++;

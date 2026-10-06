@@ -250,6 +250,30 @@ describe("buildResponse", () => {
     answeredAt: new Date("2026-10-05T12:00:00Z"),
   });
 
+  it("drops a claim whose id is too long for an answer, rather than fail the whole response", () => {
+    const long = "x".repeat(65);
+    const wiki = structuredClone(extendedWiki(sample));
+    wiki.pages
+      .find((p) => p.featureId === "signals")
+      ?.sections.find((s) => s.key === "overview")
+      ?.claims.push(
+        bodyClaim({ id: long, text: "A claim with a long id.", citations: [codeCitation()] }),
+      );
+    const longView = new WikiView(wiki);
+    const response = buildResponse({
+      ...base(),
+      view: longView,
+      indexes: askIndexes(longView),
+      sentences: [
+        { text: "Long.", handles: [`signals#${long}`] },
+        { text: "Short.", handles: [`signals#${long}`, "signals#s-1"] },
+      ],
+    });
+    expect(response.sentences).toEqual([{ text: "Short.", sources: [1] }]);
+    expect(response.sources.map((s) => s.claimId)).toEqual(["s-1"]);
+    expect(response.refused).toBe(1);
+  });
+
   it("numbers sources by first citation and links each claim", () => {
     const response = buildResponse({
       ...base(),
