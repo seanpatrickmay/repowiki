@@ -305,6 +305,39 @@ function stalled(first: string, fail?: Error) {
   return { response, cancel };
 }
 
+describe("frames after the answer", () => {
+  it.each([
+    [
+      "a second answer",
+      () =>
+        frame(
+          "answer",
+          makeAskResponse({ sentences: [{ text: "A second answer.", sources: [1, 2] }] }),
+        ),
+    ],
+    ["a status", () => frame("status", { step: "search", query: "late" })],
+  ])("ignores %s after the first answer", async (_name, late) => {
+    const { submit, live, result } = setup({
+      ask: async () => stream([frame("answer", makeAskResponse()) + late()]),
+    });
+    await submit("Where are signals made?");
+    await vi.waitFor(() => expect(text(result)).toContain("Signals are made by"));
+    expect(text(live)).toBe("");
+    expect(text(result)).not.toContain("A second answer.");
+  });
+
+  it("does not take a later answer when the first was not one", async () => {
+    const { submit, live } = setup({
+      ask: async () =>
+        stream([frame("answer", { status: "maybe" }) + frame("answer", makeAskResponse())]),
+    });
+    await submit("Where are signals made?");
+    await vi.waitFor(() =>
+      expect(text(live)).toBe("The answer could not be shown; here are the pages that match."),
+    );
+  });
+});
+
 describe("a served wiki that fails", () => {
   const ROUTED = ["/wiki/signals/", "/wiki/signals/#overview"];
   const links = (result: FakeElement) =>

@@ -1,28 +1,38 @@
 import { z } from "zod";
+import {
+  ASK_EXCERPT_LENGTH,
+  ASK_ID_MAX_LENGTH,
+  ASK_MAX_READ_NEXT,
+  ASK_MAX_SENTENCE_SOURCES,
+  ASK_MAX_SENTENCES,
+  ASK_MAX_SOURCES,
+  ASK_PAGE_MAX_LENGTH,
+  ASK_QUESTION_MAX_LENGTH,
+  ASK_SECTION_MAX_LENGTH,
+  ASK_SECTION_TITLE_MAX_LENGTH,
+  ASK_SENTENCE_MAX_LENGTH,
+  ASK_SUMMARY_MAX_LENGTH,
+  ASK_TITLE_MAX_LENGTH,
+  NOT_FOUND_SENTENCE,
+} from "./ask-limits.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 
-/** The longest question the sidebar takes, in code points after trimming (spec v2 #4 §5.1). */
-export const ASK_QUESTION_MAX_LENGTH = 500;
-/** The most sentences an answer shows. */
-export const ASK_MAX_SENTENCES = 6;
-/** The longest sentence shown, in code points. */
-export const ASK_SENTENCE_MAX_LENGTH = 400;
-/** The most claims one sentence cites. */
-export const ASK_MAX_SENTENCE_SOURCES = 4;
-/** The most sources one answer lists. */
-export const ASK_MAX_SOURCES = 12;
-/** The most pages an answer's Read next lists. */
-export const ASK_MAX_READ_NEXT = 3;
-/** The longest excerpt of a cited claim a source shows, in code points. */
-export const ASK_EXCERPT_LENGTH = 160;
-/** The longest page hint a request may carry: the longest page id an answer names. */
-export const ASK_PAGE_MAX_LENGTH = 64;
-/** The longest page summary in Read next, and the longest title, in code points. */
-export const ASK_SUMMARY_MAX_LENGTH = 200;
-export const ASK_TITLE_MAX_LENGTH = 200;
-
-/** A not-found answer's one sentence: fixed server text, never the model's (spec v2 #4 R26). */
-export const NOT_FOUND_SENTENCE = "The wiki does not cover this.";
+export {
+  ASK_EXCERPT_LENGTH,
+  ASK_ID_MAX_LENGTH,
+  ASK_MAX_READ_NEXT,
+  ASK_MAX_SENTENCE_SOURCES,
+  ASK_MAX_SENTENCES,
+  ASK_MAX_SOURCES,
+  ASK_PAGE_MAX_LENGTH,
+  ASK_QUESTION_MAX_LENGTH,
+  ASK_SECTION_MAX_LENGTH,
+  ASK_SECTION_TITLE_MAX_LENGTH,
+  ASK_SENTENCE_MAX_LENGTH,
+  ASK_SUMMARY_MAX_LENGTH,
+  ASK_TITLE_MAX_LENGTH,
+  NOT_FOUND_SENTENCE,
+} from "./ask-limits.ts";
 
 const ANCHORED_CLAIM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -76,7 +86,7 @@ export const AskProgress = z.discriminatedUnion("step", [
   z.strictObject({ step: z.literal("search"), query: sized(0, ASK_SUMMARY_MAX_LENGTH) }),
   z.strictObject({
     step: z.literal("read"),
-    pageId: z.string().min(1).max(64),
+    pageId: z.string().min(1).max(ASK_ID_MAX_LENGTH),
     title: sized(0, ASK_TITLE_MAX_LENGTH),
   }),
 ]);
@@ -85,12 +95,12 @@ export type AskProgress = z.infer<typeof AskProgress>;
 /** A claim an answer cites, numbered in order of first citation. */
 export const AskSource = z.strictObject({
   n: z.number().int().min(1),
-  pageId: z.string().min(1).max(64),
+  pageId: z.string().min(1).max(ASK_ID_MAX_LENGTH),
   pageTitle: sized(1, ASK_TITLE_MAX_LENGTH),
   /** The claim's section key, and its title; null for neither. */
-  section: z.string().max(32).nullable(),
-  sectionTitle: sized(1, 64).nullable(),
-  claimId: z.string().min(1).max(64),
+  section: z.string().max(ASK_SECTION_MAX_LENGTH).nullable(),
+  sectionTitle: sized(1, ASK_SECTION_TITLE_MAX_LENGTH).nullable(),
+  claimId: z.string().min(1).max(ASK_ID_MAX_LENGTH),
   href: z.string().regex(ASK_HREF, "expected a page, claim or section link"),
   /** The first ASK_EXCERPT_LENGTH code points of the claim as plain text. */
   excerpt: sized(1, ASK_EXCERPT_LENGTH),
@@ -122,7 +132,7 @@ export const AskResponse = z
     readNext: z
       .array(
         z.strictObject({
-          pageId: z.string().min(1).max(64),
+          pageId: z.string().min(1).max(ASK_ID_MAX_LENGTH),
           title: sized(1, ASK_TITLE_MAX_LENGTH),
           href: z.string().regex(ASK_HREF, "expected a page link"),
           summary: sized(0, ASK_SUMMARY_MAX_LENGTH),

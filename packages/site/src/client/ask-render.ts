@@ -3,6 +3,21 @@
 // zod in the browser), every piece of text is set with textContent, and a link is made only when
 // its href matches SAFE_HREF. Nothing from an answer or a Pagefind excerpt is parsed as HTML.
 import type { AskProgress, AskResponse } from "@repowiki/core";
+import {
+  ASK_EXCERPT_LENGTH,
+  ASK_ID_MAX_LENGTH,
+  ASK_MAX_READ_NEXT,
+  ASK_MAX_SENTENCE_SOURCES,
+  ASK_MAX_SENTENCES,
+  ASK_MAX_SOURCES,
+  ASK_QUESTION_MAX_LENGTH,
+  ASK_SECTION_MAX_LENGTH,
+  ASK_SECTION_TITLE_MAX_LENGTH,
+  ASK_SENTENCE_MAX_LENGTH,
+  ASK_SUMMARY_MAX_LENGTH,
+  ASK_TITLE_MAX_LENGTH,
+  NOT_FOUND_SENTENCE,
+} from "@repowiki/core/ask-limits";
 
 /**
  * The links an answer or a route may carry (R19): a feature page or the About article, at one of
@@ -41,43 +56,66 @@ const isList = (value: unknown, max: number): value is unknown[] =>
 
 /**
  * An answer from the server, or null when it is not the shape core's AskResponse gives it (spec
- * v2 #4 §9.3): types, lengths and index ranges, by hand. The renderer shows nothing it refuses.
+ * v2 #4 section 9.3), by hand and with core's own limits (`@repowiki/core/ask-limits`, which
+ * holds no zod): types, lengths and index ranges, and AskResponse's cross-field rules (sources
+ * numbered in order, each cited, none cited twice by a sentence; an answered or partial answer's
+ * sentences each cite one; not-found is the one fixed sentence; budget and error have none). The
+ * renderer shows nothing it refuses.
  */
 export function guardResponse(value: unknown): AskResponse | null {
   if (!isRecord(value) || !STATUSES.has(value.status as string)) return null;
-  if (!isText(value.question, 500, 1) || !/^[0-9a-f]{40}$/.test(String(value.head))) return null;
+  if (
+    !isText(value.question, ASK_QUESTION_MAX_LENGTH, 1) ||
+    typeof value.head !== "string" ||
+    !/^[0-9a-f]{40}$/.test(value.head)
+  )
+    return null;
   const sources = value.sources;
-  if (!isList(sources, 12)) return null;
+  if (!isList(sources, ASK_MAX_SOURCES)) return null;
   const sourcesOk = sources.every(
     (s, i) =>
       isRecord(s) &&
       s.n === i + 1 &&
-      isText(s.pageId, 64, 1) &&
-      isText(s.pageTitle, 200, 1) &&
-      (s.section === null || isText(s.section, 32)) &&
-      (s.sectionTitle === null || isText(s.sectionTitle, 64)) &&
-      isText(s.claimId, 64, 1) &&
+      isText(s.pageId, ASK_ID_MAX_LENGTH, 1) &&
+      isText(s.pageTitle, ASK_TITLE_MAX_LENGTH, 1) &&
+      (s.section === null || isText(s.section, ASK_SECTION_MAX_LENGTH)) &&
+      (s.sectionTitle === null || isText(s.sectionTitle, ASK_SECTION_TITLE_MAX_LENGTH, 1)) &&
+      isText(s.claimId, ASK_ID_MAX_LENGTH, 1) &&
       typeof s.href === "string" &&
-      isText(s.excerpt, 160, 1),
+      isText(s.excerpt, ASK_EXCERPT_LENGTH, 1),
   );
   const sentences = value.sentences;
-  if (!sourcesOk || !isList(sentences, 6)) return null;
+  if (!sourcesOk || !isList(sentences, ASK_MAX_SENTENCES)) return null;
   const sentencesOk = sentences.every(
     (s) =>
       isRecord(s) &&
-      isText(s.text, 400, 1) &&
-      isList(s.sources, 4) &&
-      s.sources.every((n) => isInt(n, 1) && n <= sources.length),
+      isText(s.text, ASK_SENTENCE_MAX_LENGTH, 1) &&
+      isList(s.sources, ASK_MAX_SENTENCE_SOURCES) &&
+      s.sources.every((n) => isInt(n, 1) && n <= sources.length) &&
+      new Set(s.sources).size === s.sources.length,
   );
+  if (!sentencesOk) return null;
+  const cited = sentences as { text: string; sources: number[] }[];
+  const citedSet = new Set(cited.flatMap((s) => s.sources));
+  if (sources.some((_s, i) => !citedSet.has(i + 1))) return null;
+  const status = value.status;
+  const shapeOk =
+    status === "answered" || status === "partial"
+      ? cited.length > 0 && cited.every((s) => s.sources.length > 0)
+      : status === "not-found"
+        ? cited.length === 1 &&
+          cited[0]?.text === NOT_FOUND_SENTENCE &&
+          cited[0].sources.length === 0
+        : cited.length === 0;
   const readNext = value.readNext;
-  if (!sentencesOk || !isList(readNext, 3)) return null;
+  if (!shapeOk || !isList(readNext, ASK_MAX_READ_NEXT)) return null;
   const readNextOk = readNext.every(
     (r) =>
       isRecord(r) &&
-      isText(r.pageId, 64, 1) &&
-      isText(r.title, 200, 1) &&
+      isText(r.pageId, ASK_ID_MAX_LENGTH, 1) &&
+      isText(r.title, ASK_TITLE_MAX_LENGTH, 1) &&
       typeof r.href === "string" &&
-      isText(r.summary, 200),
+      isText(r.summary, ASK_SUMMARY_MAX_LENGTH),
   );
   const cost = value.cost;
   if (
@@ -87,7 +125,7 @@ export function guardResponse(value: unknown): AskResponse | null {
     !isText(value.answeredAt, 40, 1) ||
     !isRecord(cost) ||
     !isInt(cost.turns, 0) ||
-    !(cost.usd === null || (typeof cost.usd === "number" && cost.usd >= 0)) ||
+    !(cost.usd === null || (Number.isFinite(cost.usd) && (cost.usd as number) >= 0)) ||
     !(cost.model === null || isText(cost.model, 100, 1))
   )
     return null;

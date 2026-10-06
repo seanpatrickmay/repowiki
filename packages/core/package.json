@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ask-limits": "./src/ask-limits.ts",
     "./test-fixtures": "./src/test-fixtures.ts"
   },
   "dependencies": {

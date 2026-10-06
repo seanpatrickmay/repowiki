@@ -262,6 +262,7 @@ export function installAsk(env: AskEnv): void {
         const tooLong = "The answer took too long; here are the pages that match.";
         let reader: ReturnType<NonNullable<AskFetchResponse["body"]>["getReader"]> | null = null;
         let answer: AskResponse | null = null;
+        let answered = false;
         try {
           let response: AskFetchResponse;
           try {
@@ -304,9 +305,14 @@ export function installAsk(env: AskEnv): void {
                 if (frame.event === "status") {
                   const progress = guardProgress(data);
                   if (progress !== null) live.textContent = progressText(progress);
-                } else if (frame.event === "answer") answer = guardResponse(data);
+                } else if (frame.event === "answer") {
+                  // The first answer frame is the answer, shown or refused: nothing after it counts.
+                  answered = true;
+                  answer = guardResponse(data);
+                  break;
+                }
               }
-              if (done || answer !== null) break;
+              if (done || answered) break;
             }
           } catch {
             answer = null;
