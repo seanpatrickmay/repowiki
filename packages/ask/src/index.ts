@@ -9,6 +9,18 @@ export {
   ungroundedToken,
 } from "./answer.ts";
 export {
+  ASK_MAX_TOKENS,
+  ASK_TEMPERATURE,
+  AskError,
+  type AskQuestionOptions,
+  type AskResult,
+  askQuestion,
+  BOUND_CHARS_PER_TOKEN,
+  CALL_ANSWER_NOW,
+  retryText,
+  turnBound,
+} from "./loop.ts";
+export {
   type AskIndexes,
   askIndexes,
   hintedPage,
