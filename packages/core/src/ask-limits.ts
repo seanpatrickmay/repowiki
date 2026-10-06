@@ -25,5 +25,13 @@ export const ASK_ID_MAX_LENGTH = 64;
 export const ASK_SECTION_MAX_LENGTH = 32;
 export const ASK_SECTION_TITLE_MAX_LENGTH = 64;
 
+/**
+ * Every link an answer may carry (R19): a feature page or the About article, optionally at one of
+ * its claims or sections. The server builds links from handles; the client refuses anything else,
+ * with this very pattern. M11 widens it to person pages.
+ */
+export const ASK_HREF =
+  /^\/(wiki\/[a-z0-9-]{1,64}\/|special\/about\/)(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
+
 /** A not-found answer's one sentence: fixed server text, never the model's (spec v2 #4 R26). */
 export const NOT_FOUND_SENTENCE = "The wiki does not cover this.";

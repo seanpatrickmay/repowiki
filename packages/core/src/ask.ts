@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ASK_EXCERPT_LENGTH,
+  ASK_HREF,
   ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
@@ -19,6 +20,7 @@ import { GitSha, IsoDateTime } from "./primitives.ts";
 
 export {
   ASK_EXCERPT_LENGTH,
+  ASK_HREF,
   ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
@@ -43,13 +45,6 @@ const ANCHORED_CLAIM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function claimAnchor(claimId: string): string | null {
   return ANCHORED_CLAIM_ID.test(claimId) ? `claim-${claimId}` : null;
 }
-
-/**
- * Every link an answer may carry (R19): a feature page or the About article, optionally at one of
- * its claims or sections. The server builds links from handles; the client refuses anything else.
- */
-export const ASK_HREF =
-  /^\/(wiki\/[a-z0-9-]{1,64}\/|special\/about\/)(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
 
 const codePoints = (text: string) => [...text].length;
 

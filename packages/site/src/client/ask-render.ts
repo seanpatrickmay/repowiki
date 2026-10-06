@@ -5,6 +5,7 @@
 import type { AskProgress, AskResponse } from "@repowiki/core";
 import {
   ASK_EXCERPT_LENGTH,
+  ASK_HREF,
   ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
@@ -20,11 +21,10 @@ import {
 } from "@repowiki/core/ask-limits";
 
 /**
- * The links an answer or a route may carry (R19): a feature page or the About article, at one of
- * its claims or sections. Anything else is shown as plain text. M11 widens it to person pages.
+ * The links an answer or a route may carry (R19): core's ASK_HREF itself, a feature page or the
+ * About article, at one of its claims or sections. Anything else is shown as plain text.
  */
-export const SAFE_HREF =
-  /^\/(wiki\/[a-z0-9-]{1,64}\/|special\/about\/)(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
+export const SAFE_HREF = ASK_HREF;
 
 /** The href, or null when it is not one SAFE_HREF admits. */
 export const safeHref = (href: unknown): string | null =>

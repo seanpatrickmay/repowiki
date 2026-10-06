@@ -24,6 +24,10 @@ const render = (response: AskResponse) => {
 };
 
 describe("SAFE_HREF", () => {
+  it("is core's ASK_HREF itself, so the two cannot drift", () => {
+    expect(SAFE_HREF).toBe(ASK_HREF);
+  });
+
   it("admits every link an answer may carry, as core's ASK_HREF does", () => {
     for (const href of [
       "/wiki/signals/",
