@@ -86,3 +86,11 @@ export {
   type VerifiedPersonClaim,
   verifyPersonClaim,
 } from "./verify.ts";
+export {
+  type PersonOutcome,
+  type PersonRequest,
+  personRequest,
+  type WritePeopleInput,
+  type WritePeopleOptions,
+  writePeople,
+} from "./write.ts";
