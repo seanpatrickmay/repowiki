@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { askIndexes } from "@repowiki/ask";
@@ -8,6 +15,7 @@ import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@r
 import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
 import { renderAskReport, runAskEval } from "./ask-eval-run.ts";
+import { supportSheet, tallySupport } from "./ask-eval-sheet.ts";
 import { logLine } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
@@ -17,11 +25,15 @@ import { exitWithError, requireApiKey } from "./wiki-cli.ts";
 /**
  * pnpm ask:eval <repo> --questions <file> (spec v2 #4 §7): asks the dev set of the M7 question
  * file through the ask (no cache), judges each answer with the M7 judge, and writes report.md and
- * results.json to <out>/eval/ask-<time>/. States its estimate first; --dry-run stops there.
- * Never runs the held-out set (R25) and never writes in <repo>.
+ * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks. States
+ * its estimate first; --dry-run stops there. Never runs the held-out set (R25) and never writes
+ * in <repo>.
+ * `pnpm ask:eval tally <support.md>` counts a marked support sheet.
  */
 async function main(): Promise<void> {
-  const args = parseAskEvalArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  if (argv[0] === "tally") return tally(argv.slice(1));
+  const args = parseAskEvalArgs(argv);
   const repo = resolve(args.repo);
   if (!existsSync(repo) || !statSync(repo).isDirectory()) {
     throw new CliError(`no such repository: ${args.repo}`);
@@ -105,11 +117,39 @@ async function main(): Promise<void> {
       result,
     }),
   );
+  writeFileSync(
+    join(runDir, "support.md"),
+    supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt }),
+  );
   const correct = result.rows.filter((r) => r.score === 1).length;
   console.log(
     `ask ${correct} of ${result.rows.length}; this run cost $${result.spentUsd.toFixed(4)}${result.overBudget.length > 0 ? `; ${result.overBudget.length} not asked (--max-usd)` : ""}`,
   );
   console.log(`Wrote ${report}`);
+}
+
+const TALLY_USAGE = "usage: pnpm ask:eval tally <support.md>";
+
+/** `pnpm ask:eval tally <support.md>`: the owner's marks, counted (spec v2 #4 §12.3-4). */
+function tally(argv: readonly string[]): void {
+  const [file, ...extra] = argv;
+  if (file === undefined || file === "" || extra.length > 0) throw new CliError(TALLY_USAGE);
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    throw new CliError(`cannot read ${file}`);
+  }
+  let counted: ReturnType<typeof tallySupport>;
+  try {
+    counted = tallySupport(text);
+  } catch (err) {
+    throw new CliError(`${file}: ${(err as Error).message}`, { cause: err });
+  }
+  const line = (name: string, c: (typeof counted)["support"], what: string) =>
+    `${name}: ${c.yes} of ${c.lines} ${what}, ${c.no} not, ${c.unmarked} unmarked: ${c.pass ? "passes" : "does not pass"}`;
+  console.log(line("support", counted.support, "supported by their cited claims"));
+  console.log(line("routing", counted.routing, "routed to the right first page"));
 }
 
 try {

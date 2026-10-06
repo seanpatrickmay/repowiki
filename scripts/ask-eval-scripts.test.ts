@@ -82,4 +82,46 @@ describe("ask-eval.ts as a process (no network)", () => {
     },
     PROCESS_TIMEOUT_MS,
   );
+  it(
+    "counts a marked support sheet with tally, and refuses a file that is not one",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "repowiki-ask-eval-tally-"));
+      try {
+        const sheet = join(dir, "support.md");
+        writeFileSync(
+          sheet,
+          [
+            "## Support",
+            '- [x] `support/s01` (sentence): A. \u2014 cites "a" (P)',
+            '- [!] `support/s02` (sentence): B. \u2014 cites "b" (P)',
+            "## Routing",
+            "- [x] `routing/q-1` (question): Q? \u2014 first source: P (/wiki/p/)",
+            "",
+          ].join("\n"),
+        );
+        const tally = (file: string) =>
+          spawnSync(process.execPath, [SCRIPT, "tally", file], {
+            env: keyless(),
+            encoding: "utf8",
+            timeout: PROCESS_TIMEOUT_MS,
+          });
+        const counted = tally(sheet);
+        expect(counted.status).toBe(0);
+        expect(counted.stdout).toBe(
+          [
+            "support: 1 of 2 supported by their cited claims, 1 not, 0 unmarked: does not pass",
+            "routing: 1 of 1 routed to the right first page, 0 not, 0 unmarked: passes",
+            "",
+          ].join("\n"),
+        );
+        writeFileSync(sheet, "# notes\n");
+        const refused = tally(sheet);
+        expect(refused.status).toBe(2);
+        expect(refused.stderr).toContain('no "## Routing" section');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
 });
