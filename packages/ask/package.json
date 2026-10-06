@@ -1,0 +1,15 @@
+{
+  "name": "@repowiki/ask",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repowiki/core": "workspace:*",
+    "@repowiki/llm": "workspace:*",
+    "@repowiki/query": "workspace:*",
+    "zod": "4.6.5"
+  }
+}
