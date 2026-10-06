@@ -40,7 +40,8 @@ function linkedWikipediaTitles(pages: readonly (Revision | Architecture)[]): str
  * Assembles and validates the export consumed by the reader site and by agents. The stored
  * work-in-flight snapshot rides along only while it agrees with the export (inflightProblems): a
  * snapshot that names a claim the current pages no longer hold is left out (null) rather than
- * failing the export; wiki:inflight derives a new one.
+ * failing the export; wiki:inflight derives a new one. A stored snapshot that no longer parses
+ * still throws, as every stored body does: that is a schema change shipped without its migration.
  */
 export function buildExport(store: Store, options: ExportOptions): WikiExport {
   const head = store.getHead();

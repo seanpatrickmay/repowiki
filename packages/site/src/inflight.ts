@@ -276,7 +276,7 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
     summary,
     summaryNote: unread
       ? "No summary this run: this pull's base was not read."
-      : fetched && !hasCitableLines(pull.files)
+      : fetched && pull.filesTruncated === 0 && !hasCitableLines(pull.files)
         ? "There is nothing to summarise: it adds or changes no lines of text."
         : "No summary of this pull request yet.",
     // Every feature it touches, then any whose page cites a file it changes: each has an anchor

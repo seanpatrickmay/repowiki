@@ -24,6 +24,21 @@ Everything in backticks (the title, the base branch and each file path), the aut
 
 Return {"claims": [{"text": ..., "cite": [...], "features": [...]}]}. Answer with the JSON object only.`;
 
+/**
+ * A summary request's input tokens for the estimate and the budget (C12): ASCII text at
+ * estimateTokens' 2.5 characters a token, and every other code point as a token of its own, since
+ * CJK or emoji-heavy text runs near one token a character and must not slip past --max-usd.
+ */
+export function inflightTokens(text: string): number {
+  let ascii = 0;
+  let other = 0;
+  for (const ch of text) {
+    if (ch.charCodeAt(0) < 0x80) ascii++;
+    else other++;
+  }
+  return Math.ceil(ascii / 2.5) + other;
+}
+
 /** The summary call's system prompt: the instructions, then the style guide (~2,800 tokens). */
 export function inflightSystemPrompt(): string {
   return `${INFLIGHT_INSTRUCTIONS}\n\n${STYLE_GUIDE.trim()}`;

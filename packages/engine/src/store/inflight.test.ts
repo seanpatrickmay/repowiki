@@ -31,8 +31,34 @@ beforeEach(() => {
 afterEach(() => store.close());
 
 describe("migration 9 (spec v2 #9 §5.2, C2)", () => {
-  it("is the ninth migration", () => {
-    expect(MIGRATIONS).toHaveLength(9);
+  it("is the ninth migration, so a later milestone's own appends nothing here", () => {
+    expect(MIGRATIONS.length).toBeGreaterThanOrEqual(9);
+    expect(String(MIGRATIONS[8])).toMatch(/CREATE TABLE github_snapshot/);
+  });
+
+  it("gives a migrated store the same schema as a fresh one", () => {
+    const schema = (db: Database.Database) =>
+      db.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
+    const fresh = new Database(":memory:");
+    runMigrations(fresh, MIGRATIONS.slice(0, 9));
+    const migrated = new Database(":memory:");
+    runMigrations(migrated, MIGRATIONS.slice(0, 8));
+    runMigrations(migrated, MIGRATIONS.slice(0, 9));
+    expect(schema(migrated)).toEqual(schema(fresh));
+    fresh.close();
+    migrated.close();
+  });
+
+  it("prunes the summary cache in one pass, keeping what a kept head cites", () => {
+    store.putInFlightSummary(KEY_1, summary as NonNullable<typeof summary>, AT);
+    store.putInFlightSummary(KEY_2, summary as NonNullable<typeof summary>, AT);
+    const head = summary?.claims[0]?.citations[0]?.sha ?? "";
+    expect(store.pruneInFlightSummaries([KEY_1], [head])).toBe(0);
+    expect(store.pruneInFlightSummaries([KEY_1])).toBe(1);
+    expect([store.getInFlightSummary(KEY_1), store.getInFlightSummary(KEY_2)]).toEqual([
+      summary,
+      null,
+    ]);
   });
 
   it("adds the three tables to a store at schema 8 without touching what it holds", () => {
