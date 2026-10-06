@@ -4,6 +4,8 @@ import {
   type Architecture,
   inflightProblems,
   LLMS_TXT_FILE,
+  type PeopleExport,
+  peopleProblems,
   type Revision,
   renderLlmsTxt,
   SCHEMA_VERSION,
@@ -37,11 +39,28 @@ function linkedWikipediaTitles(pages: readonly (Revision | Architecture)[]): str
 }
 
 /**
+ * The stored People (spec v2 #6 §5, R28): the snapshot and the current narrative of each human in
+ * it, or null when there is no snapshot or it disagrees with the manifest (peopleProblems). A
+ * narrative whose person left the snapshot (excluded or forgotten since) is left out.
+ */
+function storedPeople(store: Store, manifest: { features: readonly { id: string }[] }) {
+  const snapshot = store.getPeopleSnapshot();
+  if (snapshot === null) return null;
+  const humans = new Set(snapshot.people.filter((p) => p.kind === "human").map((p) => p.id));
+  const people: PeopleExport = {
+    snapshot,
+    pages: store.listCurrentPersonRevisions().filter((page) => humans.has(page.personId)),
+  };
+  return peopleProblems(people, { manifest }).length === 0 ? people : null;
+}
+
+/**
  * Assembles and validates the export consumed by the reader site and by agents. The stored
  * work-in-flight snapshot rides along only while it agrees with the export (inflightProblems): a
  * snapshot that names a claim the current pages no longer hold is left out (null) rather than
- * failing the export; wiki:inflight derives a new one. A stored snapshot that no longer parses
- * still throws, as every stored body does: that is a schema change shipped without its migration.
+ * failing the export; wiki:inflight derives a new one. People follows the same rule
+ * (storedPeople). A stored snapshot that no longer parses still throws, as every stored body
+ * does: that is a schema change shipped without its migration.
  */
 export function buildExport(store: Store, options: ExportOptions): WikiExport {
   const head = store.getHead();
@@ -76,6 +95,7 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     architecture,
     runs: runTotals(store.listLedger()),
     inflight,
+    people: storedPeople(store, manifest),
   });
 }
 
