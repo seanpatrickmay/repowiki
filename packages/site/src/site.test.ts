@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
+import { escapeHtml } from "./inline.ts";
 import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
@@ -1454,5 +1455,32 @@ describe("site build --no-inflight (R18, C11)", () => {
     );
     for (const page of htmlFiles(shared.outDir))
       expect(shared.read(page)).not.toContain("#12 Page");
+  });
+
+  it("leaks no pull request's or issue's title, author, branch or label into any text file", () => {
+    const inflight = inflightExport().inflight;
+    if (inflight === null) throw new Error("the fixture has a snapshot");
+    // Each string as written, as HTML escapes it and as JSON escapes it; words under five
+    // characters ("main", "bug") are left out, since a page says them for other reasons.
+    const needles = [
+      ...inflight.pulls.flatMap((p) => [p.title, p.author?.login ?? "", p.baseRef, ...p.labels]),
+      ...inflight.issues.flatMap((i) => [i.title, i.author?.login ?? "", ...i.labels]),
+    ]
+      .filter((text) => [...text].length >= 5)
+      .flatMap((text) => [text, escapeHtml(text), JSON.stringify(text).slice(1, -1)]);
+    expect(needles).toContain("Page through long chunks");
+    expect(needles).toContain("release/1.x");
+    const files = (readdirSync(shared.outDir, { recursive: true }) as string[])
+      .map((file) => file.split("\\").join("/"))
+      .filter((file) => /\.(html|json|txt)$/.test(file));
+    for (const file of ["llms.txt", "export.json"]) expect(files).toContain(file);
+    expect(files.some((file) => file.startsWith("api/"))).toBe(true);
+    for (const file of files) {
+      const text = shared.read(file);
+      expect({ file, leaked: needles.filter((needle) => text.includes(needle)) }).toEqual({
+        file,
+        leaked: [],
+      });
+    }
   });
 });

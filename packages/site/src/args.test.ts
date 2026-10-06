@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -129,6 +129,33 @@ describe("parseSiteArgs", () => {
     expect(() => parseSiteArgs(["preview", "--out", "o", "--no-inflight"])).toThrow(
       /^only build takes --no-inflight/,
     );
+  });
+
+  it("refuses the export's own site/ for --no-inflight however a symlink spells it", () => {
+    const real = join(dir, "real");
+    const link = join(dir, "link");
+    mkdirSync(real);
+    writeFileSync(join(real, "export.json"), "{}\n");
+    symlinkSync(real, link);
+    for (const [exportFile, out] of [
+      [join(real, "export.json"), join(link, "site")],
+      [join(link, "export.json"), join(real, "site")],
+      [join(link, "export.json"), join(link, "sub", "..", "site")],
+    ]) {
+      expect(() =>
+        parseSiteArgs(["build", "--export", exportFile ?? "", "--out", out ?? "", "--no-inflight"]),
+      ).toThrow(/^--no-inflight refuses /);
+    }
+    expect(
+      parseSiteArgs([
+        "build",
+        "--export",
+        join(link, "export.json"),
+        "--out",
+        join(real, "share"),
+        "--no-inflight",
+      ]),
+    ).toMatchObject({ inflight: false });
   });
 
   it.each([

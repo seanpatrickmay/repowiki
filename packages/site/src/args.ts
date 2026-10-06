@@ -1,5 +1,16 @@
-import { dirname, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { resolveExportFile } from "./load.ts";
+
+/**
+ * `path` with every symlink resolved: the realpath of its nearest existing ancestor, then the
+ * rest of it, so a directory not made yet compares like one that exists.
+ */
+export function realPath(path: string): string {
+  let ancestor = resolve(path);
+  while (!existsSync(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor);
+  return resolve(realpathSync(ancestor), relative(ancestor, resolve(path)));
+}
 
 export interface SiteArgs {
   command: "build" | "preview";
@@ -53,8 +64,8 @@ export function parseSiteArgs(argv: readonly string[]): SiteArgs {
   const defaultOut = resolve(dirname(exportFile ?? ""), "site");
   const outDir = resolve(outFlag ?? defaultOut);
   // <out>/site/ is the site wiki:serve rebuilds with the work in flight; a site to share without
-  // it goes elsewhere, so one directory never holds both (R18, C11).
-  if (noInflight > 0 && outDir === defaultOut) {
+  // it goes elsewhere, so one directory never holds both (R18, C11), however a symlink spells it.
+  if (noInflight > 0 && realPath(outDir) === realPath(defaultOut)) {
     throw new UsageError(
       `--no-inflight refuses ${defaultOut}, the site wiki:serve rebuilds with the work in flight; choose another --out\n${USAGE}`,
     );
