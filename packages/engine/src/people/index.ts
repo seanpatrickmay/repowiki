@@ -1,4 +1,10 @@
 export {
+  type DueNarrative,
+  type DueReason,
+  type NarrativePlan,
+  planNarratives,
+} from "./due.ts";
+export {
   type IdentityGroup,
   type IdentityInput,
   type JoinReason,

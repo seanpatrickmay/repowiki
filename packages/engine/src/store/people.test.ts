@@ -168,6 +168,14 @@ describe("person revisions", () => {
     expect(store.listPersonHistory("ada-lovelace")).toEqual([]);
     expect(store.listPeopleRegistry().map((r) => r.id)).toEqual(["grace-hopper"]);
   });
+
+  it("forgets a narrative and keeps the registry row (a withdrawn consent)", () => {
+    store.putPersonRevision(first);
+    store.putPeopleRegistry([row()]);
+    expect(store.forgetPersonNarrative("ada-lovelace")).toBe(1);
+    expect(store.getCurrentPersonRevision("ada-lovelace")).toBeNull();
+    expect(store.listPeopleRegistry().map((r) => r.id)).toEqual(["ada-lovelace"]);
+  });
 });
 
 describe("the blame cache (spec v2 #6 R3)", () => {
