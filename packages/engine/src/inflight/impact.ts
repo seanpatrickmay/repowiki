@@ -2,6 +2,7 @@ import {
   INFLIGHT_MAX_FILES,
   type InFlightFeature,
   type InFlightFile,
+  isInflightPath,
   type Manifest,
   type Membership,
   memberId,
@@ -37,10 +38,14 @@ export interface ImpactContext {
 export interface PullChanges {
   /** The merge base of the wiki's head and the pull request's head; null when they share none. */
   mergeBase: string | null;
-  /** Every file the pull request changes, from the merge base (else the wiki's head) to its head. */
+  /**
+   * Every file the pull request changes, from the merge base (else the wiki's head) to its head,
+   * less those with an unsafe path.
+   */
   changes: FileChange[];
   /** The first INFLIGHT_MAX_FILES of them by path, each with its feature. */
   files: InFlightFile[];
+  /** Files beyond those listed: past the cap, or dropped for an unsafe path. */
   filesTruncated: number;
   /** Heaviest first. */
   features: InFlightFeature[];
@@ -84,7 +89,14 @@ export function lineCounts(
   for (let i = 0; i < tokens.length; i++) {
     const head = tokens[i] ?? "";
     if (head === "") continue;
-    const [added = "", removed = "", path = ""] = head.split("\t");
+    // "added<TAB>removed<TAB>path": the path is all that follows the second tab, since a path
+    // may hold a tab of its own (-z writes it raw).
+    const first = head.indexOf("\t");
+    const second = first === -1 ? -1 : head.indexOf("\t", first + 1);
+    if (second === -1) continue;
+    const added = head.slice(0, first);
+    const removed = head.slice(first + 1, second);
+    const path = head.slice(second + 1);
     const count = (n: string) => (/^\d+$/.test(n) ? Number(n) : 0);
     // A rename's entry ends in a tab; its old and new paths follow as tokens of their own.
     const key = path === "" ? (tokens[i + 2] ?? "") : path;
@@ -93,6 +105,10 @@ export function lineCounts(
   }
   return counts;
 }
+
+/** Whether a change's paths are safe to store, show and prompt with (isInflightPath, R13). */
+const safeChange = (change: FileChange): boolean =>
+  [change.oldPath, change.newPath].every((path) => path === null || isInflightPath(path));
 
 /** The path a change has at the head, or the one it had for a deletion. */
 const pathOf = (change: FileChange): string => change.newPath ?? change.oldPath ?? "";
@@ -211,12 +227,16 @@ function featuresOf(
  * file that exists at the head placed as an update places a new file (placeNewFiles over an index
  * built at the head, a disputed one by fallbackFeature, never a call). The index is built only
  * when some file needs placing. A file the pull request deletes that the wiki's head lacks has no
- * feature.
+ * feature. A change whose path fails isInflightPath (a control, tab, line-break or bidi
+ * character, a backslash, or over the cap) is dropped before anything else sees it, and counted
+ * in filesTruncated.
  */
 export async function pullChanges(ctx: ImpactContext, head: string): Promise<PullChanges> {
   const base = mergeBase(ctx.dir, ctx.wikiHead, head);
   const from = base ?? ctx.wikiHead;
-  const changes = diffTrees(ctx.dir, from, head, undefined, INFLIGHT_GIT);
+  const diffed = diffTrees(ctx.dir, from, head, undefined, INFLIGHT_GIT);
+  const changes = diffed.filter(safeChange);
+  const dropped = diffed.length - changes.length;
   const counts = lineCounts(ctx.dir, from, head);
   const unknown = changes.filter(
     (c) => c.newPath !== null && memberFeature(ctx.manifest, c) === undefined,
@@ -268,7 +288,7 @@ export async function pullChanges(ctx: ImpactContext, head: string): Promise<Pul
     mergeBase: base,
     changes,
     files: files.slice(0, INFLIGHT_MAX_FILES),
-    filesTruncated: Math.max(0, files.length - INFLIGHT_MAX_FILES),
+    filesTruncated: Math.max(0, files.length - INFLIGHT_MAX_FILES) + dropped,
     features: featuresOf(all, churn, ctx.driftThreshold),
   };
 }

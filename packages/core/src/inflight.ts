@@ -132,8 +132,8 @@ export type InFlightSummary = z.infer<typeof InFlightSummary>;
  */
 export const InFlightFile = z
   .object({
-    path: RepoPath,
-    oldPath: RepoPath.nullable(),
+    path: InflightPath,
+    oldPath: InflightPath.nullable(),
     status: z.enum(["added", "modified", "deleted", "renamed"]),
     additions: count,
     deletions: count,

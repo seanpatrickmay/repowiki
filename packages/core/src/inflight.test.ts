@@ -161,6 +161,10 @@ describe("InFlightFile", () => {
       true,
     );
     expect(InFlightFile.safeParse({ ...file, path: "../etc/passwd" }).success).toBe(false);
+    for (const path of ["a\tb.py", "a\u202Eb.py", "a\nb.py"]) {
+      expect(InFlightFile.safeParse({ ...file, path }).success).toBe(false);
+      expect(InFlightFile.safeParse({ ...file, oldPath: path }).success).toBe(false);
+    }
   });
 });
 
