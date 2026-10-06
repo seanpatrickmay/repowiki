@@ -191,14 +191,15 @@ export function assertOid(oid: string): void {
   if (!isSha(oid)) throw new GitError(`not a 40-hex object id: ${JSON.stringify(oid)}`);
 }
 
-/** Full 40-character sha of the commit `rev` names. */
+/** Full 40-character sha of the commit `rev` names; a GitTimeoutError past `timeoutMs`. */
 export function resolveCommit(repo: string, rev: string, options: GitOptions = {}): string {
-  const out = spawnSync(
-    "git",
-    ["-C", repo, "rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
-    { env: scrubbedGitEnv({ ...options.env }) },
-  );
-  if (out.error) throw spawnError(out.error);
+  const args = ["rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`];
+  const out = spawnSync("git", ["-C", repo, ...args], {
+    env: scrubbedGitEnv({ ...options.env }),
+    timeout: options.timeoutMs,
+  });
+  if (out.error)
+    throw timeoutError(out.error, repo, args, options.timeoutMs) ?? spawnError(out.error);
   const sha = out.stdout?.toString("utf8").trim() ?? "";
   if (out.status !== 0 && UNSAFE_REPOSITORY_STDERR.test(out.stderr?.toString("utf8") ?? "")) {
     throw new GitError(`git failed in ${printable(repo)}: ${unsafeRepositoryCause(repo)}`);
@@ -349,6 +350,7 @@ function drained(stream: NodeJS.WritableStream): Promise<void> {
  *
  * Throws GitError for an object that is not a blob, a git that cannot start or exits non-zero
  * (with git's own stderr), and output that ends early. Stopping the iteration early kills git.
+ * With `timeoutMs`, a stream still running after that long is killed: a GitTimeoutError.
  */
 export async function* streamBlobs(
   repo: string,
@@ -362,6 +364,14 @@ export async function* streamBlobs(
     stdio: ["pipe", "pipe", "pipe"],
   });
   let spawnFailure: Error | undefined;
+  let timedOut = false;
+  const timer =
+    options.timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, options.timeoutMs);
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (text: string) => {
@@ -382,6 +392,11 @@ export async function* streamBlobs(
     const { code, signal } = await closed;
     if (spawnFailure !== undefined) {
       return new GitError(`could not run git: ${spawnFailure.message}`);
+    }
+    if (timedOut) {
+      return new GitTimeoutError(
+        `git cat-file timed out after ${options.timeoutMs} ms in ${printable(repo)}`,
+      );
     }
     if (code === 0) return null;
     const why = stderr.trim() || (signal === null ? `exit status ${code}` : `signal ${signal}`);
@@ -457,6 +472,8 @@ export async function* streamBlobs(
         );
       }
     } catch (error) {
+      // A killed stream can end in any error; the timeout is what explains it.
+      if (timedOut) throw await exitProblem();
       if (!(error instanceof Truncated)) throw error;
       const cause = reader.failure === undefined ? "" : ` (${reader.failure.message})`;
       throw (await exitProblem()) ?? new GitError(`${error.message}${cause}`);
@@ -465,6 +482,7 @@ export async function* streamBlobs(
     const problem = await exitProblem();
     if (problem !== null) throw problem;
   } finally {
+    clearTimeout(timer);
     if (!finished) child.kill("SIGKILL");
     child.stdin.destroy();
     await iterator.return?.();
