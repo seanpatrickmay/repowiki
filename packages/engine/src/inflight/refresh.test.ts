@@ -1,4 +1,4 @@
-import { readdirSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { GitHubSnapshot } from "@repowiki/core";
 import {
@@ -19,7 +19,7 @@ import {
   withinBudget,
 } from "./refresh.ts";
 import type { InFlightAnswer, SummaryRequest } from "./summary.ts";
-import { type InflightFixture, inflightFixture } from "./test-inflight.ts";
+import { fileHashes, type InflightFixture, inflightFixture } from "./test-inflight.ts";
 
 // Each test builds a fixture wiki, a remote and inflight.git: seconds on a loaded machine.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -277,6 +277,41 @@ describe("deriveInFlight against each pull request's own base (R27)", () => {
     expect(six?.pull.effects.every((e) => !e.certain)).toBe(true);
     expect(six?.pull.effects.map((e) => e.claimId)).toEqual(["c1", "c2"]);
     expect(six?.request).toBeNull();
+  });
+});
+
+describe("the documented repository (ADR-0006)", () => {
+  it("keeps its objects, refs, config and index byte-identical through the fetch and merge-tree", async () => {
+    const git = join(fx.repo.dir, ".git");
+    const state = () => ({
+      objects: fileHashes(join(git, "objects")),
+      refs: fileHashes(join(git, "refs")),
+      packedRefs: fileHashes(git).filter((line) => line.startsWith("packed-refs ")),
+      config: readFileSync(join(git, "config")),
+      index: readFileSync(join(git, "index")),
+    });
+    const before = state();
+    // #1 edits cited lines (a clean merge); #2 is an empty commit, so merge-tree writes a tree the
+    // documented repository already has (git freshens that object file's mtime through the
+    // alternates); #3 adds a file (the head is indexed).
+    const pulls = [
+      fx.pushPull(1, fx.first, { "src/signals/ingest.py": ingestWith(12, "    signals = list()") }),
+      fx.pushPull(2, fx.first, {}),
+      fx.pushPull(3, fx.first, { "src/signals/extra.py": "def extra():\n    return 1\n" }),
+    ].map((head, i) =>
+      makeGitHubPull({ number: i + 1, headRefOid: head, baseRefOid: fx.first, closes: [] }),
+    );
+    const snapshot = makeGitHubSnapshot({ pulls, issues: [] });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const derived = await derive(snapshot, heads);
+    expect(derived.pulls.map((p) => [p.pull.head, p.pull.merge])).toEqual([
+      ["fetched", "clean"],
+      ["fetched", "clean"],
+      ["fetched", "clean"],
+    ]);
+    // Contents and paths only: git's freshen step may touch an object file's mtime, which ADR-0006
+    // records as the one accepted exception; no byte, path, ref, config or index entry changes.
+    expect(state()).toEqual(before);
   });
 });
 

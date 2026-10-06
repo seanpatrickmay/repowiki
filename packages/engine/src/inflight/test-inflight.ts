@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { builtWiki } from "../freshness/index.ts";
@@ -110,5 +120,19 @@ export function listing(dir: string): string[] {
       const stat = statSync(join(dir, path));
       return `${relative(dir, join(dir, path))} ${stat.size} ${stat.mtimeMs}`;
     })
+    .sort();
+}
+
+/** Every file under a directory with a SHA-256 of its bytes, not its mtime: "byte-identical". */
+export function fileHashes(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return (readdirSync(dir, { recursive: true }) as string[])
+    .filter((path) => statSync(join(dir, path)).isFile())
+    .map(
+      (path) =>
+        `${path} ${createHash("sha256")
+          .update(readFileSync(join(dir, path)))
+          .digest("hex")}`,
+    )
     .sort();
 }
