@@ -1,4 +1,4 @@
-import { pageSearchIndex, WikiView } from "@repowiki/query";
+import { createWikiTools, pageSearchIndex, WikiView } from "@repowiki/query";
 import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAskTools } from "./tools.ts";
@@ -25,6 +25,15 @@ describe("createAskTools", () => {
     const { tools } = setup();
     expect(tools.definitions.map((d) => d.name)).toEqual(["search", "read_page"]);
     expect(tools.definitions[1]?.description).toContain("starting with its handle");
+    const agent = createWikiTools(extendedWiki(sample)).definitions;
+    // search is the wiki agent's own, byte for byte; read_page takes the same input.
+    expect(tools.definitions[0]).toEqual(agent[0]);
+    expect(tools.definitions[1]?.inputSchema).toEqual(agent[1]?.inputSchema);
+  });
+
+  it("says read_page shows no history list, as spec v2 #4 §6.1 has it", () => {
+    const { tools } = setup();
+    expect(tools.definitions[1]?.description).toContain("the page has no history list");
   });
 
   it("searches as the wiki agent does and reports the query", () => {
