@@ -19,3 +19,9 @@ export const ASK_URL = "/special/ask/";
 export function wikipediaUrl(title: string): string {
   return `https://en.wikipedia.org/wiki/${encodeURIComponent(title.trim().replace(/ /g, "_"))}`;
 }
+/** The People index (spec v2 #6 §11). */
+export const PEOPLE_URL = "/people/";
+/** A person's page; an id merged away keeps a redirect page here. */
+export const personUrl = (id: string): string => `${PEOPLE_URL}${id}/`;
+/** The People index's part for one feature. */
+export const peopleFeatureUrl = (featureId: string): string => `${PEOPLE_URL}#feature-${featureId}`;
