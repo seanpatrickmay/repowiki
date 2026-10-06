@@ -1,5 +1,6 @@
 import { claimAnchor, type Revision, type SectionKey } from "@repowiki/core";
 import { formatDate, formatNumber, shortSha } from "./format.ts";
+import { type ArticleInflight, IN_PROGRESS_ANCHOR } from "./inflight-article.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
@@ -55,6 +56,8 @@ export interface ArticleView {
   infobox: { label: string; html: string }[];
   /** Trusted HTML: "This page was last edited on <date>, at commit <sha link>." */
   lastEdited: string;
+  /** The work in flight on a current active article (spec v2 #9 §6.2); absent otherwise. */
+  inflight?: ArticleInflight;
 }
 
 /**
@@ -69,8 +72,15 @@ export function anchoredClaim(claimId: string, html: string, used: Set<string>):
   return `<span class="claim" id="${anchor}">${html}</span>`;
 }
 
-/** Everything the article template prints, computed from one revision. */
-export function articleView(site: SiteModel, revision: Revision): ArticleView {
+/**
+ * Everything the article template prints, computed from one revision; `inflight` (a current
+ * article's only) adds its claims' markers, its In progress section and its Contents entry.
+ */
+export function articleView(
+  site: SiteModel,
+  revision: Revision,
+  inflight: ArticleInflight | null = null,
+): ArticleView {
   const feature = site.features.get(revision.featureId);
   const title = feature?.title ?? revision.featureId;
   const refs = collectReferences(revision);
@@ -86,7 +96,9 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
       .map((claim) =>
         anchoredClaim(
           claim.id,
-          renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []),
+          renderInline(claim.text, links) +
+            markersHtml(refs.markers.get(claim.id) ?? []) +
+            (inflight?.markers.get(claim.id) ?? ""),
           anchored,
         ),
       )
@@ -116,6 +128,7 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
   }));
   const toc = [
     ...sections.map(({ anchor, title }) => ({ anchor, title })),
+    ...(inflight === null ? [] : [{ anchor: IN_PROGRESS_ANCHOR, title: "In progress" }]),
     ...(seeAlso.length > 0 ? [{ anchor: "see-also", title: "See also" }] : []),
     ...(references.length > 0 ? [{ anchor: "references", title: "References" }] : []),
   ];
@@ -141,6 +154,7 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
     references,
     infobox: infoboxRows(site, revision, feature?.aliases ?? []),
     lastEdited: `This page was last edited on ${formatDate(revision.commitDate)}, at commit ${revisionHtml(site, revision)}.`,
+    ...(inflight === null ? {} : { inflight }),
   };
 }
 

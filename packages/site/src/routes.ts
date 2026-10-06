@@ -1,5 +1,6 @@
 import type { Revision } from "@repowiki/core";
 import { type ArticleView, articleView } from "./article.ts";
+import { articleInflight } from "./inflight-article.ts";
 import { featureLink, finalTarget, type SiteModel } from "./model.ts";
 import { leadSummary } from "./summary.ts";
 
@@ -82,7 +83,7 @@ export function pageFor(site: SiteModel, route: WikiRoute): PageView {
     case "article":
       return {
         kind: "article",
-        view: articleView(site, articleFor(site, route)),
+        view: articleView(site, articleFor(site, route), articleInflight(site, route.featureId)),
         indexed: site.features.get(route.featureId)?.status.kind === "active",
       };
     case "redirect": {

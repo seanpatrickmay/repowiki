@@ -1,0 +1,47 @@
+---
+import { type ArticleInflight, IN_PROGRESS_ANCHOR } from "../inflight-article.ts";
+import { IN_PROGRESS_URL } from "../urls.ts";
+
+interface Props {
+  view: ArticleInflight;
+}
+
+const { view } = Astro.props;
+---
+<section aria-labelledby={IN_PROGRESS_ANCHOR} data-pagefind-ignore="all">
+  <h2 id={IN_PROGRESS_ANCHOR}>In progress</h2>
+  <p class="inflight-more">{view.status.line} <a href={IN_PROGRESS_URL}>All work in progress</a></p>
+  {view.status.stale !== null && <div class="ambox ambox-stale" role="note">{view.status.stale}</div>}
+  {view.pulls.length > 0 && (
+    <>
+      <h3>Open pull requests</h3>
+      <ul class="inflight-pulls">
+        {view.pulls.map((pull) => (
+          <li>
+            <a href={pull.href}>#{pull.number} {pull.title}</a>
+            {pull.badges.map((badge) => <span class="badge">{badge}</span>)}
+            <span class="inflight-evidence">({pull.changes})</span>
+            {pull.claims.length > 0 && (
+              <ul>
+                {pull.claims.map((html) => <li set:html={html} />)}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
+  )}
+  {view.issues.length > 0 && (
+    <>
+      <h3>Planned work</h3>
+      <ul class="inflight-issues">
+        {view.issues.map((issue) => (
+          <li>
+            <a href={issue.href}>#{issue.number} {issue.title}</a>
+            <span class="inflight-evidence">({issue.evidence})</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )}
+</section>

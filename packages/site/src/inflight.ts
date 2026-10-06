@@ -233,31 +233,41 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
       ? MERGE_WORDS[pull.merge]
       : `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`,
     summary,
-    features: pull.features.map((f) => ({
-      anchor: pullFeatureAnchor(f.featureId),
-      feature: featureRef(site, f.featureId),
-      files: `${counted(f.files, "file")}, ${counted(f.changedLines, "line")}${f.added + f.removed > 0 ? `, ${formatNumber(f.added)} added and ${formatNumber(f.removed)} removed` : ""}`,
-      drifts: f.drifts,
-      effects: pull.effects
-        .filter((e) => e.featureId === f.featureId)
-        .map((e) => {
-          const claim = site.pages
-            .get(e.featureId)
-            ?.sections.flatMap((s) => s.claims)
-            .find((c) => c.id === e.claimId);
-          const anchor = claimAnchor(e.claimId);
-          return {
-            text: claim === undefined ? e.claimId : plainClaimText(claim.text, titleOf),
-            // A claim no longer on the page (a stale snapshot) links to the article itself.
-            href:
-              claim === undefined || anchor === null
-                ? (featureLink(site, e.featureId)?.href ?? null)
-                : `${articleUrl(e.featureId)}#${anchor}`,
-            reason: e.reason,
-            certain: e.certain,
-          };
-        }),
-    })),
+    // Every feature it touches, then any whose page cites a file it changes: each has an anchor
+    // the article's markers link to.
+    features: [...new Set([...pull.features, ...pull.effects].map((f) => f.featureId))].map(
+      (featureId) => {
+        const f = pull.features.find((touched) => touched.featureId === featureId);
+        return {
+          anchor: pullFeatureAnchor(featureId),
+          feature: featureRef(site, featureId),
+          files:
+            f === undefined
+              ? "None of its files, but its page cites files this changes"
+              : `${counted(f.files, "file")}, ${counted(f.changedLines, "line")}${f.added + f.removed > 0 ? `, ${formatNumber(f.added)} added and ${formatNumber(f.removed)} removed` : ""}`,
+          drifts: f?.drifts ?? false,
+          effects: pull.effects
+            .filter((e) => e.featureId === featureId)
+            .map((e) => {
+              const claim = site.pages
+                .get(e.featureId)
+                ?.sections.flatMap((s) => s.claims)
+                .find((c) => c.id === e.claimId);
+              const anchor = claimAnchor(e.claimId);
+              return {
+                text: claim === undefined ? e.claimId : plainClaimText(claim.text, titleOf),
+                // A claim no longer on the page (a stale snapshot) links to the article itself.
+                href:
+                  claim === undefined || anchor === null
+                    ? (featureLink(site, e.featureId)?.href ?? null)
+                    : `${articleUrl(e.featureId)}#${anchor}`,
+                reason: e.reason,
+                certain: e.certain,
+              };
+            }),
+        };
+      },
+    ),
     closes: pull.closes.map((number) => ({
       number,
       href: githubUrl(inflight.repo, "issues", number),
