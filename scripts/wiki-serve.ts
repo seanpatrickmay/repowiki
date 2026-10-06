@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
+  ASK_TURN_TIMEOUT_MS,
   type AskSession,
   createAskHandler,
   createAskSession,
@@ -94,6 +95,8 @@ async function main(): Promise<void> {
           models,
           ledger: createLedger(),
           runId: `ask-${new Date().toISOString()}`,
+          // A hung call ends as an error answer instead of holding the session for minutes.
+          timeoutMs: ASK_TURN_TIMEOUT_MS,
         }),
         model: models.ask,
         questionUsd: args.questionUsd,

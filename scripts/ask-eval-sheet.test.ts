@@ -48,6 +48,7 @@ function result(n: number): AskEvalResult {
       ms: 2000,
       score: 1,
       judgeUsd: 0.001,
+      grounded: 2,
     }),
   );
   return { rows, overBudget: [], spentUsd: 0.2 };

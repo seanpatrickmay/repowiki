@@ -5,7 +5,13 @@ import { callCostUsd, type GenerateRequest, LlmOutputError, type Provider } from
 import { WikiView } from "@repowiki/query";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { answerText, median, renderAskReport, runAskEval } from "./ask-eval-run.ts";
+import {
+  answerText,
+  groundedSentences,
+  median,
+  renderAskReport,
+  runAskEval,
+} from "./ask-eval-run.ts";
 
 let sample: SampleWiki;
 beforeAll(() => {
@@ -289,6 +295,36 @@ describe("runAskEval", () => {
   });
 });
 
+describe("groundedSentences", () => {
+  it("counts the shown sentences whose sources were shown and whose names they write", () => {
+    const view = new WikiView(sample.wiki);
+    const source = (n: number, claimId: string) => ({
+      n,
+      pageId: "signals",
+      pageTitle: "Signals",
+      section: "overview",
+      sectionTitle: "Overview",
+      claimId,
+      href: `/wiki/signals/#claim-${claimId}`,
+      excerpt: "x",
+    });
+    const response = {
+      status: "answered",
+      sentences: [
+        { text: "Signals are made by `ingest_chunk`.", sources: [1] },
+        { text: "It is in `nowhere_at_all`.", sources: [1] },
+        { text: "Ingestion stops at `MAX_SIGNALS`.", sources: [2] },
+      ],
+      sources: [source(1, "s-1"), source(2, "s-2")],
+    } as never;
+    expect(groundedSentences(view, response, ["signals#s-1"])).toBe(1);
+    expect(groundedSentences(view, response, ["signals#s-1", "signals#s-2"])).toBe(2);
+    expect(
+      groundedSentences(view, { ...(response as object), status: "not-found" } as never, []),
+    ).toBe(0);
+  });
+});
+
 describe("renderAskReport", () => {
   it("states each question, the totals, the grounding and spec §12.5's bars", async () => {
     const view = new WikiView(sample.wiki);
@@ -324,9 +360,22 @@ describe("renderAskReport", () => {
     expect(report).toContain("| q-where | where | answered | yes | 1 | $0.0030 | 3.0 s |");
     expect(report).toContain("| q-how | how | not-found | no | 1 | $0.0030 | 3.0 s |");
     expect(report).toContain("- Accuracy: 1 of 2 (50%).");
+    expect(result.rows.map((r) => r.grounded)).toEqual([1, 0]);
     expect(report).toContain(
-      "- Grounding: 1 of 1 shown sentences cite at least one claim the model was shown.",
+      "- Grounding: 1 of 1 shown sentences cite only claims the model was shown and name only what they write (checked again from each question's shown handles).",
     );
+    // A sentence the check finds ungrounded lowers the line: it is not the schema's guarantee.
+    const [first, ...rest] = result.rows;
+    if (first === undefined) throw new Error("no row");
+    const lowered = renderAskReport({
+      repo: "sample",
+      head: sample.sha,
+      model: "claude-haiku-4-5",
+      set: "dev",
+      startedAt: "2026-10-05T12:00:00.000Z",
+      result: { ...result, rows: [{ ...first, grounded: 0 }, ...rest] },
+    });
+    expect(lowered).toContain("- Grounding: 0 of 1 shown sentences cite only claims");
     expect(report).toContain("- Median cost at most $0.0150: met.");
     expect(report).toContain("- Median time at most 8 s: met.");
     expect(report).not.toContain("How does ingest_chunk save");

@@ -1,4 +1,4 @@
-import { type AskIndexes, askQuestion } from "@repowiki/ask";
+import { type AskIndexes, askQuestion, ungroundedToken } from "@repowiki/ask";
 import { ASK_QUESTION_MAX_LENGTH, type AskResponse } from "@repowiki/core";
 import {
   type EvalQuestion,
@@ -8,7 +8,7 @@ import {
   settleAll,
 } from "@repowiki/eval";
 import { callCostUsd, type Provider, type ToolProvider } from "@repowiki/llm";
-import { cut, markdownText, oneLine, type WikiView } from "@repowiki/query";
+import { cut, handleClaim, markdownText, oneLine, type WikiView } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 import { DEFAULT_QUESTION_USD } from "./serve-cli.ts";
 
@@ -23,6 +23,8 @@ export interface AskEvalRow {
   /** The judge's 0/1 grade, or null when the judgment failed. */
   score: 0 | 1 | null;
   judgeUsd: number | null;
+  /** The shown sentences the harness's own check finds grounded (groundedSentences). */
+  grounded: number;
 }
 
 export interface AskEvalResult {
@@ -40,6 +42,33 @@ export interface AskEvalProgress extends AskEvalResult {
 /** An answer as the judge reads it: its sentences, joined as one answer. */
 export const answerText = (response: AskResponse): string =>
   response.sentences.map((s) => s.text).join(" ");
+
+/**
+ * How many of an answered or partial response's sentences pass spec v2 #4 §12.3's check, made
+ * again here from the handles the question's conversation showed (AskResult.shown), not from the
+ * response's own shape: every source a sentence cites is a shown handle, and the sentence names
+ * no file, function or setting those claims do not write. A not-found, budget or error answer
+ * shows none.
+ */
+export function groundedSentences(
+  view: WikiView,
+  response: AskResponse,
+  shown: readonly string[],
+): number {
+  if (response.status !== "answered" && response.status !== "partial") return 0;
+  const rendered = new Set(shown);
+  return response.sentences.filter((sentence) => {
+    const handles = sentence.sources.map((n) => {
+      const source = response.sources[n - 1];
+      return source === undefined ? "" : `${source.pageId}#${source.claimId}`;
+    });
+    if (handles.length === 0 || !handles.every((h) => rendered.has(h))) return false;
+    const claims = handles.flatMap((h) => handleClaim(view, h) ?? []);
+    return (
+      claims.length === handles.length && ungroundedToken(view, sentence.text, claims) === null
+    );
+  }).length;
+}
 
 /**
  * Refuses, as one CliError naming them, the questions the ask cannot take (over
@@ -104,8 +133,9 @@ export async function runAskEval(options: {
     const started = clock();
     let paid = 0;
     let response: AskResponse;
+    let shown: string[];
     try {
-      ({ response } = await askQuestion({
+      ({ response, shown } = await askQuestion({
         provider: options.provider,
         view: options.view,
         indexes: options.indexes,
@@ -126,7 +156,14 @@ export async function runAskEval(options: {
     const ms = clock() - started;
     spent += response.cost.usd ?? DEFAULT_QUESTION_USD;
     committed += ceiling - DEFAULT_QUESTION_USD + (response.cost.usd ?? DEFAULT_QUESTION_USD);
-    asked.push({ id: question.id, kind: question.kind, question: question.question, response, ms });
+    asked.push({
+      id: question.id,
+      kind: question.kind,
+      question: question.question,
+      response,
+      ms,
+      grounded: groundedSentences(options.view, response, shown),
+    });
     record(unjudged(), false);
   }
   if (asked.length > 0)
@@ -212,7 +249,7 @@ export function renderAskReport(at: {
   const shown = rows.flatMap((r) =>
     r.response.status === "answered" || r.response.status === "partial" ? r.response.sentences : [],
   );
-  const cited = shown.filter((s) => s.sources.length > 0).length;
+  const grounded = rows.reduce((sum, r) => sum + r.grounded, 0);
   const medianUsd = median(costs);
   const maxUsd = costs.length === 0 ? null : Math.max(...costs);
   const medianMs = median(times);
@@ -234,7 +271,7 @@ export function renderAskReport(at: {
     `- Accuracy: ${correct} of ${rows.length}${rows.length === 0 ? "" : ` (${Math.round((100 * correct) / rows.length)}%)`}${rows.some((r) => r.score === null) ? `; ${rows.filter((r) => r.score === null).length} unjudged` : ""}.`,
     `- Cost a question: median ${usd4(medianUsd)}, most ${usd4(maxUsd)}; the run cost ${usd4(at.result.spentUsd)} with judging.`,
     `- Time from the question to its answer: median ${medianMs === null ? "none" : seconds(medianMs)}, most ${times.length === 0 ? "none" : seconds(Math.max(...times))}.`,
-    `- Grounding: ${cited} of ${shown.length} shown sentences cite at least one claim the model was shown.`,
+    `- Grounding: ${grounded} of ${shown.length} shown sentences cite only claims the model was shown and name only what they write (checked again from each question's shown handles).`,
     `- Not asked (the next question could have crossed --max-usd): ${at.result.overBudget.length === 0 ? "none" : at.result.overBudget.join(", ")}.`,
     "",
     "## Cost and speed (spec v2 #4 §12.5)",

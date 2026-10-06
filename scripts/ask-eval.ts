@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { askIndexes } from "@repowiki/ask";
+import { ASK_TURN_TIMEOUT_MS, askIndexes } from "@repowiki/ask";
 import { WikiBuildError } from "@repowiki/engine";
 import { loadQuestions, QuestionFileError, selectQuestions } from "@repowiki/eval";
 import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@repowiki/llm";
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     view,
     indexes: askIndexes(view),
     questions,
-    provider: createClaudeToolProvider({ models, ledger, runId }),
+    provider: createClaudeToolProvider({ models, ledger, runId, timeoutMs: ASK_TURN_TIMEOUT_MS }),
     judge: createClaudeProvider({ models, ledger, runId }),
     model: models.ask,
     judgeModel: models.evalJudge,
