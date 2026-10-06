@@ -31,7 +31,8 @@ const STOP_WAIT_MS = 30_000;
 /**
  * pnpm wiki:serve <repo> (spec v2 #4 §7): serves <out>/site/ (default out ~/.repowiki/<basename
  * of repo>) and /api/ask from one origin on 127.0.0.1, rebuilding the site first when its copy
- * of the export is not <out>/export.json's. A bad --config or a busy port fails before that
+ * of the export is not <out>/export.json's or its marker names other site code (siteIsCurrent),
+ * or --repo-url is given. A bad --config or a busy port fails before that
  * build: the port is bound first, answering 503 until the site is ready. Prints the estimate
  * and both caps (with or without a key), then answers questions with the ask role's model when
  * ANTHROPIC_API_KEY is set (read only from RepoWiki's .env, never printed); without a key or
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
   const siteDir = join(out, "site");
   if (args.repoUrl !== null || !siteIsCurrent(siteDir, wiki)) {
     console.error(
-      `building the site (${args.repoUrl !== null ? "--repo-url given" : "export changed"})`,
+      `building the site (${args.repoUrl !== null ? "--repo-url given" : "the export or the site code changed"})`,
     );
     const { buildSite } = await import("@repowiki/site/build");
     await buildSite(exportPath, siteDir, args.repoUrl);

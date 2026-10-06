@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
+import { siteMarker } from "@repowiki/site/format";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SCRIPT = "scripts/wiki-serve.ts";
@@ -20,7 +21,7 @@ beforeAll(() => {
   // A site already built from this export, so serving it needs no Astro build.
   const site = join(out, "site");
   mkdirSync(site);
-  writeFileSync(join(site, ".repowiki-site"), "");
+  writeFileSync(join(site, ".repowiki-site"), siteMarker());
   writeFileSync(join(site, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
   writeFileSync(join(site, "index.html"), "<p>main page</p>");
   writeFileSync(join(site, "404.html"), "<p>not found</p>");
@@ -303,7 +304,7 @@ describe("wiki-serve.ts as a process", () => {
     try {
       writeFileSync(join(stale, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
       const server = await serve(["--out", stale, "--port", "0", "--no-ask"]);
-      expect(server.stderr()).toContain("building the site (export changed)");
+      expect(server.stderr()).toContain("building the site (the export or the site code changed)");
       expect(readFileSync(join(stale, "site", "export.json"), "utf8")).toBe(
         `${JSON.stringify(sample.wiki, null, 2)}\n`,
       );
