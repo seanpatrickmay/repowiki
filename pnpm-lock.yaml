@@ -35,6 +35,9 @@ importers:
       '@repowiki/query':
         specifier: workspace:*
         version: link:packages/query
+      '@repowiki/site':
+        specifier: workspace:*
+        version: link:packages/site
       '@types/node':
         specifier: 24.19.0
         version: 24.19.0

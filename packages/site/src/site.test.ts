@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import {
   type BuiltSite,
@@ -80,6 +81,10 @@ describe("site build", () => {
 describe("content security policy", () => {
   const CSP =
     "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+
+  it("is the one constant wiki:serve sends as a header too (C10)", () => {
+    expect(CONTENT_SECURITY_POLICY).toBe(CSP);
+  });
 
   it("puts the same policy right after the charset on every page, once", () => {
     const tag = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
