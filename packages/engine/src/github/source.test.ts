@@ -168,6 +168,63 @@ describe("ghSource", () => {
     expect(calls.filter((args) => args.some((a) => a.includes("pullRequests")))).toHaveLength(2);
   });
 
+  it("stops after ceil(cap / page size) + 1 pages when the cursor keeps changing", () => {
+    const calls: string[][] = [];
+    const page = (connection: string, n: number, extra: Record<string, unknown>) =>
+      ok({
+        data: {
+          repository: {
+            ...extra,
+            [connection]: {
+              totalCount: 1000,
+              pageInfo: { hasNextPage: true, endCursor: `cursor-${calls.length}` },
+              nodes: [{ n }],
+            },
+          },
+        },
+      });
+    const run: GhRunner = (args) => {
+      calls.push([...args]);
+      const query = args.find((a) => a.startsWith("query=")) ?? "";
+      return query.includes("pullRequests")
+        ? page("pullRequests", calls.length, { isPrivate: false, defaultBranchRef: null })
+        : page("issues", calls.length, {});
+    };
+    const snapshot = read(run);
+    const asked = (connection: string) =>
+      calls.filter((args) => args.some((a) => a.includes(connection))).length;
+    // 50 pull requests at 50 a page, 200 issues at 100 a page.
+    expect(asked("pullRequests")).toBe(2);
+    expect(asked("issues(states")).toBe(3);
+    expect(snapshot.dropped).toBe(5);
+  });
+
+  it("redacts gh's stderr and makes it one line before it is a skip reason (R25)", () => {
+    const saved = process.env.GH_TOKEN;
+    // Built at run time, so no token-shaped literal sits in the source.
+    const configured = `${"0123456789abcdef".repeat(2)}legacy`;
+    const shaped = `gh${"o"}_${"Q7r6".repeat(9)}`;
+    process.env.GH_TOKEN = configured;
+    try {
+      const skip = (stderr: string) =>
+        ghSource({
+          run: () => ({ status: 1, stdout: "", stderr, failure: null }),
+          now,
+        }).read(IDENTITY);
+      const first = skip(`\n gh: token ${configured} and ${shaped}\u202E\r\u0007 bad \nnext`);
+      expect(first).toEqual({
+        skip: "GitHub refused the query: gh: token [redacted] and [redacted] bad",
+      });
+      // Redacted before it is cut, so a cut never leaves a token's prefix.
+      const long = skip(`${"x".repeat(190)} ${shaped}`);
+      expect(JSON.stringify(long)).not.toContain("gho");
+      expect(JSON.stringify(long)).not.toContain("Q7r6");
+    } finally {
+      if (saved === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = saved;
+    }
+  });
+
   it.each([
     [
       "no gh",

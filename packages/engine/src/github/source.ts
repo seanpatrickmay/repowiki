@@ -21,6 +21,7 @@ import {
 import { z } from "zod";
 import { GH_TIMEOUT_MS, type GhRunner, spawnGh } from "./gh.ts";
 import type { GitHubIdentity } from "./identity.ts";
+import { redactGitHub } from "./redact.ts";
 
 /** Open pull requests, most recently updated first (spec v2 #9 §5.3). */
 export const PULLS_QUERY = `query($owner: String!, $name: String!, $first: Int!, $after: String) {
@@ -179,10 +180,16 @@ export function normaliseIssue(raw: z.infer<typeof RawIssue>): GitHubIssue {
 const byActivity = (a: { updatedAt: string; number: number }, b: typeof a) =>
   Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.number - a.number;
 
-/** gh's stderr as a skip reason: its first line only, cut short (R25); the caller redacts it. */
+/**
+ * gh's stderr as a skip reason (R25): GitHub tokens redacted first, then its first non-blank line
+ * only, neutralised to one plain line (no control or bidi character) and cut to 200 code points.
+ */
 function firstLine(stderr: string): string {
-  const line = stderr.split("\n").find((l) => l.trim() !== "") ?? "";
-  return [...line.trim()].slice(0, 200).join("") || "no message";
+  const line =
+    redactGitHub(stderr)
+      .split("\n")
+      .find((l) => l.trim() !== "") ?? "";
+  return inflightLine(line, 200) || "no message";
 }
 
 class Skip extends Error {}
@@ -224,7 +231,11 @@ function graphql(
   }
 }
 
-/** Pages through one connection until `cap` nodes or the last page; `select` finds the page. */
+/**
+ * Pages through one connection until `cap` nodes or the last page, and never past
+ * ceil(cap / pageSize) + 1 pages (a cursor that keeps changing must not page for hours);
+ * `select` finds the page.
+ */
 function readConnection(
   run: GhRunner,
   query: string,
@@ -237,7 +248,8 @@ function readConnection(
   let after: string | null = null;
   let total = 0;
   let extra: unknown = null;
-  for (;;) {
+  const maxPages = Math.ceil(cap / pageSize) + 1;
+  for (let pages = 1; ; pages++) {
     const first = Math.min(pageSize, cap - nodes.length);
     const selected = select(graphql(run, query, identity, first, after));
     if (selected === null)
@@ -249,7 +261,8 @@ function readConnection(
     // An empty page or a cursor that did not move ends it too: paging never loops forever.
     const cursor = page.pageInfo.endCursor;
     const last = !page.pageInfo.hasNextPage || cursor === null || cursor === after;
-    if (nodes.length >= cap || last || page.nodes.length === 0) return { nodes, total, extra };
+    if (nodes.length >= cap || last || page.nodes.length === 0 || pages >= maxPages)
+      return { nodes, total, extra };
     after = cursor;
   }
 }
