@@ -14,7 +14,7 @@
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-serif: "Linux Libertine", Georgia, "Times New Roman", Times, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  /* Activity charts (spec v2 #6 §11): eight people, others and bots. */
+  /* Activity charts (spec v2 #6 §11): eight people, others, bots, and the heatmap's levels. */
   --chart-1: #3366cc;
   --chart-2: #d33;
   --chart-3: #14866d;
@@ -25,6 +25,11 @@
   --chart-8: #447ff5;
   --chart-others: #a2a9b1;
   --chart-bots: #c8ccd1;
+  --heat-0: #eaecf0;
+  --heat-1: #b6d4c9;
+  --heat-2: #6fb59d;
+  --heat-3: #2f9374;
+  --heat-4: #14634b;
   color-scheme: light;
 }
 
@@ -51,6 +56,11 @@
     --chart-8: #a6bbf5;
     --chart-others: #72777d;
     --chart-bots: #54595d;
+    --heat-0: #27292d;
+    --heat-1: #1d4d3e;
+    --heat-2: #2b7a5f;
+    --heat-3: #3fae87;
+    --heat-4: #7fdcb7;
     color-scheme: dark;
   }
 }
@@ -782,6 +792,11 @@ ins {
   height: 10em;
   border-bottom: 1px solid var(--border);
 }
+.activity-heatmap {
+  display: block;
+  width: 100%;
+  max-width: 48em;
+}
 .activity-chart .bar-hit {
   fill: transparent;
 }
@@ -829,6 +844,21 @@ ins {
   fill: var(--chart-bots);
   background: var(--chart-bots);
 }
+.heat-0 {
+  fill: var(--heat-0);
+}
+.heat-1 {
+  fill: var(--heat-1);
+}
+.heat-2 {
+  fill: var(--heat-2);
+}
+.heat-3 {
+  fill: var(--heat-3);
+}
+.heat-4 {
+  fill: var(--heat-4);
+}
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -842,4 +872,9 @@ ins {
   width: 0.8em;
   height: 0.8em;
   margin-right: 0.3em;
+}
+.sparkline {
+  width: 6em;
+  height: 1.2em;
+  fill: var(--chart-1);
 }
