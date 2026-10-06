@@ -99,6 +99,10 @@ describe("ask-eval.ts as a process (no network)", () => {
             "",
           ].join("\n"),
         );
+        writeFileSync(
+          join(dir, "support-entries.json"),
+          JSON.stringify({ support: ["support/s01", "support/s02"], routing: ["routing/q-1"] }),
+        );
         const tally = (file: string) =>
           spawnSync(process.execPath, [SCRIPT, "tally", file], {
             env: keyless(),
@@ -118,6 +122,10 @@ describe("ask-eval.ts as a process (no network)", () => {
         const refused = tally(sheet);
         expect(refused.status).toBe(2);
         expect(refused.stderr).toContain('no "## Routing" section');
+        rmSync(join(dir, "support-entries.json"));
+        const unrecorded = tally(sheet);
+        expect(unrecorded.status).toBe(2);
+        expect(unrecorded.stderr).toContain("no support-entries.json beside");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

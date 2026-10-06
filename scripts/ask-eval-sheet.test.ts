@@ -56,11 +56,18 @@ const AT = { repo: "sample", head: "a".repeat(40), startedAt: "2026-10-05T12:00:
 
 describe("supportSheet", () => {
   it("samples twenty sentences with their cited claims' full text, blind, then a routing line a question", () => {
-    const sheet = supportSheet(view, result(15), AT);
+    const { text: sheet, entries } = supportSheet(view, result(15), AT);
     const support = sheet.split("\n").filter((l) => l.startsWith("- [ ] `support/"));
     const routing = sheet.split("\n").filter((l) => l.startsWith("- [ ] `routing/"));
     expect(support).toHaveLength(SUPPORT_SAMPLE);
     expect(routing).toHaveLength(15);
+    expect(entries.support).toEqual(
+      Array.from(
+        { length: SUPPORT_SAMPLE },
+        (_, i) => `support/s${String(i + 1).padStart(2, "0")}`,
+      ),
+    );
+    expect(entries.routing).toEqual(Array.from({ length: 15 }, (_, i) => `routing/q-${i + 1}`));
     expect(support[0]).toMatch(/^- \[ \] `support\/s01` \(sentence\): Sentence \d+[ab]/);
     expect(support[0]).toContain(
       '\u2014 cites "\\`ingest\\_chunk\\` makes one signal per non-blank sentence of a chunk and saves each one with \\`save\\_signal\\`." (Signal ingestion, Overview)',
@@ -75,7 +82,7 @@ describe("supportSheet", () => {
   it("orders the sample by the run's start time, the same each time", () => {
     const order = (startedAt: string) =>
       supportSheet(view, result(15), { ...AT, startedAt })
-        .split("\n")
+        .text.split("\n")
         .filter((l) => l.startsWith("- [ ] `support/"))
         .map((l) => l.replace(/^.*\(sentence\): (\S+ \S+).*$/, "$1"));
     expect(order(AT.startedAt)).toEqual(order(AT.startedAt));
@@ -84,10 +91,14 @@ describe("supportSheet", () => {
 });
 
 describe("tallySupport", () => {
-  const marked = (support: number, routing: number) => {
+  let written: ReturnType<typeof supportSheet>;
+  beforeAll(() => {
+    written = supportSheet(view, result(20), AT);
+  });
+  const marked = (support: number, routing: number, sheet = written) => {
     let s = 0;
     let r = 0;
-    return supportSheet(view, result(20), AT)
+    return sheet.text
       .split("\n")
       .map((line) => {
         if (line.startsWith("- [ ] `support/"))
@@ -100,21 +111,48 @@ describe("tallySupport", () => {
   };
 
   it("counts each section apart and passes at 18 of 20 supported and 16 of 20 routed", () => {
-    expect(tallySupport(marked(18, 16))).toEqual({
+    expect(tallySupport(marked(18, 16), written.entries)).toEqual({
       support: { lines: 20, yes: 18, no: 2, unmarked: 0, pass: true },
       routing: { lines: 20, yes: 16, no: 4, unmarked: 0, pass: true },
     });
-    const short = tallySupport(marked(17, 15));
+    const short = tallySupport(marked(17, 15), written.entries);
     expect([short.support.pass, short.routing.pass]).toEqual([false, false]);
-    const blank = tallySupport(supportSheet(view, result(20), AT));
+    const blank = tallySupport(written.text, written.entries);
     expect(blank.support).toEqual({ lines: 20, yes: 0, no: 0, unmarked: 20, pass: false });
   });
 
   it("refuses a mark it cannot read and a file that is not a support sheet", () => {
     expect(() =>
-      tallySupport(marked(18, 16).replace("- [x] `support/s01`", "- [?] `support/s01`")),
+      tallySupport(
+        marked(18, 16).replace("- [x] `support/s01`", "- [?] `support/s01`"),
+        written.entries,
+      ),
     ).toThrow(/mark a claim/);
-    expect(() => tallySupport("# notes\n- [x] `a/b` (x)\n")).toThrow(/no "## Routing" section/);
+    expect(() => tallySupport("# notes\n- [x] `a/b` (x)\n", written.entries)).toThrow(
+      /no "## Routing" section/,
+    );
+  });
+
+  it("measures each section against the entries the sheet was written with", () => {
+    const small = supportSheet(view, result(3), AT);
+    expect(small.entries.support).toHaveLength(6);
+    const counted = tallySupport(marked(6, 2, small), small.entries);
+    expect(counted.support).toEqual({ lines: 6, yes: 6, no: 0, unmarked: 0, pass: true });
+    expect(counted.routing).toEqual({ lines: 3, yes: 2, no: 1, unmarked: 0, pass: false });
+  });
+
+  it("refuses a sheet with an entry removed or added, naming the counts, on one line", () => {
+    const lines = marked(20, 20).split("\n");
+    const without = lines.filter((l) => !l.includes("`support/s07`")).join("\n");
+    expect(() => tallySupport(without, written.entries)).toThrow(
+      /^the Support section has 19 entries, but the sheet was written with 20 \(missing support\/s07\)$/,
+    );
+    const extra = [...lines, "- [x] `routing/q-99` (question): Q? \u2014 first source: P"].join(
+      "\n",
+    );
+    expect(() => tallySupport(extra, written.entries)).toThrow(
+      /^the Routing section has 21 entries, but the sheet was written with 20 \(not written: routing\/q-99\)$/,
+    );
   });
 });
 

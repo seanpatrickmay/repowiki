@@ -15,7 +15,14 @@ import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@r
 import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
 import { checkAskableQuestions, renderAskReport, runAskEval } from "./ask-eval-run.ts";
-import { criteriaLines, devBaseline, supportSheet, tallySupport } from "./ask-eval-sheet.ts";
+import {
+  criteriaLines,
+  devBaseline,
+  readSheetEntries,
+  SUPPORT_ENTRIES_FILE,
+  supportSheet,
+  tallySupport,
+} from "./ask-eval-sheet.ts";
 import { logLine } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
@@ -28,7 +35,8 @@ import { exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
  * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks and the
  * comparison with his latest complete eval:run dev run (§12.2). States its estimate first;
  * --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
- * `pnpm ask:eval tally <support.md>` counts a marked support sheet.
+ * `pnpm ask:eval tally <support.md>` counts a marked support sheet against the entries recorded
+ * beside it (support-entries.json).
  */
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -131,10 +139,9 @@ async function main(): Promise<void> {
       extra: criteriaLines(result, baseline),
     }),
   );
-  writeFileSync(
-    join(runDir, "support.md"),
-    supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt }),
-  );
+  const sheet = supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt });
+  writeFileSync(join(runDir, "support.md"), sheet.text);
+  writeFileSync(join(runDir, SUPPORT_ENTRIES_FILE), `${JSON.stringify(sheet.entries, null, 2)}\n`);
   const correct = result.rows.filter((r) => r.score === 1).length;
   console.log(
     `ask ${correct} of ${result.rows.length}; this run cost $${result.spentUsd.toFixed(4)}${result.overBudget.length > 0 ? `; ${result.overBudget.length} not asked (--max-usd)` : ""}`,
@@ -154,9 +161,18 @@ function tally(argv: readonly string[]): void {
   } catch {
     throw new CliError(`cannot read ${file}`);
   }
+  const entriesPath = join(dirname(file), SUPPORT_ENTRIES_FILE);
+  let entriesText: string;
+  try {
+    entriesText = readFileSync(entriesPath, "utf8");
+  } catch {
+    throw new CliError(
+      `no ${SUPPORT_ENTRIES_FILE} beside ${file}: tally counts a sheet as ask:eval wrote it`,
+    );
+  }
   let counted: ReturnType<typeof tallySupport>;
   try {
-    counted = tallySupport(text);
+    counted = tallySupport(text, readSheetEntries(entriesText));
   } catch (err) {
     throw new CliError(`${file}: ${(err as Error).message}`, { cause: err });
   }
