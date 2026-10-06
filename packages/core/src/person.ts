@@ -36,13 +36,17 @@ export function withoutEmails(text: string): string {
 export const PERSON_NAME_MAX_LENGTH = 120;
 
 /**
- * An author name as People shows it (spec v2 #6 §6.1, R14): every control, bidi and invisible
- * character dropped, whitespace collapsed, trimmed and cut to PERSON_NAME_MAX_LENGTH code points.
+ * An author name as People shows it (spec v2 #6 §6.1, R14): whitespace made spaces, every other
+ * control, bidi and invisible character dropped, spaces collapsed, trimmed and cut to PERSON_NAME_MAX_LENGTH code points.
  * A name that holds an email address is unusable (R10): it cleans to "", as does one with nothing
  * left, and the caller falls back to the next name.
  */
 export function cleanPersonName(raw: string): string {
-  const flat = raw.replace(INVISIBLE_CHARACTERS, "").replace(/\s+/g, " ").trim();
+  const flat = raw
+    .replace(/\s+/g, " ")
+    .replace(INVISIBLE_CHARACTERS, "")
+    .replace(/ +/g, " ")
+    .trim();
   if (EMAIL_TEST.test(flat)) return "";
   return [...flat].slice(0, PERSON_NAME_MAX_LENGTH).join("").trimEnd();
 }

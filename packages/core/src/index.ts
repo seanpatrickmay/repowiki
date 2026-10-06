@@ -115,6 +115,20 @@ export {
 export { Manifest, MemberId, Membership } from "./manifest.ts";
 export { memberId, parseMemberId } from "./member-id.ts";
 export {
+  DEFAULT_MAX_NARRATIVES,
+  DEFAULT_MIN_COMMITS,
+  DEFAULT_OTHERS_MIN_PEOPLE,
+  MatchKey,
+  type MatchKind,
+  normalizeName,
+  type ParsedMatchKey,
+  PeopleConfig,
+  PeopleEntry,
+  parseMatchKey,
+  parsePeopleConfig,
+  shownMatchKey,
+} from "./people-config.ts";
+export {
   ActivityDay,
   CalendarDay,
   type Contributor,
