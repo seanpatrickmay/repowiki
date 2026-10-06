@@ -50,27 +50,44 @@ const LooseAnswer = z.object({
 const SOURCE_EXTENSION =
   /\.(ts|tsx|js|jsx|mjs|cjs|py|tf|hcl|json|yml|yaml|toml|sql|sh|css|html|md|txt|env|ini|cfg|xml|lock|go|rs|java|kt|rb|php|c|h|cpp|cs|swift)$/i;
 
+/** A run of the characters a name is made of: letters, digits and `.`, `/`, `_`, `-`. */
+const NAME_RUN = /[\p{L}\p{N}._/-]+/gu;
+/** A sentence's dashes and dots at a name's ends (not a dotfile's dot or `../`). */
+const NAME_LEAD = /^(?:-+|\.{2,}(?!\/))/;
+const NAME_TAIL = /[.-]+$/;
+/** What follows a name that makes it a call: `()` or `(args)`. */
+const CALL_AFTER = /^\([^()\n]*\)/;
+/** `file(s)`, `class(es)`: a plural after a lowercase word, not a call. */
+const PLURAL_AFTER = /^\(e?s\)/;
+
 /**
- * The code-like tokens of a sentence (spec v2 #4 R6): every backtick span, and every other word
- * that contains `/` or `_`, ends in `()`, or ends in a source-file extension. Surrounding
- * punctuation is not part of a word.
+ * The code-like tokens of a sentence (spec v2 #4 R6): every backtick span, and every other name
+ * that contains `/` or `_`, is a call, or ends in a source-file extension. A name is a run of
+ * letters, digits, `.`, `/`, `_` and `-`; any other character (Unicode quotes, dashes, ellipses,
+ * apostrophes, symbols) ends it, so `secrets.txt's` and a curly-quoted `secrets.txt` both give
+ * `secrets.txt`. A sentence's dots and dashes at a name's ends are not part of it. `name(args)`
+ * is the call `name()`, and its arguments are read as names too.
  */
 export function codeTokens(text: string): string[] {
   const tokens: string[] = [];
   const rest = text.replace(/`([^`]*)`/g, (_span, inner: string) => {
-    if (inner.trim() !== "") tokens.push(inner.trim());
-    return " ";
+    const code = inner.trim();
+    const call = /^([\p{L}\p{N}._/-]+)\(([^()\n]*)\)$/u.exec(code);
+    if (call !== null) tokens.push(`${call[1]}()`);
+    else if (code !== "") tokens.push(code);
+    return ` ${call?.[2] ?? ""} `;
   });
-  for (const raw of rest.split(/\s+/)) {
-    let word = raw.replace(/^[("'[{<]+/, "");
-    for (;;) {
-      const next = word.replace(/[.,;:!?'"\]}>]+$/, "");
-      const trimmed = next.endsWith(")") && !next.endsWith("()") ? next.slice(0, -1) : next;
-      if (trimmed === word) break;
-      word = trimmed;
-    }
-    if (word === "") continue;
-    if (word.endsWith("()") || /[/_]/.test(word) || SOURCE_EXTENSION.test(word)) tokens.push(word);
+  for (const match of rest.matchAll(NAME_RUN)) {
+    const run = match[0];
+    const word = run.replace(NAME_LEAD, "").replace(NAME_TAIL, "");
+    if (!/[\p{L}\p{N}]/u.test(word)) continue;
+    const after = rest.slice(match.index + run.length);
+    const call =
+      run.endsWith(word) &&
+      CALL_AFTER.test(after) &&
+      !(PLURAL_AFTER.test(after) && /^\p{Ll}+$/u.test(word));
+    if (call) tokens.push(`${word}()`);
+    else if (/[/_]/.test(word) || SOURCE_EXTENSION.test(word)) tokens.push(word);
   }
   return tokens;
 }

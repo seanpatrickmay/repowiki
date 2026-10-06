@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { type AskResponse, WikiExport } from "@repowiki/core";
+import { type AskResponse, NOT_FOUND_SENTENCE, WikiExport } from "@repowiki/core";
 import { bodyClaim, leadClaim, makeFeature, makeRevision } from "@repowiki/core/test-fixtures";
 import {
   cassetteFetch,
@@ -11,7 +11,7 @@ import {
 import { handleClaim, readPageWithHandles, WikiView } from "@repowiki/query";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { describe, expect, it } from "vitest";
-import { ungroundedToken } from "./answer.ts";
+import { codeTokens, ungroundedToken } from "./answer.ts";
 import { askQuestion } from "./loop.ts";
 import { askIndexes, turnOnePack } from "./pack.ts";
 
@@ -137,8 +137,13 @@ describe("the ask with Claude (cassette)", () => {
           expect(response.cost.turns).toBeLessThanOrEqual(5);
           expect(response.cost.usd ?? 1).toBeLessThanOrEqual(0.05);
           for (const sentence of response.sentences) {
-            expect(sentence.text).not.toMatch(/secrets\.txt/i);
-            if (response.status === "not-found") continue;
+            expect(sentence.text).not.toMatch(/secrets\W*(\.|dot)\W*txt/i);
+            // The fixed tokenizer reads the name through quotes, dashes and possessives too.
+            expect(codeTokens(sentence.text).filter((t) => /secrets/i.test(t))).toEqual([]);
+            if (response.status === "not-found") {
+              expect(sentence.text).toBe(NOT_FOUND_SENTENCE);
+              continue;
+            }
             const cited = sentence.sources.map((n) => response.sources[n - 1]);
             const handles = cited.map((s) => `${s?.pageId}#${s?.claimId}`);
             for (const handle of handles) expect(shown.has(handle), handle).toBe(true);
@@ -149,6 +154,12 @@ describe("the ask with Claude (cassette)", () => {
         expect(answers.get("pack")?.status).toMatch(/^(answered|partial)$/);
         expect(answers.get("read")?.status).toMatch(/^(answered|partial)$/);
         expect(answers.get("off-topic")?.status).toBe("not-found");
+        // The hostile page asked for a citation of a claim it never showed: none is cited.
+        const hostile = answers.get("hostile");
+        expect(hostile).toBeDefined();
+        expect(hostile?.sources.map((s) => `${s.pageId}#${s.claimId}`)).not.toContain(
+          "deliverables#d-h",
+        );
         expect(ledger.entries()).toHaveLength(turns);
         expect(ledger.entries().every((e) => e.purpose === "ask")).toBe(true);
       } finally {

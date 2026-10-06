@@ -47,6 +47,40 @@ describe("codeTokens", () => {
   it("strips the punctuation around a word but keeps a call's parentheses", () => {
     expect(codeTokens('("src/a.ts"), run()! and `x` .')).toEqual(["x", "src/a.ts", "run()"]);
   });
+
+  it.each([
+    ["a possessive", "Keys live in secrets.txt's first line.", ["secrets.txt"]],
+    ["a curly possessive", "Keys live in secrets.txt\u2019s first line.", ["secrets.txt"]],
+    ["curly double quotes", "Keys live in \u201Csecrets.txt\u201D.", ["secrets.txt"]],
+    ["an ellipsis", "Keys live in secrets.txt\u2026", ["secrets.txt"]],
+    ["three dots", "Keys live in secrets.txt...", ["secrets.txt"]],
+    ["an em dash", "Keys live in secrets.txt\u2014always", ["secrets.txt"]],
+    ["an en dash", "secrets.txt\u2013config.yaml", ["secrets.txt", "config.yaml"]],
+    ["curly single quotes", "It reads \u2018secrets.env\u2019.", ["secrets.env"]],
+    ["emphasis", "It reads **secrets.env** and _x_.", ["secrets.env", "_x_"]],
+    ["an arrow", "Keys moved to secrets.txt\u2192now.", ["secrets.txt"]],
+    ["a line number", "See secrets.txt:12 or secrets.txt#L3.", ["secrets.txt", "secrets.txt"]],
+    ["a call with arguments", "It calls loadSecrets(path) first.", ["loadSecrets()"]],
+    ["a call with two arguments", "It calls load(path, mode).", ["load()"]],
+    ["a file inside a call", "It calls load(secrets.txt).", ["load()", "secrets.txt"]],
+    ["a quoted call", "It calls `loadSecrets(path)`.", ["loadSecrets()"]],
+    ["a file inside a quoted call", "It calls `load(secrets.txt)`.", ["load()", "secrets.txt"]],
+    ["a call's possessive", "save_signal()'s result", ["save_signal()"]],
+  ])("finds the token behind %s", (_name, text, tokens) => {
+    expect(codeTokens(text)).toEqual(tokens);
+  });
+
+  it("keeps the characters of a name inside it, and reads a plural as a word", () => {
+    expect(codeTokens("See scripts/wiki-serve.ts, .env and docs/ for it.")).toEqual([
+      "scripts/wiki-serve.ts",
+      ".env",
+      "docs/",
+    ]);
+    expect(codeTokens("One or more file(s) and class(es) change.")).toEqual([]);
+    expect(codeTokens("The pipeline (see below) runs and/or waits \u2014 then stops.")).toEqual([
+      "and/or",
+    ]);
+  });
 });
 
 describe("ungroundedToken", () => {
@@ -68,6 +102,23 @@ describe("ungroundedToken", () => {
     expect(ungroundedToken(view, "Its server is main.go.", claims)).toBe("main.go");
     expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claims)).toBe("MAX_SIGNALS");
     expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claimsOf("signals#s-2"))).toBeNull();
+  });
+
+  it.each([
+    "Keys live in secrets.txt's first line.",
+    "Keys live in \u201Csecrets.txt\u201D.",
+    "Keys live in secrets.txt\u2026",
+    "Keys live in secrets.txt\u2014always.",
+    "It reads \u2018secrets.env\u2019.",
+    "It calls loadSecrets(path) first.",
+  ])("refuses a name hidden by punctuation or call syntax: %s", (text) => {
+    expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).not.toBeNull();
+  });
+
+  it("grounds a call with arguments by its name", () => {
+    expect(
+      ungroundedToken(view, "Then ingest_chunk(text) saves it.", claimsOf("signals#s-1")),
+    ).toBeNull();
   });
 
   it("matches a name only on identifier boundaries, not inside a longer name", () => {
