@@ -520,6 +520,16 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
     expect(html).toContain('<meta name="robots" content="noindex">');
   });
 
+  it("ships the ask client in the Layout's script, with no zod in the browser", () => {
+    const scripts = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".js"));
+    const client = scripts
+      .map((f) => site.read(`_astro/${f}`))
+      .filter((js) => js.includes("/api/ask/status"));
+    expect(client).toHaveLength(1);
+    expect(client[0]).toContain("/pagefind/pagefind.js");
+    expect(client[0]).not.toMatch(/ZodError|\$ZodType/);
+  });
+
   it("covers the viewport under 720px", () => {
     const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
     const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
