@@ -126,4 +126,11 @@ describe("unmarkHandles", () => {
   it("makes {…#…} parentheses and leaves other braces", () => {
     expect(unmarkHandles("a {p#c} b {q} {r#s#t}")).toBe("a (p#c) b {q} (r#s#t)");
   });
+
+  it("leaves nothing handle-shaped when marks are nested", () => {
+    expect(unmarkHandles("{x{a#b}#y}")).toBe("(x(a#b)#y)");
+    expect(unmarkHandles("{{a#b}}")).toBe("((a#b))");
+    expect(unmarkHandles("{p{q{a#b}#c}#d}")).toBe("(p(q(a#b)#c)#d)");
+    expect(/\{[^{}\n]*#[^{}\n]*\}/.test(unmarkHandles("{x{a#b}#y} {{c#d}#e}"))).toBe(false);
+  });
 });

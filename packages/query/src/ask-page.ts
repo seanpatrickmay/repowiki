@@ -12,12 +12,21 @@ const HANDLE_CLAIM_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 /** True when a claim with this id gets a handle; other claims are shown but cannot be cited. */
 export const hasHandle = (claimId: string): boolean => HANDLE_CLAIM_ID.test(claimId);
 
+const HANDLE_SHAPED = /\{([^{}\n]*#[^{}\n]*)\}/g;
+
 /**
  * Wiki text with every handle-shaped `{…#…}` made `(…#…)`, so only the server's own handles,
- * at the start of a claim's bullet, look like handles to the model.
+ * at the start of a claim's bullet, look like handles to the model. It repeats until nothing
+ * changes, so nested marks such as `{x{a#b}#y}` are unmarked too (each pass removes braces).
  */
-export const unmarkHandles = (text: string): string =>
-  text.replace(/\{([^{}\n]*#[^{}\n]*)\}/g, "($1)");
+export function unmarkHandles(text: string): string {
+  let before = text;
+  for (;;) {
+    const after = before.replace(HANDLE_SHAPED, "($1)");
+    if (after === before) return after;
+    before = after;
+  }
+}
 
 /** A page as the ask's read_page returns it, and the handles of the claims it shows. */
 export interface PageWithHandles {
