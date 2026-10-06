@@ -119,6 +119,7 @@ export {
   CalendarDay,
   cleanPersonName,
   cleanPullTitle,
+  featureLinkTargets,
   MAX_OTHER_NAMES,
   PERSON_ID_MAX_LENGTH,
   PERSON_NAME_MAX_LENGTH,
@@ -129,8 +130,13 @@ export {
   PersonKind,
   PersonName,
   PersonRedirect,
+  PersonRevision,
+  PersonRevisionReason,
+  PersonSection,
+  PersonSectionKey,
   PR_TITLE_MAX_LENGTH,
   PullRequestRef,
+  personClaimViolations,
   withoutEmails,
 } from "./person.ts";
 export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";
