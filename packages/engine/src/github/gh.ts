@@ -16,7 +16,7 @@ export const GH_TIMEOUT_MS = 60_000;
 export const GH_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
 /** What would point gh at another host or repository, print its traffic, or open a program. */
-const REDIRECTING_GH_ENV = [
+export const REDIRECTING_GH_ENV: readonly string[] = [
   "GH_HOST",
   "GH_REPO",
   "GH_DEBUG",

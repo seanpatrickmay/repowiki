@@ -18,6 +18,7 @@ export {
   INFLIGHT_DIR,
   INFLIGHT_GIT,
   INFLIGHT_GIT_ENV,
+  INFLIGHT_READ_TIMEOUT_MS,
   inflightGit,
   isMissingObject,
   pullRef,
