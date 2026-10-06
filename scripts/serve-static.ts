@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { extname, join, relative, sep } from "node:path";
 import { hostAllowed, securityHeaders } from "@repowiki/ask";
+import { cut, oneLine } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 
 /** Content types by extension; anything else is application/octet-stream (spec v2 #4 §7). */
@@ -67,49 +68,68 @@ export type RouteHandler = (request: IncomingMessage, response: ServerResponse) 
 
 /**
  * wiki:serve's request handling: every request must name this server as its Host (421, R18);
- * the ask's endpoints, then the site's files, GET and HEAD only (405), each with the security
- * headers (§9.2) and /api/ responses with no-store; a miss serves 404.html with 404.
+ * the ask's endpoints, then the site's files, GET and HEAD only (405, with Allow), each with the
+ * security headers (§9.2) and /api/ responses with no-store; a miss serves 404.html with 404. A
+ * request that throws is a 500 with the same headers (when none were sent yet), logged on one
+ * line.
  */
 export function serveRequests(options: {
   siteDir: string;
   csp: string;
   port: () => number;
   ask: RouteHandler;
+  /** One terminal line for a request that failed. */
+  log?: (line: string) => void;
 }): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const headers = securityHeaders(options.csp);
   return async (request, response) => {
     const url = request.url ?? "/";
     const api = url.startsWith("/api/") ? { "cache-control": "no-store" } : {};
-    const send = (status: number, type: string, body: Buffer | string) => {
+    const send = (
+      status: number,
+      type: string,
+      body: Buffer | string,
+      extra: Record<string, string> = {},
+    ) => {
       response.writeHead(status, {
         ...headers,
         ...api,
+        ...extra,
         "content-type": type,
         "content-length": String(Buffer.byteLength(body)),
       });
       response.end(request.method === "HEAD" ? undefined : body);
     };
-    if (!hostAllowed(request.headers.host, options.port())) {
-      send(
-        421,
-        "text/plain; charset=utf-8",
-        "This server answers only as 127.0.0.1 or localhost.\n",
+    try {
+      if (!hostAllowed(request.headers.host, options.port())) {
+        send(
+          421,
+          "text/plain; charset=utf-8",
+          "This server answers only as 127.0.0.1 or localhost.\n",
+        );
+        return;
+      }
+      if (await options.ask(request, response)) return;
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        send(405, "text/plain; charset=utf-8", "Only GET and HEAD.\n", { allow: "GET, HEAD" });
+        return;
+      }
+      const file = resolveStaticPath(options.siteDir, url);
+      if (file !== null) {
+        send(200, contentTypeFor(file), readFileSync(file));
+        return;
+      }
+      const missing = resolveStaticPath(options.siteDir, "/404.html");
+      if (missing === null) send(404, "text/plain; charset=utf-8", "Not found.\n");
+      else send(404, "text/html; charset=utf-8", readFileSync(missing));
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      options.log?.(
+        `serve: ${cut(oneLine(request.method ?? "GET"), 10)} ${cut(oneLine(url), 120)} failed (${cut(oneLine(why), 200)})`,
       );
-      return;
+      if (!response.headersSent) send(500, "text/plain; charset=utf-8", "Server error.\n");
+      else response.end();
     }
-    if (await options.ask(request, response)) return;
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      send(405, "text/plain; charset=utf-8", "Only GET and HEAD.\n");
-      return;
-    }
-    const file = resolveStaticPath(options.siteDir, url);
-    if (file !== null) {
-      send(200, contentTypeFor(file), readFileSync(file));
-      return;
-    }
-    const missing = resolveStaticPath(options.siteDir, "/404.html");
-    if (missing === null) send(404, "text/plain; charset=utf-8", "Not found.\n");
-    else send(404, "text/html; charset=utf-8", readFileSync(missing));
   };
 }
 

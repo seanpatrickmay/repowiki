@@ -37,7 +37,14 @@ describe("ask-eval.ts as a process (no network)", () => {
   it(
     "states its estimate on a dry run of the smoke set, and makes no call and writes nothing",
     () => {
-      const result = run(["--questions", SMOKE_QUESTIONS, "--set", "smoke", "--dry-run"]);
+      const result = run([
+        "--questions",
+        SMOKE_QUESTIONS,
+        "--set",
+        "smoke",
+        "--dry-run",
+        "--no-baseline",
+      ]);
       expect(result.status).toBe(0);
       expect(result.stderr).toMatch(/^3 smoke questions through the ask: about \$0\.\d\d /);
       expect(existsSync(join(out, "eval"))).toBe(false);
@@ -51,9 +58,24 @@ describe("ask-eval.ts as a process (no network)", () => {
       const heldOut = run(["--questions", SMOKE_QUESTIONS, "--set", "held-out"]);
       expect(heldOut.status).toBe(2);
       expect(heldOut.stderr).toContain("never runs the held-out set");
-      const keylessRun = run(["--questions", SMOKE_QUESTIONS, "--set", "smoke"]);
+      const keylessRun = run(["--questions", SMOKE_QUESTIONS, "--set", "smoke", "--no-baseline"]);
       expect(keylessRun.status).toBe(1);
       expect(keylessRun.stderr).toContain("ANTHROPIC_API_KEY is not set: pnpm ask:eval");
+      expect(existsSync(join(out, "eval"))).toBe(false);
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
+    "stops in one line, exit 1, before any call when no dev run is there to compare with",
+    () => {
+      const result = run(["--questions", SMOKE_QUESTIONS, "--set", "smoke"]);
+      expect(result.status).toBe(1);
+      const lines = result.stderr.trim().split("\n");
+      expect(lines.at(-1)).toMatch(
+        /^no complete `eval:run --set dev` run on this question file is in .*; run `pnpm eval:run <repo> --questions <file> --set dev` first, or pass --no-baseline$/,
+      );
+      expect(result.stderr).not.toContain("ANTHROPIC_API_KEY");
       expect(existsSync(join(out, "eval"))).toBe(false);
     },
     PROCESS_TIMEOUT_MS,
@@ -99,6 +121,10 @@ describe("ask-eval.ts as a process (no network)", () => {
             "",
           ].join("\n"),
         );
+        writeFileSync(
+          join(dir, "support-entries.json"),
+          JSON.stringify({ support: ["support/s01", "support/s02"], routing: ["routing/q-1"] }),
+        );
         const tally = (file: string) =>
           spawnSync(process.execPath, [SCRIPT, "tally", file], {
             env: keyless(),
@@ -118,6 +144,10 @@ describe("ask-eval.ts as a process (no network)", () => {
         const refused = tally(sheet);
         expect(refused.status).toBe(2);
         expect(refused.stderr).toContain('no "## Routing" section');
+        rmSync(join(dir, "support-entries.json"));
+        const unrecorded = tally(sheet);
+        expect(unrecorded.status).toBe(2);
+        expect(unrecorded.stderr).toContain("no support-entries.json beside");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

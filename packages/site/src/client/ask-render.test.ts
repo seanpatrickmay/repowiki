@@ -1,4 +1,4 @@
-import { ASK_HREF, type AskResponse } from "@repowiki/core";
+import { ASK_HREF, AskResponse, NOT_FOUND_SENTENCE } from "@repowiki/core";
 import { makeAskResponse } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
@@ -75,8 +75,47 @@ describe("guardResponse", () => {
     ],
     ["a cost in words", { ...base, cost: { turns: 1, usd: "a cent", model: null } }],
     ["a missing cached flag", { ...base, cached: undefined }],
-  ])("refuses %s", (_name, value) => {
+    ["a head in a list", { ...base, head: [base.head] }],
+    ["an infinite cost", { ...base, cost: { turns: 1, usd: Infinity, model: null } }],
+    ["a budget answer with a sentence", { ...base, status: "budget" }],
+    [
+      "a sentence citing one source twice",
+      {
+        ...base,
+        sentences: [
+          { text: "x", sources: [1, 1] },
+          { text: "y", sources: [2] },
+        ],
+      },
+    ],
+    [
+      "an answered sentence citing no source",
+      { ...base, sentences: [{ text: "x", sources: [] }, ...base.sentences] },
+    ],
+    ["a source no sentence cites", { ...base, sentences: [{ text: "x", sources: [1] }] }],
+    ["an empty section title", { ...base, sources: [{ ...first, sectionTitle: "" }, second] }],
+    [
+      "a not-found answer in the model's words",
+      { ...base, status: "not-found", sentences: [{ text: "Nothing.", sources: [] }], sources: [] },
+    ],
+    ["an answered answer with no sentence", { ...base, sentences: [], sources: [] }],
+  ])("refuses %s, as core's AskResponse does", (_name, value) => {
     expect(guardResponse(value)).toBeNull();
+    expect(AskResponse.safeParse(value).success).toBe(false);
+  });
+
+  it("passes a not-found answer and a budget answer as the server sends them", () => {
+    const notFound = {
+      ...base,
+      status: "not-found",
+      sentences: [{ text: NOT_FOUND_SENTENCE, sources: [] }],
+      sources: [],
+    };
+    const budget = { ...base, status: "budget", sentences: [], sources: [] };
+    for (const value of [notFound, budget]) {
+      expect(AskResponse.safeParse(value).success).toBe(true);
+      expect(guardResponse(value)).toEqual(value);
+    }
   });
 });
 

@@ -1,8 +1,15 @@
 import { type AskIndexes, askQuestion } from "@repowiki/ask";
-import type { AskResponse } from "@repowiki/core";
-import { type EvalQuestion, judgeAnswer } from "@repowiki/eval";
+import { ASK_QUESTION_MAX_LENGTH, type AskResponse } from "@repowiki/core";
+import {
+  type EvalQuestion,
+  JudgeError,
+  judgeAnswer,
+  MAX_DIRECT_JUDGE_CALLS,
+  settleAll,
+} from "@repowiki/eval";
 import { callCostUsd, type Provider, type ToolProvider } from "@repowiki/llm";
-import { markdownText, type WikiView } from "@repowiki/query";
+import { cut, markdownText, oneLine, type WikiView } from "@repowiki/query";
+import { CliError } from "./manifest-cli.ts";
 import { DEFAULT_QUESTION_USD } from "./serve-cli.ts";
 
 /** One question's result: the ask's response, how long it took, and the judge's grade. */
@@ -25,14 +32,37 @@ export interface AskEvalResult {
   spentUsd: number;
 }
 
+/** A run as it stands: complete once every answer is judged; until then rows are unjudged. */
+export interface AskEvalProgress extends AskEvalResult {
+  complete: boolean;
+}
+
 /** An answer as the judge reads it: its sentences, joined as one answer. */
 export const answerText = (response: AskResponse): string =>
   response.sentences.map((s) => s.text).join(" ");
 
 /**
+ * Refuses, as one CliError naming them, the questions the ask cannot take (over
+ * ASK_QUESTION_MAX_LENGTH code points once trimmed, as AskRequest counts): the eval's question
+ * file allows longer ones, and such a question would fail only after its turns were paid for.
+ */
+export function checkAskableQuestions(questions: readonly EvalQuestion[]): void {
+  const long = questions.filter((q) => [...q.question.trim()].length > ASK_QUESTION_MAX_LENGTH);
+  if (long.length > 0) {
+    throw new CliError(
+      `the ask takes questions of at most ${ASK_QUESTION_MAX_LENGTH} characters; longer: ${long.map((q) => q.id).join(", ")}`,
+    );
+  }
+}
+
+/**
  * Asks each question through askQuestion with no cache (spec v2 #4 §7), one at a time, while the
- * next question's ceiling fits under `maxUsd` (C12); then judges every answer with the M7 judge,
- * the calls together so they go as one batch.
+ * next question's ceiling fits under `maxUsd` (C12), after refusing any question the ask cannot
+ * take; then judges every answer with the M7 judge, the calls together so they go as one batch
+ * (with --no-batch, at most MAX_DIRECT_JUDGE_CALLS at once). Every judge attempt is counted in
+ * `spentUsd`: a judgment the judge answered unusably twice is left unjudged (logged on one line)
+ * and an unpriced one is priced as `judgeModel`; any other judge failure is rethrown once every
+ * judgment has settled.
  */
 export async function runAskEval(options: {
   view: WikiView;
@@ -41,17 +71,28 @@ export async function runAskEval(options: {
   provider: ToolProvider;
   judge: Provider;
   model: string;
+  /** The judge role's configured model, which prices a judgment its reply did not price. */
+  judgeModel: string;
   batchJudge: boolean;
   maxUsd: number;
   perQuestionCeilingUsd: readonly number[];
   clock?: () => number;
   log?: (line: string) => void;
+  /**
+   * Called with the run so far after each question is answered, before rethrowing a failure,
+   * and once judged (complete), so what was paid for is written as it is spent.
+   */
+  record?: (progress: AskEvalProgress) => void;
 }): Promise<AskEvalResult> {
   const clock = options.clock ?? (() => performance.now());
   const log = options.log ?? (() => {});
+  checkAskableQuestions(options.questions);
   const asked: Omit<AskEvalRow, "score" | "judgeUsd">[] = [];
   const overBudget: string[] = [];
   let spent = 0;
+  const record = (rows: AskEvalRow[], complete: boolean) =>
+    options.record?.({ rows, overBudget: [...overBudget], spentUsd: spent, complete });
+  const unjudged = () => asked.map((row) => ({ ...row, score: null, judgeUsd: null }));
   let committed = 0;
   for (const [i, question] of options.questions.entries()) {
     const ceiling = options.perQuestionCeilingUsd[i] ?? DEFAULT_QUESTION_USD;
@@ -61,41 +102,74 @@ export async function runAskEval(options: {
     }
     log(`[${i + 1}/${options.questions.length}] ${question.id}: asking`);
     const started = clock();
-    const { response } = await askQuestion({
-      provider: options.provider,
-      view: options.view,
-      indexes: options.indexes,
-      question: question.question,
-      page: null,
-      model: options.model,
-      questionUsd: DEFAULT_QUESTION_USD,
-    });
+    let paid = 0;
+    let response: AskResponse;
+    try {
+      ({ response } = await askQuestion({
+        provider: options.provider,
+        view: options.view,
+        indexes: options.indexes,
+        question: question.question,
+        page: null,
+        model: options.model,
+        questionUsd: DEFAULT_QUESTION_USD,
+        onSpend: (usd) => {
+          paid += usd;
+        },
+      }));
+    } catch (error) {
+      // The turns it took were paid for: record them before the run stops.
+      spent += paid;
+      record(unjudged(), false);
+      throw error;
+    }
     const ms = clock() - started;
     spent += response.cost.usd ?? DEFAULT_QUESTION_USD;
     committed += ceiling - DEFAULT_QUESTION_USD + (response.cost.usd ?? DEFAULT_QUESTION_USD);
     asked.push({ id: question.id, kind: question.kind, question: question.question, response, ms });
+    record(unjudged(), false);
   }
   if (asked.length > 0)
     log(`judging ${asked.length} answers${options.batchJudge ? " in one batch" : ""}`);
   const byId = new Map(options.questions.map((q) => [q.id, q]));
-  const judged = await Promise.allSettled(
-    asked.map((row) =>
-      judgeAnswer(
-        options.judge,
-        byId.get(row.id) as EvalQuestion,
-        answerText(row.response),
-        options.batchJudge,
-      ),
+  const judged = await settleAll(
+    asked.map(
+      (row) => () =>
+        judgeAnswer(
+          options.judge,
+          byId.get(row.id) as EvalQuestion,
+          answerText(row.response),
+          options.batchJudge,
+        ),
     ),
+    options.batchJudge ? asked.length : MAX_DIRECT_JUDGE_CALLS,
   );
+  // A reply priced under its own model id, else under the configured judge model.
+  const priced = (model: string | null, usage: JudgeError["usage"]) =>
+    (model === null ? null : callCostUsd(model, usage, options.batchJudge)) ??
+    callCostUsd(options.judgeModel, usage, options.batchJudge);
+  const failures: unknown[] = [];
   const rows = asked.map((row, i): AskEvalRow => {
     const outcome = judged[i];
-    if (outcome?.status !== "fulfilled") return { ...row, score: null, judgeUsd: null };
-    const j = outcome.value;
-    const usd = j.model === null ? 0 : callCostUsd(j.model, j.usage, j.batch);
+    if (outcome?.status === "rejected") {
+      if (!(outcome.reason instanceof JudgeError)) {
+        failures.push(outcome.reason);
+        return { ...row, score: null, judgeUsd: null };
+      }
+      // The unusable attempts were paid for, though there is no grade: count them.
+      const usd = priced(null, outcome.reason.usage);
+      if (usd !== null) spent += usd;
+      log(`${row.id}: ${cut(oneLine(outcome.reason.message), 200)}; left unjudged`);
+      return { ...row, score: null, judgeUsd: usd };
+    }
+    const j = outcome?.value;
+    if (j === undefined) return { ...row, score: null, judgeUsd: null };
+    const usd = j.model === null ? 0 : priced(j.model, j.usage);
     if (usd !== null) spent += usd;
     return { ...row, score: j.score, judgeUsd: usd };
   });
+  record(rows, failures.length === 0);
+  if (failures.length > 0) throw failures[0];
   return { rows, overBudget, spentUsd: spent };
 }
 

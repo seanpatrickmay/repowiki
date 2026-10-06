@@ -1,4 +1,5 @@
 import { existsSync, statSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
@@ -7,6 +8,7 @@ import {
   createAskSession,
   exportHash,
   openAnswerCache,
+  securityHeaders,
 } from "@repowiki/ask";
 import { WikiBuildError } from "@repowiki/engine";
 import { createClaudeToolProvider, createLedger } from "@repowiki/llm";
@@ -30,11 +32,13 @@ const STOP_WAIT_MS = 30_000;
 /**
  * pnpm wiki:serve <repo> (spec v2 #4 §7): serves <out>/site/ (default out ~/.repowiki/<basename
  * of repo>) and /api/ask from one origin on 127.0.0.1, rebuilding the site first when its copy
- * of the export is not <out>/export.json's. Answers questions with the ask role's model when
- * ANTHROPIC_API_KEY is set (read only from RepoWiki's .env, never printed), after printing the
- * estimate and the caps; without a key or with --no-ask it serves the same site with routing
- * only. Holds no build lock: it answers from the export it read at start. Writes only
- * <out>/site/ and <out>/ask/answers.jsonl, never inside <repo>.
+ * of the export is not <out>/export.json's. A bad --config or a busy port fails before that
+ * build: the port is bound first, answering 503 until the site is ready. Prints the estimate
+ * and both caps (with or without a key), then answers questions with the ask role's model when
+ * ANTHROPIC_API_KEY is set (read only from RepoWiki's .env, never printed); without a key or
+ * with --no-ask it serves the same site with routing only. Holds no build lock: it answers from
+ * the export it read at start. Writes only <out>/site/ and <out>/ask/answers.jsonl, never
+ * inside <repo>.
  */
 async function main(): Promise<void> {
   const args = parseWikiServeArgs(process.argv.slice(2));
@@ -53,6 +57,24 @@ async function main(): Promise<void> {
     throw new WikiBuildError(`no export at ${exportPath}; run pnpm wiki:build first`);
   }
   const wiki = loadExport(exportPath);
+  // Everything that can fail fast does so before a site build that can take minutes.
+  const models = loadModels(args.config);
+  let port = args.port;
+  const building = securityHeaders(CONTENT_SECURITY_POLICY);
+  let handle: (request: IncomingMessage, response: ServerResponse) => Promise<void> = async (
+    _request,
+    response,
+  ) => {
+    response.writeHead(503, {
+      ...building,
+      "cache-control": "no-store",
+      "retry-after": "5",
+      "content-type": "text/plain; charset=utf-8",
+    });
+    response.end("The site is being built; try again in a moment.\n");
+  };
+  const listening = await listenLoopback((request, response) => handle(request, response), port);
+  port = listening.port;
   const siteDir = join(out, "site");
   if (args.repoUrl !== null || !siteIsCurrent(siteDir, wiki)) {
     console.error(
@@ -61,13 +83,11 @@ async function main(): Promise<void> {
     const { buildSite } = await import("@repowiki/site/build");
     await buildSite(exportPath, siteDir, args.repoUrl);
   }
-  const models = loadModels(args.config);
   let session: AskSession | null = null;
   const routing = args.ask ? "no-key" : "disabled";
   if (!args.ask) console.error("ask: routing only (--no-ask)");
-  else if (!process.env.ANTHROPIC_API_KEY)
-    console.error("ask: routing only (no ANTHROPIC_API_KEY)");
   else {
+    // The estimate and both caps come first, key or not, so the owner sees what a question costs.
     console.error(
       serveEstimateLine({
         model: models.ask,
@@ -76,21 +96,23 @@ async function main(): Promise<void> {
         maxUsd: args.maxUsd,
       }),
     );
-    session = createAskSession({
-      wiki,
-      provider: createClaudeToolProvider({
-        models,
-        ledger: createLedger(),
-        runId: `ask-${new Date().toISOString()}`,
-      }),
-      model: models.ask,
-      questionUsd: args.questionUsd,
-      maxUsd: args.maxUsd,
-      cache: openAnswerCache(join(out, "ask"), exportHash(wiki)),
-      log: (line) => console.error(line),
-    });
+    if (!process.env.ANTHROPIC_API_KEY) console.error("ask: routing only (no ANTHROPIC_API_KEY)");
+    else {
+      session = createAskSession({
+        wiki,
+        provider: createClaudeToolProvider({
+          models,
+          ledger: createLedger(),
+          runId: `ask-${new Date().toISOString()}`,
+        }),
+        model: models.ask,
+        questionUsd: args.questionUsd,
+        maxUsd: args.maxUsd,
+        cache: openAnswerCache(join(out, "ask"), exportHash(wiki), (line) => console.error(line)),
+        log: (line) => console.error(line),
+      });
+    }
   }
-  let port = args.port;
   const ask = createAskHandler({
     get port() {
       return port;
@@ -101,9 +123,13 @@ async function main(): Promise<void> {
     csp: CONTENT_SECURITY_POLICY,
     log: (line) => console.error(line),
   });
-  const handle = serveRequests({ siteDir, csp: CONTENT_SECURITY_POLICY, port: () => port, ask });
-  const listening = await listenLoopback(handle, args.port);
-  port = listening.port;
+  handle = serveRequests({
+    siteDir,
+    csp: CONTENT_SECURITY_POLICY,
+    port: () => port,
+    ask,
+    log: (line) => console.error(line),
+  });
   console.log(
     `serving http://127.0.0.1:${port}/ (the wiki at ${wiki.head.slice(0, 7)}; Ctrl-C to stop)`,
   );

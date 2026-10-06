@@ -68,8 +68,13 @@ describe("AskRequest", () => {
     ["a page that is not a string", { question: "q", page: 3 }],
     ["fresh as a string", { question: "q", fresh: "yes" }],
     ["an unknown key", { question: "q", stream: true }],
+    ["a page hint of 65 characters", { question: "q", page: "x".repeat(65) }],
   ])("refuses %s", (_name, body) => {
     expect(AskRequest.safeParse(body).success).toBe(false);
+  });
+
+  it("takes a page hint of up to 64 characters", () => {
+    expect(AskRequest.parse({ question: "q", page: "x".repeat(64) }).page).toBe("x".repeat(64));
   });
 });
 
@@ -106,6 +111,39 @@ describe("AskResponse", () => {
 
   const answer = makeAskResponse();
   const [first, second] = answer.sources;
+  /** `count` real sources, numbered 1 to `count`. */
+  const sourcesOf = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      ...answer.sources[0],
+      n: i + 1,
+      claimId: `s-${i + 1}`,
+      href: `/wiki/signals/#claim-s-${i + 1}`,
+    })) as typeof answer.sources;
+  const numbers = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => from + i);
+
+  it("accepts a sentence citing four sources, and six sentences citing twelve", () => {
+    const four = { sentences: [{ text: "x", sources: [1, 2, 3, 4] }], sources: sourcesOf(4) };
+    expect(AskResponse.safeParse({ ...answer, ...four }).success).toBe(true);
+    const full = {
+      sentences: [0, 1, 2, 3, 4, 5].map((i) => ({
+        text: "x",
+        sources: i < 4 ? numbers(3 * i + 1, 3 * i + 3) : [1],
+      })),
+      sources: sourcesOf(12),
+    };
+    expect(AskResponse.safeParse({ ...answer, ...full }).success).toBe(true);
+  });
+
+  it("refuses a sentence citing five real sources, on the four-source cap alone", () => {
+    const five = { sentences: [{ text: "x", sources: [1, 2, 3, 4, 5] }], sources: sourcesOf(5) };
+    const parsed = AskResponse.safeParse({ ...answer, ...five });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => [i.code, i.path.join(".")])).toEqual([
+      ["too_big", "sentences.0.sources"],
+    ]);
+  });
+
   it.each([
     ["a sentence citing no source", { sentences: [{ text: "Uncited.", sources: [] }] }],
     ["a sentence citing a missing source", { sentences: [{ text: "x", sources: [3] }] }],

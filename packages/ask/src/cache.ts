@@ -16,8 +16,14 @@ import { z } from "zod";
 /** The answer cache's file under `<out>/ask/` (spec v2 #4 R12, C11). */
 export const ANSWERS_FILE = "answers.jsonl";
 
-/** Past this size at start, the cache is rewritten with only the current export's records. */
+/**
+ * Past this size at start, the cache is rewritten with only the current export's latest record
+ * of each key, when that removes anything.
+ */
 export const COMPACT_BYTES = 5 * 1024 * 1024;
+
+/** Past this size at start, the cache is not read: it is deleted and started again, empty. */
+export const MAX_CACHE_BYTES = 32 * 1024 * 1024;
 
 /** One line of answers.jsonl: a cached answer and what it cost (spec v2 #4 §5.2). */
 export const AskRecord = z.strictObject({
@@ -117,22 +123,37 @@ function readRecords(text: string): { records: AskRecord[]; skipped: number } {
 }
 
 /**
- * Opens `<dir>/answers.jsonl` for one export (spec v2 #4 §5.2), creating `dir`: lines that fail
- * AskRecord are counted, not fatal; another export's records are ignored, and past COMPACT_BYTES
- * the file is rewritten to a temporary file, then renamed, keeping only this export's. `dir` must
- * be the resolved out dir's `ask/` (never inside the documented repository).
+ * Opens `<dir>/answers.jsonl` for one export (spec v2 #4 §5.2), creating `dir`. The file's size is
+ * read first: past MAX_CACHE_BYTES it is deleted unread and started again, logged on one line.
+ * Lines that fail AskRecord are counted, not fatal; another export's records are ignored, and
+ * past COMPACT_BYTES the file is rewritten to a temporary file, then renamed, keeping only this
+ * export's latest record of each key, unless that would remove nothing. `dir` must be the
+ * resolved out dir's `ask/` (never inside the documented repository).
  */
-export function openAnswerCache(dir: string, hash: string): AnswerCache {
+export function openAnswerCache(
+  dir: string,
+  hash: string,
+  log: (line: string) => void = () => {},
+): AnswerCache {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, ANSWERS_FILE);
-  const text = existsSync(path) ? readFileSync(path, "utf8") : "";
+  let size = existsSync(path) ? statSync(path).size : 0;
+  if (size > MAX_CACHE_BYTES) {
+    rmSync(path, { force: true });
+    log(
+      `ask cache: ${path} was over ${MAX_CACHE_BYTES / 1024 / 1024} MB, so it was deleted unread and started again`,
+    );
+    size = 0;
+  }
+  const text = size > 0 ? readFileSync(path, "utf8") : "";
   const { records, skipped } = readRecords(text);
-  const current = records.filter((r) => r.exportHash === hash);
+  const byKey = new Map<string, AskRecord>();
+  for (const r of records) if (r.exportHash === hash) byKey.set(r.key, r);
   let endsInNewline = text === "" || text.endsWith("\n");
-  if (existsSync(path) && statSync(path).size > COMPACT_BYTES) {
+  if (size > COMPACT_BYTES && (byKey.size < records.length || skipped > 0)) {
     const temporary = `${path}.${process.pid}.tmp`;
     try {
-      writeFileSync(temporary, current.map((r) => `${JSON.stringify(r)}\n`).join(""), {
+      writeFileSync(temporary, [...byKey.values()].map((r) => `${JSON.stringify(r)}\n`).join(""), {
         flag: "wx",
       });
       renameSync(temporary, path);
@@ -142,7 +163,6 @@ export function openAnswerCache(dir: string, hash: string): AnswerCache {
       throw error;
     }
   }
-  const byKey = new Map(current.map((r) => [r.key, r]));
   return {
     path,
     skipped,

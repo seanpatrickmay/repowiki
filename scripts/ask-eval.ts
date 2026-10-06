@@ -14,21 +14,29 @@ import { loadQuestions, QuestionFileError, selectQuestions } from "@repowiki/eva
 import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@repowiki/llm";
 import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
-import { renderAskReport, runAskEval } from "./ask-eval-run.ts";
-import { criteriaLines, devBaseline, supportSheet, tallySupport } from "./ask-eval-sheet.ts";
+import { checkAskableQuestions, renderAskReport, runAskEval } from "./ask-eval-run.ts";
+import {
+  criteriaLines,
+  devBaseline,
+  readSheetEntries,
+  SUPPORT_ENTRIES_FILE,
+  supportSheet,
+  tallySupport,
+} from "./ask-eval-sheet.ts";
 import { logLine } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { typicalQuestionUsd } from "./serve-cli.ts";
-import { exitWithError, requireApiKey } from "./wiki-cli.ts";
+import { exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
 
 /**
  * pnpm ask:eval <repo> --questions <file> (spec v2 #4 §7): asks the dev set of the M7 question
  * file through the ask (no cache), judges each answer with the M7 judge, and writes report.md and
  * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks and the
- * comparison with his latest complete eval:run dev run (§12.2). States its estimate first;
- * --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
- * `pnpm ask:eval tally <support.md>` counts a marked support sheet.
+ * comparison with his latest complete eval:run dev run (§12.2). States its estimate first, then
+ * stops (exit 1) when there is no such run, unless --no-baseline; --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
+ * `pnpm ask:eval tally <support.md>` counts a marked support sheet against the entries recorded
+ * beside it (support-entries.json).
  */
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -72,6 +80,7 @@ async function main(): Promise<void> {
       `the question file is about ${JSON.stringify(loaded.file.repo)}, but the wiki in ${out} is ${JSON.stringify(wiki.repo)}`,
     );
   }
+  checkAskableQuestions(questions);
   const models = loadModels(args.config);
   const estimate = estimateAskEval({
     questions,
@@ -80,6 +89,15 @@ async function main(): Promise<void> {
     batchJudge: args.batch,
   });
   console.error(askEvalEstimateLine(estimate, args));
+  // The comparison the run exists for is found before any paid call (spec v2 #4 §12.2).
+  const baseline = devBaseline(out, loaded.hash);
+  if (baseline === null && args.baseline) {
+    console.error(
+      `no complete \`eval:run --set dev\` run on this question file is in ${join(out, "eval")}; run \`pnpm eval:run <repo> --questions <file> --set dev\` first, or pass --no-baseline`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (args.dryRun) return;
   requireApiKey("ask:eval");
   const now = new Date();
@@ -87,6 +105,16 @@ async function main(): Promise<void> {
   const ledger = createLedger();
   const runId = `ask-eval-${now.toISOString()}`;
   const view = new WikiView(wiki);
+  const startedAt = now.toISOString();
+  mkdirSync(runDir, { recursive: true });
+  const header = {
+    repo: wiki.repo,
+    head: wiki.head,
+    model: models.ask,
+    set: args.set,
+    questionsHash: loaded.hash,
+    startedAt,
+  };
   const result = await runAskEval({
     view,
     indexes: askIndexes(view),
@@ -94,19 +122,19 @@ async function main(): Promise<void> {
     provider: createClaudeToolProvider({ models, ledger, runId }),
     judge: createClaudeProvider({ models, ledger, runId }),
     model: models.ask,
+    judgeModel: models.evalJudge,
     batchJudge: args.batch,
     maxUsd: args.maxUsd,
     perQuestionCeilingUsd: estimate.perQuestionCeilingUsd,
     log: logLine,
+    // Each question's result, rewritten whole as it completes: a crash keeps what was paid for.
+    record: (progress) =>
+      writeFileAtomic(
+        join(runDir, "results.json"),
+        `${JSON.stringify({ ...header, ...progress }, null, 2)}\n`,
+      ),
   });
-  mkdirSync(runDir, { recursive: true });
-  const startedAt = now.toISOString();
-  writeFileSync(
-    join(runDir, "results.json"),
-    `${JSON.stringify({ repo: wiki.repo, head: wiki.head, model: models.ask, set: args.set, questionsHash: loaded.hash, startedAt, ...result }, null, 2)}\n`,
-  );
   const report = join(runDir, "report.md");
-  const baseline = devBaseline(out, loaded.hash);
   writeFileSync(
     report,
     renderAskReport({
@@ -119,10 +147,9 @@ async function main(): Promise<void> {
       extra: criteriaLines(result, baseline),
     }),
   );
-  writeFileSync(
-    join(runDir, "support.md"),
-    supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt }),
-  );
+  const sheet = supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt });
+  writeFileSync(join(runDir, "support.md"), sheet.text);
+  writeFileSync(join(runDir, SUPPORT_ENTRIES_FILE), `${JSON.stringify(sheet.entries, null, 2)}\n`);
   const correct = result.rows.filter((r) => r.score === 1).length;
   console.log(
     `ask ${correct} of ${result.rows.length}; this run cost $${result.spentUsd.toFixed(4)}${result.overBudget.length > 0 ? `; ${result.overBudget.length} not asked (--max-usd)` : ""}`,
@@ -142,9 +169,18 @@ function tally(argv: readonly string[]): void {
   } catch {
     throw new CliError(`cannot read ${file}`);
   }
+  const entriesPath = join(dirname(file), SUPPORT_ENTRIES_FILE);
+  let entriesText: string;
+  try {
+    entriesText = readFileSync(entriesPath, "utf8");
+  } catch {
+    throw new CliError(
+      `no ${SUPPORT_ENTRIES_FILE} beside ${file}: tally counts a sheet as ask:eval wrote it`,
+    );
+  }
   let counted: ReturnType<typeof tallySupport>;
   try {
-    counted = tallySupport(text);
+    counted = tallySupport(text, readSheetEntries(entriesText));
   } catch (err) {
     throw new CliError(`${file}: ${(err as Error).message}`, { cause: err });
   }

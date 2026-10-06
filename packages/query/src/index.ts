@@ -28,8 +28,11 @@ export {
 } from "./changes.ts";
 export {
   CLAIM_BOOST,
+  CLAIM_LINE_REFERENCE_LENGTH,
   CLAIM_LINE_REFERENCES,
   CLAIM_LINE_TEXT_LENGTH,
+  CLAIM_SEARCH_LIMIT,
+  CLAIM_SEARCH_PER_PAGE,
   type ClaimEntry,
   type ClaimIndex,
   claimLine,

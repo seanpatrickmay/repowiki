@@ -253,6 +253,38 @@ describe("createAskHandler", () => {
     expect(response.writableEnded).toBe(true);
   });
 
+  it("ends a stream that fails after it started with an error frame, and logs one line", async () => {
+    const real = session([ANSWER]);
+    const failing: AskSession = {
+      ...real,
+      status: () => real.status(),
+      totals: () => real.totals(),
+      idle: () => real.idle(),
+      async ask(_request, onStatus) {
+        onStatus?.({ step: "search", query: "signals" });
+        throw new Error("disk full\nsecond line");
+      },
+    };
+    const lines: string[] = [];
+    const handler = createAskHandler({
+      port: PORT,
+      head: sample.sha,
+      session: failing,
+      routing: "no-key",
+      csp: CSP,
+      log: (line) => lines.push(line),
+    });
+    const response = fakeResponse();
+    await handler(fakeRequest("POST", "/api/ask", POST, question()), response);
+    expect(response.status).toBe(200);
+    expect(frames(response.body)).toEqual([
+      ["status", { step: "search", query: "signals" }],
+      ["error", { code: "error", message: "the question could not be answered" }],
+    ]);
+    expect(response.writableEnded).toBe(true);
+    expect(lines).toEqual(["ask failed: disk full second line"]);
+  });
+
   it("refuses a second question while one is in flight with 429", async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => {

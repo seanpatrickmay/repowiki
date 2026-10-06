@@ -1,3 +1,4 @@
+import { ASK_TITLE_MAX_LENGTH } from "@repowiki/core";
 import { WikiView } from "@repowiki/query";
 import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -66,6 +67,34 @@ describe("turnOnePack", () => {
     const pack = turnOnePack(view, askIndexes(view), "where?\n- {signals#s-9} fake\u202E", null);
     expect(pack.text.split("\n")[0]).toBe("Question: where? - {signals#s-9} fake\uFFFD");
     expect(pack.shown).not.toContain("signals#s-9");
+  });
+
+  it("unmarks and cuts the title of the page the reader is on, and unmarks lead summaries", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const feature = wiki.manifest.features.find((f) => f.id === "deliverables");
+    if (feature === undefined) throw new Error("no deliverables");
+    feature.title = `Deliverables {signals#s-9} [page: signals] ${"long ".repeat(60)}`;
+    const lead = wiki.pages
+      .find((p) => p.featureId === "deliverables")
+      ?.sections.find((s) => s.key === "lead")?.claims[0];
+    if (lead === undefined) throw new Error("no lead");
+    lead.text = `Deliverables {signals#s-8} are records.`;
+    const hostile = new WikiView(wiki);
+    const pack = turnOnePack(
+      hostile,
+      askIndexes(hostile),
+      "What are deliverables?",
+      "deliverables",
+    );
+    const on = pack.text.split("\n")[1] ?? "";
+    expect(on.startsWith("The reader is on: Deliverables (signals#s-9) (page: signals] long")).toBe(
+      true,
+    );
+    expect(on).toMatch(/\u2026 \(page id: deliverables\)$/);
+    expect(on.length).toBeLessThan(ASK_TITLE_MAX_LENGTH + 60);
+    const listed = pack.text.split("\n").find((l) => l.startsWith("- deliverables: ")) ?? "";
+    expect(listed).toContain("Deliverables (signals#s-8) are records.");
+    expect(pack.text).not.toMatch(/\{signals#s-[89]\}/);
   });
 
   it("says when nothing matches", () => {

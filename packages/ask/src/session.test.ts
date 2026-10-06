@@ -113,14 +113,69 @@ describe("createAskSession", () => {
     expect(requests).toHaveLength(1);
     expect(lines[1]).toMatch(/^ask "What are deliverables\?" \u2192 budget, 0 turns, \$0\.0000/);
     expect((await s.ask(ask("Where are signals made?"))).cached).toBe(true);
+    expect(s.totals()).toEqual({ questions: 3, cached: 1, usd: TURN_USD });
   });
 
   it("caches neither a budget nor an error answer", async () => {
     const { session: s, requests, lines } = session([{ error: new Error("overloaded") }, ANSWER]);
     expect((await s.ask(ask("Where are signals made?"))).status).toBe("error");
     expect(lines[0]).toMatch(/\u2192 error \(overloaded\), 0 turns/);
+    expect(s.totals()).toEqual({ questions: 1, cached: 0, usd: 0 });
     expect((await s.ask(ask("Where are signals made?"))).status).toBe("answered");
     expect(requests).toHaveLength(2);
+  });
+
+  it("logs a question that throws after a paid turn, and counts what it spent", async () => {
+    const broken = {
+      content: null,
+      stopReason: "tool_use",
+      usage: TURN_USAGE,
+      model: SCRIPTED_MODEL,
+    } as unknown as ScriptedTurn;
+    const { session: s, lines } = session(
+      [{ tool: "search", input: { query: "signals" } }, broken],
+      {
+        questionUsd: 0.05,
+        maxUsd: 0.055,
+      },
+    );
+    await expect(s.ask(ask("Where are signals made?"))).rejects.toThrow();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^ask "Where are signals made\?" \u2192 failed \(.+\), \$0\.0060 \(session \$0\.0060 of \$0\.0\d\)$/,
+    );
+    expect(s.totals()).toEqual({ questions: 1, cached: 0, usd: 2 * TURN_USD });
+    expect(s.status()).toEqual({ mode: "routing", head: sample.sha, reason: "budget" });
+  });
+
+  it("still answers when the cache cannot be written, and logs it on one line", async () => {
+    const wiki = extendedWiki(sample);
+    const lines: string[] = [];
+    const s = createAskSession({
+      wiki,
+      provider: scriptedProvider([ANSWER]).provider,
+      model: "claude-haiku-4-5",
+      questionUsd: 0.05,
+      maxUsd: 1,
+      cache: {
+        path: join(dir, "ask", "answers.jsonl"),
+        skipped: 0,
+        get: () => undefined,
+        append() {
+          throw new Error("ENOSPC: no space left on device\nwrite");
+        },
+      },
+      log: (line) => lines.push(line),
+      now: () => new Date("2026-10-05T12:00:00Z"),
+    });
+    const answered = await s.ask(ask("Where are signals made?"));
+    expect(answered).toMatchObject({ status: "answered", cached: false });
+    expect(s.totals()).toEqual({ questions: 1, cached: 0, usd: TURN_USD });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe(
+      "ask cache: the answer was not saved (ENOSPC: no space left on device write)",
+    );
+    expect(lines[1]).toMatch(/^ask "Where are signals made\?" \u2192 answered, 1 turn/);
   });
 
   it("keeps a hostile question on one short line in the log", async () => {

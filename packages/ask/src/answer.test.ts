@@ -1,5 +1,5 @@
 import { AskResponse, NOT_FOUND_SENTENCE } from "@repowiki/core";
-import { bodyClaim } from "@repowiki/core/test-fixtures";
+import { bodyClaim, codeCitation } from "@repowiki/core/test-fixtures";
 import { handleClaim, WikiView } from "@repowiki/query";
 import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -68,6 +68,29 @@ describe("ungroundedToken", () => {
     expect(ungroundedToken(view, "Its server is main.go.", claims)).toBe("main.go");
     expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claims)).toBe("MAX_SIGNALS");
     expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claimsOf("signals#s-2"))).toBeNull();
+  });
+
+  it("matches a name only on identifier boundaries, not inside a longer name", () => {
+    const store = {
+      handle: "signals#s-9",
+      pageId: "signals",
+      pageTitle: "Signal ingestion",
+      aliases: [],
+      sectionKey: "overview",
+      claim: bodyClaim({
+        id: "s-9",
+        text: "Each piece is stored by `save_signal` after `ingest_chunk` runs.",
+        citations: [codeCitation({ path: "src/store/write.py", symbol: "ingest_chunk" })],
+      }),
+    };
+    const token = (text: string) => ungroundedToken(view, text, [store]);
+    expect(token("Call `signal()` next.")).toBe("signal()");
+    expect(token("Call sign() next.")).toBe("sign()");
+    expect(token("Then `save` runs.")).toBe("save");
+    expect(token("Then `ingest` runs.")).toBe("ingest");
+    expect(token("Then `chunk` runs.")).toBe("chunk");
+    expect(token("`save_signal` and ingest_chunk() run.")).toBeNull();
+    expect(token("It is in src/store/write.py, see write.py.")).toBeNull();
   });
 });
 
@@ -239,6 +262,36 @@ describe("buildResponse", () => {
     expect(response.sources).toHaveLength(12);
     expect(response.sentences).toHaveLength(3);
     expect(response.refused).toBe(1);
+  });
+
+  it("refuses a sentence whose kept sources no longer write its names, adding none of them", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const more = Array.from({ length: 12 }, (_, i) =>
+      bodyClaim({ id: `x-${i}`, text: `Extra claim ${i}.` }),
+    );
+    wiki.pages
+      .find((p) => p.featureId === "signals")
+      ?.sections.find((s) => s.key === "overview")
+      ?.claims.push(...more);
+    const wide = new WikiView(wiki);
+    const x = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => `signals#x-${from + i}`);
+    const response = buildResponse({
+      ...base(),
+      view: wide,
+      sentences: [
+        { text: "S1.", handles: x(0, 4) },
+        { text: "S2.", handles: x(4, 8) },
+        { text: "S3.", handles: x(8, 11) },
+        { text: "It is saved by `save_signal`.", handles: ["signals#x-11", "signals#s-1"] },
+        { text: "S5.", handles: ["deliverables#d-1"] },
+      ],
+    });
+    expect(response.sentences.map((s) => s.text)).toEqual(["S1.", "S2.", "S3.", "S5."]);
+    expect(response.refused).toBe(1);
+    expect(response.sources).toHaveLength(12);
+    expect(response.sources.map((s) => s.claimId)).not.toContain("x-11");
+    expect(response.sources.at(-1)).toMatchObject({ n: 12, claimId: "d-1" });
   });
 });
 

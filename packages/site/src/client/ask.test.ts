@@ -102,6 +102,7 @@ function setup(
     status?: () => Promise<AskFetchResponse>;
     ask?: (body: unknown) => Promise<AskFetchResponse>;
     pagefind?: () => Promise<Pagefind>;
+    timeoutMs?: number;
   } = {},
 ) {
   const p = page();
@@ -120,6 +121,7 @@ function setup(
     storage: () => storage,
     fetch,
     pagefind: options.pagefind ?? (async () => PAGEFIND),
+    ...(options.timeoutMs === undefined ? {} : { askTimeoutMs: options.timeoutMs }),
   };
   installAsk(env);
   const submit = async (question: string) => {
@@ -276,6 +278,146 @@ describe("asking a served wiki", () => {
     const { result, input } = setup({ storage });
     expect(result.children).toEqual([]);
     expect(input.value).toBe("");
+  });
+});
+
+/** A stream that sends `first`, then never sends again (or fails, when `fail` is given). */
+function stalled(first: string, fail?: Error) {
+  const cancel = vi.fn(async () => {});
+  let sent = false;
+  const response: AskFetchResponse = {
+    ok: true,
+    status: 200,
+    json: async () => null,
+    body: {
+      getReader: () => ({
+        read: () => {
+          if (!sent) {
+            sent = true;
+            return Promise.resolve({ done: false, value: new TextEncoder().encode(first) });
+          }
+          return fail === undefined ? new Promise(() => {}) : Promise.reject(fail);
+        },
+        cancel,
+      }),
+    },
+  };
+  return { response, cancel };
+}
+
+describe("frames after the answer", () => {
+  it.each([
+    [
+      "a second answer",
+      () =>
+        frame(
+          "answer",
+          makeAskResponse({ sentences: [{ text: "A second answer.", sources: [1, 2] }] }),
+        ),
+    ],
+    ["a status", () => frame("status", { step: "search", query: "late" })],
+  ])("ignores %s after the first answer", async (_name, late) => {
+    const { submit, live, result } = setup({
+      ask: async () => stream([frame("answer", makeAskResponse()) + late()]),
+    });
+    await submit("Where are signals made?");
+    await vi.waitFor(() => expect(text(result)).toContain("Signals are made by"));
+    expect(text(live)).toBe("");
+    expect(text(result)).not.toContain("A second answer.");
+  });
+
+  it("does not take a later answer when the first was not one", async () => {
+    const { submit, live } = setup({
+      ask: async () =>
+        stream([frame("answer", { status: "maybe" }) + frame("answer", makeAskResponse())]),
+    });
+    await submit("Where are signals made?");
+    await vi.waitFor(() =>
+      expect(text(live)).toBe("The answer could not be shown; here are the pages that match."),
+    );
+  });
+});
+
+describe("a served wiki that fails", () => {
+  const ROUTED = ["/wiki/signals/", "/wiki/signals/#overview"];
+  const links = (result: FakeElement) =>
+    result.querySelectorAll("a").map((a) => a.getAttribute("href"));
+
+  it("gives up on a stream that stops sending, cancels its reader, and routes", async () => {
+    const hung = stalled(frame("status", { step: "search", query: "signals" }));
+    const { submit, live, result } = setup({ ask: async () => hung.response, timeoutMs: 30 });
+    await submit("Where are signals made?");
+    await vi.waitFor(() =>
+      expect(text(live)).toBe("The answer took too long; here are the pages that match."),
+    );
+    expect(hung.cancel).toHaveBeenCalled();
+    await vi.waitFor(() => expect(links(result)).toEqual(ROUTED));
+  });
+
+  it("gives up on a POST that never answers, and asks again afterwards", async () => {
+    let calls = 0;
+    const { submit, live, result } = setup({
+      ask: () =>
+        ++calls === 1
+          ? new Promise(() => {})
+          : Promise.resolve(stream([frame("answer", makeAskResponse())])),
+      timeoutMs: 30,
+    });
+    await submit("Where are signals made?");
+    await vi.waitFor(() =>
+      expect(text(live)).toBe("The answer took too long; here are the pages that match."),
+    );
+    await submit("Where are signals made?");
+    await vi.waitFor(() => expect(text(result)).toContain("Signals are made by"));
+  });
+
+  it("routes when the stream fails midway, cancelling its reader", async () => {
+    const broken = stalled(
+      frame("status", { step: "search", query: "signals" }),
+      new TypeError("network"),
+    );
+    const { submit, live, result } = setup({ ask: async () => broken.response });
+    await submit("Where are signals made?");
+    await vi.waitFor(() =>
+      expect(text(live)).toBe("The answer could not be shown; here are the pages that match."),
+    );
+    expect(broken.cancel).toHaveBeenCalled();
+    await vi.waitFor(() => expect(links(result)).toEqual(ROUTED));
+  });
+
+  it.each([
+    [
+      "rejects",
+      () => Promise.reject(new TypeError("Failed to fetch")),
+      "The server did not answer; here are the pages that match.",
+    ],
+    [
+      "is a 500",
+      async () => json(500, { code: "error" }),
+      "The question could not be answered; here are the pages that match.",
+    ],
+  ])("routes when the POST %s", async (_name, ask, said) => {
+    const { submit, live, result } = setup({ ask: ask as () => Promise<AskFetchResponse> });
+    await submit("Where are signals made?");
+    await vi.waitFor(() => expect(text(live)).toBe(said));
+    await vi.waitFor(() => expect(links(result)).toEqual(ROUTED));
+  });
+
+  it("probes the status again on the next ask after a failed probe", async () => {
+    let probes = 0;
+    const { submit, live, result, posts } = setup({
+      status: () =>
+        ++probes === 1
+          ? Promise.reject(new TypeError("Failed to fetch"))
+          : Promise.resolve(json(200, ANSWERING)),
+    });
+    await submit("Where are signals made?");
+    expect(text(live)).toBe("Answers need pnpm wiki:serve; here are the pages that match.");
+    expect(posts).toEqual([]);
+    await submit("Where are signals made?");
+    await vi.waitFor(() => expect(text(result)).toContain("Signals are made by"));
+    expect(probes).toBe(2);
+    expect(posts).toHaveLength(1);
   });
 });
 

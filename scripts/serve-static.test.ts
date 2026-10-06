@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAskHandler, createAskSession, exportHash, openAnswerCache } from "@repowiki/ask";
@@ -24,6 +25,8 @@ beforeAll(() => {
   writeFileSync(join(site, "index.html"), "<p>main</p>");
   writeFileSync(join(site, "404.html"), "<p>missing</p>");
   writeFileSync(join(site, "wiki", "signals", "index.html"), "<p>signals</p>");
+  mkdirSync(join(site, "api", "previews"), { recursive: true });
+  writeFileSync(join(site, "api", "previews", "signals.json"), '{"title":"Signals"}');
   writeFileSync(join(site, ".repowiki-site"), "");
   writeFileSync(join(root, "secret.txt"), "outside");
   symlinkSync(join(root, "secret.txt"), join(site, "link.txt"));
@@ -106,6 +109,7 @@ describe("serveRequests on a loopback socket", () => {
       0,
     );
     port = listening.port;
+    expect((listening.server.address() as AddressInfo).address).toBe("127.0.0.1");
     const call = (
       method: string,
       path: string,
@@ -138,7 +142,15 @@ describe("serveRequests on a loopback socket", () => {
       });
       expect(await call("GET", "/missing/")).toMatchObject({ status: 404, body: "<p>missing</p>" });
       expect((await call("GET", "/../secret.txt")).status).toBe(404);
-      expect((await call("DELETE", "/")).status).toBe(405);
+      const refused = await call("DELETE", "/");
+      expect(refused.status).toBe(405);
+      expect(refused.headers).toMatchObject({
+        allow: "GET, HEAD",
+        "content-security-policy": `${csp}; frame-ancestors 'none'`,
+      });
+      const preview = await call("GET", "/api/previews/signals.json");
+      expect(preview).toMatchObject({ status: 200, body: '{"title":"Signals"}' });
+      expect(preview.headers["cache-control"]).toBe("no-store");
       expect((await call("GET", "/", { host: `evil.example:${port}` })).status).toBe(421);
       expect((await call("HEAD", "/")).body).toBe("");
       const status = await call("GET", "/api/ask/status");
@@ -155,6 +167,45 @@ describe("serveRequests on a loopback socket", () => {
     } finally {
       await new Promise((resolve) => listening.server.close(resolve));
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("answers a handler that throws with 500, the security headers and one log line", async () => {
+    const csp = "default-src 'self'";
+    const lines: string[] = [];
+    let port = 0;
+    const listening = await listenLoopback(
+      serveRequests({
+        siteDir: site,
+        csp,
+        port: () => port,
+        ask: async () => {
+          throw new Error("read failed\nhere");
+        },
+        log: (line) => lines.push(line),
+      }),
+      0,
+    );
+    port = listening.port;
+    try {
+      const response = await new Promise<{ status: number; headers: Record<string, unknown> }>(
+        (resolve, reject) => {
+          const req = httpRequest({ host: "127.0.0.1", port, path: "/boom" }, (res) => {
+            res.resume();
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
+          });
+          req.on("error", reject);
+          req.end();
+        },
+      );
+      expect(response.status).toBe(500);
+      expect(response.headers).toMatchObject({
+        "content-security-policy": `${csp}; frame-ancestors 'none'`,
+        "x-content-type-options": "nosniff",
+      });
+      expect(lines).toEqual(["serve: GET /boom failed (read failed here)"]);
+    } finally {
+      await new Promise((resolve) => listening.server.close(resolve));
     }
   });
 

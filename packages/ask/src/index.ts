@@ -16,6 +16,7 @@ export {
   answerKey,
   COMPACT_BYTES,
   exportHash,
+  MAX_CACHE_BYTES,
   normalizeQuestion,
   openAnswerCache,
 } from "./cache.ts";
