@@ -411,6 +411,36 @@ describe("describeError", () => {
       });
     });
 
+    it("replaces the configured GitHub tokens' exact values, whatever their shape (R25)", () => {
+      const names = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"];
+      const saved = names.map((name) => process.env[name]);
+      // Unprefixed, as a legacy 40-hex OAuth token or an enterprise token is; built at run time.
+      const values = names.map((_, i) => `${i}`.repeat(4) + "0123456789abcdef".repeat(2));
+      try {
+        names.forEach((name, i) => {
+          process.env[name] = values[i];
+        });
+        process.env.GH_ENTERPRISE_TOKEN = "short";
+        withKey(undefined, () => {
+          const err = new Error(`fetch failed: token ${values[0]}`, {
+            cause: new Error(`gh: ${values[1]} ${values[3]} and a short value`),
+          });
+          const text = describeError(err, true);
+          for (const value of values) expect(text).not.toContain(value);
+          expect(text.split("\n")).toEqual([
+            "fetch failed: token [redacted]",
+            "caused by: Error: gh: [redacted] [redacted] and a short value",
+          ]);
+          expect(problemLine(`git: ${values[1]}`)).toBe("git: [redacted]");
+        });
+      } finally {
+        names.forEach((name, i) => {
+          if (saved[i] === undefined) delete process.env[name];
+          else process.env[name] = saved[i];
+        });
+      }
+    });
+
     it("ignores an empty configured key", () => {
       withKey("", () => {
         expect(describeError(new Error("plain message"), true)).toBe("plain message");

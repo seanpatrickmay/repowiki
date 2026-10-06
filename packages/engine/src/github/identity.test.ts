@@ -64,6 +64,15 @@ describe("resolveGitHubIdentity", () => {
     });
   });
 
+  it("reads the URL git itself fetches from when origin has several", () => {
+    repo.git("remote", "add", "origin", "https://github.com/acme/first.git");
+    repo.git("config", "--add", "remote.origin.url", "https://github.com/evil/second.git");
+    expect(readOriginUrl(repo.dir)).toBe("https://github.com/acme/first.git");
+    expect(resolveGitHubIdentity(repo.dir, null)).toEqual({
+      identity: { owner: "acme", name: "first" },
+    });
+  });
+
   it("skips with a hint when there is no origin, or origin is not on github.com", () => {
     expect(resolveGitHubIdentity(repo.dir, null)).toEqual({
       skip: "the repository has no origin remote; pass --github owner/name",

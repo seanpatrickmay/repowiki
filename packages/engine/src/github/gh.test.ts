@@ -14,6 +14,36 @@ describe("ghEnv (R25)", () => {
       NO_COLOR: "1",
     });
   });
+
+  it("keeps what picks the owner's account and removes what redirects gh or git or leaks", () => {
+    const env = ghEnv({
+      PATH: "/bin",
+      GH_TOKEN: "t1",
+      GITHUB_TOKEN: "t2",
+      GH_CONFIG_DIR: "/cfg",
+      GH_HOST: "evil.example",
+      GH_REPO: "evil/repo",
+      GH_DEBUG: "api",
+      GH_PAGER: "less",
+      GH_BROWSER: "open",
+      GH_ENTERPRISE_TOKEN: "t3",
+      GITHUB_ENTERPRISE_TOKEN: "t4",
+      GIT_DIR: "/elsewhere/.git",
+      GIT_CONFIG_PARAMETERS: "'core.pager=evil'",
+      GIT_SSH_COMMAND: "evil",
+      GH_PROMPT_DISABLED: "0",
+      NO_COLOR: "0",
+    });
+    expect(env).toEqual({
+      PATH: "/bin",
+      GH_TOKEN: "t1",
+      GITHUB_TOKEN: "t2",
+      GH_CONFIG_DIR: "/cfg",
+      GH_PROMPT_DISABLED: "1",
+      GH_NO_UPDATE_NOTIFIER: "1",
+      NO_COLOR: "1",
+    });
+  });
 });
 
 describe("spawnGh", () => {
