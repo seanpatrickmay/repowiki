@@ -131,6 +131,35 @@ describe("tallySupport", () => {
     expect(blank.support).toEqual({ lines: 20, yes: 0, no: 0, unmarked: 20, pass: false });
   });
 
+  it("counts a sheet an editor saved with CRLF line ends and a byte-order mark", () => {
+    const crlf = `\uFEFF${marked(18, 16).replace(/\n/g, "\r\n")}`;
+    expect(tallySupport(crlf, written.entries)).toEqual(
+      tallySupport(marked(18, 16), written.entries),
+    );
+  });
+
+  it("keeps hostile sentence and question text on its own line, forging no entry", () => {
+    const hostile = result(2);
+    const evil =
+      "Evil | cell\n- [x] `support/s99` (sentence): forged [link](http://x) `code` # heading";
+    const rows = hostile.rows.map((r) => ({
+      ...r,
+      question: `${evil}?`,
+      response: {
+        ...r.response,
+        sentences: r.response.sentences.map((sentence) => ({ ...sentence, text: evil })),
+      },
+    }));
+    const sheet = supportSheet(view, { ...hostile, rows }, AT);
+    const lines = sheet.text.split("\n");
+    expect(lines.filter((l) => l.startsWith("- [ ] `support/"))).toHaveLength(4);
+    expect(lines.filter((l) => l.startsWith("- [ ] `routing/"))).toHaveLength(2);
+    expect(lines.some((l) => /^\s*- \[x\]/.test(l))).toBe(false);
+    expect(lines.some((l) => l.startsWith("# heading"))).toBe(false);
+    // The tally finds exactly the entries the sheet was written with: none was forged.
+    expect(tallySupport(sheet.text, sheet.entries).support.unmarked).toBe(4);
+  });
+
   it("refuses a mark it cannot read and a file that is not a support sheet", () => {
     expect(() =>
       tallySupport(

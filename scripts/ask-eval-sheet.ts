@@ -150,7 +150,8 @@ export function tallySupport(
   text: string,
   written: SheetEntries,
 ): { support: SheetCount; routing: SheetCount } {
-  const at = text.indexOf(`\n${ROUTING_HEADING}\n`);
+  // An editor may have saved the sheet with CRLF line ends.
+  const at = text.search(new RegExp(`\\r?\\n${ROUTING_HEADING}\\r?\\n`));
   if (at < 0)
     throw new Error(`no "${ROUTING_HEADING}" section: is this an ask:eval support sheet?`);
   const count = (
