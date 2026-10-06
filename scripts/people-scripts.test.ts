@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makePersonRevision } from "@repowiki/core/test-fixtures";
 import { openStore } from "@repowiki/engine";
 import { listing } from "@repowiki/engine/test-inflight";
 import { PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
@@ -13,6 +14,8 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 const SUGGEST = fileURLToPath(new URL("./people-suggest.ts", import.meta.url));
 const PEOPLE = fileURLToPath(new URL("./wiki-people.ts", import.meta.url));
 const CHECK = fileURLToPath(new URL("./wiki-check.ts", import.meta.url));
+const EXPORT = fileURLToPath(new URL("./wiki-export.ts", import.meta.url));
+const ACCURACY = fileURLToPath(new URL("./eval-accuracy.ts", import.meta.url));
 
 let fx: PeopleFixture;
 beforeEach(async () => {
@@ -140,5 +143,36 @@ describe("pnpm wiki:check's People half (spec v2 #6 §9)", () => {
     expect(leaked.status).toBe(1);
     expect(leaked.stderr).toContain("llms.txt holds an author's email address");
     scan([leaked.stdout, leaked.stderr]);
+  });
+});
+
+describe("pnpm eval:accuracy sheet --person (spec v2 #6 §15.4)", () => {
+  it("writes a sheet of a person's narrative claims, and refuses a person with none", () => {
+    expect(run(PEOPLE, "--no-narrative").status).toBe(0);
+    const store = openStore(join(fx.out, "wiki.db"));
+    try {
+      store.putPersonRevision(
+        makePersonRevision({ sha: fx.head, id: `person-ada-lovelace-${fx.head.slice(0, 12)}-1` }),
+      );
+    } finally {
+      store.close();
+    }
+    expect(run(EXPORT).status).toBe(0);
+    const sheet = spawnSync(
+      process.execPath,
+      [ACCURACY, "sheet", fx.repo.dir, "--out", fx.out, "--person", "ada-lovelace"],
+      { encoding: "utf8" },
+    );
+    expect(sheet.status).toBe(0);
+    const text = readFileSync(join(fx.out, "eval", "accuracy-review.md"), "utf8");
+    expect(text).toContain("## Person: Ada Lovelace (people/ada-lovelace)");
+    scan([text, sheet.stdout, sheet.stderr]);
+    const none = spawnSync(
+      process.execPath,
+      [ACCURACY, "sheet", fx.repo.dir, "--out", fx.out, "--person", "bob"],
+      { encoding: "utf8" },
+    );
+    expect(none.status).toBe(2);
+    expect(none.stderr).toContain('no narrative for "bob"; the people with one are ada-lovelace');
   });
 });
