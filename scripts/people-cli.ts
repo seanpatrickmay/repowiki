@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { type PeopleConfig, PersonId, parseMatchKey, parsePeopleConfig } from "@repowiki/core";
@@ -13,7 +14,7 @@ import {
 import type { LedgerTotals } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { badOption, cell, costLines, count, once, priced } from "./wiki-cli.ts";
+import { acquireBuildLock, badOption, cell, costLines, count, once, priced } from "./wiki-cli.ts";
 
 export const SUGGEST_USAGE =
   "usage: pnpm people:suggest <repo-path> [--out dir] [--people-file file]";
@@ -365,4 +366,29 @@ export function exclusionNotes(excluded: number, othersShown: boolean): string[]
       'With exactly one person excluded, the "other contributors" series is theirs by elimination; set othersMinPeople to 2 to leave it out.',
     );
   return notes;
+}
+
+/**
+ * A throwaway copy of the out dir's wiki.db, taken under the build lock (planner ruling R17):
+ * people:suggest and wiki:people --dry-run read and refresh it, so the real store is never
+ * written or migrated. `remove` deletes the copy.
+ */
+export function storeCopy(out: string): { path: string; remove: () => void } {
+  const db = join(out, "wiki.db");
+  const scratch = mkdtempSync(join(tmpdir(), "repowiki-people-"));
+  const remove = () => rmSync(scratch, { recursive: true, force: true });
+  try {
+    const release = acquireBuildLock(out, (line) => console.error(line));
+    try {
+      for (const suffix of ["", "-wal", "-shm"])
+        if (existsSync(`${db}${suffix}`))
+          copyFileSync(`${db}${suffix}`, join(scratch, `wiki.db${suffix}`));
+    } finally {
+      release();
+    }
+  } catch (err) {
+    remove();
+    throw err;
+  }
+  return { path: join(scratch, "wiki.db"), remove };
 }
