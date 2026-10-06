@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openStore } from "@repowiki/engine";
@@ -12,6 +12,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const SUGGEST = fileURLToPath(new URL("./people-suggest.ts", import.meta.url));
 const PEOPLE = fileURLToPath(new URL("./wiki-people.ts", import.meta.url));
+const CHECK = fileURLToPath(new URL("./wiki-check.ts", import.meta.url));
 
 let fx: PeopleFixture;
 beforeEach(async () => {
@@ -120,5 +121,24 @@ describe("pnpm wiki:people (spec v2 #6 §10)", () => {
     );
     expect(result.status).toBe(2);
     expect(result.stderr).toMatch(/run pnpm wiki:build first/);
+  });
+});
+
+describe("pnpm wiki:check's People half (spec v2 #6 §9)", () => {
+  it("scans the outputs for an author's email, naming the file and never the address", () => {
+    expect(run(PEOPLE, "--no-narrative").status).toBe(0);
+    // The fixture's About article cites a made-up sha, so wiki:check exits 1 for it already;
+    // People adds no problem of its own.
+    const clean = run(CHECK);
+    expect(clean.stderr).not.toContain("email");
+    expect(clean.stdout).toMatch(
+      /0 person narratives re-verified and 3 files scanned for an author's email; no problems/,
+    );
+    const llms = join(fx.out, "llms.txt");
+    writeFileSync(llms, `${readFileSync(llms, "utf8")}\nContact: KIM.q7hidden@example.com\n`);
+    const leaked = run(CHECK);
+    expect(leaked.status).toBe(1);
+    expect(leaked.stderr).toContain("llms.txt holds an author's email address");
+    scan([leaked.stdout, leaked.stderr]);
   });
 });

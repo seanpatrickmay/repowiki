@@ -296,6 +296,13 @@ describe("problemLine", () => {
     );
     expect(problemLine("x".repeat(400))).toHaveLength(300);
   });
+
+  it("never prints an email address (spec v2 #6 R10)", () => {
+    expect(problemLine("fatal: bad author Ada <ada.q7@example.com>")).toBe(
+      "fatal: bad author Ada <[email]>",
+    );
+    expect(describeError(new Error("by kim@example.org"), false)).toBe("by [email]");
+  });
 });
 
 describe("describeError", () => {

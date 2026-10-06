@@ -1,3 +1,4 @@
+export { type PeopleCheckInput, personRevisionProblems } from "./check.ts";
 export {
   type DueNarrative,
   type DueReason,
@@ -68,6 +69,7 @@ export { type Assigned, assignIds } from "./registry.ts";
 export { type PreparedPeople, type PrepareInput, preparePeople, storeNarratives } from "./round.ts";
 export {
   type ComputedSnapshot,
+  commitFeaturesOf,
   computeSnapshot,
   type Landing,
   pullRequestAuthors,
