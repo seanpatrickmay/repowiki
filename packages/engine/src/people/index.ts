@@ -16,4 +16,13 @@ export {
   type MailmapRule,
   parseMailmap,
 } from "./mailmap.ts";
+export {
+  type BlameTreeOptions,
+  blameTree,
+  ignoreRevsFrom,
+  isLockfile,
+  LOCKFILES,
+  MAX_IGNORE_REVS,
+  type Ownership,
+} from "./ownership.ts";
 export { type Assigned, assignIds } from "./registry.ts";

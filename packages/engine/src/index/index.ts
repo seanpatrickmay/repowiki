@@ -35,6 +35,7 @@ export {
   listBlobs,
   resolveCommit,
   scrubbedGitEnv,
+  streamBlobs,
   type TreeBlob,
 } from "./git.ts";
 export { type CommitInfo, pullRequestOf, readHistory, readSources } from "./history.ts";
