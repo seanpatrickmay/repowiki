@@ -32,6 +32,11 @@ export interface AskEvalResult {
   spentUsd: number;
 }
 
+/** A run as it stands: complete once every answer is judged; until then rows are unjudged. */
+export interface AskEvalProgress extends AskEvalResult {
+  complete: boolean;
+}
+
 /** An answer as the judge reads it: its sentences, joined as one answer. */
 export const answerText = (response: AskResponse): string =>
   response.sentences.map((s) => s.text).join(" ");
@@ -73,6 +78,11 @@ export async function runAskEval(options: {
   perQuestionCeilingUsd: readonly number[];
   clock?: () => number;
   log?: (line: string) => void;
+  /**
+   * Called with the run so far after each question is answered, before rethrowing a failure,
+   * and once judged (complete), so what was paid for is written as it is spent.
+   */
+  record?: (progress: AskEvalProgress) => void;
 }): Promise<AskEvalResult> {
   const clock = options.clock ?? (() => performance.now());
   const log = options.log ?? (() => {});
@@ -80,6 +90,9 @@ export async function runAskEval(options: {
   const asked: Omit<AskEvalRow, "score" | "judgeUsd">[] = [];
   const overBudget: string[] = [];
   let spent = 0;
+  const record = (rows: AskEvalRow[], complete: boolean) =>
+    options.record?.({ rows, overBudget: [...overBudget], spentUsd: spent, complete });
+  const unjudged = () => asked.map((row) => ({ ...row, score: null, judgeUsd: null }));
   let committed = 0;
   for (const [i, question] of options.questions.entries()) {
     const ceiling = options.perQuestionCeilingUsd[i] ?? DEFAULT_QUESTION_USD;
@@ -89,19 +102,32 @@ export async function runAskEval(options: {
     }
     log(`[${i + 1}/${options.questions.length}] ${question.id}: asking`);
     const started = clock();
-    const { response } = await askQuestion({
-      provider: options.provider,
-      view: options.view,
-      indexes: options.indexes,
-      question: question.question,
-      page: null,
-      model: options.model,
-      questionUsd: DEFAULT_QUESTION_USD,
-    });
+    let paid = 0;
+    let response: AskResponse;
+    try {
+      ({ response } = await askQuestion({
+        provider: options.provider,
+        view: options.view,
+        indexes: options.indexes,
+        question: question.question,
+        page: null,
+        model: options.model,
+        questionUsd: DEFAULT_QUESTION_USD,
+        onSpend: (usd) => {
+          paid += usd;
+        },
+      }));
+    } catch (error) {
+      // The turns it took were paid for: record them before the run stops.
+      spent += paid;
+      record(unjudged(), false);
+      throw error;
+    }
     const ms = clock() - started;
     spent += response.cost.usd ?? DEFAULT_QUESTION_USD;
     committed += ceiling - DEFAULT_QUESTION_USD + (response.cost.usd ?? DEFAULT_QUESTION_USD);
     asked.push({ id: question.id, kind: question.kind, question: question.question, response, ms });
+    record(unjudged(), false);
   }
   if (asked.length > 0)
     log(`judging ${asked.length} answers${options.batchJudge ? " in one batch" : ""}`);
@@ -142,6 +168,7 @@ export async function runAskEval(options: {
     if (usd !== null) spent += usd;
     return { ...row, score: j.score, judgeUsd: usd };
   });
+  record(rows, failures.length === 0);
   if (failures.length > 0) throw failures[0];
   return { rows, overBudget, spentUsd: spent };
 }

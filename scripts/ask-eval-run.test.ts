@@ -217,6 +217,72 @@ describe("runAskEval", () => {
     expect(judged).toEqual([]);
   });
 
+  it("records each question's result and spend as it completes, and the judged run last", async () => {
+    const view = new WikiView(sample.wiki);
+    const { provider } = scriptedProvider([ANSWER, ANSWER]);
+    const records: { complete: boolean; rows: number; spentUsd: number }[] = [];
+    const result = await runAskEval({
+      view,
+      indexes: askIndexes(view),
+      questions: QUESTIONS,
+      provider,
+      judge: fakeJudge().judge,
+      model: "claude-haiku-4-5",
+      judgeModel: "claude-haiku-4-5",
+      batchJudge: true,
+      maxUsd: 10,
+      perQuestionCeilingUsd: [0.06, 0.06],
+      record: (progress) =>
+        records.push({
+          complete: progress.complete,
+          rows: progress.rows.length,
+          spentUsd: progress.spentUsd,
+        }),
+    });
+    expect(records.map((r) => [r.complete, r.rows])).toEqual([
+      [false, 1],
+      [false, 2],
+      [true, 2],
+    ]);
+    expect(records[0]?.spentUsd).toBeCloseTo(ASK_USD, 10);
+    expect(records.at(-1)?.spentUsd).toBe(result.spentUsd);
+  });
+
+  it("records what a question that throws already spent before rethrowing", async () => {
+    const view = new WikiView(sample.wiki);
+    const broken = {
+      content: null,
+      stopReason: "tool_use",
+      usage: TURN_USAGE,
+      model: "claude-haiku-4-5-20251001",
+    } as never;
+    const { provider } = scriptedProvider([ANSWER, broken]);
+    const records: { complete: boolean; rows: number; spentUsd: number }[] = [];
+    await expect(
+      runAskEval({
+        view,
+        indexes: askIndexes(view),
+        questions: QUESTIONS,
+        provider,
+        judge: fakeJudge().judge,
+        model: "claude-haiku-4-5",
+        judgeModel: "claude-haiku-4-5",
+        batchJudge: true,
+        maxUsd: 10,
+        perQuestionCeilingUsd: [0.06, 0.06],
+        record: (progress) =>
+          records.push({
+            complete: progress.complete,
+            rows: progress.rows.length,
+            spentUsd: progress.spentUsd,
+          }),
+      }),
+    ).rejects.toThrow();
+    expect(records.at(-1)?.complete).toBe(false);
+    expect(records.at(-1)?.rows).toBe(1);
+    expect(records.at(-1)?.spentUsd).toBeCloseTo(2 * ASK_USD, 10);
+  });
+
   it("gives the judge the sentences joined as one answer", () => {
     const response = { sentences: [{ text: "One." }, { text: "Two." }] };
     expect(answerText(response as never)).toBe("One. Two.");

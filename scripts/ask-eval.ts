@@ -20,7 +20,7 @@ import { logLine } from "./eval-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { typicalQuestionUsd } from "./serve-cli.ts";
-import { exitWithError, requireApiKey } from "./wiki-cli.ts";
+import { exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
 
 /**
  * pnpm ask:eval <repo> --questions <file> (spec v2 #4 §7): asks the dev set of the M7 question
@@ -88,6 +88,16 @@ async function main(): Promise<void> {
   const ledger = createLedger();
   const runId = `ask-eval-${now.toISOString()}`;
   const view = new WikiView(wiki);
+  const startedAt = now.toISOString();
+  mkdirSync(runDir, { recursive: true });
+  const header = {
+    repo: wiki.repo,
+    head: wiki.head,
+    model: models.ask,
+    set: args.set,
+    questionsHash: loaded.hash,
+    startedAt,
+  };
   const result = await runAskEval({
     view,
     indexes: askIndexes(view),
@@ -100,13 +110,13 @@ async function main(): Promise<void> {
     maxUsd: args.maxUsd,
     perQuestionCeilingUsd: estimate.perQuestionCeilingUsd,
     log: logLine,
+    // Each question's result, rewritten whole as it completes: a crash keeps what was paid for.
+    record: (progress) =>
+      writeFileAtomic(
+        join(runDir, "results.json"),
+        `${JSON.stringify({ ...header, ...progress }, null, 2)}\n`,
+      ),
   });
-  mkdirSync(runDir, { recursive: true });
-  const startedAt = now.toISOString();
-  writeFileSync(
-    join(runDir, "results.json"),
-    `${JSON.stringify({ repo: wiki.repo, head: wiki.head, model: models.ask, set: args.set, questionsHash: loaded.hash, startedAt, ...result }, null, 2)}\n`,
-  );
   const report = join(runDir, "report.md");
   const baseline = devBaseline(out, loaded.hash);
   writeFileSync(
