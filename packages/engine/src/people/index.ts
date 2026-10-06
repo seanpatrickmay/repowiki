@@ -1,4 +1,15 @@
 export {
+  type IdentityGroup,
+  type IdentityInput,
+  type JoinReason,
+  KNOWN_BOTS,
+  noreplyLogin,
+  type RawIdentity,
+  type ResolvedIdentities,
+  resolveIdentities,
+  saltedKey,
+} from "./identities.ts";
+export {
   applyMailmap,
   type Identity,
   type Mailmap,
