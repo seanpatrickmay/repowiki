@@ -1,7 +1,17 @@
-import { githubUrl, type InFlight, type InFlightPull, type IssueEvidence } from "@repowiki/core";
+import {
+  claimAnchor,
+  githubBlobUrl,
+  githubUrl,
+  type InFlight,
+  type InFlightPull,
+  type IssueEvidence,
+  plainClaimText,
+} from "@repowiki/core";
 import { formatDate, formatNumber, shortSha } from "./format.ts";
+import { renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
-import { pullUrl } from "./urls.ts";
+import { inlineOptions } from "./preview.ts";
+import { articleUrl, pullUrl } from "./urls.ts";
 
 /** A snapshot read this long before the export was made is stale (R16). */
 export const STALE_AFTER_DAYS = 7;
@@ -44,6 +54,9 @@ export function inflightStatus(site: SiteModel, inflight: InFlight): InflightSta
       }
     : { line, stale: null };
 }
+
+const counted = (n: number, one: string): string =>
+  `${formatNumber(n)} ${one}${n === 1 ? "" : "s"}`;
 
 const featureRef = (site: SiteModel, id: string): FeatureRef => ({
   title: site.features.get(id)?.title ?? id,
@@ -154,5 +167,100 @@ export function inflightIndexView(site: SiteModel, inflight: InFlight): Inflight
       ...(pulls > 0 ? [`And ${formatNumber(pulls)} more open pull requests, not read.`] : []),
       ...(issues > 0 ? [`And ${formatNumber(issues)} more open issues, not read.`] : []),
     ],
+  };
+}
+
+export interface PullView {
+  number: number;
+  /** Plain text. */
+  title: string;
+  badges: string[];
+  githubHref: string;
+  author: string;
+  created: string;
+  updated: string;
+  base: string;
+  /** Plain text: how the pull request would merge, or why its impact is unknown. */
+  merge: string;
+  /** Null when the head was not fetched; the page says so. */
+  summary: { html: string; refs: { n: number; label: string; href: string }[] }[] | null;
+  features: {
+    anchor: string;
+    feature: FeatureRef;
+    files: string;
+    drifts: boolean;
+    /** Each claim it would change, quoted as plain text and linked to it on the article. */
+    effects: { text: string; href: string | null; reason: string; certain: boolean }[];
+  }[];
+  closes: { number: number; href: string }[];
+}
+
+const MERGE_WORDS: Record<InFlightPull["merge"], string> = {
+  clean: "It merges cleanly with the wiki's commit.",
+  conflicts: "It conflicts with the wiki's commit, so the claims below only may change.",
+  unknown: "Git could not merge it with the wiki's commit (that needs git 2.38 or later).",
+};
+
+/** The anchor of a feature's part of a pull request page, which article markers link to. */
+export const pullFeatureAnchor = (featureId: string): string => `feature-${featureId}`;
+
+/** /special/in-progress/pr/<n>/. Every text field is plain except the summary claims' `html`. */
+export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull): PullView {
+  const fetched = pull.head === "fetched";
+  const titleOf = (id: string) => site.features.get(id)?.title ?? null;
+  let n = 0;
+  const summary =
+    pull.summary === null
+      ? null
+      : pull.summary.claims.map((claim) => ({
+          html: renderInline(claim.text, inlineOptions(site)),
+          refs: claim.citations.map((c) => ({
+            n: ++n,
+            label: `${c.path}:L${c.startLine}${c.endLine > c.startLine ? `-L${c.endLine}` : ""}`,
+            href: githubBlobUrl(inflight.repo, c.sha, c.path, c.startLine, c.endLine),
+          })),
+        }));
+  return {
+    number: pull.number,
+    title: pull.title,
+    badges: badges(inflight, pull),
+    githubHref: githubUrl(inflight.repo, "pull", pull.number),
+    author: authorOf(pull),
+    created: formatDate(pull.createdAt),
+    updated: formatDate(pull.updatedAt),
+    base: pull.baseRef,
+    merge: fetched
+      ? MERGE_WORDS[pull.merge]
+      : `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`,
+    summary,
+    features: pull.features.map((f) => ({
+      anchor: pullFeatureAnchor(f.featureId),
+      feature: featureRef(site, f.featureId),
+      files: `${counted(f.files, "file")}, ${counted(f.changedLines, "line")}${f.added + f.removed > 0 ? `, ${formatNumber(f.added)} added and ${formatNumber(f.removed)} removed` : ""}`,
+      drifts: f.drifts,
+      effects: pull.effects
+        .filter((e) => e.featureId === f.featureId)
+        .map((e) => {
+          const claim = site.pages
+            .get(e.featureId)
+            ?.sections.flatMap((s) => s.claims)
+            .find((c) => c.id === e.claimId);
+          const anchor = claimAnchor(e.claimId);
+          return {
+            text: claim === undefined ? e.claimId : plainClaimText(claim.text, titleOf),
+            // A claim no longer on the page (a stale snapshot) links to the article itself.
+            href:
+              claim === undefined || anchor === null
+                ? (featureLink(site, e.featureId)?.href ?? null)
+                : `${articleUrl(e.featureId)}#${anchor}`,
+            reason: e.reason,
+            certain: e.certain,
+          };
+        }),
+    })),
+    closes: pull.closes.map((number) => ({
+      number,
+      href: githubUrl(inflight.repo, "issues", number),
+    })),
   };
 }
