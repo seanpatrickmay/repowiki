@@ -65,6 +65,7 @@ export {
   refreshPeople,
 } from "./refresh.ts";
 export { type Assigned, assignIds } from "./registry.ts";
+export { type PreparedPeople, type PrepareInput, preparePeople, storeNarratives } from "./round.ts";
 export {
   type ComputedSnapshot,
   computeSnapshot,
