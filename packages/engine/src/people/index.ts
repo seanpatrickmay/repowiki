@@ -25,6 +25,14 @@ export {
   MAX_IGNORE_REVS,
   type Ownership,
 } from "./ownership.ts";
+export {
+  type PeopleRead,
+  type ReadInput,
+  type Refreshed,
+  type RefreshInput,
+  readPeople,
+  refreshPeople,
+} from "./refresh.ts";
 export { type Assigned, assignIds } from "./registry.ts";
 export {
   type ComputedSnapshot,
