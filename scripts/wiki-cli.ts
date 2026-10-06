@@ -194,7 +194,7 @@ function parse(argv: readonly string[], limit: boolean) {
 }
 
 /** The commands that make live calls and so need the key. */
-export type LiveCommand = "wiki:build" | "wiki:update" | "wiki:replay" | "eval:run";
+export type LiveCommand = "wiki:build" | "wiki:update" | "wiki:replay" | "eval:run" | "ask:eval";
 
 /** Why a run that needs a call cannot make one; the commands load .env only if present. */
 export function keylessMessage(command: LiveCommand): string {

@@ -12,6 +12,7 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm wiki:build <repo> [rev] [--out dir] [--dry-run]` — write, verify and link every page from the stored manifest, then the project's About article (Haiku 4.5 via the Batches API), and write `export.json`; prints the cost estimate first; writes only under `~/.repowiki/<repo>/` or `--out`
 - `pnpm wiki:check <repo> [--out dir]` — check the stored wiki and its About article: every citation resolves with a matching hash, no link points nowhere
 - `pnpm wiki:serve <repo> [--out dir] [--port N] [--question-usd N] [--max-usd N]` — serve the built wiki and the Ask sidebar's `/api/ask` on `127.0.0.1` only (rebuilds a stale site first); each question is one live Haiku 4.5 tool loop under the per-question and session caps; prints its estimate first
+- `pnpm ask:eval <repo> --questions <file> [--set dev] [--max-usd N] [--dry-run]` — ask the dev set through the Ask sidebar's loop and judge it (live; prints its estimate first; never the held-out set); writes `<out>/eval/ask-<time>/`
 - `pnpm cassettes:record <test files>` — re-record LLM cassettes live (needs `ANTHROPIC_API_KEY` in `.env`; costs money; review the diff)
 
 ## Layout
