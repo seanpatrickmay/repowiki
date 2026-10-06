@@ -51,6 +51,21 @@ export interface SummaryPack {
   tokens: number;
   /** The head line numbers the pack shows of each file: the only lines a claim may cite. */
   shown: ReadonlyMap<string, ReadonlySet<number>>;
+  /**
+   * The shown head lines each file's change touches, of which a kept claim cites at least one:
+   * every added line, and for lines only removed the two head lines they sat between.
+   */
+  changed: ReadonlyMap<string, ReadonlySet<number>>;
+  /** Each file's removed lines as shown, by the head line they show before (one past the end). */
+  removed: ReadonlyMap<string, ReadonlyMap<number, readonly string[]>>;
+}
+
+/** What one file's block shows: its text, and its shown, changed and removed lines. */
+interface FileBlock {
+  text: string;
+  shown: Set<number>;
+  changed: Set<number>;
+  removed: Map<number, string[]>;
 }
 
 /** One line of source, safe for the prompt: no "\r", cut to 300, unsafe characters replaced. */
@@ -90,21 +105,23 @@ function fileBlock(
   change: FileChange,
   file: InFlightFile | undefined,
   input: PackInput,
-): { text: string; shown: Set<number> } {
+): FileBlock {
   const path = change.newPath ?? change.oldPath ?? "";
   const feature = file?.featureId ?? "no feature";
   const from = change.status === "renamed" ? `, from ${fenced(change.oldPath ?? "")}` : "";
   const shown = new Set<number>();
+  const changed = new Set<number>();
+  const none = { shown, changed, removed: new Map<number, string[]>() };
   const header = (detail: string) =>
     `### ${fenced(path)} (${change.status}${from}; ${feature}${detail})`;
   if (change.status === "deleted") {
     const old = input.base.get(change.oldPath ?? "");
     const count = old === undefined ? "" : `, ${sourceLines(old).length} lines`;
-    return { text: header(count), shown };
+    return { text: header(count), ...none };
   }
   const text = input.head.get(path);
   if (text === undefined || change.binary)
-    return { text: `${header("")}\nbinary or unreadable; no lines shown`, shown };
+    return { text: `${header("")}\nbinary or unreadable; no lines shown`, ...none };
   const lines = sourceLines(text);
   const width = String(lines.length).length;
   const numbered = (n: number, mark: string) =>
@@ -112,15 +129,20 @@ function fileBlock(
   if (change.status === "added") {
     const body = lines.map((_, i) => {
       shown.add(i + 1);
+      changed.add(i + 1);
       return numbered(i + 1, "+");
     });
-    return { text: [header(""), ...body].join("\n"), shown };
+    return { text: [header(""), ...body].join("\n"), ...none };
   }
   const old = sourceLines(input.base.get(change.oldPath ?? "") ?? "");
   const added = new Set<number>();
   const removedBefore = new Map<number, string[]>();
   for (const hunk of change.hunks) {
     for (let n = hunk.newStart; n < hunk.newStart + hunk.newCount; n++) added.add(n);
+    // Lines only removed sit between head lines newStart and newStart + 1.
+    if (hunk.newCount === 0)
+      for (const n of [hunk.newStart, hunk.newStart + 1])
+        if (n >= 1 && n <= lines.length) changed.add(n);
     // A pure deletion sits after head line newStart; its removed lines show before the next one.
     const anchor = hunk.newCount === 0 ? hunk.newStart + 1 : hunk.newStart;
     const removed = old.slice(hunk.oldStart - 1, hunk.oldStart - 1 + hunk.oldCount);
@@ -132,6 +154,8 @@ function fileBlock(
     );
     for (let n = low; n <= high; n++) shown.add(n);
   }
+  for (const n of added) changed.add(n);
+  const removed = new Map([...removedBefore].map(([n, rest]) => [n, [...rest]]));
   const out = [header("")];
   let previous = 0;
   const removedLine = (line: string) => `- ${" ".repeat(width)}| ${safe(line)}`;
@@ -144,7 +168,7 @@ function fileBlock(
   }
   // Lines removed at the very end of the file have no head line after them.
   for (const rest of removedBefore.values()) for (const line of rest) out.push(removedLine(line));
-  return { text: out.join("\n"), shown };
+  return { text: out.join("\n"), shown, changed, removed };
 }
 
 /**
@@ -195,6 +219,8 @@ export function summaryPack(
   const parts = [head];
   let used = estimateTokens(head);
   const shown = new Map<string, Set<number>>();
+  const changed = new Map<string, Set<number>>();
+  const removed = new Map<string, Map<number, string[]>>();
   const skipped: FileChange[] = [];
   for (const change of ordered) {
     const block = fileBlock(change, fileOf.get(pathOf(change)), input);
@@ -205,7 +231,11 @@ export function summaryPack(
     }
     parts.push(block.text);
     used += cost;
-    if (block.shown.size > 0) shown.set(pathOf(change), block.shown);
+    if (block.shown.size > 0) {
+      shown.set(pathOf(change), block.shown);
+      changed.set(pathOf(change), block.changed);
+      removed.set(pathOf(change), block.removed);
+    }
   }
   const rest = skipped.map((c) => fenced(pathOf(c)));
   if (rest.length > 0) {
@@ -221,7 +251,7 @@ export function summaryPack(
     );
   }
   const text = parts.join("\n\n");
-  return { text, tokens: estimateTokens(text), shown };
+  return { text, tokens: estimateTokens(text), shown, changed, removed };
 }
 
 /**

@@ -41,6 +41,7 @@ export {
 } from "./ask.ts";
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
 export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind } from "./claim.ts";
+export { codeTokens, ungroundedCodeToken, writesName } from "./code-tokens.ts";
 export { contentHash } from "./content-hash.ts";
 export {
   type ClaimChange,
