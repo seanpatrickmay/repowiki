@@ -1,5 +1,6 @@
 import { askIndexes } from "@repowiki/ask";
 import { answerTurn, scriptedProvider, TURN_USAGE } from "@repowiki/ask/test-provider";
+import { makeAskResponse } from "@repowiki/core/test-fixtures";
 import type { EvalQuestion } from "@repowiki/eval";
 import { callCostUsd, type GenerateRequest, LlmOutputError, type Provider } from "@repowiki/llm";
 import { WikiView } from "@repowiki/query";
@@ -100,6 +101,63 @@ describe("runAskEval", () => {
     const { rows, overBudget } = await run(0.07).result;
     expect(rows.map((r) => r.id)).toEqual(["q-where"]);
     expect(overBudget).toEqual(["q-how"]);
+  });
+
+  it("stops at the first question that does not fit, so the asked questions are the file's first", async () => {
+    const view = new WikiView(sample.wiki);
+    const { provider, requests } = scriptedProvider([ANSWER, ANSWER, ANSWER]);
+    const questions = [0, 1, 2].map((i) => ({ ...(QUESTIONS[0] as EvalQuestion), id: `q-${i}` }));
+    const result = await runAskEval({
+      view,
+      indexes: askIndexes(view),
+      questions,
+      provider,
+      judge: fakeJudge().judge,
+      model: "claude-haiku-4-5",
+      judgeModel: "claude-haiku-4-5",
+      batchJudge: true,
+      maxUsd: 0.2,
+      // The second does not fit; the third, cheaper, would have.
+      perQuestionCeilingUsd: [0.06, 0.5, 0.06],
+    });
+    expect(result.rows.map((r) => r.id)).toEqual(["q-0"]);
+    expect(result.overBudget).toEqual(["q-1", "q-2"]);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("refuses a ceiling list that does not match the questions, before any call", async () => {
+    const view = new WikiView(sample.wiki);
+    const { provider, requests } = scriptedProvider([ANSWER, ANSWER]);
+    await expect(
+      runAskEval({
+        view,
+        indexes: askIndexes(view),
+        questions: QUESTIONS,
+        provider,
+        judge: fakeJudge().judge,
+        model: "claude-haiku-4-5",
+        judgeModel: "claude-haiku-4-5",
+        batchJudge: true,
+        maxUsd: 1.5,
+        perQuestionCeilingUsd: [0.06],
+      }),
+    ).rejects.toThrow("1 ceilings for 2 questions");
+    expect(requests).toEqual([]);
+  });
+
+  it("counts exactly what the asks and the judgments cost", async () => {
+    const { rows, spentUsd } = await run().result;
+    const judgeUsd =
+      callCostUsd(
+        "claude-haiku-4-5-20251001",
+        { in: 800, out: 100, cacheRead: 0, cacheWrite: 0 },
+        true,
+      ) ?? 0;
+    expect(rows.map((r) => r.judgeUsd)).toEqual([judgeUsd, judgeUsd]);
+    expect(spentUsd).toBeCloseTo(
+      2 * (callCostUsd("claude-haiku-4-5-20251001", TURN_USAGE, false) ?? 0) + 2 * judgeUsd,
+      12,
+    );
   });
 
   const JUDGE_USAGE = { in: 800, out: 100, cacheRead: 0, cacheWrite: 0 };
@@ -289,6 +347,41 @@ describe("runAskEval", () => {
     expect(records.at(-1)?.spentUsd).toBeCloseTo(2 * ASK_USD, 10);
   });
 
+  it("rethrows the question's own failure when recording it fails too", async () => {
+    const view = new WikiView(sample.wiki);
+    const broken = {
+      content: null,
+      stopReason: "tool_use",
+      usage: TURN_USAGE,
+      model: "claude-haiku-4-5-20251001",
+    } as never;
+    const { provider } = scriptedProvider([broken]);
+    const lines: string[] = [];
+    let calls = 0;
+    const failed = runAskEval({
+      view,
+      indexes: askIndexes(view),
+      questions: QUESTIONS,
+      provider,
+      judge: fakeJudge().judge,
+      model: "claude-haiku-4-5",
+      judgeModel: "claude-haiku-4-5",
+      batchJudge: true,
+      maxUsd: 10,
+      perQuestionCeilingUsd: [0.06, 0.06],
+      log: (line) => lines.push(line),
+      record: () => {
+        calls++;
+        throw new Error("ENOSPC: no space left on device");
+      },
+    });
+    await expect(failed).rejects.toBeInstanceOf(TypeError);
+    expect(calls).toBe(1);
+    expect(lines.at(-1)).toBe(
+      "could not record the run (ENOSPC: no space left on device); rethrowing the question's failure",
+    );
+  });
+
   it("gives the judge the sentences joined as one answer", () => {
     const response = { sentences: [{ text: "One." }, { text: "Two." }] };
     expect(answerText(response as never)).toBe("One. Two.");
@@ -376,9 +469,48 @@ describe("renderAskReport", () => {
       result: { ...result, rows: [{ ...first, grounded: 0 }, ...rest] },
     });
     expect(lowered).toContain("- Grounding: 0 of 1 shown sentences cite only claims");
+    expect(report).toContain(
+      "- Not answered (budget or error, each counted as not correct): none.",
+    );
     expect(report).toContain("- Median cost at most $0.0150: met.");
     expect(report).toContain("- Median time at most 8 s: met.");
     expect(report).not.toContain("How does ingest_chunk save");
+  });
+
+  it("names the questions not answered or not asked, and says when a cost was counted at the cap", () => {
+    const base = makeAskResponse();
+    const row = (id: string, status: "answered" | "error" | "budget", usd: number | null) => ({
+      id,
+      kind: "where",
+      question: "Placeholder question?",
+      response:
+        status === "answered"
+          ? { ...base, cost: { turns: 1, usd, model: null } }
+          : { ...base, status, sentences: [], sources: [], cost: { turns: 1, usd, model: null } },
+      ms: 1000,
+      score: status === "answered" ? (1 as const) : (0 as const),
+      judgeUsd: 0.001,
+      grounded: status === "answered" ? 2 : 0,
+    });
+    const report = renderAskReport({
+      repo: "sample",
+      head: sample.sha,
+      model: "claude-haiku-4-5",
+      set: "dev",
+      startedAt: "2026-10-05T12:00:00.000Z",
+      result: {
+        rows: [row("q-1", "answered", null), row("q-2", "error", 0.001), row("q-3", "budget", 0)],
+        overBudget: ["q-4", "q-5"],
+        spentUsd: 0.06,
+      },
+    });
+    expect(report).toContain(
+      "- Not answered (budget or error, each counted as not correct): q-2 (error), q-3 (budget).",
+    );
+    expect(report).toContain(
+      "- Not asked (the next question could have crossed --max-usd): q-4, q-5.",
+    );
+    expect(report).toContain("1 cost unknown, counted at the $0.0500 cap.");
   });
 
   it("finds the median of an odd and an even count", () => {

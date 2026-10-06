@@ -52,6 +52,12 @@ describe("ask-eval.ts as a process (no network)", () => {
       const heldOut = run(["--questions", SMOKE_QUESTIONS, "--set", "held-out"]);
       expect(heldOut.status).toBe(2);
       expect(heldOut.stderr).toContain("never runs the held-out set");
+      const history = run(["--questions", SMOKE_QUESTIONS, "--set", "history"]);
+      expect(history.status).toBe(2);
+      expect(history.stderr).toContain("--set must be dev (or smoke, for the fixture)");
+      const bogus = run(["--questions", SMOKE_QUESTIONS, "--bogus"]);
+      expect(bogus.status).toBe(2);
+      expect(bogus.stderr).toContain("bad option --bogus");
       const keylessRun = run(["--questions", SMOKE_QUESTIONS, "--set", "smoke"]);
       expect(keylessRun.status).toBe(1);
       expect(keylessRun.stderr).toContain("ANTHROPIC_API_KEY is not set: pnpm ask:eval");

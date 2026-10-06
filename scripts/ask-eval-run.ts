@@ -86,8 +86,9 @@ export function checkAskableQuestions(questions: readonly EvalQuestion[]): void 
 
 /**
  * Asks each question through askQuestion with no cache (spec v2 #4 §7), one at a time, while the
- * next question's ceiling fits under `maxUsd` (C12), after refusing any question the ask cannot
- * take; then judges every answer with the M7 judge, the calls together so they go as one batch
+ * next question's ceiling fits under `maxUsd` (C12; the first that does not fit stops the asking,
+ * so the asked questions are the file's first), after refusing any question the ask cannot take
+ * and a ceiling list that is not one a question; then judges every answer with the M7 judge, the calls together so they go as one batch
  * (with --no-batch, at most MAX_DIRECT_JUDGE_CALLS at once). Every judge attempt is counted in
  * `spentUsd`: a judgment the judge answered unusably twice is left unjudged (logged on one line)
  * and an unpriced one is priced as `judgeModel`; any other judge failure is rethrown once every
@@ -116,6 +117,11 @@ export async function runAskEval(options: {
   const clock = options.clock ?? (() => performance.now());
   const log = options.log ?? (() => {});
   checkAskableQuestions(options.questions);
+  if (options.perQuestionCeilingUsd.length !== options.questions.length) {
+    throw new Error(
+      `${options.perQuestionCeilingUsd.length} ceilings for ${options.questions.length} questions`,
+    );
+  }
   const asked: Omit<AskEvalRow, "score" | "judgeUsd">[] = [];
   const overBudget: string[] = [];
   let spent = 0;
@@ -125,7 +131,8 @@ export async function runAskEval(options: {
   let committed = 0;
   for (const [i, question] of options.questions.entries()) {
     const ceiling = options.perQuestionCeilingUsd[i] ?? DEFAULT_QUESTION_USD;
-    if (committed + ceiling > options.maxUsd + 1e-12) {
+    // The first question that does not fit stops the asking, so the asked are the file's first.
+    if (overBudget.length > 0 || committed + ceiling > options.maxUsd + 1e-12) {
       overBudget.push(question.id);
       continue;
     }
@@ -148,9 +155,17 @@ export async function runAskEval(options: {
         },
       }));
     } catch (error) {
-      // The turns it took were paid for: record them before the run stops.
+      // The turns it took were paid for: record them before the run stops. A record that fails
+      // too is logged, and the question's own failure is what the run reports.
       spent += paid;
-      record(unjudged(), false);
+      try {
+        record(unjudged(), false);
+      } catch (failure) {
+        const why = failure instanceof Error ? failure.message : String(failure);
+        log(
+          `could not record the run (${cut(oneLine(why), 200)}); rethrowing the question's failure`,
+        );
+      }
       throw error;
     }
     const ms = clock() - started;
@@ -182,9 +197,9 @@ export async function runAskEval(options: {
     options.batchJudge ? asked.length : MAX_DIRECT_JUDGE_CALLS,
   );
   // A reply priced under its own model id, else under the configured judge model.
-  const priced = (model: string | null, usage: JudgeError["usage"]) =>
-    (model === null ? null : callCostUsd(model, usage, options.batchJudge)) ??
-    callCostUsd(options.judgeModel, usage, options.batchJudge);
+  const priced = (model: string | null, usage: JudgeError["usage"], batch = options.batchJudge) =>
+    (model === null ? null : callCostUsd(model, usage, batch)) ??
+    callCostUsd(options.judgeModel, usage, batch);
   const failures: unknown[] = [];
   const rows = asked.map((row, i): AskEvalRow => {
     const outcome = judged[i];
@@ -201,7 +216,7 @@ export async function runAskEval(options: {
     }
     const j = outcome?.value;
     if (j === undefined) return { ...row, score: null, judgeUsd: null };
-    const usd = j.model === null ? 0 : priced(j.model, j.usage);
+    const usd = j.model === null ? 0 : priced(j.model, j.usage, j.batch);
     if (usd !== null) spent += usd;
     return { ...row, score: j.score, judgeUsd: usd };
   });
@@ -250,6 +265,10 @@ export function renderAskReport(at: {
     r.response.status === "answered" || r.response.status === "partial" ? r.response.sentences : [],
   );
   const grounded = rows.reduce((sum, r) => sum + r.grounded, 0);
+  const unknown = rows.filter((r) => r.response.cost.usd === null).length;
+  const unanswered = rows.filter(
+    (r) => r.response.status === "budget" || r.response.status === "error",
+  );
   const medianUsd = median(costs);
   const maxUsd = costs.length === 0 ? null : Math.max(...costs);
   const medianMs = median(times);
@@ -269,9 +288,10 @@ export function renderAskReport(at: {
     "## Totals",
     "",
     `- Accuracy: ${correct} of ${rows.length}${rows.length === 0 ? "" : ` (${Math.round((100 * correct) / rows.length)}%)`}${rows.some((r) => r.score === null) ? `; ${rows.filter((r) => r.score === null).length} unjudged` : ""}.`,
-    `- Cost a question: median ${usd4(medianUsd)}, most ${usd4(maxUsd)}; the run cost ${usd4(at.result.spentUsd)} with judging.`,
+    `- Cost a question: median ${usd4(medianUsd)}, most ${usd4(maxUsd)}; the run cost ${usd4(at.result.spentUsd)} with judging.${unknown === 0 ? "" : ` ${unknown} cost${unknown === 1 ? "" : "s"} unknown, counted at the ${usd4(DEFAULT_QUESTION_USD)} cap.`}`,
     `- Time from the question to its answer: median ${medianMs === null ? "none" : seconds(medianMs)}, most ${times.length === 0 ? "none" : seconds(Math.max(...times))}.`,
     `- Grounding: ${grounded} of ${shown.length} shown sentences cite only claims the model was shown and name only what they write (checked again from each question's shown handles).`,
+    `- Not answered (budget or error, each counted as not correct): ${unanswered.length === 0 ? "none" : unanswered.map((r) => `${r.id} (${r.response.status})`).join(", ")}.`,
     `- Not asked (the next question could have crossed --max-usd): ${at.result.overBudget.length === 0 ? "none" : at.result.overBudget.join(", ")}.`,
     "",
     "## Cost and speed (spec v2 #4 §12.5)",
