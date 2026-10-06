@@ -4,6 +4,7 @@ import { FeatureId } from "./feature.ts";
 import { InFlight, inflightProblems } from "./inflight.ts";
 import { RunKind } from "./llm.ts";
 import { Manifest } from "./manifest.ts";
+import { PeopleExport, peopleProblems } from "./person.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 import { Revision, TokenUsage } from "./revision.ts";
 import { SCHEMA_VERSION } from "./version.ts";
@@ -54,6 +55,12 @@ export const WikiExport = z
      * when the wiki has no snapshot. Added within schema version 3 with a default, like `runs`.
      */
     inflight: InFlight.nullable().default(null),
+    /**
+     * The people who built the repository (spec v2 #6, F14-F16): the computed snapshot and each
+     * person's current narrative, or null when People is off. Added within schema version 3 with
+     * a default, like `inflight`.
+     */
+    people: PeopleExport.nullable().default(null),
   })
   .superRefine((wiki, ctx) => {
     const known = new Set(wiki.manifest.features.map((f) => f.id));
@@ -147,6 +154,11 @@ export const WikiExport = z
     if (wiki.inflight !== null) {
       for (const { message, path } of inflightProblems(wiki.inflight, wiki)) {
         ctx.addIssue({ code: "custom", message, path: ["inflight", ...path] });
+      }
+    }
+    if (wiki.people !== null) {
+      for (const { message, path } of peopleProblems(wiki.people, wiki)) {
+        ctx.addIssue({ code: "custom", message, path: ["people", ...path] });
       }
     }
     current?.edges.forEach((edge, e) => {

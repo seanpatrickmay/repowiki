@@ -396,7 +396,7 @@ describe("GitHubSnapshot", () => {
 describe("the inflight role and run kind (spec v2 #9 R20)", () => {
   it("adds inflight to LlmRole and RunKind, so its ledger rows and config parse", () => {
     expect(LlmRole.options).toContain("inflight");
-    expect(RunKind.options).toEqual(["build", "update", "inflight"]);
+    expect(RunKind.options).toContain("inflight");
     const row = makeLedgerEntry({ purpose: "inflight", runKind: "inflight", sha: SHA_A });
     expect(LedgerEntry.parse(row)).toEqual(row);
     expect(LlmConfigFile.parse({ models: { inflight: "claude-haiku-4-5" } })).toEqual({

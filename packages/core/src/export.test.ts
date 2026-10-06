@@ -29,6 +29,7 @@ function makeExport(overrides: Partial<WikiExport> = {}): WikiExport {
     architecture: [],
     runs: [],
     inflight: null,
+    people: null,
     ...overrides,
   };
 }
