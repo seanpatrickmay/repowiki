@@ -31,7 +31,7 @@ describe("architectureView", () => {
   it("links the lead's features and escapes markup in claim text", () => {
     const view = architectureView(site);
     expect(view?.leadHtml).toBe(
-      '<b>Demo Repo</b> turns <a class="wikilink" href="/wiki/signals/" title="Signal ingestion" data-preview="signals">Signal ingestion</a> into <a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">Deliverables</a> for a delivery team.',
+      '<span class="claim" id="claim-c1"><b>Demo Repo</b> turns <a class="wikilink" href="/wiki/signals/" title="Signal ingestion" data-preview="signals">Signal ingestion</a> into <a class="wikilink" href="/wiki/deliverables/" title="Deliverables" data-preview="deliverables">Deliverables</a> for a delivery team.</span>',
     );
     const deps = view?.sections.find((s) => s.anchor === "dependencies")?.html ?? "";
     expect(deps).toContain("Deliverables depend on signals &lt;b&gt;and&lt;/b&gt; on ghost.");

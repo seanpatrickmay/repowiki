@@ -473,6 +473,30 @@ describe("article page", () => {
   });
 });
 
+describe("claim anchors (spec v2 #4 R17)", () => {
+  const anchors = (page: string) =>
+    [...site.read(page).matchAll(/<span class="claim" id="(claim-[^"]+)">/g)].map((m) => m[1]);
+
+  it("gives every claim of an article, an old revision and the About article its anchor", () => {
+    const wiki = fixtureExport();
+    const signals = wiki.pages.find((p) => p.featureId === "signals");
+    const ids = signals?.sections.flatMap((s) => s.claims.map((c) => `claim-${c.id}`)) ?? [];
+    expect(anchors("wiki/signals/index.html")).toEqual(ids);
+    expect(anchors("wiki/signals/history/1/index.html").length).toBeGreaterThan(0);
+    expect(anchors("special/about/index.html")).toContain("claim-c1");
+  });
+
+  it("never repeats an anchor id on a page", () => {
+    for (const page of htmlFiles(site.outDir)) {
+      const ids = anchors(page);
+      expect({ page, repeated: ids.filter((id, i) => ids.indexOf(id) !== i) }).toEqual({
+        page,
+        repeated: [],
+      });
+    }
+  });
+});
+
 describe("hostile fixture content", () => {
   // The fixture feature's title is `<img src=x onerror=alert(1)> "q" & 'p'` plus two private-use
   // characters; its alias is `<i>x</i>`. Titles and labels are plain text, so every page that

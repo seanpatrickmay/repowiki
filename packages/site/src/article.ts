@@ -1,4 +1,4 @@
-import type { Revision, SectionKey } from "@repowiki/core";
+import { claimAnchor, type Revision, type SectionKey } from "@repowiki/core";
 import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
@@ -57,6 +57,18 @@ export interface ArticleView {
   lastEdited: string;
 }
 
+/**
+ * A claim's HTML in its anchor, `<span class="claim" id="claim-<id>">` (spec v2 #4 R17), so a
+ * link to `#claim-<id>` lands on it and `:target` highlights it. An id claimAnchor refuses, or
+ * one `used` already holds (a page anchors each id once), leaves the claim unwrapped.
+ */
+export function anchoredClaim(claimId: string, html: string, used: Set<string>): string {
+  const anchor = claimAnchor(claimId);
+  if (anchor === null || used.has(anchor)) return html;
+  used.add(anchor);
+  return `<span class="claim" id="${anchor}">${html}</span>`;
+}
+
 /** Everything the article template prints, computed from one revision. */
 export function articleView(site: SiteModel, revision: Revision): ArticleView {
   const feature = site.features.get(revision.featureId);
@@ -68,10 +80,15 @@ export function articleView(site: SiteModel, revision: Revision): ArticleView {
   for (const section of revision.sections) {
     for (const claim of section.claims) if (claim.staleSince !== null) stale.add(claim.id);
   }
+  const anchored = new Set<string>();
   const paragraph = (claims: Revision["sections"][number]["claims"]): string =>
     claims
-      .map(
-        (claim) => renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []),
+      .map((claim) =>
+        anchoredClaim(
+          claim.id,
+          renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []),
+          anchored,
+        ),
       )
       .join(" ");
 

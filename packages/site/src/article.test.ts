@@ -8,7 +8,7 @@ import {
   SHA_B,
 } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
-import { articleView } from "./article.ts";
+import { anchoredClaim, articleView } from "./article.ts";
 import { formatDate, formatNumber } from "./format.ts";
 import { buildSiteModel } from "./model.ts";
 import { fixtureExport, fixtureExportWith } from "./test-fixtures.ts";
@@ -242,5 +242,41 @@ describe("articleView preview ids", () => {
     expect(view.leadHtml).not.toContain('data-preview="old-name"');
     expect(view.leadHtml).toContain('data-preview="legacy-signals"');
     expect(view.leadHtml).toContain('data-preview="deliverables"');
+  });
+});
+
+describe("claim anchors (spec v2 #4 R17)", () => {
+  it("wraps a claim in its anchor once per page, and leaves an id it cannot anchor bare", () => {
+    const used = new Set<string>();
+    expect(anchoredClaim("c3", "<b>x</b>", used)).toBe(
+      '<span class="claim" id="claim-c3"><b>x</b></span>',
+    );
+    expect(anchoredClaim("c3", "again", used)).toBe("again");
+    expect(anchoredClaim('c3"><img src=x>', "text", used)).toBe("text");
+    expect(anchoredClaim("c 4", "text", used)).toBe("text");
+  });
+
+  it("anchors every claim of an article, lead and sections", () => {
+    const view = articleView(site, page("signals"));
+    const ids = [view.leadHtml, ...view.sections.map((s) => s.html)].flatMap((html) =>
+      [...html.matchAll(/<span class="claim" id="([^"]+)">/g)].map((m) => m[1]),
+    );
+    const claims = page("signals").sections.flatMap((s) => s.claims.map((c) => `claim-${c.id}`));
+    expect(ids).toEqual(claims);
+  });
+
+  it("anchors a repeated claim id only at its first claim", () => {
+    const revision = page("signals");
+    const [lead, ...rest] = revision.sections;
+    if (lead === undefined) throw new Error("no lead");
+    const twice = articleView(site, {
+      ...revision,
+      sections: [
+        { ...lead, claims: lead.claims.map((c) => ({ ...c, id: "dup" })) },
+        ...rest.map((s) => ({ ...s, claims: s.claims.map((c) => ({ ...c, id: "dup" })) })),
+      ],
+    });
+    const all = [twice.leadHtml, ...twice.sections.map((s) => s.html)].join(" ");
+    expect(all.split('id="claim-dup"')).toHaveLength(2);
   });
 });
