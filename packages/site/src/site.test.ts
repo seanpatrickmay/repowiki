@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
-import { HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
+import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -1319,15 +1319,46 @@ const inflightPages = (): string[] =>
 const ESCAPED_PULL_TITLE =
   "&lt;script&gt;alert(1)&lt;/script&gt; [[signals]] [x](javascript:alert(1)) &quot;q&quot; &amp; &#39;p&#39;";
 
+/** The fixture's snapshot with #12 also adding a file its feature is inferred for. */
+function placedExport() {
+  const [twelve, ...rest] = fixtureInFlight().pulls;
+  if (twelve === undefined) throw new Error("the fixture has #12");
+  const placed = {
+    ...twelve,
+    files: [
+      ...twelve.files,
+      {
+        path: "src/signals/page.py",
+        oldPath: null,
+        status: "added" as const,
+        additions: 5,
+        deletions: 0,
+        featureId: "signals",
+        placement: "inferred" as const,
+      },
+    ],
+    features: twelve.features.map((f) => ({
+      ...f,
+      files: f.files + 1,
+      changedLines: f.changedLines + 5,
+      added: f.added + 1,
+    })),
+  };
+  return inflightExport({ pulls: [placed, ...rest] });
+}
+
 describe("the work in progress pages (spec v2 #9 §6.2)", () => {
   beforeAll(() => {
-    inflightSite = buildFixtureSite([], inflightExport());
+    inflightSite = buildFixtureSite([], placedExport());
   }, 120_000);
   afterAll(() => inflightSite?.cleanup());
 
   it("renders a page per pull request", async () => {
     await expect(inflightNormalized("special/in-progress/pr/12/index.html")).toMatchFileSnapshot(
       "__snapshots__/special-in-progress-pr-12.html",
+    );
+    expect(inflightSite.read("special/in-progress/pr/12/index.html")).toContain(
+      "2 files, 13 lines, 1 file added. Its feature is inferred for 1 file the manifest does not list yet.",
     );
     const missing = inflightSite.read("special/in-progress/pr/13/index.html");
     expect(missing).toContain(`<h1 class="page-title">${ESCAPED_PULL_TITLE}</h1>`);
@@ -1383,7 +1414,7 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
     expect(nav.indexOf('href="/special/in-progress/"')).toBeGreaterThan(
       nav.indexOf('href="/special/about/"'),
     );
-    expect(inflightSite.read("llms.txt")).toBe(renderLlmsTxt(inflightExport()));
+    expect(inflightSite.read("llms.txt")).toBe(renderLlmsTxt(placedExport()));
     expect(inflightSite.read("llms.txt")).not.toMatch(/in-progress|pull request/i);
     const box = /<section class="mp-box mp-in-progress"[\s\S]*?<\/section>/.exec(
       inflightSite.read("index.html"),

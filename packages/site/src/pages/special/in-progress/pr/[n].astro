@@ -70,7 +70,7 @@ const status = inflightStatus(site, inflight);
         <section aria-labelledby={f.anchor}>
           <h3 id={f.anchor}>{f.feature.href === null ? f.feature.title : <a href={f.feature.href}>{f.feature.title}</a>}</h3>
           <p>
-            {f.files}.{f.drifts && " It would trigger a manifest revision."}
+            {f.files}.{f.inferred > 0 && ` Its feature is inferred for ${f.inferred === 1 ? "1 file" : `${f.inferred} files`} the manifest does not list yet.`}{f.drifts && " It would trigger a manifest revision."}
           </p>
           {f.effects.length > 0 && (
             <ul class="inflight-effects">

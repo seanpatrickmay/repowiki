@@ -132,6 +132,66 @@ describe("pullView", () => {
     ]);
   });
 
+  it("links a claim whose id cannot be an anchor to its section, or the article for the lead", () => {
+    const s = site();
+    const inflight = inflightOf(s);
+    const pull = inflight.pulls[0] as InFlight["pulls"][number];
+    const page = s.pages.get("signals");
+    if (page === undefined) throw new Error("the fixture has a signals page");
+    const rename = (id: string) => (id === "s-o1" ? "s.o1" : id === "s-lead-1" ? "s lead" : id);
+    (s.pages as Map<string, typeof page>).set("signals", {
+      ...page,
+      sections: page.sections.map((section) => ({
+        ...section,
+        claims: section.claims.map((claim) => ({ ...claim, id: rename(claim.id) })),
+      })),
+    });
+    const odd = {
+      ...pull,
+      effects: pull.effects.map((e) => ({ ...e, claimId: rename(e.claimId) })),
+    };
+    expect(pullView(s, inflight, odd).features[0]?.effects.map((e) => e.href)).toEqual([
+      "/wiki/signals/#overview",
+      "/wiki/signals/",
+    ]);
+  });
+
+  it("counts a feature's files added and removed as files, and marks the inferred ones", () => {
+    const pull = fixtureInFlight().pulls[0] as InFlight["pulls"][number];
+    const file = (path: string, status: "added" | "deleted", placement: "member" | "inferred") => ({
+      path,
+      oldPath: status === "added" ? null : path,
+      status,
+      additions: status === "added" ? 5 : 0,
+      deletions: status === "added" ? 0 : 3,
+      featureId: "signals",
+      placement,
+    });
+    const placed = {
+      ...pull,
+      closes: [],
+      files: [
+        ...pull.files,
+        file("src/signals/page.py", "added", "inferred"),
+        file("src/signals/next.py", "added", "inferred"),
+        file("src/signals/old.py", "deleted", "member"),
+      ],
+      features: pull.features.map((f) => ({
+        ...f,
+        files: 4,
+        changedLines: 21,
+        added: 2,
+        removed: 1,
+      })),
+    };
+    const s = site({ pulls: [placed], issues: [] });
+    const [signals] = pullView(s, inflightOf(s), placed).features;
+    expect(signals?.files).toBe("4 files, 21 lines, 2 files added and 1 removed");
+    expect(signals?.inferred).toBe(2);
+    const plain = pullView(site(), inflightOf(site()), pull).features[0];
+    expect([plain?.files, plain?.inferred]).toEqual(["1 file, 8 lines", 0]);
+  });
+
   it("says a pull request whose head is missing could not be worked out, and has no summary", () => {
     const s = site();
     const inflight = inflightOf(s);
