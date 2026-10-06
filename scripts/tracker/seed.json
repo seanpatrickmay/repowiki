@@ -1739,6 +1739,266 @@
       "labels": ["v2", "type:task", "area:infra"],
       "parent": "F23",
       "body": "**Deliverable:** the whole-milestone review's fixes; the wiki:inflight line in CLAUDE.md; spec v2 #9 §12.1 and §12.4-6 checked live on RepoWiki itself; the owner's runbook for next-chief-of-staff posted on F23.\n\n**Done when:** the review's findings are fixed or ruled on, the gate's results are on F23, and the runbook is there. The scored criteria (§12.2-4 on next-chief-of-staff) are the owner's. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 28."
+    },
+    {
+      "key": "M11-1",
+      "title": "[M11] tracker: M11 tickets, ADR-0007 and ADR-0008",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F14",
+      "closed": true,
+      "body": "**Deliverable:** M11 tickets M11-1..M11-37 in seed.json under F14, F15 and F16; docs/decisions/0007-blame-for-people.md (blame for People, superseding ADR-0003, whose status becomes \"superseded by 0007\"); docs/decisions/0008-people-chronicle-voice.md (F14's voice reshaped to a chronicle; trailers ignored).\n\n**Done when:** the seed creates M11-2..M11-37 under their features, and both ADRs are on main. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 1."
+    },
+    {
+      "key": "M11-2",
+      "title": "[M11] core: the People facts and snapshot schemas, and cleaned author names",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F15",
+      "body": "**Deliverable:** core's person.ts: PersonId, withoutEmails, cleanPersonName, PersonName, CalendarDay, ActivityDay, cleanPullTitle, PullRequestRef, PersonKind, PersonFeature, PersonFacts, PersonRedirect and PeopleSnapshot with their cross-field rules; makePersonFacts and makePeopleSnapshot fixtures.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 2."
+    },
+    {
+      "key": "M11-3",
+      "title": "[M11] core: the person narrative revision and its claim rules",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** PersonSectionKey (lead, chronicle, areas), PersonRevisionReason, featureLinkTargets, personClaimViolations (commit citations only, never a hook, an areas claim links one feature), PersonSection and PersonRevision; makePersonRevision.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 3."
+    },
+    {
+      "key": "M11-4",
+      "title": "[M11] core: WikiExport.people, the people role and run kind, and contributorsOf",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** PeopleExport and peopleProblems; WikiExport.people (null by default within schema 3); LlmRole and RunKind gain people; DEFAULT_MODELS.people; contributorsOf (humans only).\n\n**Done when:** tests pass, every existing export and ledger row parses, and M7-M10's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 4."
+    },
+    {
+      "key": "M11-5",
+      "title": "[M11] core: the people file and its match keys",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F16",
+      "body": "**Deliverable:** core's people-config.ts: normalizeName, parseMatchKey, MatchKey, PeopleEntry, PeopleConfig (people, exclude, bots, humans, owner, minCommits, maxNarratives, ignoreRevs, othersMinPeople) and parsePeopleConfig, whose problems never show an email key's value.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 5."
+    },
+    {
+      "key": "M11-6",
+      "title": "[M11] index: read each commit's author, author date and numstat",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F15",
+      "body": "**Deliverable:** engine's index/authorship.ts: readAuthorship (NUL-parsed log with raw %an/%ae, the author date, a merge's title line and -M numstat, every shaping option pinned in argv), sharing readHistory's pull-request assignment; TestRepo commits take an author.\n\n**Done when:** tests pass, including hostile names, subjects and paths. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 6."
+    },
+    {
+      "key": "M11-7",
+      "title": "[M11] people: read a committed blob, and parse and apply the mailmap",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F16",
+      "body": "**Deliverable:** index/blob.ts (readBlobAt, never the work tree) and the new people module's mailmap.ts (parseMailmap with a skipped count, applyMailmap).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 7."
+    },
+    {
+      "key": "M11-8",
+      "title": "[M11] index: hermetic blame at a sha, with ignore-revs and a timeout",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F15",
+      "body": "**Deliverable:** index/blame.ts: blameFile (ADR-0007's argv through scrubbedGitEnv, --ignore-revs-file= to clear a configured file, --ignore-rev per committed sha, a 120 s timeout) and parseIncrementalBlame.\n\n**Done when:** tests pass, including the hostile-config blame test. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 8."
+    },
+    {
+      "key": "M11-9",
+      "title": "[M11] store: migration 10 with the People registry, snapshot, narratives and blame cache",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** migration 10 (people_registry, people_snapshot, person_revisions, blame_cache, and the random people.salt) appended to migrations.ts; Store's People methods; RegistryRow in core; Store.listManifests.\n\n**Done when:** tests pass, a store at schema 9 migrates without losing a row, and no shipped migration is edited. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 9."
+    },
+    {
+      "key": "M11-10",
+      "title": "[M11] people: resolve authors into people",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F16",
+      "body": "**Deliverable:** people/identities.ts: resolveIdentities (the people file, then the committed mailmap, then the four automatic rules with fences; exclusion, bots and humans; R14's display name; salted keys; the owner from the people file or the repository's user.email).\n\n**Done when:** tests pass, including the synthetic 15-identity table. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 10."
+    },
+    {
+      "key": "M11-11",
+      "title": "[M11] people: permanent person ids",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F16",
+      "body": "**Deliverable:** people/registry.ts: assignIds (stored ids kept by key, a merge keeps the larger row and redirects the other, a people-file id leaves a redirect, new ids from the display name, excluded rows private, redirects flattened, regrouped ids reported).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 11."
+    },
+    {
+      "key": "M11-12",
+      "title": "[M11] people: blame the head's text files with a cache",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F15",
+      "body": "**Deliverable:** people/ownership.ts: blameTree (cache by path and blob, lockfiles and binaries skipped, four at a time, the ignore list's fingerprint, pruning) and ignoreRevsFrom.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 12."
+    },
+    {
+      "key": "M11-13",
+      "title": "[M11] people: compute the People snapshot",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F15",
+      "body": "**Deliverable:** people/snapshot.ts: computeSnapshot (activity by author calendar day, R20's lines, R19's commit-to-feature map through renames and older manifests, current lines, R6's pull requests, the anonymous others series) and topologicalNewestFirst.\n\n**Done when:** tests pass, and the snapshot is byte-identical across runs and log orders. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 13."
+    },
+    {
+      "key": "M11-14",
+      "title": "[M11] people: read and refresh in one step",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F15",
+      "body": "**Deliverable:** people/refresh.ts: readPeople (no write) and refreshPeople (the registry and snapshot stored in one transaction); index/user-email.ts configuredEmail.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 14."
+    },
+    {
+      "key": "M11-15",
+      "title": "[M11] scripts: pnpm people:suggest",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F16",
+      "body": "**Deliverable:** people/suggest.ts (maskEmail, suggestMerges, suggestionSnippet), wantsNarrative, scripts/people-cli.ts (parseSuggestArgs, the people-file path and loader, renderSuggest) and scripts/people-suggest.ts on a throwaway copy of the store; the People test fixture.\n\n**Done when:** tests pass, and the process test's output shows only masked emails. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 15."
+    },
+    {
+      "key": "M11-16",
+      "title": "[M11] store: People in the export and llms.txt",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** buildExport adds people (the snapshot and the current narratives of its humans; null when peopleProblems finds one); llms.txt's People section.\n\n**Done when:** tests pass, and no author email or local part, and nothing of an excluded person, reaches export.json or llms.txt. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 16."
+    },
+    {
+      "key": "M11-17",
+      "title": "[M11] people: the person pack",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/pack.ts: buildPersonPack and packFor (episodes oldest first, a pull request's commits together, the rest by month, the merged list; neutralised one-line text; collapse then drop under PERSON_BUDGET_TOKENS; the citable shas and their dates), ancestorsOf; pullRequestLandings and pullRequestAuthors shared with the snapshot.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 17."
+    },
+    {
+      "key": "M11-18",
+      "title": "[M11] people: the narrative prompt, style guide and draft schema",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/prompt.ts (PEOPLE_INSTRUCTIONS, PersonDraft, PersonFixes, peopleSystemPrompt, peopleCacheKey, personTurn) and people/people-style.md; write/index.ts re-exports featureDirectory.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 18."
+    },
+    {
+      "key": "M11-19",
+      "title": "[M11] people: verify person claims",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/verify.ts: verifyPersonClaim (v1's text checks, commit-only references, authorship by the pack's shas, R18's dates, statistics, other names, banned words and areas rules, no email), statedDates, personVerifyContext and commitFeatureLookup.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 19."
+    },
+    {
+      "key": "M11-20",
+      "title": "[M11] people: write narratives in a batched round with one retry",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/write.ts: writePeople (one batch, one retry batch through write/rounds.ts, drafts in their own order, an append keeps the stored chronicle, the computed lead on failure) and personRequest; write/index.ts re-exports the round helpers.\n\n**Done when:** tests pass with a scripted provider. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 20."
+    },
+    {
+      "key": "M11-21",
+      "title": "[M11] people: which narratives are due",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/due.ts: planNarratives (consent and minCommits, rank and maxNarratives, missing, newer and regrouped, --only, withdrawn consent); Store.forgetPersonNarrative.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 21."
+    },
+    {
+      "key": "M11-22",
+      "title": "[M11] people: the narrative cassettes",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/write.claude.test.ts with two cassettes, team-people.json and team-people-append.json, recorded live once and unbatched (about $0.03).\n\n**Done when:** the cassettes replay in CI with no network, and the secret scan passes. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 22."
+    },
+    {
+      "key": "M11-23",
+      "title": "[M11] scripts: wiki:people's flags, ceiling and summary",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people-cli.ts: PEOPLE_USAGE and parsePeopleArgs, parseUsd, narrativeCeilingUsd, withinBudget, peopleTable, renderPeopleSummary and exclusionNotes.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 23."
+    },
+    {
+      "key": "M11-24",
+      "title": "[M11] people: prepare a round and store its narratives",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/round.ts: preparePeople (refresh, plan, withdrawn narratives deleted, requests) and storeNarratives (revisions and the journal flush in one transaction).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 24."
+    },
+    {
+      "key": "M11-25",
+      "title": "[M11] scripts: the People step",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** scripts/people-run.ts: runPeopleStep (the estimate before any call, the round capped in rank order, the narratives stored, a row per person, the notes); chronicleProvider for tests.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 25."
+    },
+    {
+      "key": "M11-26",
+      "title": "[M11] scripts: pnpm wiki:people",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** scripts/wiki-people.ts with --dry-run on a store copy, --disable, --forget <match-key>, the lock, the one export write and people-<sha7>.md; storeCopy shared with people:suggest.\n\n**Done when:** tests pass, and the process tests show no email anywhere the command writes or prints. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 26."
+    },
+    {
+      "key": "M11-27",
+      "title": "[M11] scripts: People after wiki:update and wiki:replay",
+      "labels": ["v2", "type:task", "area:freshness"],
+      "parent": "F14",
+      "body": "**Deliverable:** scripts/people-hook.ts: peopleAfterUpdate after M10's step and before the one export write; --people-max-usd on both commands; a missing key leaves narratives due.\n\n**Done when:** tests pass, and an update of a wiki without People is unchanged. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 27."
+    },
+    {
+      "key": "M11-28",
+      "title": "[M11] scripts: wiki:check re-verifies People and scans for emails",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F14",
+      "body": "**Deliverable:** people/check.ts personRevisionProblems; scripts/people-problems.ts checkPeopleStored (narratives re-verified, outputs scanned for an author's email, never printed); printed error lines carry no email; commitFeaturesOf shared with the snapshot.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 28."
+    },
+    {
+      "key": "M11-29",
+      "title": "[M11] store: work in flight's authors joined to person pages",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F16",
+      "body": "**Deliverable:** Author.person (null by default within schema 3); Store.resolvePerson through the salted keys; buildExport links an author to a person page and drops an excluded person's login; core's saltedKey and queryKeys.\n\n**Done when:** tests pass, and M10's tests and cassettes are unchanged but for the new null field. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 29."
+    },
+    {
+      "key": "M11-30",
+      "title": "[M11] site: activity bar charts as static SVG",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F15",
+      "body": "**Deliverable:** packages/site/src/activity-svg.ts: xmlText, R22's buckets and labels, barsOf, barTitle, the stacked, linked bar chart with its legend and hidden data table, and periodDays; the series colours in wiki.css (light and dark).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 30."
+    },
+    {
+      "key": "M11-31",
+      "title": "[M11] site: the activity heatmap, sparklines and repository series",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F15",
+      "body": "**Deliverable:** activity-svg.ts's calendar heatmap with its hidden table, heatLevel, the decorative sparkline, and repositorySeries (the eight people with most commits, then Others, then Bots); the heatmap colours in wiki.css.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 31."
+    },
+    {
+      "key": "M11-32",
+      "title": "[M11] site: the People index and person page views",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F14",
+      "body": "**Deliverable:** packages/site/src/people.ts: peopleRoutes, peopleIndexView (people by commits, the bots, each feature's contributors) and personView (facts, charts, the narrative or the computed lead, citations); personUrl, PEOPLE_URL and peopleFeatureUrl; the site's People fixture.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 32."
+    },
+    {
+      "key": "M11-33",
+      "title": "[M11] site: the People pages",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F14",
+      "body": "**Deliverable:** /people/, /people/<id>/ and redirect pages (one rest-param route), the People nav link (last), Pagefind on person pages only; the built-site email and exclusion scan.\n\n**Done when:** tests pass, and every existing snapshot is unchanged. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 33."
+    },
+    {
+      "key": "M11-34",
+      "title": "[M11] site: the activity zoom pages",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F15",
+      "body": "**Deliverable:** /special/activity/, /special/activity/<yyyy>/ and /special/activity/<yyyy-mm>/, only for periods with activity.\n\n**Done when:** tests pass, and the crawl finds no broken zoom link. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 34."
+    },
+    {
+      "key": "M11-35",
+      "title": "[M11] site: Main contributors and in-flight author links",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F14",
+      "body": "**Deliverable:** the feature infobox's Main contributors row (data-pagefind-ignore); in-progress pages link an author with a person; the ask client's link pattern gains /people/<id>/.\n\n**Done when:** tests pass, and the built site holds no author email. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 35."
+    },
+    {
+      "key": "M11-36",
+      "title": "[M11] eval: person pages on the accuracy sheet",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F14",
+      "body": "**Deliverable:** accuracySheet's personIds and eval:accuracy sheet --person <id>.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 36."
+    },
+    {
+      "key": "M11-37",
+      "title": "[M11] final review fixes, the live gate and the owner's runbook",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F14",
+      "body": "**Deliverable:** the fixes the whole-milestone review asks for; the live gate on a scratch copy of RepoWiki's own store (about $0.05); the owner's runbook for spec v2 #6 section 15.\n\n**Done when:** the review's findings are fixed or ruled on, the gate's numbers are on the PR, and the runbook is posted. The identity confirmation, the consent entries and the accuracy review are the owner's. Plan: docs/superpowers/plans/2026-10-06-repowiki-m11-people.md Task 37."
     }
   ]
 }

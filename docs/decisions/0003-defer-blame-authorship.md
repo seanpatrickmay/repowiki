@@ -1,6 +1,6 @@
 # 0003. Defer line authorship by git blame (F17) to v2
 
-- Status: accepted
+- Status: superseded by 0007
 - Date: 2026-10-03
 - Features: F17
 
