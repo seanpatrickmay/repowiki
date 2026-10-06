@@ -7,7 +7,7 @@ import {
   makeGitHubPull,
   makeGitHubSnapshot,
 } from "@repowiki/core/test-fixtures";
-import type { GenerateRequest, Provider } from "@repowiki/llm";
+import { callCostUsd, type GenerateRequest, type Provider } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildExport } from "../store/index.ts";
 import { ensureInflightRepo, fetchHeads } from "./heads.ts";
@@ -18,7 +18,7 @@ import {
   estimateSummaries,
   withinBudget,
 } from "./refresh.ts";
-import type { InFlightAnswer } from "./summary.ts";
+import type { InFlightAnswer, SummaryRequest } from "./summary.ts";
 import { type InflightFixture, inflightFixture } from "./test-inflight.ts";
 
 // Each test builds a fixture wiki, a remote and inflight.git: seconds on a loaded machine.
@@ -327,5 +327,46 @@ describe("the summary round", () => {
     const offline = await complete(await derive(snapshot, heads), null, 1, done.inflight);
     expect(offline.status.get(1)).toBe("kept");
     expect(offline.inflight.pulls[0]?.summary).toEqual(done.inflight.pulls[0]?.summary);
+  });
+});
+
+describe("withinBudget across pull requests (R17)", () => {
+  /** A derived pull with a request of `tokens` input tokens and no cached answer. */
+  const due = (number: number, updatedAt: string, tokens: number) => ({
+    pull: { number },
+    request: { number, tokens } as SummaryRequest,
+    cached: null,
+    updatedAt,
+  });
+  const derived = {
+    pulls: [
+      due(1, "2026-10-01T00:00:00Z", 1000),
+      due(2, "2026-10-03T00:00:00Z", 9000),
+      due(3, "2026-10-02T00:00:00Z", 100),
+    ],
+  } as unknown as Derived;
+  const ceiling = (tokens: number) =>
+    callCostUsd(MODEL, { in: tokens, out: 1500, cacheRead: 0, cacheWrite: 0 }, true) as number;
+  const numbers = (r: { chosen: SummaryRequest[]; over: SummaryRequest[] }) => ({
+    chosen: r.chosen.map((q) => q.number),
+    over: r.over.map((q) => q.number),
+  });
+  const budget = (maxUsd: number) => numbers(withinBudget(derived, MODEL, true, maxUsd));
+
+  it("takes the newest activity first, each at its ceiling, up to an exact fit", () => {
+    // Newest first: #2 (9,000 tokens), #3 (100), #1 (1,000).
+    const all = ceiling(9000) + ceiling(100) + ceiling(1000);
+    expect(estimateSummaries(derived, MODEL, true)?.ceilingUsd).toBe(all);
+    expect(budget(all)).toEqual({ chosen: [2, 3, 1], over: [] });
+    expect(budget(ceiling(9000))).toEqual({ chosen: [2], over: [3, 1] });
+  });
+
+  it("stops at the first that does not fit: no later, cheaper one is taken", () => {
+    expect(budget(ceiling(9000) + ceiling(100) + ceiling(1000) - 1e-9)).toEqual({
+      chosen: [2, 3],
+      over: [1],
+    });
+    // #3 and #1 would fit alone, but #2 is newer and does not.
+    expect(budget(ceiling(9000) - 1e-9)).toEqual({ chosen: [], over: [2, 3, 1] });
   });
 });

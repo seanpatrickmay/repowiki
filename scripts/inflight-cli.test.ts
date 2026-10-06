@@ -1,4 +1,10 @@
-import { makeGitHubSnapshot, makeInFlight, makeInFlightPull } from "@repowiki/core/test-fixtures";
+import {
+  makeGitHubSnapshot,
+  makeInFlight,
+  makeInFlightPull,
+  makeLedgerEntry,
+} from "@repowiki/core/test-fixtures";
+import { callCostUsd, totalsOf } from "@repowiki/llm";
 import { sampleWiki } from "@repowiki/query/test-wiki";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +15,7 @@ import {
   parseInflightArgs,
   readLine,
   renderInflightTable,
+  spendLine,
   suggestFor,
 } from "./inflight-cli.ts";
 import { CliError } from "./manifest-cli.ts";
@@ -98,6 +105,21 @@ describe("the lines it prints", () => {
     expect(readLine(makeGitHubSnapshot({ droppedPaths: 1 }))).toBe(
       "acme/demo: 1 open pull request, 1 open issue; 1 unsafe file path dropped",
     );
+  });
+
+  it("totals the run's ledger rows for its spend, failed calls included", () => {
+    expect(spendLine(0, totalsOf([]))).toBe("0 new summaries, $0.0000");
+    // Two calls: one became a summary, one verified to nothing; both were paid for.
+    const rows = [
+      makeLedgerEntry({ purpose: "inflight", batch: true }),
+      makeLedgerEntry({
+        purpose: "inflight",
+        batch: true,
+        tokens: { in: 3000, out: 900, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+    const usd = rows.reduce((n, r) => n + (callCostUsd(r.model, r.tokens, r.batch) ?? 0), 0);
+    expect(spendLine(1, totalsOf(rows))).toBe(`1 new summary, $${usd.toFixed(4)} for 2 calls`);
   });
 
   it("counts the heads, and gives the fetch's first line redacted", () => {

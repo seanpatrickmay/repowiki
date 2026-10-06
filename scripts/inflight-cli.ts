@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import type { GitHubSnapshot, InFlight, WikiExport } from "@repowiki/core";
 import type { HeadState, Suggest, SummaryEstimate, SummaryStatus } from "@repowiki/engine";
+import type { LedgerTotals } from "@repowiki/llm";
 import { ABOUT_PAGE_ID, pageSearchIndex, WikiView } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 import { badOption, cell, count, deadlineMinutes, once, problemLine } from "./wiki-cli.ts";
@@ -126,6 +127,15 @@ export function readLine(snapshot: GitHubSnapshot): string {
   if (snapshot.droppedPaths > 0)
     parts.push(`${plural(snapshot.droppedPaths, "unsafe file path")} dropped`);
   return parts.join("; ");
+}
+
+/**
+ * The run's spend line: the new summaries, and what every call of the run cost by its ledger rows,
+ * failed calls and answers that verified to nothing included.
+ */
+export function spendLine(newSummaries: number, spent: LedgerTotals): string {
+  const calls = spent.calls > 0 ? ` for ${plural(spent.calls, "call")}` : "";
+  return `${plural(newSummaries, "new summary", "new summaries")}, ${money(spent.usd)}${calls}`;
 }
 
 /** How the pull-request heads stand after the fetch, and its first error line, redacted. */
