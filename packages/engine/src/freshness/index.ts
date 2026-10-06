@@ -42,7 +42,7 @@ export {
   remapClaims,
 } from "./stale.ts";
 /** Test-only: the fixture wiki repository and store (builtWiki), for other modules' tests. */
-export { builtWiki, inputAt, STORE_PY } from "./test-wiki-repo.ts";
+export { builtWiki, CRUD_PY, inputAt, STORE_PY } from "./test-wiki-repo.ts";
 export {
   breakTies,
   fallbackFeature,

@@ -8,6 +8,7 @@ export {
   type ResolvedIdentities,
   resolveIdentities,
   saltedKey,
+  wantsNarrative,
 } from "./identities.ts";
 export {
   applyMailmap,
@@ -40,3 +41,10 @@ export {
   type SnapshotInput,
   topologicalNewestFirst,
 } from "./snapshot.ts";
+export {
+  maskEmail,
+  type Suggestion,
+  type SuggestRule,
+  suggestionSnippet,
+  suggestMerges,
+} from "./suggest.ts";

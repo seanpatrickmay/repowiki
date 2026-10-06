@@ -401,3 +401,14 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
     warnings,
   };
 }
+
+/**
+ * Whether People writes a group a narrative (spec v2 #6 R15 under the v2 consent ruling): a
+ * human, not excluded, with at least minCommits non-merge commits, whose people-file entry says
+ * `narrative: true`, or who is the owner and whose entry does not say `narrative: false`.
+ * maxNarratives is applied by the caller, ranking by commits.
+ */
+export function wantsNarrative(group: IdentityGroup, config: PeopleConfig): boolean {
+  if (group.kind !== "human" || group.excluded || group.commits < config.minCommits) return false;
+  return group.narrative ?? group.owner;
+}

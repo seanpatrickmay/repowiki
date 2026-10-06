@@ -21,6 +21,7 @@
     "wiki:update": "node --env-file-if-exists=.env scripts/wiki-update.ts",
     "wiki:replay": "node --env-file-if-exists=.env scripts/wiki-replay.ts",
     "wiki:inflight": "node --env-file-if-exists=.env scripts/wiki-inflight.ts",
+    "people:suggest": "node scripts/people-suggest.ts",
     "wiki:serve": "node --env-file-if-exists=.env scripts/wiki-serve.ts",
     "eval:run": "node --env-file-if-exists=.env scripts/eval-run.ts",
     "eval:report": "node scripts/eval-report.ts",
