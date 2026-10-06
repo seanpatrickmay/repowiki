@@ -86,9 +86,12 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  type Completed,
+  completeInFlight,
   type Derived,
   deriveInFlight,
   ensureInflightRepo,
+  estimateSummaries,
   type FetchedHeads,
   fetchHeads,
   githubFetchUrl,
@@ -98,7 +101,10 @@ export {
   isMissingObject,
   removeInflightRepo,
   type StaleClaim,
+  type SummaryEstimate,
+  type SummaryStatus,
   staleClaims,
+  withinBudget,
 } from "./inflight/index.ts";
 export {
   architectureLinksWithoutPage,
