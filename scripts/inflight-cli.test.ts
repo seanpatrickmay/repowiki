@@ -5,7 +5,8 @@ import {
   makeLedgerEntry,
 } from "@repowiki/core/test-fixtures";
 import { callCostUsd, totalsOf } from "@repowiki/llm";
-import { sampleWiki } from "@repowiki/query/test-wiki";
+import { ABOUT_PAGE_ID, pageSearchIndex, WikiView } from "@repowiki/query";
+import { extendedWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_INFLIGHT_USD,
@@ -193,6 +194,22 @@ describe("suggestFor (C3)", () => {
       expect(found[0]?.score).toBeGreaterThan(0);
       expect(found.every((m) => m.featureId !== "special:about")).toBe(true);
       expect(suggestFor(sample.wiki)("kubernetes")).toEqual([]);
+    } finally {
+      sample.repo.remove();
+    }
+  });
+
+  it("leaves out the About article even when it is the best match", () => {
+    const sample = sampleWiki();
+    try {
+      const wiki = extendedWiki(sample);
+      const query = "demo is built from signals and deliverables";
+      // The search itself finds the About article, so the filter is what keeps it out.
+      const ranked = pageSearchIndex(new WikiView(wiki)).ranked(query, 3);
+      expect(ranked.map((m) => m.id)).toContain(ABOUT_PAGE_ID);
+      const found = suggestFor(wiki)(query);
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.map((m) => m.featureId)).not.toContain(ABOUT_PAGE_ID);
     } finally {
       sample.repo.remove();
     }
