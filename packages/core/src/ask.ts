@@ -14,6 +14,8 @@ import {
   ASK_SENTENCE_MAX_LENGTH,
   ASK_SUMMARY_MAX_LENGTH,
   ASK_TITLE_MAX_LENGTH,
+  citedInOrder,
+  hrefFits,
   NOT_FOUND_SENTENCE,
 } from "./ask-limits.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
@@ -33,6 +35,8 @@ export {
   ASK_SENTENCE_MAX_LENGTH,
   ASK_SUMMARY_MAX_LENGTH,
   ASK_TITLE_MAX_LENGTH,
+  citedInOrder,
+  hrefFits,
   NOT_FOUND_SENTENCE,
 } from "./ask-limits.ts";
 
@@ -149,9 +153,18 @@ export const AskResponse = z
       ctx.addIssue({ code: "custom", message, path });
     response.sources.forEach((source, i) => {
       if (source.n !== i + 1) issue(`expected source ${i + 1}`, ["sources", i, "n"]);
+      if (!hrefFits(source.href, source.pageId, source.claimId))
+        issue("links somewhere else than its page and claim", ["sources", i, "href"]);
     });
+    response.readNext.forEach((page, i) => {
+      if (!hrefFits(page.href, page.pageId, null))
+        issue("links somewhere else than its page", ["readNext", i, "href"]);
+    });
+    if (!citedInOrder(response.sentences))
+      issue("sources are not numbered in order of first citation", ["sources"]);
     const cited = new Set<number>();
     response.sentences.forEach((sentence, i) => {
+      if (sentence.text.trim() === "") issue("is blank", ["sentences", i, "text"]);
       if (new Set(sentence.sources).size !== sentence.sources.length)
         issue("cites a source twice", ["sentences", i, "sources"]);
       for (const n of sentence.sources) {

@@ -17,6 +17,8 @@ import {
   ASK_SENTENCE_MAX_LENGTH,
   ASK_SUMMARY_MAX_LENGTH,
   ASK_TITLE_MAX_LENGTH,
+  citedInOrder,
+  hrefFits,
   NOT_FOUND_SENTENCE,
 } from "@repowiki/core/ask-limits";
 
@@ -58,7 +60,8 @@ const isList = (value: unknown, max: number): value is unknown[] =>
  * An answer from the server, or null when it is not the shape core's AskResponse gives it (spec
  * v2 #4 section 9.3), by hand and with core's own limits (`@repowiki/core/ask-limits`, which
  * holds no zod): types, lengths and index ranges, and AskResponse's cross-field rules (sources
- * numbered in order, each cited, none cited twice by a sentence; an answered or partial answer's
+ * numbered in order of first citation, each cited, none cited twice by a sentence, each linked
+ * into its own page and claim; no blank sentence; an answered or partial answer's
  * sentences each cite one; not-found is the one fixed sentence; budget and error have none). The
  * renderer shows nothing it refuses.
  */
@@ -82,6 +85,7 @@ export function guardResponse(value: unknown): AskResponse | null {
       (s.sectionTitle === null || isText(s.sectionTitle, ASK_SECTION_TITLE_MAX_LENGTH, 1)) &&
       isText(s.claimId, ASK_ID_MAX_LENGTH, 1) &&
       typeof s.href === "string" &&
+      hrefFits(s.href, s.pageId, s.claimId) &&
       isText(s.excerpt, ASK_EXCERPT_LENGTH, 1),
   );
   const sentences = value.sentences;
@@ -90,12 +94,14 @@ export function guardResponse(value: unknown): AskResponse | null {
     (s) =>
       isRecord(s) &&
       isText(s.text, ASK_SENTENCE_MAX_LENGTH, 1) &&
+      s.text.trim() !== "" &&
       isList(s.sources, ASK_MAX_SENTENCE_SOURCES) &&
       s.sources.every((n) => isInt(n, 1) && n <= sources.length) &&
       new Set(s.sources).size === s.sources.length,
   );
   if (!sentencesOk) return null;
   const cited = sentences as { text: string; sources: number[] }[];
+  if (!citedInOrder(cited)) return null;
   const citedSet = new Set(cited.flatMap((s) => s.sources));
   if (sources.some((_s, i) => !citedSet.has(i + 1))) return null;
   const status = value.status;
@@ -115,6 +121,7 @@ export function guardResponse(value: unknown): AskResponse | null {
       isText(r.pageId, ASK_ID_MAX_LENGTH, 1) &&
       isText(r.title, ASK_TITLE_MAX_LENGTH, 1) &&
       typeof r.href === "string" &&
+      hrefFits(r.href, r.pageId, null) &&
       isText(r.summary, ASK_SUMMARY_MAX_LENGTH),
   );
   const cost = value.cost;

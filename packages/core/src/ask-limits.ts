@@ -35,3 +35,32 @@ export const ASK_HREF =
 
 /** A not-found answer's one sentence: fixed server text, never the model's (spec v2 #4 R26). */
 export const NOT_FOUND_SENTENCE = "The wiki does not cover this.";
+
+/** The page part of a link into `pageId`: the About article ("special:about") or a feature page. */
+const pagePath = (pageId: string): string =>
+  pageId === "special:about" ? "/special/about/" : `/wiki/${pageId}/`;
+
+/**
+ * True when `href` is a link into `pageId`'s page as the server builds it from a handle: a
+ * source's (`claimId` given) is the page, a section of it, or `claimId`'s own anchor; a Read next
+ * page's (`claimId` null) is the page itself.
+ */
+export function hrefFits(href: string, pageId: string, claimId: string | null): boolean {
+  const page = pagePath(pageId);
+  if (!href.startsWith(page)) return false;
+  const fragment = href.slice(page.length);
+  if (claimId === null) return fragment === "";
+  return !fragment.startsWith("#claim-") || fragment === `#claim-${claimId}`;
+}
+
+/** True when sources are numbered in order of first citation: each new number is the next one. */
+export function citedInOrder(sentences: readonly { sources: readonly number[] }[]): boolean {
+  let next = 1;
+  for (const sentence of sentences) {
+    for (const n of sentence.sources) {
+      if (n > next) return false;
+      if (n === next) next++;
+    }
+  }
+  return true;
+}

@@ -167,8 +167,43 @@ describe("AskResponse", () => {
     ["a short head", { head: "abc1234" }],
     ["a negative cost", { cost: { turns: 1, usd: -1, model: null } }],
     ["an unknown status", { status: "maybe" }],
+    [
+      "sources not numbered in order of first citation",
+      {
+        sentences: [
+          { text: "x", sources: [2] },
+          { text: "y", sources: [1] },
+        ],
+      },
+    ],
+    ["a blank sentence", { sentences: [{ text: " \t ", sources: [1, 2] }] }],
+    ["a source linking another page", { sources: [{ ...first, href: "/wiki/other/" }, second] }],
+    [
+      "a source anchored at another claim",
+      { sources: [{ ...first, href: "/wiki/signals/#claim-zzz" }, second] },
+    ],
+    [
+      "a Read next link with a fragment",
+      { readNext: [{ ...answer.readNext[0], href: "/wiki/deliverables/#claim-d-1" }] },
+    ],
+    [
+      "a Read next link to another page",
+      { readNext: [{ ...answer.readNext[0], href: "/wiki/x/" }] },
+    ],
+    ["four Read next pages", { readNext: Array(4).fill(answer.readNext[0]) }],
   ])("refuses %s", (_name, overrides) => {
     expect(AskResponse.safeParse({ ...answer, ...overrides }).success).toBe(false);
+  });
+
+  it("accepts a partial answer, three Read next pages, and a claim linked at its section or page", () => {
+    expect(AskResponse.safeParse({ ...answer, status: "partial" }).success).toBe(true);
+    const three = Array(3).fill(answer.readNext[0]);
+    expect(AskResponse.safeParse({ ...answer, readNext: three }).success).toBe(true);
+    const atSection = { ...first, claimId: "s.1", href: "/wiki/signals/#overview" };
+    const atPage = { ...second, claimId: "s:2", href: "/wiki/signals/" };
+    expect(AskResponse.safeParse({ ...answer, sources: [atSection, atPage] }).success).toBe(true);
+    const about = { ...first, pageId: "special:about", href: "/special/about/#claim-s-1" };
+    expect(AskResponse.safeParse({ ...answer, sources: [about, second] }).success).toBe(true);
   });
 });
 

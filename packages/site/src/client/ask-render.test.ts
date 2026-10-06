@@ -103,6 +103,29 @@ describe("guardResponse", () => {
       { ...base, status: "not-found", sentences: [{ text: "Nothing.", sources: [] }], sources: [] },
     ],
     ["an answered answer with no sentence", { ...base, sentences: [], sources: [] }],
+    [
+      "sources not numbered in order of first citation",
+      {
+        ...base,
+        sentences: [
+          { text: "x", sources: [2] },
+          { text: "y", sources: [1] },
+        ],
+      },
+    ],
+    ["a blank sentence", { ...base, sentences: [{ text: " \t ", sources: [1, 2] }] }],
+    [
+      "a source linking another page",
+      { ...base, sources: [{ ...first, href: "/wiki/x/" }, second] },
+    ],
+    [
+      "a source anchored at another claim",
+      { ...base, sources: [{ ...first, href: "/wiki/signals/#claim-zzz" }, second] },
+    ],
+    [
+      "a Read next link to another page",
+      { ...base, readNext: [{ ...base.readNext[0], href: "/wiki/x/" }] },
+    ],
   ])("refuses %s, as core's AskResponse does", (_name, value) => {
     expect(guardResponse(value)).toBeNull();
     expect(AskResponse.safeParse(value).success).toBe(false);
