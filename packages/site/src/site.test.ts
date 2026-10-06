@@ -1399,6 +1399,17 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
       expect(html).not.toContain("data-pagefind-body");
       expect(html).toContain('<meta name="robots" content="noindex">');
     }
+    // The article most readers see: deliverables' In progress section holds #13's title and
+    // issue #8's, both as text and both out of search.
+    const article = inflightSite.read("wiki/deliverables/index.html");
+    const section =
+      /<section aria-labelledby="in-progress" data-pagefind-ignore="all">[\s\S]*?<\/section>/.exec(
+        article,
+      )?.[0] ?? "";
+    expect(section).toContain(`#13 ${ESCAPED_PULL_TITLE}`);
+    expect(section).toContain("#8 Deliverables &lt;em&gt;export&lt;/em&gt; fails");
+    for (const raw of ["<script>alert(1)", "<em>export</em>", 'href="javascript:'])
+      expect(article).not.toContain(raw);
     expect(brokenLinks(inflightSite.outDir).broken).toEqual([]);
     for (const page of htmlFiles(inflightSite.outDir))
       expect({ page, offsite: offsiteResources(inflightSite.read(page)) }).toEqual({
