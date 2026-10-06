@@ -126,6 +126,9 @@ export {
   PeopleEntry,
   parseMatchKey,
   parsePeopleConfig,
+  queryKeys,
+  type ResolvedPerson,
+  saltedKey,
   shownMatchKey,
 } from "./people-config.ts";
 export {

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RegistryRow } from "@repowiki/core";
+import { type RegistryRow, saltedKey } from "@repowiki/core";
 import {
   makeManifest,
   makePeopleSnapshot,
@@ -167,6 +167,36 @@ describe("person revisions", () => {
     expect(store.forgetPerson("ada-lovelace")).toBe(2);
     expect(store.listPersonHistory("ada-lovelace")).toEqual([]);
     expect(store.listPeopleRegistry().map((r) => r.id)).toEqual(["grace-hopper"]);
+  });
+
+  it("resolves a login, a name or an email through the salted keys (spec v2 #6 §6)", () => {
+    const key = (k: string) => saltedKey(store.getPeopleSalt(), k);
+    expect(store.resolvePerson({ login: "ada" })).toBeNull();
+    store.putPeopleRegistry([
+      row({ keys: [key("login:ada"), key("name:ada lovelace")].sort() }),
+      row({
+        id: "kim",
+        order: 1,
+        name: "Kim",
+        status: "excluded",
+        keys: [key("email:kim@example.com")],
+      }),
+      row({
+        id: "dependabot-bot",
+        order: 2,
+        name: "dependabot[bot]",
+        kind: "bot",
+        keys: [key("login:dependabot[bot]")],
+      }),
+    ]);
+    expect(store.resolvePerson({ login: "ADA" })).toEqual({ kind: "person", id: "ada-lovelace" });
+    expect(store.resolvePerson({ name: "  Ada  LOVELACE " })).toEqual({
+      kind: "person",
+      id: "ada-lovelace",
+    });
+    expect(store.resolvePerson({ email: "Kim@Example.com" })).toEqual({ kind: "excluded" });
+    expect(store.resolvePerson({ login: "dependabot[bot]" })).toEqual({ kind: "bot" });
+    expect(store.resolvePerson({ login: "stranger" })).toBeNull();
   });
 
   it("forgets a narrative and keeps the registry row (a withdrawn consent)", () => {

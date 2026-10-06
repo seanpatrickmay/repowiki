@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import {
   cleanPersonName,
   normalizeName,
   type PeopleConfig,
   parseMatchKey,
+  saltedKey,
   shownMatchKey,
 } from "@repowiki/core";
 import type { AuthoredCommit } from "../index/index.ts";
@@ -97,10 +97,8 @@ export function noreplyLogin(email: string): string | null {
   return NOREPLY.exec(email.trim().toLowerCase())?.[1] ?? null;
 }
 
-/** A key as the store keeps it: SHA-256 of the store's salt and the key (R10). */
-export function saltedKey(salt: string, key: string): string {
-  return createHash("sha256").update(`${salt}\0${key}`).digest("hex");
-}
+/** A key as the store keeps it (R10): core's, re-exported for the people module. */
+export { saltedKey };
 
 const isoMin = (a: string, b: string) => (Date.parse(b) < Date.parse(a) ? b : a);
 const isoMax = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);

@@ -111,8 +111,8 @@ describe("InFlight", () => {
     ["a label with a tab", { labels: ["area:\tsignals"] }],
     ["eleven labels", { labels: Array.from({ length: 11 }, (_, i) => `l${i}`) }],
     ["a base branch with a newline", { baseRef: "main\nx" }],
-    ["a login with an @", { author: { login: "a@b.c", bot: false } }],
-    ["a login of 40 characters", { author: { login: "a".repeat(40), bot: false } }],
+    ["a login with an @", { author: { login: "a@b.c", bot: false, person: null } }],
+    ["a login of 40 characters", { author: { login: "a".repeat(40), bot: false, person: null } }],
   ])("refuses a pull request with %s", (_name, overrides) => {
     expect(InFlightPull.safeParse(makeInFlightPull(overrides)).success).toBe(false);
   });

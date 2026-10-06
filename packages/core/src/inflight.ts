@@ -4,6 +4,7 @@ import { CodeCitation } from "./citation.ts";
 import { CLAIM_TEXT_MAX_LENGTH, ClaimId } from "./claim.ts";
 import { FeatureId } from "./feature.ts";
 import type { Manifest } from "./manifest.ts";
+import { PersonId } from "./person.ts";
 import { GitSha, IsoDateTime, RepoPath } from "./primitives.ts";
 import { type Revision, TokenUsage } from "./revision.ts";
 
@@ -112,10 +113,16 @@ export type GitHubRepo = z.infer<typeof GitHubRepo>;
 
 /**
  * Who opened a pull request or issue: a validated login, never an email (C8); null for a deleted
- * account or a login that fails the pattern.
+ * account, a login that fails the pattern, or (in the export, spec v2 #6 C8) an excluded person.
+ * `person` is the id of the person page the login resolves to, set by buildExport when People
+ * is on; null otherwise (spec v2 #6 R28: added within schema 3).
  */
 export const Author = z
-  .object({ login: z.string().regex(GITHUB_LOGIN), bot: z.boolean() })
+  .object({
+    login: z.string().regex(GITHUB_LOGIN),
+    bot: z.boolean(),
+    person: PersonId.nullable().default(null),
+  })
   .nullable();
 export type Author = z.infer<typeof Author>;
 
