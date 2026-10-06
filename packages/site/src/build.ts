@@ -8,8 +8,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { WikiExport } from "@repowiki/core";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
 import { UsageError } from "./args.ts";
@@ -114,9 +116,30 @@ export async function buildSite(
   exportFile: string,
   outDir: string,
   repoUrl: string | null,
+  options: { inflight?: boolean } = {},
 ): Promise<BuildResult> {
-  const wiki = loadExport(exportFile);
+  const loaded = loadExport(exportFile);
   validateOutDir(exportFile, outDir);
+  // Without the work in flight, the pages are built from, and the root's export is, a copy of
+  // the export with `inflight: null`: no private pull request title leaves in a shared site (R18).
+  const wiki = options.inflight === false ? { ...loaded, inflight: null } : loaded;
+  const scratch = options.inflight === false ? mkdtempSync(join(tmpdir(), "repowiki-site-")) : null;
+  const pages = scratch === null ? exportFile : join(scratch, "export.json");
+  if (scratch !== null) writeFileSync(pages, `${JSON.stringify(wiki)}\n`);
+  try {
+    return await render(pages, outDir, repoUrl, wiki);
+  } finally {
+    if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** Renders the site from `exportFile`, writes its root files from `wiki`, and indexes it. */
+async function render(
+  exportFile: string,
+  outDir: string,
+  repoUrl: string | null,
+  wiki: WikiExport,
+): Promise<BuildResult> {
   setBuildEnv(exportFile, repoUrl);
   const marker = siteMarker();
 

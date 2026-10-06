@@ -41,16 +41,20 @@ export interface BuiltSite {
   cleanup(): void;
 }
 
-/** Writes the fixture export (or the given variant of it) to a temp dir and builds the site. */
+/**
+ * Writes the fixture export (or the given variant of it) to a temp dir and builds the site into
+ * `outName` beside it (`site`, the default --out, unless a test needs another).
+ */
 export function buildFixtureSite(
   extraArgs: readonly string[] = [],
   wikiExport: WikiExport = fixtureExport(),
+  outName = "site",
 ): BuiltSite {
   const dir = mkdtempSync(join(tmpdir(), "repowiki-site-"));
   try {
     const exportFile = join(dir, "export.json");
     writeFileSync(exportFile, JSON.stringify(wikiExport, null, 2));
-    const outDir = join(dir, "site");
+    const outDir = join(dir, outName);
     const result = runCli(["build", "--export", exportFile, "--out", outDir, ...extraArgs]);
     if (result.status !== 0)
       throw new Error(`site build failed:\n${result.stderr}${result.stdout}`);

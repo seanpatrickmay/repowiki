@@ -5,7 +5,9 @@ import { ExportError } from "./load.ts";
 try {
   const args = parseSiteArgs(process.argv.slice(2));
   if (args.command === "build") {
-    const { htmlPages } = await buildSite(args.exportFile ?? "", args.outDir, args.repoUrl);
+    const { htmlPages } = await buildSite(args.exportFile ?? "", args.outDir, args.repoUrl, {
+      inflight: args.inflight,
+    });
     console.log(`built ${args.outDir} (${htmlPages} HTML pages)`);
   } else {
     await previewSite(args.outDir);

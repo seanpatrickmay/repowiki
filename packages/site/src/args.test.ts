@@ -14,6 +14,7 @@ describe("parseSiteArgs", () => {
       exportFile: "/data/demo/export.json",
       outDir: "/data/demo/site",
       repoUrl: null,
+      inflight: true,
     });
   });
 
@@ -100,7 +101,34 @@ describe("parseSiteArgs", () => {
       exportFile: null,
       outDir: "/srv/site",
       repoUrl: null,
+      inflight: true,
     });
+  });
+
+  it("takes --no-inflight for a build to another --out than the export's site/", () => {
+    expect(
+      parseSiteArgs(["build", "--no-inflight", "--export", "/d/export.json", "--out", "/share"]),
+    ).toMatchObject({ outDir: "/share", inflight: false });
+    expect(() => parseSiteArgs(["build", "--export", "/d/export.json", "--no-inflight"])).toThrow(
+      /^--no-inflight refuses \/d\/site, the site wiki:serve rebuilds/,
+    );
+    expect(() =>
+      parseSiteArgs(["build", "--export", "/d/x.json", "--out", "/d/site", "--no-inflight"]),
+    ).toThrow(/^--no-inflight refuses/);
+    expect(() =>
+      parseSiteArgs([
+        "build",
+        "--export",
+        "x.json",
+        "--out",
+        "o",
+        "--no-inflight",
+        "--no-inflight",
+      ]),
+    ).toThrow(/^--no-inflight was given more than once/);
+    expect(() => parseSiteArgs(["preview", "--out", "o", "--no-inflight"])).toThrow(
+      /^only build takes --no-inflight/,
+    );
   });
 
   it.each([
