@@ -12,7 +12,7 @@ import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
-import { articleUrl, pullUrl } from "./urls.ts";
+import { articleUrl, personUrl, pullUrl } from "./urls.ts";
 
 /** A snapshot read this long before the export was made is stale (R16). */
 export const STALE_AFTER_DAYS = 7;
@@ -81,8 +81,23 @@ export function badges(inflight: InFlight, pull: InFlightPull): string[] {
   ];
 }
 
-const authorOf = (pull: { author: InFlightPull["author"] }): string =>
-  pull.author === null ? "a deleted account" : pull.author.login;
+/**
+ * Who opened a pull request: their login, linked to their person page when People resolved it
+ * (spec v2 #6 C8); "an unknown author" for a null author, which is a deleted account or, with
+ * People on, an excluded person. All text is plain.
+ */
+export interface AuthorRef {
+  name: string;
+  href: string | null;
+}
+
+const authorOf = (pull: { author: InFlightPull["author"] }): AuthorRef =>
+  pull.author === null
+    ? { name: "an unknown author", href: null }
+    : {
+        name: pull.author.login,
+        href: pull.author.person === null ? null : personUrl(pull.author.person),
+      };
 
 /** The claims a pull request would make stale (certain ones) and may change. */
 const effectCount = (pull: InFlightPull): string => {
@@ -127,7 +142,7 @@ export interface InflightIndexView {
     title: string;
     href: string;
     badges: string[];
-    author: string;
+    author: AuthorRef;
     updated: string;
     features: FeatureRef[];
     claims: string;
@@ -185,7 +200,7 @@ export interface PullView {
   title: string;
   badges: string[];
   githubHref: string;
-  author: string;
+  author: AuthorRef;
   created: string;
   updated: string;
   base: string;

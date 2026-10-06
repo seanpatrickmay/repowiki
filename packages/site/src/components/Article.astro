@@ -27,7 +27,7 @@ const { wiki } = getSite();
     <caption>{view.title}</caption>
     <tbody>
       {view.infobox.map((row) => (
-        <tr>
+        <tr data-pagefind-ignore={row.ignore === true ? "all" : undefined}>
           <th scope="row">{row.label}</th>
           <td set:html={row.html} />
         </tr>

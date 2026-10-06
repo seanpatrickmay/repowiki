@@ -49,7 +49,7 @@ const view = inflight === null ? null : inflightIndexView(site, inflight);
                     <a href={pull.href}>#{pull.number} {pull.title}</a>
                     {pull.badges.map((badge) => <span class="badge">{badge}</span>)}
                   </td>
-                  <td>{pull.author}</td>
+                  <td>{pull.author.href === null ? pull.author.name : <a href={pull.author.href}>{pull.author.name}</a>}</td>
                   <td>{pull.updated}</td>
                   <td>
                     {pull.features.length === 0 ? "none" : pull.features.map((f, i) => (

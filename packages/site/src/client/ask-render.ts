@@ -22,11 +22,15 @@ import {
   NOT_FOUND_SENTENCE,
 } from "@repowiki/core/ask-limits";
 
+/** A person page and its anchors: Pagefind lists them, but a served answer never cites one (C9). */
+const PERSON_HREF = /^\/people\/[a-z0-9-]{1,64}\/(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
+
 /**
- * The links an answer or a route may carry (R19): core's ASK_HREF itself, a feature page or the
- * About article, at one of its claims or sections. Anything else is shown as plain text.
+ * The links an answer or a route may carry (R19): core's ASK_HREF (a feature page or the About
+ * article, at one of its claims or sections), or a person page (spec v2 #6 §11: Pagefind finds
+ * them by name). Anything else is shown as plain text.
  */
-export const SAFE_HREF = ASK_HREF;
+export const SAFE_HREF = new RegExp(`${ASK_HREF.source}|${PERSON_HREF.source}`);
 
 /** The href, or null when it is not one SAFE_HREF admits. */
 export const safeHref = (href: unknown): string | null =>
