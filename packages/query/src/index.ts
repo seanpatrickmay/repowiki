@@ -12,11 +12,21 @@ export {
   viewAt,
 } from "./as-of.ts";
 export {
+  type HandleClaim,
+  handleClaim,
+  handleOf,
+  hasHandle,
+  type PageWithHandles,
+  readPageWithHandles,
+  unmarkHandles,
+} from "./ask-page.ts";
+export {
   type ChangedRevision,
   renderChanges,
   revisionEntry,
   wordDiffText,
 } from "./changes.ts";
+export { claimHref, pageHref, sectionHref } from "./hrefs.ts";
 export { ExportLoadError, loadExport } from "./load.ts";
 export {
   type SearchDoc,
