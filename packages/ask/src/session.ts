@@ -22,6 +22,17 @@ export class BusyError extends Error {
   }
 }
 
+/**
+ * A question that threw, after the session logged it on one line with what it spent: the HTTP
+ * handler answers it without a second line. `cause` is what the question threw.
+ */
+export class AskFailedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+
 export interface AskSessionOptions {
   wiki: WikiExport;
   provider: ToolProvider;
@@ -48,7 +59,10 @@ export interface AskSession {
   readonly view: WikiView;
   readonly indexes: AskIndexes;
   status(): AskStatus;
-  /** Answers one request; throws BusyError while another is in flight. */
+  /**
+   * Answers one request; throws BusyError while another is in flight (a cached answer is still
+   * served), and AskFailedError, once logged, for a question that threw.
+   */
   ask(request: AskRequest, onStatus?: (progress: AskProgress) => void): Promise<AskResponse>;
   totals(): SessionTotals;
   /** Resolves once no question is in flight. */
@@ -63,12 +77,19 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  * cache (R12; a hit costs nothing and is allowed past the session cap); the session cap (a
  * question starts only if the spend so far plus the question cap stays within it, so the cap is
  * never crossed); one question in flight; and one terminal line per question, a question that
- * throws included (what it spent before throwing is counted, then it rethrows). Only answered,
- * partial and not-found answers are cached; "Ask again" (`fresh`) skips the cache and replaces
- * the entry.
+ * throws included (what it spent before throwing is counted, then it throws AskFailedError).
+ * Only finished answers are cached: answered, partial, or a not-found the model gave itself (not
+ * one a refused or unusable answer left); "Ask again" (`fresh`) skips the cache and replaces the
+ * entry. A cache hit is served even while another question is in flight: it costs nothing and
+ * changes no spend. The caps must be positive, the session's at least the question's.
  */
 export function createAskSession(options: AskSessionOptions): AskSession {
   const { wiki, provider, model, questionUsd, maxUsd, cache, log } = options;
+  if (!(questionUsd > 0 && maxUsd >= questionUsd && Number.isFinite(maxUsd))) {
+    throw new RangeError(
+      `the ask's caps must be a question cap above 0 and a finite session cap at least as large (got ${questionUsd} and ${maxUsd})`,
+    );
+  }
   const now = options.now ?? (() => new Date());
   const view = new WikiView(wiki);
   const indexes = askIndexes(view);
@@ -163,7 +184,7 @@ export function createAskSession(options: AskSessionOptions): AskSession {
           log(
             `ask ${shown(request.question)} \u2192 failed (${cut(oneLine(message), 120)}), ${money(paid)} ${sessionLine()}`,
           );
-          throw failure;
+          throw new AskFailedError(message, { cause: failure });
         }
         const { response, tokens, error } = result;
         totals.questions++;

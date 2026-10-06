@@ -97,6 +97,23 @@ describe("turnOnePack", () => {
     expect(pack.text).not.toMatch(/\{signals#s-[89]\}/);
   });
 
+  it("counts as shown only the claims it rendered", () => {
+    const real = askIndexes(view);
+    const ghosted = {
+      ...real,
+      claims: {
+        ...real.claims,
+        search: () => ["ghost#x", ...real.claims.search("signals", 12, 4)],
+      },
+    };
+    const pack = turnOnePack(view, ghosted, "signals", null);
+    expect(pack.shown).not.toContain("ghost#x");
+    expect(pack.shown.length).toBeGreaterThan(0);
+    for (const handle of pack.shown) expect(pack.text).toContain(`- {${handle}} `);
+    const none = { ...real, claims: { ...real.claims, search: () => ["ghost#x"] } };
+    expect(turnOnePack(view, none, "signals", null).text).toContain("Claims that match:\n- none");
+  });
+
   it("says when nothing matches", () => {
     const pack = turnOnePack(view, askIndexes(view), "kubernetes helm charts", null);
     expect(pack.text).toContain("Pages that match:\n- none");

@@ -37,4 +37,21 @@ describe("the answer tool", () => {
       AnswerInput.safeParse({ ...answer, sentences: [{ text: "x", claims: [] }] }).success,
     ).toBe(false);
   });
+
+  it("refuses an extra key at either level, and says so in the schema the model is given", () => {
+    const answer = {
+      status: "answered",
+      sentences: [{ text: "Signals come from chunks.", claims: ["signals#s-1"] }],
+      readNext: [],
+    };
+    expect(AnswerInput.safeParse({ ...answer, confidence: 1 }).success).toBe(false);
+    const sentence = { text: "x", claims: ["signals#s-1"], note: "n" };
+    expect(AnswerInput.safeParse({ ...answer, sentences: [sentence] }).success).toBe(false);
+    const schema = answerTool.inputSchema as unknown as {
+      additionalProperties?: unknown;
+      properties: { sentences: { items: { additionalProperties?: unknown } } };
+    };
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.sentences.items.additionalProperties).toBe(false);
+  });
 });

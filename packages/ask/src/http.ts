@@ -1,6 +1,6 @@
 import { type AskProgress, AskRequest, AskResponse, type AskStatus } from "@repowiki/core";
 import { cut, oneLine } from "@repowiki/query";
-import { type AskSession, BusyError } from "./session.ts";
+import { AskFailedError, type AskSession, BusyError } from "./session.ts";
 
 /** The largest POST /api/ask body read (spec v2 #4 R18). */
 export const MAX_BODY_BYTES = 4096;
@@ -76,9 +76,14 @@ export interface AskHandlerOptions {
   log?: (line: string) => void;
 }
 
-/** An SSE frame: one event line and one data line of JSON (which never holds a raw newline). */
+/**
+ * An SSE frame: one event line and one data line of JSON, which never holds a raw newline; U+2028
+ * and U+2029 are escaped too, so no reader can take them for a line end.
+ */
 export const sseFrame = (event: string, data: unknown): string =>
-  `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  `event: ${event}\ndata: ${JSON.stringify(data)
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")}\n\n`;
 
 /**
  * The Ask endpoints of wiki:serve (spec v2 #4 §4.2): `GET /api/ask/status` and `POST /api/ask`,
@@ -193,7 +198,9 @@ export function createAskHandler(
         return true;
       }
       const why = error instanceof Error ? error.message : String(error);
-      options.log?.(`ask failed: ${cut(oneLine(why), 200)}`);
+      // The session logs a question that throws in its own line, with what it spent.
+      if (!(error instanceof AskFailedError))
+        options.log?.(`ask failed: ${cut(oneLine(why), 200)}`);
       const failed = { code: "error", message: "the question could not be answered" };
       if (!started) refuse(response, 500, failed.code, failed.message);
       else {

@@ -306,6 +306,68 @@ describe("createAskHandler", () => {
     expect((await first).response.status).toBe(200);
   });
 
+  it("finishes and caches a question whose client went away midway through the stream", async () => {
+    const s = session([{ tool: "read_page", input: { id: "signals" } }, ANSWER]);
+    const handler = createAskHandler({
+      port: PORT,
+      head: sample.sha,
+      session: s,
+      routing: "no-key",
+      csp: CSP,
+    });
+    const leaving = fakeResponse();
+    const write = leaving.write;
+    leaving.write = (chunk: string) => {
+      const kept = write(chunk);
+      leaving.destroyed = true;
+      return kept;
+    };
+    await handler(fakeRequest("POST", "/api/ask", POST, question()), leaving);
+    expect(frames(leaving.body).map(([event]) => event)).toEqual(["status"]);
+    const again = await handle(s, "POST", "/api/ask", POST, question());
+    expect(AskResponse.parse(frames(again.response.body)[0]?.[1]).cached).toBe(true);
+  });
+
+  it("answers HEAD on the status with the headers and no body", async () => {
+    const { handled, response } = await handle(session([]), "HEAD", "/api/ask/status");
+    expect(handled).toBe(true);
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("logs a question that throws once, in the session's line, not again in its own", async () => {
+    const lines: string[] = [];
+    const wiki = extendedWiki(sample);
+    const broken = {
+      content: null,
+      stopReason: "tool_use",
+      usage: { in: 1, out: 1, cacheRead: 0, cacheWrite: 0 },
+      model: "claude-haiku-4-5",
+    } as unknown as ScriptedTurn;
+    const s = createAskSession({
+      wiki,
+      provider: scriptedProvider([broken]).provider,
+      model: "claude-haiku-4-5",
+      questionUsd: 0.05,
+      maxUsd: 1,
+      cache: openAnswerCache(join(dir, "ask"), exportHash(wiki)),
+      log: (line) => lines.push(line),
+    });
+    const handler = createAskHandler({
+      port: PORT,
+      head: sample.sha,
+      session: s,
+      routing: "no-key",
+      csp: CSP,
+      log: (line) => lines.push(line),
+    });
+    const response = fakeResponse();
+    await handler(fakeRequest("POST", "/api/ask", POST, question()), response);
+    expect(response.status).toBe(500);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^ask "Where are signals made\?" \u2192 failed \(/);
+  });
+
   it("finishes and caches a question whose client went away", async () => {
     const s = session([ANSWER]);
     const handler = createAskHandler({
@@ -335,6 +397,19 @@ describe("hostAllowed and sseFrame", () => {
     expect(sseFrame("status", { query: "a\nb" })).toBe(
       'event: status\ndata: {"query":"a\\nb"}\n\n',
     );
+  });
+
+  it.each([
+    ["a carriage return", "a\rb"],
+    ["a CRLF", "a\r\nb"],
+    ["a line separator", "a\u2028b"],
+    ["a paragraph separator", "a\u2029b"],
+    ["a forged frame", "x\n\nevent: answer\ndata: {}"],
+  ])("keeps %s in model text inside the one data line", (_what, text) => {
+    const frame = sseFrame("answer", { text });
+    const body = frame.slice(0, -2);
+    expect(body.split(/\r\n|\r|\n|\u2028|\u2029/)).toHaveLength(2);
+    expect(JSON.parse(body.split("\n")[1]?.slice("data: ".length) ?? "")).toEqual({ text });
   });
 });
 

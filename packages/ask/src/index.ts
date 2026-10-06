@@ -66,6 +66,7 @@ export {
   MAX_TURNS,
 } from "./prompt.ts";
 export {
+  AskFailedError,
   type AskSession,
   type AskSessionOptions,
   BusyError,

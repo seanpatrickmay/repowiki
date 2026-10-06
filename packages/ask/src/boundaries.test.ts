@@ -14,7 +14,8 @@ const SRC = dirname(fileURLToPath(import.meta.url));
 /**
  * @repowiki/ask answers questions in a process that never opens SQLite or tree-sitter (spec v2 #4
  * R15): it loads no engine, eval or site, and calls the model only through @repowiki/llm's
- * provider. Its HTTP handler takes node:http's request and response; it opens no socket itself.
+ * provider. Its HTTP handler takes structural request and response types (AskHttpRequest and
+ * AskHttpResponse), so scripts/serve-static.ts owns the socket; it opens none itself.
  */
 describe("@repowiki/ask's boundaries", () => {
   const sources = sourceImports(SRC);
