@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { plainClaimText } from "@repowiki/core";
-import { tallySheet } from "@repowiki/eval";
+import { readRecords, readRunInfo, summarize, tallySheet } from "@repowiki/eval";
 import { handleClaim, markdownText, type WikiView } from "@repowiki/query";
 import type { AskEvalResult } from "./ask-eval-run.ts";
 
@@ -9,6 +11,8 @@ export const SUPPORT_SAMPLE = 20;
 /** §12.3: 18 of 20 supported; §12.4: 16 of 20 routed to the right page, as shares. */
 export const SUPPORT_PERCENT = 90;
 export const ROUTING_PERCENT = 80;
+/** §12.2: the ask's accuracy at least 90% of the wiki agent's on the same questions. */
+export const ACCURACY_PERCENT = 90;
 
 const ROUTING_HEADING = "## Routing";
 
@@ -117,4 +121,64 @@ export function tallySupport(text: string): { support: SheetCount; routing: Shee
     support: count(text.slice(0, at), SUPPORT_PERCENT),
     routing: count(text.slice(at), ROUTING_PERCENT),
   };
+}
+
+/** The owner's latest complete dev run of the eval with the wiki agent on this question file. */
+export interface DevBaseline {
+  runDir: string;
+  wikiCorrect: number;
+  questions: number;
+}
+
+/**
+ * The run spec v2 #4 §12.2 compares against: the latest complete `eval:run --set dev` under
+ * `<out>/eval/` that asked the wiki agent the same question file (same hash), or null.
+ */
+export function devBaseline(out: string, questionsHash: string): DevBaseline | null {
+  const dir = join(out, "eval");
+  if (!existsSync(dir)) return null;
+  let best: (DevBaseline & { startedAt: string }) | null = null;
+  for (const name of readdirSync(dir)) {
+    if (!name.startsWith("dev-")) continue;
+    const runDir = join(dir, name);
+    try {
+      const info = readRunInfo(runDir);
+      if (info.set !== "dev" || info.questionsHash !== questionsHash) continue;
+      if (!info.agents.includes("wiki")) continue;
+      const summary = summarize(info, readRecords(runDir));
+      if (!summary.complete) continue;
+      if (best === null || info.startedAt > best.startedAt) {
+        best = {
+          runDir,
+          wikiCorrect: summary.agents.wiki.correct,
+          questions: info.questions.length,
+          startedAt: info.startedAt,
+        };
+      }
+    } catch {
+      // Not a run directory eval:run wrote whole: it is no baseline.
+    }
+  }
+  return best === null
+    ? null
+    : { runDir: best.runDir, wikiCorrect: best.wikiCorrect, questions: best.questions };
+}
+
+/** Spec v2 #4 §12.2-4's lines for report.md: the accuracy comparison and the owner's checks. */
+export function criteriaLines(result: AskEvalResult, baseline: DevBaseline | null): string[] {
+  const correct = result.rows.filter((r) => r.score === 1).length;
+  const n = result.rows.length;
+  const accuracy =
+    baseline === null
+      ? "no complete `eval:run --set dev` run on this question file is in the out dir's eval/ folder, so this cannot be scored yet; run `pnpm eval:run <repo> --questions <file> --set dev` first."
+      : baseline.questions !== n
+        ? `the run compared against (${markdownText(baseline.runDir, 300)}) asked ${baseline.questions} questions and this one ${n}, so they cannot be compared.`
+        : `the ask got ${correct} of ${n} and the wiki agent ${baseline.wikiCorrect} of ${baseline.questions} in ${markdownText(baseline.runDir, 300)}: ${correct * 100 >= baseline.wikiCorrect * ACCURACY_PERCENT ? "met" : "not met"} (at least ${ACCURACY_PERCENT}% of the wiki agent's).`;
+  return [
+    "",
+    "## Accuracy, grounding and routing (spec v2 #4 \u00A712.2-4)",
+    "",
+    `- Accuracy against the wiki agent: ${accuracy}`,
+    `- Support and routing: the owner marks support.md in this folder, then runs \`pnpm ask:eval tally <support.md>\` (passes at ${SUPPORT_PERCENT}% supported and ${ROUTING_PERCENT}% routed).`,
+  ];
 }
