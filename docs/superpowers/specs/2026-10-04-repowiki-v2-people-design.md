@@ -716,3 +716,19 @@ Flagged, not changed:
 - Narratives about every teammate with 3 or more commits are on by default (R15, §18.2). On a
   shared repository such as next-chief-of-staff, the owner should decide this before the live
   gate.
+
+## 19. M11 plan deltas (2026-10-06)
+
+The M11 plan (`docs/superpowers/plans/2026-10-06-repowiki-m11-people.md`) changes this spec
+as follows; where a line above disagrees, this section wins. Its rulings R1-R40 settle what this
+spec left open.
+
+- **§14 (tasks).** Thirty-seven tasks instead of twenty-seven: P1-P18 keep their scope as Tasks 1-19, with P10's identities and P14's suggest command split so `refresh.ts` (Task 14) joins the read and the store write; P19 is split into the scripted round (Task 20) and the recording (Task 22), which also records P20's append; P20's due detection is Task 21; P21 is split into the flags and summary (23), the engine round (24), the People step shared with the update (25) and the command (26); P22 into the update hook (27) and `wiki:check` (28); P23 is Task 29 with the email scan moved to 28; P24 into the bar charts (30), the heatmap, sparklines and repository series (31) and the zoom pages (34); P25 into the view models (32, which also take P26's `/people/` by-feature table) and the pages (33), with the ask client's link pattern moved to 35; P26 is 35 with the in-flight author links; P27 is 36; the live gate and runbook are Task 37.
+- **R2 (blame argv).** No `--end-of-options` (git blame reads it as a revision and fails with "bad revision"); the sha is checked as 40 hex instead. `--ignore-revs-file=` replaces `-c blame.ignoreRevsFile=`, which does not clear a file the repository's own config names. `--no-textconv` is added.
+- **R15 and §2, §18.2 (consent).** Narratives are off by default: only the owner (the people file's `owner` keys, else the documented repository's configured `user.email`) and people whose entry says `narrative: true` get one; `PeopleEntry` gains `narrative` and `PeopleConfig` gains `owner` and `humans`. On next-chief-of-staff, the 7 person pages have narratives only as the owner grants them. A withdrawn consent deletes the stored narrative at the next refresh (it is not kept until `--forget`, unlike an exclusion's).
+- **R26 (keys in updates).** `wiki:update` and `wiki:replay` print the People ceiling up front but the People estimate only after the refresh, since the due set is known only at the new head; with no key the due narratives are listed and stay due, and the update exits 0. `wiki:people` checks the key once, after its estimate and before its first call.
+- **§8.5 (costs).** The recording is one task (Task 22), unbatched, about $0.03 for the build and the append; the live gate runs on RepoWiki only, about $0.05.
+- **§10.** `wiki:people --dry-run` works on a copy of the store, so it writes nothing and prints the table and the estimate; `--disable` and `--forget` each stand alone; `--forget` prints counts only. `people:suggest` also works on a copy.
+- **§6 (resolvePerson).** It is `Store.resolvePerson`, the oldest registry row holding a salted key of the login, name or email; core gains `saltedKey` and `queryKeys` so the store needs no People module.
+- **C1 (ADR numbers).** M10 shipped ADR-0006 (`inflight.git` borrows objects), so People's ADRs are ADR-0007 (blame for People, superseding ADR-0003, whose status reads "superseded by 0007") and ADR-0008 (the chronicle voice); where this spec says ADR-0006 or ADR-0007 for People, read ADR-0007 or ADR-0008.
+- **§11 (site).** The "N newer commits are not yet in the narrative" line counts commits on days after the narrative's commit date and shows whenever that is above 0 (R35). M10's in-progress pages call a null author "an unknown author" (R36). The People and zoom routes build nothing when the export has no People (R33).
