@@ -202,6 +202,7 @@ export type LiveCommand =
   | "wiki:update"
   | "wiki:replay"
   | "wiki:inflight"
+  | "wiki:people"
   | "eval:run"
   | "ask:eval";
 

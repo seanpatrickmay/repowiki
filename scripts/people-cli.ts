@@ -1,17 +1,19 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { type PeopleConfig, parsePeopleConfig } from "@repowiki/core";
+import { type PeopleConfig, PersonId, parseMatchKey, parsePeopleConfig } from "@repowiki/core";
 import {
+  markdownCodeSpan,
   maskEmail,
   type PeopleRead,
   suggestionSnippet,
   suggestMerges,
   wantsNarrative,
 } from "@repowiki/engine";
+import type { LedgerTotals } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { badOption, cell, count, once } from "./wiki-cli.ts";
+import { badOption, cell, costLines, count, once, priced } from "./wiki-cli.ts";
 
 export const SUGGEST_USAGE =
   "usage: pnpm people:suggest <repo-path> [--out dir] [--people-file file]";
@@ -138,4 +140,229 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
     }
   }
   return lines.join("\n");
+}
+
+export const PEOPLE_USAGE =
+  "usage: pnpm wiki:people <repo-path> [--out dir] [--people-file file] [--config file.json] [--no-narrative] [--only <person-id>]... [--rebuild-blame] [--no-batch] [--max-usd N] [--dry-run] [--disable] [--forget <match-key>] [--verbose]";
+
+/** wiki:people's narrative ceiling unless --max-usd says otherwise (R26). */
+export const DEFAULT_PEOPLE_MAX_USD = 1;
+/** wiki:update's and wiki:replay's People ceiling unless --people-max-usd says otherwise (R26). */
+export const DEFAULT_PEOPLE_UPDATE_MAX_USD = 0.5;
+/** The highest ceiling: a typo of a few zeros must not lift it. */
+const MAX_MAX_USD = 100;
+
+/** A dollar ceiling as eval:run parses --max-usd: digits, above 0, at most $100. */
+export function parseUsd(
+  flag: string,
+  text: string | undefined,
+  fallback: number,
+  usage: string,
+): number {
+  if (text === undefined) return fallback;
+  const usd = Number(text);
+  if (!/^\d+(\.\d+)?$/.test(text) || !(usd > 0 && usd <= MAX_MAX_USD))
+    throw new CliError(
+      `${flag} must be a number of dollars above 0 and up to ${MAX_MAX_USD}; ${usage}`,
+    );
+  return usd;
+}
+
+export interface PeopleArgs {
+  repo: string;
+  out: string | null;
+  peopleFile: string | null;
+  config: string | null;
+  narrative: boolean;
+  only: string[];
+  rebuildBlame: boolean;
+  batch: boolean;
+  maxUsd: number;
+  dryRun: boolean;
+  disable: boolean;
+  /** A people-file match key (spec v2 #6 §9); an email key's value is never echoed. */
+  forget: string | null;
+  verbose: boolean;
+}
+
+/**
+ * wiki:people's arguments (spec v2 #6 §10) by wiki-cli's rules: a repeated flag, an empty value
+ * or an unknown flag is a usage error. `--only` takes person ids and may repeat. `--disable` and
+ * `--forget` each stand alone: neither refreshes or writes a narrative.
+ */
+export function parsePeopleArgs(argv: readonly string[]): PeopleArgs {
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      options: {
+        out: { type: "string", multiple: true },
+        "people-file": { type: "string", multiple: true },
+        config: { type: "string", multiple: true },
+        "no-narrative": { type: "boolean", multiple: true },
+        only: { type: "string", multiple: true },
+        "rebuild-blame": { type: "boolean", multiple: true },
+        "no-batch": { type: "boolean", multiple: true },
+        "max-usd": { type: "string", multiple: true },
+        "dry-run": { type: "boolean", multiple: true },
+        disable: { type: "boolean", multiple: true },
+        forget: { type: "string", multiple: true },
+        verbose: { type: "boolean", multiple: true },
+      },
+    });
+  } catch (err) {
+    throw badOption(err, PEOPLE_USAGE);
+  }
+  const [repo, ...extra] = parsed.positionals;
+  if (repo === undefined || extra.length > 0) throw new CliError(PEOPLE_USAGE);
+  if (repo === "") throw new CliError(`<repo-path> must not be empty; ${PEOPLE_USAGE}`);
+  const v = parsed.values as Record<string, (string | boolean)[] | undefined>;
+  const text = (flag: string) => once(`--${flag}`, v[flag] as string[] | undefined, PEOPLE_USAGE);
+  const flag = (name: string) =>
+    once(`--${name}`, v[name] as boolean[] | undefined, PEOPLE_USAGE) === true;
+  const only = (v.only as string[] | undefined) ?? [];
+  for (const id of only)
+    if (!PersonId.safeParse(id).success)
+      throw new CliError(`--only takes a person id such as ada-lovelace; ${PEOPLE_USAGE}`);
+  const forget = text("forget") ?? null;
+  if (forget !== null && parseMatchKey(forget) === null)
+    throw new CliError(
+      `--forget takes a people-file match key: name:<text>, email:<address> or login:<github-login>; ${PEOPLE_USAGE}`,
+    );
+  const args: PeopleArgs = {
+    repo,
+    out: text("out") ?? null,
+    peopleFile: text("people-file") ?? null,
+    config: text("config") ?? null,
+    narrative: !flag("no-narrative"),
+    only,
+    rebuildBlame: flag("rebuild-blame"),
+    batch: !flag("no-batch"),
+    maxUsd: parseUsd("--max-usd", text("max-usd"), DEFAULT_PEOPLE_MAX_USD, PEOPLE_USAGE),
+    dryRun: flag("dry-run"),
+    disable: flag("disable"),
+    forget,
+    verbose: flag("verbose"),
+  };
+  const alone = args.disable ? "--disable" : args.forget !== null ? "--forget" : null;
+  const others =
+    !args.narrative ||
+    args.only.length > 0 ||
+    args.rebuildBlame ||
+    !args.batch ||
+    v["max-usd"] !== undefined ||
+    args.dryRun ||
+    (args.disable && args.forget !== null);
+  if (alone !== null && others)
+    throw new CliError(`${alone} takes no other run flag; ${PEOPLE_USAGE}`);
+  return args;
+}
+
+/** Output tokens a narrative is assumed to take before any is written (spec v2 #6 §8.5). */
+export const ASSUMED_PERSON_OUTPUT_TOKENS = 2500;
+
+/**
+ * One narrative's ceiling (R26): its call and a retry that resends the turn and the draft, each
+ * with the system prompt, priced at the model's rates, halved when batched; no cache hit.
+ */
+export function narrativeCeilingUsd(
+  turnTokens: number,
+  systemTokens: number,
+  model: string,
+  batch: boolean,
+): number {
+  const input = 2 * (systemTokens + turnTokens) + ASSUMED_PERSON_OUTPUT_TOKENS;
+  return priced(model, input, 2 * ASSUMED_PERSON_OUTPUT_TOKENS, batch);
+}
+
+/**
+ * The narratives a ceiling allows (R26, C12): in the order given (rank), each counted at its
+ * ceiling, taken while the next fits; the rest are over budget and stay due.
+ */
+export function withinBudget<T>(
+  items: readonly T[],
+  costOf: (item: T) => number,
+  maxUsd: number,
+): { taken: T[]; over: T[]; usd: number } {
+  let usd = 0;
+  let i = 0;
+  for (; i < items.length; i++) {
+    const cost = costOf(items[i] as T);
+    if (usd + cost > maxUsd) break;
+    usd += cost;
+  }
+  return { taken: items.slice(0, i), over: items.slice(i), usd };
+}
+
+/** One person's row of the People summary and the dry run's table. */
+export interface PeopleRow {
+  id: string;
+  name: string;
+  kind: "human" | "bot";
+  commits: number;
+  /** What happened to the narrative: written, appended, carried, failed: …, over budget, … */
+  narrative: string;
+  dropped: number;
+}
+
+/** The people table: every string a code span, so no name can break a row (spec v2 #6 §10). */
+export function peopleTable(rows: readonly PeopleRow[]): string[] {
+  return [
+    "| Person | Name | Commits | Narrative | Dropped |",
+    "|---|---|---:|---|---:|",
+    ...rows.map(
+      (r) =>
+        `| ${cell(r.id)}${r.kind === "bot" ? " (bot)" : ""} | ${cell(r.name)} | ${count(r.commits)} | ${r.narrative} | ${r.dropped} |`,
+    ),
+  ];
+}
+
+/**
+ * The People summary `people-<sha7>.md` (spec v2 #6 §10): each person's row, the notes (an
+ * exclusion's caveats, skipped narratives), then the LLM cost block in the build summary's format.
+ */
+export function renderPeopleSummary(
+  repoName: string,
+  sha: string,
+  rows: readonly PeopleRow[],
+  notes: readonly string[],
+  totals: LedgerTotals,
+  estimateUsd: number | null,
+): string {
+  const humans = rows.filter((r) => r.kind === "human").length;
+  const upFront =
+    estimateUsd === null ? "." : ` (estimated up front: at most $${estimateUsd.toFixed(4)}).`;
+  const lines = [
+    `# People: ${markdownCodeSpan(repoName)} at ${sha.slice(0, 7)}`,
+    "",
+    `${rows.length} people (${humans} with a page, ${rows.length - humans} bots).`,
+    "",
+    ...peopleTable(rows),
+    "",
+    ...notes.flatMap((n) => [n, ""]),
+    ...costLines(totals, upFront, estimateUsd !== null, PEOPLE_ESTIMATE_NOTE),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+/** What a People summary says of its estimate. */
+export const PEOPLE_ESTIMATE_NOTE =
+  "The estimate counts each narrative's call and a retry, with no cache hits: an upper-side figure.";
+
+/**
+ * What wiki:people says when the people file excludes someone (spec v2 #6 R12, §12): repository
+ * text naming them is not rewritten, and with exactly one excluded person the anonymous series
+ * names them by elimination.
+ */
+export function exclusionNotes(excluded: number, othersShown: boolean): string[] {
+  if (excluded === 0) return [];
+  const notes = [
+    `${excluded} ${excluded === 1 ? "person is" : "people are"} excluded: no page, name or id of theirs is generated; repository text that names them (commit subjects, pull request titles) is not rewritten.`,
+  ];
+  if (excluded === 1 && othersShown)
+    notes.push(
+      'With exactly one person excluded, the "other contributors" series is theirs by elimination; set othersMinPeople to 2 to leave it out.',
+    );
+  return notes;
 }
