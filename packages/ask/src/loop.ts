@@ -1,6 +1,7 @@
 import type { AskAnswerStatus, AskProgress, AskResponse, TokenUsage } from "@repowiki/core";
 import {
   callCostUsd,
+  LlmTimeoutError,
   priceFor,
   type TextBlock,
   type ToolProvider,
@@ -23,6 +24,20 @@ export const ASK_TEMPERATURE = 0;
 
 /** Characters a token, for a turn's upper bound: engine's estimateTokens rate (upper-side). */
 export const BOUND_CHARS_PER_TOKEN = 2.5;
+
+/**
+ * The system prompt the API adds to a turn that has tools, which the request's own characters do
+ * not show: 346 tokens with tool choice auto and 313 with a forced tool on Claude 4 models, Haiku
+ * 4.5 included; 500 leaves a margin (M9 final review: a forced turn counted 1,648 input tokens
+ * against a bound of 1,630 without it).
+ */
+export const TOOL_USE_PROMPT_TOKENS = 500;
+
+/**
+ * The most one ask turn may take, its retries included (the provider's timeoutMs): past it the
+ * question ends as an error answer, which is never cached, and the session is free again.
+ */
+export const ASK_TURN_TIMEOUT_MS = 60_000;
 
 /** What the model is told after a turn that answered in prose instead of calling a tool. */
 export const CALL_ANSWER_NOW = `Call ${ANSWER_TOOL} now.`;
@@ -62,6 +77,11 @@ export interface AskResult {
   tokens: TokenUsage;
   /** Why an error answer is one: the provider's message on one line; else null. */
   error: string | null;
+  /**
+   * Every handle rendered into this conversation (the pack's, then each page read's), once each:
+   * what a cited handle must be one of, so a harness can check the answer independently.
+   */
+  shown: string[];
 }
 
 const NO_TOKENS: TokenUsage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
@@ -73,15 +93,17 @@ const add = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
 });
 
 /**
- * The most a turn can cost: its whole input at BOUND_CHARS_PER_TOKEN characters a token, plus
- * its output cap, at the model's price (spec v2 #4 R10).
+ * The most a turn can cost: its whole input at BOUND_CHARS_PER_TOKEN characters a token plus the
+ * API's tool-use prompt (TOOL_USE_PROMPT_TOKENS), and its output cap, at the model's price (spec
+ * v2 #4 R10).
  */
 export function turnBound(model: string, request: TurnRequest): number {
   const chars =
     request.system.length +
     JSON.stringify(request.tools).length +
     JSON.stringify(request.messages).length;
-  const tokens = { in: Math.ceil(chars / BOUND_CHARS_PER_TOKEN), out: request.maxTokens };
+  const input = Math.ceil(chars / BOUND_CHARS_PER_TOKEN) + TOOL_USE_PROMPT_TOKENS;
+  const tokens = { in: input, out: request.maxTokens };
   return callCostUsd(model, { ...tokens, cacheRead: 0, cacheWrite: 0 }, false) ?? Infinity;
 }
 
@@ -169,6 +191,14 @@ export async function askQuestion(options: AskQuestionOptions): Promise<AskResul
     } catch (failure) {
       stop = "error";
       error = cut(oneLine(failure instanceof Error ? failure.message : String(failure)), 300);
+      if (failure instanceof LlmTimeoutError) {
+        // The turn was sent and may have been billed: count its upper bound, as for an
+        // unpriced turn, so the question's and the session's spend never fall short.
+        turns++;
+        usd = usd === null ? null : usd + bound;
+        spent += bound;
+        options.onSpend?.(bound);
+      }
       break;
     }
     turns++;
@@ -255,5 +285,5 @@ export async function askQuestion(options: AskQuestionOptions): Promise<AskResul
     cost: { turns, usd, model: reported },
     answeredAt: now(),
   });
-  return { response, tokens, error };
+  return { response, tokens, error, shown: [...shown] };
 }

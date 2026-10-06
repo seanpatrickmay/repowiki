@@ -40,7 +40,7 @@ describe("readPageWithHandles", () => {
     expect(text).toContain("See also: deliverables (Deliverables)");
   });
 
-  it("is readPage without its history line when no claim has a handle to show", () => {
+  it("is readPage without its history line once each claim's handle mark is taken off", () => {
     const view = new WikiView(sample.wiki);
     const plain = readPage(view, "signals")
       .split("\n")
@@ -125,5 +125,12 @@ describe("handleClaim", () => {
 describe("unmarkHandles", () => {
   it("makes {…#…} parentheses and leaves other braces", () => {
     expect(unmarkHandles("a {p#c} b {q} {r#s#t}")).toBe("a (p#c) b {q} (r#s#t)");
+  });
+
+  it("leaves nothing handle-shaped when marks are nested", () => {
+    expect(unmarkHandles("{x{a#b}#y}")).toBe("(x(a#b)#y)");
+    expect(unmarkHandles("{{a#b}}")).toBe("((a#b))");
+    expect(unmarkHandles("{p{q{a#b}#c}#d}")).toBe("(p(q(a#b)#c)#d)");
+    expect(/\{[^{}\n]*#[^{}\n]*\}/.test(unmarkHandles("{x{a#b}#y} {{c#d}#e}"))).toBe(false);
   });
 });

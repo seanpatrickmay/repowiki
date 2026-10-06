@@ -191,7 +191,7 @@ describe("createClaudeToolProvider", () => {
     const { bodies, fetch } = cannedTurns([
       { type: "tool_use", id: "tu_3", name: "answer", input: { text: "In ingest.py." } },
     ]);
-    const { provider } = setup(fetch);
+    const { provider, ledger } = setup(fetch);
     const result = await provider.turn({
       ...request,
       tools: [search, answer],
@@ -210,6 +210,8 @@ describe("createClaudeToolProvider", () => {
       new LlmError("the turn forces tool answer, which is not one of its tools"),
     );
     expect(bodies).toHaveLength(1);
+    // The refused turn made no call, so the ledger holds only the first turn's row.
+    expect(ledger.entries()).toHaveLength(1);
   });
 
   it("never sends an empty or whitespace-only text block, which the API refuses", async () => {
@@ -292,5 +294,31 @@ describe("createClaudeToolProvider", () => {
     } finally {
       if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
     }
+  });
+
+  it("ends a turn that outlasts its timeout with an LlmError, retrying nothing and recording no row", async () => {
+    let calls = 0;
+    const hung: FetchLike = (_input, init) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    };
+    const ledger = createLedger();
+    const provider = createClaudeToolProvider({
+      models: DEFAULT_MODELS,
+      ledger,
+      runId: "ask-run",
+      apiKey: "canned",
+      fetch: hung,
+      timeoutMs: 50,
+    });
+    const started = Date.now();
+    const turn = provider.turn(request);
+    await expect(turn).rejects.toBeInstanceOf(LlmError);
+    await expect(turn).rejects.toThrow("the API did not answer within 0.05 s");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(calls).toBe(1);
+    expect(ledger.entries()).toEqual([]);
   });
 });

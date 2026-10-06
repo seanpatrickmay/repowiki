@@ -47,6 +47,54 @@ describe("codeTokens", () => {
   it("strips the punctuation around a word but keeps a call's parentheses", () => {
     expect(codeTokens('("src/a.ts"), run()! and `x` .')).toEqual(["x", "src/a.ts", "run()"]);
   });
+
+  it.each([
+    ["a possessive", "Keys live in secrets.txt's first line.", ["secrets.txt"]],
+    ["a curly possessive", "Keys live in secrets.txt\u2019s first line.", ["secrets.txt"]],
+    ["curly double quotes", "Keys live in \u201Csecrets.txt\u201D.", ["secrets.txt"]],
+    ["an ellipsis", "Keys live in secrets.txt\u2026", ["secrets.txt"]],
+    ["three dots", "Keys live in secrets.txt...", ["secrets.txt"]],
+    ["an em dash", "Keys live in secrets.txt\u2014always", ["secrets.txt"]],
+    ["an en dash", "secrets.txt\u2013config.yaml", ["secrets.txt", "config.yaml"]],
+    ["curly single quotes", "It reads \u2018secrets.env\u2019.", ["secrets.env"]],
+    ["emphasis", "It reads **secrets.env** and _x_.", ["secrets.env", "_x_"]],
+    ["an arrow", "Keys moved to secrets.txt\u2192now.", ["secrets.txt"]],
+    ["a line number", "See secrets.txt:12 or secrets.txt#L3.", ["secrets.txt", "secrets.txt"]],
+    ["a call with arguments", "It calls loadSecrets(path) first.", ["loadSecrets()"]],
+    ["a call with two arguments", "It calls load(path, mode).", ["load()"]],
+    ["a file inside a call", "It calls load(secrets.txt).", ["load()", "secrets.txt"]],
+    ["a quoted call", "It calls `loadSecrets(path)`.", ["loadSecrets()"]],
+    ["a file inside a quoted call", "It calls `load(secrets.txt)`.", ["load()", "secrets.txt"]],
+    ["a call's possessive", "save_signal()'s result", ["save_signal()"]],
+    ["a zero-width space", "Keys live in secrets\u200B.txt now.", ["secrets.txt"]],
+    ["a soft hyphen", "Keys live in secrets\u00AD.txt now.", ["secrets.txt"]],
+    ["a word joiner", "Keys live in secrets\u2060.txt now.", ["secrets.txt"]],
+    ["a full-width dot", "Keys live in secrets\uFF0Etxt now.", ["secrets.txt"]],
+    [
+      "full-width letters",
+      "Keys live in \uFF53\uFF45\uFF43\uFF52\uFF45\uFF54\uFF53.txt now.",
+      ["secrets.txt"],
+    ],
+  ])("finds the token behind %s", (_name, text, tokens) => {
+    expect(codeTokens(text)).toEqual(tokens);
+  });
+
+  it("keeps the characters of a name inside it, and reads a plural as a word", () => {
+    expect(codeTokens("See scripts/wiki-serve.ts, .env and docs/ for it.")).toEqual([
+      "scripts/wiki-serve.ts",
+      ".env",
+      "docs/",
+    ]);
+    expect(codeTokens("One or more file(s) and class(es) change.")).toEqual([]);
+    expect(codeTokens("Each API(s) and URL(s) it calls.")).toEqual([]);
+    expect(codeTokens("It calls `ingest_chunk(save_signal(x))` once.")).toEqual([
+      "ingest_chunk()",
+      "save_signal()",
+    ]);
+    expect(codeTokens("The pipeline (see below) runs and/or waits \u2014 then stops.")).toEqual([
+      "and/or",
+    ]);
+  });
 });
 
 describe("ungroundedToken", () => {
@@ -68,6 +116,37 @@ describe("ungroundedToken", () => {
     expect(ungroundedToken(view, "Its server is main.go.", claims)).toBe("main.go");
     expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claims)).toBe("MAX_SIGNALS");
     expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claimsOf("signals#s-2"))).toBeNull();
+  });
+
+  it.each([
+    "Keys live in secrets.txt's first line.",
+    "Keys live in \u201Csecrets.txt\u201D.",
+    "Keys live in secrets.txt\u2026",
+    "Keys live in secrets.txt\u2014always.",
+    "It reads \u2018secrets.env\u2019.",
+    "It calls loadSecrets(path) first.",
+  ])("refuses a name hidden by punctuation or call syntax: %s", (text) => {
+    expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).not.toBeNull();
+  });
+
+  it("refuses a name hidden by an invisible or full-width character", () => {
+    for (const text of ["Keys live in secrets\u200B.txt.", "Keys live in secrets\uFF0Etxt."]) {
+      expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).toBe("secrets.txt");
+    }
+  });
+
+  it("does not refuse a plural in capitals or a nested call its claims write", () => {
+    const claims = claimsOf("signals#s-1");
+    expect(ungroundedToken(view, "Its API(s) and URL(s) stay as they are.", claims)).toBeNull();
+    expect(
+      ungroundedToken(view, "It runs `ingest_chunk(save_signal(x))` for a chunk.", claims),
+    ).toBeNull();
+  });
+
+  it("grounds a call with arguments by its name", () => {
+    expect(
+      ungroundedToken(view, "Then ingest_chunk(text) saves it.", claimsOf("signals#s-1")),
+    ).toBeNull();
   });
 
   it("matches a name only on identifier boundaries, not inside a longer name", () => {
@@ -197,6 +276,30 @@ describe("buildResponse", () => {
     refused: 0,
     cost: { turns: 1, usd: 0.0048, model: "claude-haiku-4-5-20251001" },
     answeredAt: new Date("2026-10-05T12:00:00Z"),
+  });
+
+  it("drops a claim whose id is too long for an answer, rather than fail the whole response", () => {
+    const long = "x".repeat(65);
+    const wiki = structuredClone(extendedWiki(sample));
+    wiki.pages
+      .find((p) => p.featureId === "signals")
+      ?.sections.find((s) => s.key === "overview")
+      ?.claims.push(
+        bodyClaim({ id: long, text: "A claim with a long id.", citations: [codeCitation()] }),
+      );
+    const longView = new WikiView(wiki);
+    const response = buildResponse({
+      ...base(),
+      view: longView,
+      indexes: askIndexes(longView),
+      sentences: [
+        { text: "Long.", handles: [`signals#${long}`] },
+        { text: "Short.", handles: [`signals#${long}`, "signals#s-1"] },
+      ],
+    });
+    expect(response.sentences).toEqual([{ text: "Short.", sources: [1] }]);
+    expect(response.sources.map((s) => s.claimId)).toEqual(["s-1"]);
+    expect(response.refused).toBe(1);
   });
 
   it("numbers sources by first citation and links each claim", () => {

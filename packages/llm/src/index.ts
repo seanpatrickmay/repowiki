@@ -45,6 +45,7 @@ export {
 } from "./provider.ts";
 export {
   createClaudeToolProvider,
+  LlmTimeoutError,
   type TextBlock,
   type ToolDefinition,
   type ToolProvider,

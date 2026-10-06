@@ -1,10 +1,17 @@
 import { AskResponse, NOT_FOUND_SENTENCE } from "@repowiki/core";
-import { callCostUsd } from "@repowiki/llm";
+import { callCostUsd, LlmTimeoutError } from "@repowiki/llm";
 import { WikiView } from "@repowiki/query";
 import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ASK_MAX_TOKENS, AskError, askQuestion, CALL_ANSWER_NOW, turnBound } from "./loop.ts";
-import { askIndexes } from "./pack.ts";
+import {
+  ASK_MAX_TOKENS,
+  AskError,
+  askQuestion,
+  CALL_ANSWER_NOW,
+  TOOL_USE_PROMPT_TOKENS,
+  turnBound,
+} from "./loop.ts";
+import { askIndexes, turnOnePack } from "./pack.ts";
 import { answerTool, MAX_TURNS } from "./prompt.ts";
 import {
   answerTurn,
@@ -163,6 +170,17 @@ describe("askQuestion", () => {
     expect(response).toMatchObject({ status: "not-found", refused: 1, cost: { turns: 2 } });
   });
 
+  it("returns every handle it rendered into the conversation: the pack's and the pages read", async () => {
+    const { shown } = await ask([
+      { tool: "read_page", input: { id: "deliverables" } },
+      answerTurn([["Signals are made by `ingest_chunk`.", ["signals#s-1"]]]),
+    ]);
+    const pack = turnOnePack(view, askIndexes(view), QUESTION, null).shown;
+    expect(shown.slice(0, pack.length)).toEqual(pack);
+    expect(shown).toContain("deliverables#d-1");
+    expect(new Set(shown).size).toBe(shown.length);
+  });
+
   it("stops with status budget, making no call, when the first turn could cross the cap", async () => {
     const { response, requests } = await ask([], { questionUsd: 0.001 });
     expect(requests).toEqual([]);
@@ -194,6 +212,31 @@ describe("askQuestion", () => {
     expect(error).toBe("overloaded retry later");
   });
 
+  it("counts a turn that timed out after it was sent at its bound, as it may have been billed", async () => {
+    const spends: number[] = [];
+    const { provider, requests } = scriptedProvider([
+      { tool: "search", input: { query: "signals" } },
+      { error: new LlmTimeoutError(60_000) },
+    ]);
+    const { response, error } = await askQuestion({
+      provider,
+      view,
+      indexes: askIndexes(view),
+      question: QUESTION,
+      page: null,
+      model: "claude-haiku-4-5",
+      questionUsd: 0.05,
+      onSpend: (usd) => spends.push(usd),
+      now: () => new Date("2026-10-05T12:00:00Z"),
+    });
+    const bound = turnBound("claude-haiku-4-5", requests[1] as never);
+    expect(error).toBe("the API did not answer within 60 s");
+    expect(response.status).toBe("error");
+    expect(response.cost.turns).toBe(2);
+    expect(response.cost.usd).toBeCloseTo(TURN_USD + bound, 12);
+    expect(spends).toEqual([TURN_USD, bound]);
+  });
+
   it("refuses a model with no price before any call", async () => {
     const { provider, requests } = scriptedProvider([]);
     await expect(
@@ -219,7 +262,7 @@ describe("askQuestion", () => {
     expect(response.cost.usd).toBeCloseTo(2 * TURN_USD, 10);
   });
 
-  it("bounds a turn by its whole request at 2.5 characters a token plus the output cap", () => {
+  it("bounds a turn by its whole request at 2.5 characters a token, the API's tool-use prompt and the output cap", () => {
     const request = {
       purpose: "ask" as const,
       system: "x".repeat(250),
@@ -230,8 +273,9 @@ describe("askQuestion", () => {
       cache: false,
     };
     const chars = 250 + JSON.stringify([answerTool]).length + 2;
+    expect(TOOL_USE_PROMPT_TOKENS).toBeGreaterThanOrEqual(346);
     expect(turnBound("claude-haiku-4-5", request)).toBeCloseTo(
-      (Math.ceil(chars / 2.5) * 1 + 1000 * 5) / 1_000_000,
+      ((Math.ceil(chars / 2.5) + TOOL_USE_PROMPT_TOKENS) * 1 + 1000 * 5) / 1_000_000,
       12,
     );
   });

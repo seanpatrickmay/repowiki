@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { answerTool, askIndexes, askSystemPrompt, createAskTools } from "@repowiki/ask";
 import type { WikiExport } from "@repowiki/core";
 import { readPageWithHandles, WikiView } from "@repowiki/query";
+import { siteMarker } from "@repowiki/site/format";
 import { CliError } from "./manifest-cli.ts";
 import { badOption, once, priced } from "./wiki-cli.ts";
 
@@ -102,12 +103,14 @@ function parse(argv: readonly string[]) {
 const builtExport = (wiki: WikiExport) => `${JSON.stringify(wiki, null, 2)}\n`;
 
 /**
- * True when `siteDir` is a RepoWiki build of `wiki` (spec v2 #4 R16): its marker is there and its
- * root copy of the export is the one a build of this export writes (writeSiteRoot), byte for byte.
+ * True when `siteDir` is a finished RepoWiki build of `wiki` by this site code (spec v2 #4 R16):
+ * its marker names the site code's format (siteMarker; a build cut short, or one by older or newer
+ * site code, has another or none), and its root copy of the export is the one a build of this
+ * export writes (writeSiteRoot), byte for byte.
  */
-export function siteIsCurrent(siteDir: string, wiki: WikiExport): boolean {
+export function siteIsCurrent(siteDir: string, wiki: WikiExport, marker = siteMarker()): boolean {
   try {
-    if (!existsSync(join(siteDir, ".repowiki-site"))) return false;
+    if (readFileSync(join(siteDir, ".repowiki-site"), "utf8") !== marker) return false;
     return readFileSync(join(siteDir, "export.json"), "utf8") === builtExport(wiki);
   } catch {
     return false;

@@ -47,6 +47,20 @@ describe("claimSearchIndex", () => {
     expect(index.search("kubernetes", 12, 4)).toEqual([]);
   });
 
+  it("orders claims of the same score by handle, the same in two indexes of one wiki", () => {
+    const twin = (id: string) =>
+      bodyClaim({ id, text: "Zebra quotas are enforced nightly.", citations: [codeCitation()] });
+    const wiki = structuredClone(sample.wiki) as WikiExport;
+    for (const page of wiki.pages) {
+      page.sections.find((s) => s.key === "overview")?.claims.push(twin(`${page.featureId}-z`));
+    }
+    const view = new WikiView(wiki);
+    const first = claimSearchIndex(view).search("zebra quotas", 12, 4);
+    expect(first.length).toBeGreaterThan(1);
+    expect(first).toEqual([...first].sort());
+    expect(claimSearchIndex(new WikiView(wiki)).search("zebra quotas", 12, 4)).toEqual(first);
+  });
+
   it("treats a fractional limit as its whole part and a NaN limit as the default", () => {
     const index = claimSearchIndex(new WikiView(sample.wiki));
     expect(index.search("signal", 1.5, 4)).toHaveLength(1);

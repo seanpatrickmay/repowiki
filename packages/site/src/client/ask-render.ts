@@ -5,6 +5,7 @@
 import type { AskProgress, AskResponse } from "@repowiki/core";
 import {
   ASK_EXCERPT_LENGTH,
+  ASK_HREF,
   ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
@@ -16,15 +17,16 @@ import {
   ASK_SENTENCE_MAX_LENGTH,
   ASK_SUMMARY_MAX_LENGTH,
   ASK_TITLE_MAX_LENGTH,
+  citedInOrder,
+  hrefFits,
   NOT_FOUND_SENTENCE,
 } from "@repowiki/core/ask-limits";
 
 /**
- * The links an answer or a route may carry (R19): a feature page or the About article, at one of
- * its claims or sections. Anything else is shown as plain text. M11 widens it to person pages.
+ * The links an answer or a route may carry (R19): core's ASK_HREF itself, a feature page or the
+ * About article, at one of its claims or sections. Anything else is shown as plain text.
  */
-export const SAFE_HREF =
-  /^\/(wiki\/[a-z0-9-]{1,64}\/|special\/about\/)(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
+export const SAFE_HREF = ASK_HREF;
 
 /** The href, or null when it is not one SAFE_HREF admits. */
 export const safeHref = (href: unknown): string | null =>
@@ -58,7 +60,8 @@ const isList = (value: unknown, max: number): value is unknown[] =>
  * An answer from the server, or null when it is not the shape core's AskResponse gives it (spec
  * v2 #4 section 9.3), by hand and with core's own limits (`@repowiki/core/ask-limits`, which
  * holds no zod): types, lengths and index ranges, and AskResponse's cross-field rules (sources
- * numbered in order, each cited, none cited twice by a sentence; an answered or partial answer's
+ * numbered in order of first citation, each cited, none cited twice by a sentence, each linked
+ * into its own page and claim; no blank sentence; an answered or partial answer's
  * sentences each cite one; not-found is the one fixed sentence; budget and error have none). The
  * renderer shows nothing it refuses.
  */
@@ -82,6 +85,7 @@ export function guardResponse(value: unknown): AskResponse | null {
       (s.sectionTitle === null || isText(s.sectionTitle, ASK_SECTION_TITLE_MAX_LENGTH, 1)) &&
       isText(s.claimId, ASK_ID_MAX_LENGTH, 1) &&
       typeof s.href === "string" &&
+      hrefFits(s.href, s.pageId, s.claimId) &&
       isText(s.excerpt, ASK_EXCERPT_LENGTH, 1),
   );
   const sentences = value.sentences;
@@ -90,12 +94,14 @@ export function guardResponse(value: unknown): AskResponse | null {
     (s) =>
       isRecord(s) &&
       isText(s.text, ASK_SENTENCE_MAX_LENGTH, 1) &&
+      s.text.trim() !== "" &&
       isList(s.sources, ASK_MAX_SENTENCE_SOURCES) &&
       s.sources.every((n) => isInt(n, 1) && n <= sources.length) &&
       new Set(s.sources).size === s.sources.length,
   );
   if (!sentencesOk) return null;
   const cited = sentences as { text: string; sources: number[] }[];
+  if (!citedInOrder(cited)) return null;
   const citedSet = new Set(cited.flatMap((s) => s.sources));
   if (sources.some((_s, i) => !citedSet.has(i + 1))) return null;
   const status = value.status;
@@ -115,6 +121,7 @@ export function guardResponse(value: unknown): AskResponse | null {
       isText(r.pageId, ASK_ID_MAX_LENGTH, 1) &&
       isText(r.title, ASK_TITLE_MAX_LENGTH, 1) &&
       typeof r.href === "string" &&
+      hrefFits(r.href, r.pageId, null) &&
       isText(r.summary, ASK_SUMMARY_MAX_LENGTH),
   );
   const cost = value.cost;
@@ -160,14 +167,18 @@ function codeText(doc: AskDocument, parent: AskNode, text: string): void {
   });
 }
 
-/** A link when the href is safe, with a hover preview for a feature page; else plain text. */
-function link(doc: AskDocument, href: unknown, text: string, pageId: string | null): AskNode {
+/**
+ * A link when the href is safe, with (unless `preview` is false) a hover preview of the feature
+ * page it goes to, read from the href itself so the preview is always the link's page; else
+ * plain text.
+ */
+function link(doc: AskDocument, href: unknown, text: string, preview = true): AskNode {
   const safe = safeHref(href);
   const node = doc.createElement(safe === null ? "span" : "a");
   if (safe !== null) {
     node.setAttribute("href", safe);
-    if (pageId !== null && /^[a-z0-9-]{1,64}$/.test(pageId))
-      node.setAttribute("data-preview", pageId);
+    const page = /^\/wiki\/([a-z0-9-]{1,64})\//.exec(safe)?.[1];
+    if (preview && page !== undefined) node.setAttribute("data-preview", page);
   }
   node.textContent = text;
   return node;
@@ -208,7 +219,7 @@ export function renderAnswer(doc: AskDocument, response: AskResponse): AskNode {
     codeText(doc, p, sentence.text);
     for (const n of sentence.sources) {
       const source = response.sources[n - 1];
-      const mark = link(doc, source?.href, `[${n}]`, source?.pageId ?? null);
+      const mark = link(doc, source?.href, `[${n}]`);
       mark.className = "ask-mark";
       p.append(mark);
     }
@@ -225,7 +236,7 @@ export function renderAnswer(doc: AskDocument, response: AskResponse): AskNode {
         source.sectionTitle === null
           ? source.pageTitle
           : `${source.pageTitle} \u203A ${source.sectionTitle}`;
-      item.append(link(doc, source.href, where, source.pageId));
+      item.append(link(doc, source.href, where));
       const excerpt = doc.createElement("div");
       excerpt.className = "ask-excerpt";
       codeText(doc, excerpt, source.excerpt);
@@ -241,7 +252,7 @@ export function renderAnswer(doc: AskDocument, response: AskResponse): AskNode {
     list.className = "ask-read-next";
     for (const page of response.readNext) {
       const item = doc.createElement("li");
-      item.append(link(doc, page.href, page.title, page.pageId));
+      item.append(link(doc, page.href, page.title));
       if (page.summary !== "") item.append(` \u2014 ${page.summary}`);
       list.append(item);
     }
@@ -254,7 +265,10 @@ export function renderAnswer(doc: AskDocument, response: AskResponse): AskNode {
   return root;
 }
 
-/** The most bytes of one answer's event stream the client reads (spec v2 #4 §9.3). */
+/**
+ * The most characters (UTF-16 code units, as decoded) of one answer's event stream the client
+ * reads (spec v2 #4 §9.3).
+ */
 export const MAX_STREAM_CHARS = 64 * 1024;
 
 /** One Server-Sent Event: its name and its data lines joined. */
@@ -278,8 +292,11 @@ export function sseReader(): { feed(chunk: string): SseEvent[] } {
       buffer += chunk;
       const events: SseEvent[] = [];
       for (;;) {
-        const end = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
+        // A frame ends at a blank line: two line ends of any kind (CRLF, LF or CR) in a row. A CR
+        // at the very end may be the first half of a CRLF still to come, so it waits.
+        const end = /(?:\r\n|\r(?!\n)|\n)(?:\r\n|\r(?!\n)|\n)/.exec(buffer);
         if (end === null) break;
+        if (end.index + end[0].length === buffer.length && buffer.endsWith("\r")) break;
         const frame = buffer.slice(0, end.index);
         buffer = buffer.slice(end.index + end[0].length);
         let event = "message";
@@ -357,10 +374,10 @@ export function renderRoutes(doc: AskDocument, routes: readonly Route[]): AskNod
   list.className = "ask-routes";
   for (const route of routes) {
     const item = doc.createElement("li");
-    item.append(link(doc, route.url, route.title, null), excerptNode(doc, route.excerpt));
+    item.append(link(doc, route.url, route.title, false), excerptNode(doc, route.excerpt));
     for (const section of route.sections.slice(0, 2)) {
       const sub = doc.createElement("div");
-      sub.append(link(doc, section.url, section.title, null), excerptNode(doc, section.excerpt));
+      sub.append(link(doc, section.url, section.title, false), excerptNode(doc, section.excerpt));
       item.append(sub);
     }
     list.append(item);

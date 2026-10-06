@@ -3,12 +3,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
+  ASK_TURN_TIMEOUT_MS,
   type AskSession,
   createAskHandler,
   createAskSession,
   exportHash,
   openAnswerCache,
-  securityHeaders,
 } from "@repowiki/ask";
 import { WikiBuildError } from "@repowiki/engine";
 import { createClaudeToolProvider, createLedger } from "@repowiki/llm";
@@ -23,7 +23,7 @@ import {
   totalsLine,
   typicalQuestionUsd,
 } from "./serve-cli.ts";
-import { listenLoopback, serveRequests } from "./serve-static.ts";
+import { listenLoopback, serveBuilding, serveRequests } from "./serve-static.ts";
 import { exitWithError } from "./wiki-cli.ts";
 
 /** How long a stop waits for a question in flight before it exits anyway. */
@@ -32,7 +32,8 @@ const STOP_WAIT_MS = 30_000;
 /**
  * pnpm wiki:serve <repo> (spec v2 #4 §7): serves <out>/site/ (default out ~/.repowiki/<basename
  * of repo>) and /api/ask from one origin on 127.0.0.1, rebuilding the site first when its copy
- * of the export is not <out>/export.json's. A bad --config or a busy port fails before that
+ * of the export is not <out>/export.json's or its marker names other site code (siteIsCurrent),
+ * or --repo-url is given. A bad --config or a busy port fails before that
  * build: the port is bound first, answering 503 until the site is ready. Prints the estimate
  * and both caps (with or without a key), then answers questions with the ask role's model when
  * ANTHROPIC_API_KEY is set (read only from RepoWiki's .env, never printed); without a key or
@@ -60,25 +61,19 @@ async function main(): Promise<void> {
   // Everything that can fail fast does so before a site build that can take minutes.
   const models = loadModels(args.config);
   let port = args.port;
-  const building = securityHeaders(CONTENT_SECURITY_POLICY);
-  let handle: (request: IncomingMessage, response: ServerResponse) => Promise<void> = async (
-    _request,
-    response,
-  ) => {
-    response.writeHead(503, {
-      ...building,
-      "cache-control": "no-store",
-      "retry-after": "5",
-      "content-type": "text/plain; charset=utf-8",
-    });
-    response.end("The site is being built; try again in a moment.\n");
-  };
-  const listening = await listenLoopback((request, response) => handle(request, response), port);
+  let handle: (request: IncomingMessage, response: ServerResponse) => Promise<void> = serveBuilding(
+    { csp: CONTENT_SECURITY_POLICY, port: () => port },
+  );
+  const listening = await listenLoopback(
+    (request, response) => handle(request, response),
+    port,
+    (line) => console.error(line),
+  );
   port = listening.port;
   const siteDir = join(out, "site");
   if (args.repoUrl !== null || !siteIsCurrent(siteDir, wiki)) {
     console.error(
-      `building the site (${args.repoUrl !== null ? "--repo-url given" : "export changed"})`,
+      `building the site (${args.repoUrl !== null ? "--repo-url given" : "the export or the site code changed"})`,
     );
     const { buildSite } = await import("@repowiki/site/build");
     await buildSite(exportPath, siteDir, args.repoUrl);
@@ -104,6 +99,8 @@ async function main(): Promise<void> {
           models,
           ledger: createLedger(),
           runId: `ask-${new Date().toISOString()}`,
+          // A hung call ends as an error answer instead of holding the session for minutes.
+          timeoutMs: ASK_TURN_TIMEOUT_MS,
         }),
         model: models.ask,
         questionUsd: args.questionUsd,

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
+import { siteMarker } from "@repowiki/site/format";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CliError } from "./manifest-cli.ts";
 import {
@@ -75,7 +76,13 @@ describe("siteIsCurrent", () => {
       expect(siteIsCurrent(dir, sample.wiki)).toBe(false);
       writeFileSync(join(dir, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
       expect(siteIsCurrent(dir, sample.wiki)).toBe(false);
+      // A build that stopped before its search index, or one made before markers had a format.
       writeFileSync(join(dir, ".repowiki-site"), "");
+      expect(siteIsCurrent(dir, sample.wiki)).toBe(false);
+      // A build made by other site code.
+      writeFileSync(join(dir, ".repowiki-site"), siteMarker("0".repeat(64)));
+      expect(siteIsCurrent(dir, sample.wiki)).toBe(false);
+      writeFileSync(join(dir, ".repowiki-site"), siteMarker());
       expect(siteIsCurrent(dir, sample.wiki)).toBe(true);
       expect(siteIsCurrent(dir, { ...sample.wiki, exportedAt: "2027-01-01T00:00:00Z" })).toBe(
         false,

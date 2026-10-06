@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ASK_EXCERPT_LENGTH,
+  ASK_HREF,
   ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
@@ -13,12 +14,15 @@ import {
   ASK_SENTENCE_MAX_LENGTH,
   ASK_SUMMARY_MAX_LENGTH,
   ASK_TITLE_MAX_LENGTH,
+  citedInOrder,
+  hrefFits,
   NOT_FOUND_SENTENCE,
 } from "./ask-limits.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 
 export {
   ASK_EXCERPT_LENGTH,
+  ASK_HREF,
   ASK_ID_MAX_LENGTH,
   ASK_MAX_READ_NEXT,
   ASK_MAX_SENTENCE_SOURCES,
@@ -31,6 +35,8 @@ export {
   ASK_SENTENCE_MAX_LENGTH,
   ASK_SUMMARY_MAX_LENGTH,
   ASK_TITLE_MAX_LENGTH,
+  citedInOrder,
+  hrefFits,
   NOT_FOUND_SENTENCE,
 } from "./ask-limits.ts";
 
@@ -43,13 +49,6 @@ const ANCHORED_CLAIM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function claimAnchor(claimId: string): string | null {
   return ANCHORED_CLAIM_ID.test(claimId) ? `claim-${claimId}` : null;
 }
-
-/**
- * Every link an answer may carry (R19): a feature page or the About article, optionally at one of
- * its claims or sections. The server builds links from handles; the client refuses anything else.
- */
-export const ASK_HREF =
-  /^\/(wiki\/[a-z0-9-]{1,64}\/|special\/about\/)(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
 
 const codePoints = (text: string) => [...text].length;
 
@@ -154,9 +153,18 @@ export const AskResponse = z
       ctx.addIssue({ code: "custom", message, path });
     response.sources.forEach((source, i) => {
       if (source.n !== i + 1) issue(`expected source ${i + 1}`, ["sources", i, "n"]);
+      if (!hrefFits(source.href, source.pageId, source.claimId))
+        issue("links somewhere else than its page and claim", ["sources", i, "href"]);
     });
+    response.readNext.forEach((page, i) => {
+      if (!hrefFits(page.href, page.pageId, null))
+        issue("links somewhere else than its page", ["readNext", i, "href"]);
+    });
+    if (!citedInOrder(response.sentences))
+      issue("sources are not numbered in order of first citation", ["sources"]);
     const cited = new Set<number>();
     response.sentences.forEach((sentence, i) => {
+      if (sentence.text.trim() === "") issue("is blank", ["sentences", i, "text"]);
       if (new Set(sentence.sources).size !== sentence.sources.length)
         issue("cites a source twice", ["sentences", i, "sources"]);
       for (const n of sentence.sources) {

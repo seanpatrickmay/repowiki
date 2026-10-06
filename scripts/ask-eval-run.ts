@@ -1,4 +1,4 @@
-import { type AskIndexes, askQuestion } from "@repowiki/ask";
+import { type AskIndexes, askQuestion, ungroundedToken } from "@repowiki/ask";
 import { ASK_QUESTION_MAX_LENGTH, type AskResponse } from "@repowiki/core";
 import {
   type EvalQuestion,
@@ -8,7 +8,7 @@ import {
   settleAll,
 } from "@repowiki/eval";
 import { callCostUsd, type Provider, type ToolProvider } from "@repowiki/llm";
-import { cut, markdownText, oneLine, type WikiView } from "@repowiki/query";
+import { cut, handleClaim, markdownText, oneLine, type WikiView } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
 import { DEFAULT_QUESTION_USD } from "./serve-cli.ts";
 
@@ -23,6 +23,8 @@ export interface AskEvalRow {
   /** The judge's 0/1 grade, or null when the judgment failed. */
   score: 0 | 1 | null;
   judgeUsd: number | null;
+  /** The shown sentences the harness's own check finds grounded (groundedSentences). */
+  grounded: number;
 }
 
 export interface AskEvalResult {
@@ -42,6 +44,33 @@ export const answerText = (response: AskResponse): string =>
   response.sentences.map((s) => s.text).join(" ");
 
 /**
+ * How many of an answered or partial response's sentences pass spec v2 #4 §12.3's check, made
+ * again here from the handles the question's conversation showed (AskResult.shown), not from the
+ * response's own shape: every source a sentence cites is a shown handle, and the sentence names
+ * no file, function or setting those claims do not write. A not-found, budget or error answer
+ * shows none.
+ */
+export function groundedSentences(
+  view: WikiView,
+  response: AskResponse,
+  shown: readonly string[],
+): number {
+  if (response.status !== "answered" && response.status !== "partial") return 0;
+  const rendered = new Set(shown);
+  return response.sentences.filter((sentence) => {
+    const handles = sentence.sources.map((n) => {
+      const source = response.sources[n - 1];
+      return source === undefined ? "" : `${source.pageId}#${source.claimId}`;
+    });
+    if (handles.length === 0 || !handles.every((h) => rendered.has(h))) return false;
+    const claims = handles.flatMap((h) => handleClaim(view, h) ?? []);
+    return (
+      claims.length === handles.length && ungroundedToken(view, sentence.text, claims) === null
+    );
+  }).length;
+}
+
+/**
  * Refuses, as one CliError naming them, the questions the ask cannot take (over
  * ASK_QUESTION_MAX_LENGTH code points once trimmed, as AskRequest counts): the eval's question
  * file allows longer ones, and such a question would fail only after its turns were paid for.
@@ -57,8 +86,9 @@ export function checkAskableQuestions(questions: readonly EvalQuestion[]): void 
 
 /**
  * Asks each question through askQuestion with no cache (spec v2 #4 §7), one at a time, while the
- * next question's ceiling fits under `maxUsd` (C12), after refusing any question the ask cannot
- * take; then judges every answer with the M7 judge, the calls together so they go as one batch
+ * next question's ceiling fits under `maxUsd` (C12; the first that does not fit stops the asking,
+ * so the asked questions are the file's first), after refusing any question the ask cannot take
+ * and a ceiling list that is not one a question; then judges every answer with the M7 judge, the calls together so they go as one batch
  * (with --no-batch, at most MAX_DIRECT_JUDGE_CALLS at once). Every judge attempt is counted in
  * `spentUsd`: a judgment the judge answered unusably twice is left unjudged (logged on one line)
  * and an unpriced one is priced as `judgeModel`; any other judge failure is rethrown once every
@@ -87,6 +117,11 @@ export async function runAskEval(options: {
   const clock = options.clock ?? (() => performance.now());
   const log = options.log ?? (() => {});
   checkAskableQuestions(options.questions);
+  if (options.perQuestionCeilingUsd.length !== options.questions.length) {
+    throw new Error(
+      `${options.perQuestionCeilingUsd.length} ceilings for ${options.questions.length} questions`,
+    );
+  }
   const asked: Omit<AskEvalRow, "score" | "judgeUsd">[] = [];
   const overBudget: string[] = [];
   let spent = 0;
@@ -96,7 +131,8 @@ export async function runAskEval(options: {
   let committed = 0;
   for (const [i, question] of options.questions.entries()) {
     const ceiling = options.perQuestionCeilingUsd[i] ?? DEFAULT_QUESTION_USD;
-    if (committed + ceiling > options.maxUsd + 1e-12) {
+    // The first question that does not fit stops the asking, so the asked are the file's first.
+    if (overBudget.length > 0 || committed + ceiling > options.maxUsd + 1e-12) {
       overBudget.push(question.id);
       continue;
     }
@@ -104,8 +140,9 @@ export async function runAskEval(options: {
     const started = clock();
     let paid = 0;
     let response: AskResponse;
+    let shown: string[];
     try {
-      ({ response } = await askQuestion({
+      ({ response, shown } = await askQuestion({
         provider: options.provider,
         view: options.view,
         indexes: options.indexes,
@@ -118,15 +155,30 @@ export async function runAskEval(options: {
         },
       }));
     } catch (error) {
-      // The turns it took were paid for: record them before the run stops.
+      // The turns it took were paid for: record them before the run stops. A record that fails
+      // too is logged, and the question's own failure is what the run reports.
       spent += paid;
-      record(unjudged(), false);
+      try {
+        record(unjudged(), false);
+      } catch (failure) {
+        const why = failure instanceof Error ? failure.message : String(failure);
+        log(
+          `could not record the run (${cut(oneLine(why), 200)}); rethrowing the question's failure`,
+        );
+      }
       throw error;
     }
     const ms = clock() - started;
     spent += response.cost.usd ?? DEFAULT_QUESTION_USD;
     committed += ceiling - DEFAULT_QUESTION_USD + (response.cost.usd ?? DEFAULT_QUESTION_USD);
-    asked.push({ id: question.id, kind: question.kind, question: question.question, response, ms });
+    asked.push({
+      id: question.id,
+      kind: question.kind,
+      question: question.question,
+      response,
+      ms,
+      grounded: groundedSentences(options.view, response, shown),
+    });
     record(unjudged(), false);
   }
   if (asked.length > 0)
@@ -145,9 +197,9 @@ export async function runAskEval(options: {
     options.batchJudge ? asked.length : MAX_DIRECT_JUDGE_CALLS,
   );
   // A reply priced under its own model id, else under the configured judge model.
-  const priced = (model: string | null, usage: JudgeError["usage"]) =>
-    (model === null ? null : callCostUsd(model, usage, options.batchJudge)) ??
-    callCostUsd(options.judgeModel, usage, options.batchJudge);
+  const priced = (model: string | null, usage: JudgeError["usage"], batch = options.batchJudge) =>
+    (model === null ? null : callCostUsd(model, usage, batch)) ??
+    callCostUsd(options.judgeModel, usage, batch);
   const failures: unknown[] = [];
   const rows = asked.map((row, i): AskEvalRow => {
     const outcome = judged[i];
@@ -164,7 +216,7 @@ export async function runAskEval(options: {
     }
     const j = outcome?.value;
     if (j === undefined) return { ...row, score: null, judgeUsd: null };
-    const usd = j.model === null ? 0 : priced(j.model, j.usage);
+    const usd = j.model === null ? 0 : priced(j.model, j.usage, j.batch);
     if (usd !== null) spent += usd;
     return { ...row, score: j.score, judgeUsd: usd };
   });
@@ -212,7 +264,11 @@ export function renderAskReport(at: {
   const shown = rows.flatMap((r) =>
     r.response.status === "answered" || r.response.status === "partial" ? r.response.sentences : [],
   );
-  const cited = shown.filter((s) => s.sources.length > 0).length;
+  const grounded = rows.reduce((sum, r) => sum + r.grounded, 0);
+  const unknown = rows.filter((r) => r.response.cost.usd === null).length;
+  const unanswered = rows.filter(
+    (r) => r.response.status === "budget" || r.response.status === "error",
+  );
   const medianUsd = median(costs);
   const maxUsd = costs.length === 0 ? null : Math.max(...costs);
   const medianMs = median(times);
@@ -232,9 +288,10 @@ export function renderAskReport(at: {
     "## Totals",
     "",
     `- Accuracy: ${correct} of ${rows.length}${rows.length === 0 ? "" : ` (${Math.round((100 * correct) / rows.length)}%)`}${rows.some((r) => r.score === null) ? `; ${rows.filter((r) => r.score === null).length} unjudged` : ""}.`,
-    `- Cost a question: median ${usd4(medianUsd)}, most ${usd4(maxUsd)}; the run cost ${usd4(at.result.spentUsd)} with judging.`,
+    `- Cost a question: median ${usd4(medianUsd)}, most ${usd4(maxUsd)}; the run cost ${usd4(at.result.spentUsd)} with judging.${unknown === 0 ? "" : ` ${unknown} cost${unknown === 1 ? "" : "s"} unknown, counted at the ${usd4(DEFAULT_QUESTION_USD)} cap.`}`,
     `- Time from the question to its answer: median ${medianMs === null ? "none" : seconds(medianMs)}, most ${times.length === 0 ? "none" : seconds(Math.max(...times))}.`,
-    `- Grounding: ${cited} of ${shown.length} shown sentences cite at least one claim the model was shown.`,
+    `- Grounding: ${grounded} of ${shown.length} shown sentences cite only claims the model was shown and name only what they write (checked again from each question's shown handles).`,
+    `- Not answered (budget or error, each counted as not correct): ${unanswered.length === 0 ? "none" : unanswered.map((r) => `${r.id} (${r.response.status})`).join(", ")}.`,
     `- Not asked (the next question could have crossed --max-usd): ${at.result.overBudget.length === 0 ? "none" : at.result.overBudget.join(", ")}.`,
     "",
     "## Cost and speed (spec v2 #4 §12.5)",

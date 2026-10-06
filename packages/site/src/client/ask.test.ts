@@ -168,6 +168,44 @@ describe("the sidebar (spec v2 #4 R21)", () => {
     expect(doc.activeElement).toBe(button);
   });
 
+  it("leaves an Escape another widget already handled alone", () => {
+    const { button, sidebar, doc } = setup();
+    button.dispatch(event("click"));
+    const handled = event("keydown", { key: "Escape" });
+    handled.preventDefault();
+    doc.dispatch(handled);
+    expect(sidebar.hidden).toBe(false);
+  });
+
+  it("shows the /special/ask/ form, hidden until the client runs", () => {
+    const doc = new FakeDocument();
+    const b = doc.build.bind(doc);
+    const input = b("textarea");
+    const form = b("form", { "data-ask-form": "", hidden: "" }, input);
+    const live = b("div", { "data-ask-live": "" });
+    const result = b("div", { "data-ask-result": "" });
+    doc.body.append(b("section", { "data-ask": "page" }, form, live, result));
+    installAsk({
+      document: doc as unknown as AskPageDocument,
+      location: { pathname: "/special/ask/" },
+      storage: () => memoryStorage(),
+      fetch: async () => json(200, ANSWERING),
+      pagefind: async () => PAGEFIND,
+    });
+    expect(form.hidden).toBe(false);
+  });
+
+  it("drops a kept answer whose question is longer than the sidebar takes", () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      ANSWERS_KEY,
+      JSON.stringify([{ question: "q".repeat(501), response: makeAskResponse() }]),
+    );
+    const { input, result } = setup({ storage });
+    expect(input.value).toBe("");
+    expect(result.children).toHaveLength(0);
+  });
+
   it("reopens on the next page when it was open, without taking focus", () => {
     const storage = memoryStorage();
     storage.setItem(OPEN_KEY, "1");

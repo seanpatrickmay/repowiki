@@ -1,7 +1,9 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { createReadStream, realpathSync, statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, relative, sep } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { hostAllowed, securityHeaders } from "@repowiki/ask";
 import { cut, oneLine } from "@repowiki/query";
 import { CliError } from "./manifest-cli.ts";
@@ -35,7 +37,7 @@ const inside = (root: string, path: string) => {
  * The file a URL path names under the site (spec v2 #4 §7), or null for a 404: the path is
  * percent-decoded once and may hold no NUL, backslash, `.`, `..` or empty segment, and no
  * dotfile; the file's real path must stay inside the site's (a symlink out is a 404). A
- * directory serves its index.html.
+ * directory serves its index.html; a file named with a trailing slash is a 404.
  */
 export function resolveStaticPath(siteDir: string, url: string): string | null {
   const raw = url.split("?")[0]?.split("#")[0] ?? "";
@@ -47,7 +49,8 @@ export function resolveStaticPath(siteDir: string, url: string): string | null {
   }
   if (!path.startsWith("/") || /[\0\\]/.test(path)) return null;
   const segments = path.slice(1).split("/");
-  if (segments.at(-1) === "") segments.pop();
+  const directory = segments.at(-1) === "";
+  if (directory) segments.pop();
   if (segments.some((s) => s === "" || s === "." || s === ".." || s.startsWith("."))) return null;
   try {
     const root = realpathSync(siteDir);
@@ -56,6 +59,9 @@ export function resolveStaticPath(siteDir: string, url: string): string | null {
     if (statSync(target).isDirectory()) {
       target = realpathSync(join(target, "index.html"));
       if (!inside(root, target)) return null;
+    } else if (directory && segments.length > 0) {
+      // A file named as a directory ("/index.html/") is no page of the site.
+      return null;
     }
     return statSync(target).isFile() ? target : null;
   } catch {
@@ -100,6 +106,22 @@ export function serveRequests(options: {
       });
       response.end(request.method === "HEAD" ? undefined : body);
     };
+    // A file is streamed, not read whole, so a large one neither blocks an answer's stream nor
+    // sits in memory; HEAD sends its length and no body.
+    const sendFile = async (status: number, type: string, path: string) => {
+      const { size } = await stat(path);
+      response.writeHead(status, {
+        ...headers,
+        ...api,
+        "content-type": type,
+        "content-length": String(size),
+      });
+      if (request.method === "HEAD") {
+        response.end();
+        return;
+      }
+      await pipeline(createReadStream(path), response);
+    };
     try {
       if (!hostAllowed(request.headers.host, options.port())) {
         send(
@@ -116,12 +138,12 @@ export function serveRequests(options: {
       }
       const file = resolveStaticPath(options.siteDir, url);
       if (file !== null) {
-        send(200, contentTypeFor(file), readFileSync(file));
+        await sendFile(200, contentTypeFor(file), file);
         return;
       }
       const missing = resolveStaticPath(options.siteDir, "/404.html");
       if (missing === null) send(404, "text/plain; charset=utf-8", "Not found.\n");
-      else send(404, "text/html; charset=utf-8", readFileSync(missing));
+      else await sendFile(404, "text/html; charset=utf-8", missing);
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
       options.log?.(
@@ -134,21 +156,59 @@ export function serveRequests(options: {
 }
 
 /**
+ * wiki:serve's answer while the site is still being built: the Host guard first (421, R18, as
+ * serveRequests), then 503 with the security headers, no-store and Retry-After.
+ */
+export function serveBuilding(options: {
+  csp: string;
+  port: () => number;
+}): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
+  const headers = securityHeaders(options.csp);
+  return async (request, response) => {
+    const allowed = hostAllowed(request.headers.host, options.port());
+    response.writeHead(allowed ? 503 : 421, {
+      ...headers,
+      "cache-control": "no-store",
+      ...(allowed ? { "retry-after": "5" } : {}),
+      "content-type": "text/plain; charset=utf-8",
+    });
+    response.end(
+      request.method === "HEAD"
+        ? undefined
+        : allowed
+          ? "The site is being built; try again in a moment.\n"
+          : "This server answers only as 127.0.0.1 or localhost.\n",
+    );
+  };
+}
+
+/** The headers of the last-resort 500: text, no store, and a CSP that allows nothing. */
+const LAST_RESORT_HEADERS = {
+  "content-type": "text/plain; charset=utf-8",
+  "cache-control": "no-store",
+  "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+};
+
+/**
  * Listens on 127.0.0.1 only (spec v2 #4 R18: there is no --host); a busy port is a CliError
  * naming --port. Resolves with the server and the port it took (`port` 0 takes any free one).
+ * A handler that throws past its own catch gets a bare 500 with LAST_RESORT_HEADERS; a server
+ * error once listening is logged on one line.
  */
 export function listenLoopback(
   handle: (request: IncomingMessage, response: ServerResponse) => Promise<void>,
   port: number,
+  log: (line: string) => void = () => {},
 ): Promise<{ server: Server; port: number }> {
   return new Promise((resolve, reject) => {
     const server = createServer((request, response) => {
       handle(request, response).catch(() => {
-        if (!response.headersSent) response.writeHead(500);
+        if (!response.headersSent) response.writeHead(500, LAST_RESORT_HEADERS);
         response.end();
       });
     });
-    server.once("error", (error: NodeJS.ErrnoException) => {
+    const starting = (error: NodeJS.ErrnoException) => {
       reject(
         error.code === "EADDRINUSE"
           ? new CliError(
@@ -156,8 +216,13 @@ export function listenLoopback(
             )
           : error,
       );
-    });
+    };
+    server.once("error", starting);
     server.listen(port, "127.0.0.1", () => {
+      server.off("error", starting);
+      server.on("error", (error: Error) => {
+        log(`serve: the server failed (${cut(oneLine(error.message), 200)})`);
+      });
       resolve({ server, port: (server.address() as AddressInfo).port });
     });
   });

@@ -81,13 +81,16 @@ export function turnOnePack(
   for (const id of pages) {
     lines.push(unmarkHandles(listedPage(id, pageTitle(view, id), view.summary(id))));
   }
-  const shown = indexes.claims.search(asked, PACK_CLAIMS, PACK_CLAIMS_PER_PAGE);
-  lines.push("", "Claims that match:");
-  if (shown.length === 0) lines.push("- none");
-  for (const handle of shown) {
+  // `shown` is what was rendered, so a handle counts as shown only when its line is in the pack.
+  const shown: string[] = [];
+  const claimLines: string[] = [];
+  for (const handle of indexes.claims.search(asked, PACK_CLAIMS, PACK_CLAIMS_PER_PAGE)) {
     const entry = indexes.claims.entries.get(handle);
-    if (entry !== undefined) lines.push(claimLine(view, entry));
+    if (entry === undefined) continue;
+    claimLines.push(claimLine(view, entry));
+    shown.push(handle);
   }
+  lines.push("", "Claims that match:", ...(claimLines.length === 0 ? ["- none"] : claimLines));
   lines.push("", "Read a page with read_page(id) for its other claims.");
   return { text: `${lines.join("\n")}\n`, shown };
 }

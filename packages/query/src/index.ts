@@ -67,6 +67,8 @@ export {
   createWikiTools,
   MAX_SEARCH_RESULTS,
   pageSearchIndex,
+  SEARCH_TOOL_DESCRIPTION,
+  SearchToolInput,
   searchResults,
 } from "./wiki-tools.ts";
 export {

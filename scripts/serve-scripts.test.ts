@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
+import { siteMarker } from "@repowiki/site/format";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SCRIPT = "scripts/wiki-serve.ts";
@@ -20,7 +21,7 @@ beforeAll(() => {
   // A site already built from this export, so serving it needs no Astro build.
   const site = join(out, "site");
   mkdirSync(site);
-  writeFileSync(join(site, ".repowiki-site"), "");
+  writeFileSync(join(site, ".repowiki-site"), siteMarker());
   writeFileSync(join(site, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
   writeFileSync(join(site, "index.html"), "<p>main page</p>");
   writeFileSync(join(site, "404.html"), "<p>not found</p>");
@@ -195,6 +196,47 @@ describe("wiki-serve.ts as a process", () => {
   );
 
   it(
+    "answers with a key's session under both caps, and never shows the key",
+    async () => {
+      const keyed = mkdtempSync(join(tmpdir(), "repowiki-serve-keyed-"));
+      try {
+        writeFileSync(join(keyed, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
+        const site = join(keyed, "site");
+        mkdirSync(site);
+        writeFileSync(join(site, ".repowiki-site"), siteMarker());
+        writeFileSync(join(site, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
+        writeFileSync(join(site, "index.html"), "<p>main page</p>");
+        const key = "sk-ant-test-not-a-key";
+        const server = await serve(
+          ["--out", keyed, "--port", "0", "--question-usd", "0.1", "--max-usd", "2"],
+          { ...keyless(), ANTHROPIC_API_KEY: key },
+        );
+        expect(server.stderr()).toMatch(
+          /^ask: claude-haiku-4-5, about \$\d+\.\d\d a question, at most \$0\.10 a question and \$2\.00 this session$/m,
+        );
+        expect(server.stderr()).not.toContain("routing only");
+        const status = await get(server.port, "/api/ask/status");
+        expect(JSON.parse(status.body)).toEqual({
+          mode: "answer",
+          head: sample.sha,
+          model: "claude-haiku-4-5",
+          questionUsd: 0.1,
+          sessionLeftUsd: 2,
+        });
+        expect(status.body).not.toContain(key);
+        expect(existsSync(join(keyed, "ask"))).toBe(true);
+        server.child.kill("SIGINT");
+        expect(await server.exited).toBe(0);
+        expect(server.stderr()).toContain("0 questions, 0 cached, $0.0000");
+        expect(`${server.stderr()}${server.stdout()}`).not.toContain(key);
+      } finally {
+        rmSync(keyed, { recursive: true, force: true });
+      }
+    },
+    PROCESS_TIMEOUT_MS,
+  );
+
+  it(
     "exits 2 for a --config it cannot read, before building the site",
     () => {
       const stale = staleOut();
@@ -303,7 +345,7 @@ describe("wiki-serve.ts as a process", () => {
     try {
       writeFileSync(join(stale, "export.json"), `${JSON.stringify(sample.wiki, null, 2)}\n`);
       const server = await serve(["--out", stale, "--port", "0", "--no-ask"]);
-      expect(server.stderr()).toContain("building the site (export changed)");
+      expect(server.stderr()).toContain("building the site (the export or the site code changed)");
       expect(readFileSync(join(stale, "site", "export.json"), "utf8")).toBe(
         `${JSON.stringify(sample.wiki, null, 2)}\n`,
       );

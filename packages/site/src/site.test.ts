@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
+import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import {
   type BuiltSite,
@@ -270,7 +271,8 @@ describe("site build directory safety", () => {
       const result = runCli(["build", "--export", exportFile, "--out", outDir]);
       expect(result.status).toBe(0);
       expect(existsSync(join(outDir, "index.html"))).toBe(true);
-      expect(existsSync(join(outDir, ".repowiki-site"))).toBe(true);
+      // The marker is written last, with the site code's format: a build cut short has none.
+      expect(readFileSync(join(outDir, ".repowiki-site"), "utf8")).toBe(siteMarker());
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -365,6 +367,28 @@ describe(".astro dir confinement", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
       rmSync(cliCwd, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("keeps each build's server chunks out of packages/site, so concurrent builds do not race", () => {
+    // Astro puts a static build's server chunks in <cwd>/.astro/.prerender when the out dir is
+    // outside the cwd; builds that shared packages/site as their cwd overwrote each other's.
+    const shared = fileURLToPath(new URL("../.astro/.prerender", import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-race-"));
+    rmSync(shared, { recursive: true, force: true });
+    mkdirSync(join(shared, ".."), { recursive: true });
+    writeFileSync(
+      shared,
+      "a file where a build that shares packages/site's .astro needs a directory",
+    );
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const result = runCli(["build", "--export", exportFile, "--out", join(dir, "site")]);
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      rmSync(shared, { force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   }, 120_000);
 });
@@ -494,6 +518,11 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
       expect(html, page).toContain(
         '<aside id="ask-panel" class="ask-sidebar" data-pagefind-ignore="all" hidden>',
       );
+      const main = html.indexOf("</main>");
+      expect({ page, after: main >= 0 && html.indexOf('<aside id="ask-panel"') > main }).toEqual({
+        page,
+        after: true,
+      });
     }
   });
 
@@ -518,6 +547,8 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
     expect(html).not.toContain("data-ask-open");
     expect(html).not.toContain('id="ask-panel"');
     expect(html).toContain('<meta name="robots" content="noindex">');
+    // Without the client the form could only reload the page: it shows once the client runs.
+    expect(html).toContain('<form class="ask-form" data-ask-form hidden>');
   });
 
   it("ships the ask client in the Layout's script, with no zod in the browser", () => {
@@ -527,13 +558,22 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
       .filter((js) => js.includes("/api/ask/status"));
     expect(client).toHaveLength(1);
     expect(client[0]).toContain("/pagefind/pagefind.js");
-    expect(client[0]).not.toMatch(/ZodError|\$ZodType/);
+    expect(client[0]).not.toMatch(/ZodError|\$ZodType|too_big|invalid_type/);
   });
 
   it("covers the viewport under 720px", () => {
     const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
     const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
-    expect(css).toMatch(/@media[^{]*720px[^{]*\{[^@]*\.ask-sidebar\{[^}]*position:\s*fixed/);
+    // The rule must sit inside the 720px block itself: no "}}" (the block's end) before it.
+    expect(css).toMatch(
+      /@media[^{]*720px[^{]*\{(?:(?!\}\})[^@])*\.ask-sidebar\{[^}]*position:\s*fixed/,
+    );
+  });
+
+  it("outlines the question box on keyboard focus, as links and buttons are", () => {
+    const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
+    const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
+    expect(css).toMatch(/textarea:focus-visible/);
   });
 });
 

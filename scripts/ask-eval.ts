@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { askIndexes } from "@repowiki/ask";
+import { ASK_TURN_TIMEOUT_MS, askIndexes } from "@repowiki/ask";
 import { WikiBuildError } from "@repowiki/engine";
 import { loadQuestions, QuestionFileError, selectQuestions } from "@repowiki/eval";
 import { createClaudeProvider, createClaudeToolProvider, createLedger } from "@repowiki/llm";
@@ -16,6 +16,7 @@ import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
 import { checkAskableQuestions, renderAskReport, runAskEval } from "./ask-eval-run.ts";
 import {
+  baselineGate,
   criteriaLines,
   devBaseline,
   readSheetEntries,
@@ -33,8 +34,12 @@ import { exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
  * pnpm ask:eval <repo> --questions <file> (spec v2 #4 §7): asks the dev set of the M7 question
  * file through the ask (no cache), judges each answer with the M7 judge, and writes report.md and
  * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks and the
- * comparison with his latest complete eval:run dev run (§12.2). States its estimate first, then
- * stops (exit 1) when there is no such run, unless --no-baseline; --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
+ * comparison with his latest complete eval:run dev run (§12.2). report.md names questions by id
+ * only; results.json, the run's raw record in the owner's out dir, keeps each question's text,
+ * as support.md's routing lines do. States its estimate first, then names the dev run it
+ * compares with or, with none, stops (exit 1) unless --no-baseline; a dry run with none says the
+ * run would stop and exits 0, and the smoke set needs none. Never runs the held-out set (R25)
+ * and never writes in <repo>.
  * `pnpm ask:eval tally <support.md>` counts a marked support sheet against the entries recorded
  * beside it (support-entries.json).
  */
@@ -90,12 +95,18 @@ async function main(): Promise<void> {
   });
   console.error(askEvalEstimateLine(estimate, args));
   // The comparison the run exists for is found before any paid call (spec v2 #4 §12.2).
-  const baseline = devBaseline(out, loaded.hash);
-  if (baseline === null && args.baseline) {
-    console.error(
-      `no complete \`eval:run --set dev\` run on this question file is in ${join(out, "eval")}; run \`pnpm eval:run <repo> --questions <file> --set dev\` first, or pass --no-baseline`,
-    );
-    process.exitCode = 1;
+  const baseline =
+    args.set === "dev" ? devBaseline(out, loaded.hash, (line) => console.error(line)) : null;
+  const gate = baselineGate({
+    set: args.set,
+    required: args.baseline,
+    dryRun: args.dryRun,
+    baseline,
+    evalDir: join(out, "eval"),
+  });
+  if (gate.line !== null) console.error(gate.line);
+  if (gate.stop) {
+    process.exitCode = gate.exitCode;
     return;
   }
   if (args.dryRun) return;
@@ -119,7 +130,7 @@ async function main(): Promise<void> {
     view,
     indexes: askIndexes(view),
     questions,
-    provider: createClaudeToolProvider({ models, ledger, runId }),
+    provider: createClaudeToolProvider({ models, ledger, runId, timeoutMs: ASK_TURN_TIMEOUT_MS }),
     judge: createClaudeProvider({ models, ledger, runId }),
     model: models.ask,
     judgeModel: models.evalJudge,
@@ -144,7 +155,7 @@ async function main(): Promise<void> {
       set: args.set,
       startedAt,
       result,
-      extra: criteriaLines(result, baseline),
+      extra: criteriaLines(result, baseline, { set: args.set, head: wiki.head }),
     }),
   );
   const sheet = supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt });

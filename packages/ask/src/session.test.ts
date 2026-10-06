@@ -87,12 +87,56 @@ describe("createAskSession", () => {
     expect(requests).toHaveLength(2);
   });
 
-  it("answers one question at a time", async () => {
-    const { session: s } = session([ANSWER]);
+  it("answers one question at a time, refusing another unlogged and uncharged", async () => {
+    const { session: s, lines, requests } = session([ANSWER]);
     const first = s.ask(ask("Where are signals made?"));
     await expect(s.ask(ask("What are deliverables?"))).rejects.toBeInstanceOf(BusyError);
-    await first;
+    expect(await first).toMatchObject({ status: "answered", cached: false });
     await s.idle();
+    expect(lines).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(s.totals()).toEqual({ questions: 1, cached: 0, usd: TURN_USD });
+  });
+
+  it("serves a cached answer while another question is in flight, as it costs nothing", async () => {
+    const { session: s } = session([ANSWER, ANSWER]);
+    await s.ask(ask("Where are signals made?"));
+    const second = s.ask(ask("What are deliverables?"));
+    expect((await s.ask(ask("Where are signals made?"))).cached).toBe(true);
+    await second;
+  });
+
+  it("charges a turn it cannot price at the question's cap", async () => {
+    const unpriced = {
+      content: [
+        {
+          type: "tool_use",
+          id: "tu_1",
+          name: "answer",
+          input: {
+            status: "answered",
+            sentences: [{ text: "Signals are made by `ingest_chunk`.", claims: ["signals#s-1"] }],
+            readNext: [],
+          },
+        },
+      ],
+      stopReason: "tool_use",
+      usage: TURN_USAGE,
+      model: "claude-unknown-9",
+    } as ScriptedTurn;
+    const { session: s } = session([unpriced], { questionUsd: 0.05, maxUsd: 1 });
+    const answered = await s.ask(ask("Where are signals made?"));
+    expect(answered.cost).toMatchObject({ turns: 1, usd: null });
+    expect(s.totals().usd).toBe(0.05);
+  });
+
+  it.each([
+    ["a question cap of 0", { questionUsd: 0, maxUsd: 1 }],
+    ["a negative session cap", { questionUsd: 0.05, maxUsd: -1 }],
+    ["a session cap under the question cap", { questionUsd: 0.5, maxUsd: 0.1 }],
+    ["a cap that is not a number", { questionUsd: Number.NaN, maxUsd: 1 }],
+  ])("refuses %s", (_what, caps) => {
+    expect(() => session([], caps)).toThrow(RangeError);
   });
 
   it("starts a question only if the session cap still covers its cap, and says so", async () => {
@@ -123,6 +167,19 @@ describe("createAskSession", () => {
     expect(s.totals()).toEqual({ questions: 1, cached: 0, usd: 0 });
     expect((await s.ask(ask("Where are signals made?"))).status).toBe("answered");
     expect(requests).toHaveLength(2);
+  });
+
+  it("caches the model's own not-found, but not one a refused or unusable answer left", async () => {
+    const own = answerTurn([], "not-found");
+    const refused = answerTurn([["It is in `nowhere_at_all`.", ["signals#s-1"]]]);
+    const { session: s, requests } = session([refused, refused, own, ANSWER]);
+    const failed = await s.ask(ask("Where are signals made?"));
+    expect(failed).toMatchObject({ status: "not-found", refused: 1 });
+    const second = await s.ask(ask("Where are signals made?"));
+    expect(second).toMatchObject({ status: "not-found", refused: 0, cached: false });
+    expect(requests).toHaveLength(3);
+    expect((await s.ask(ask("Where are signals made?"))).cached).toBe(true);
+    expect(requests).toHaveLength(3);
   });
 
   it("logs a question that throws after a paid turn, and counts what it spent", async () => {
