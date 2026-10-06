@@ -28,6 +28,7 @@ import {
   UnknownManifestError,
 } from "./errors.ts";
 import { migrate } from "./migrations.ts";
+import { type PeopleStore, peopleStore } from "./people.ts";
 
 /** A current claim whose code citation overlaps a queried line range. */
 export interface CitingClaim {
@@ -38,7 +39,7 @@ export interface CitingClaim {
   endLine: number;
 }
 
-export interface Store {
+export interface Store extends PeopleStore {
   close(): void;
   /** Runs fn atomically; nested calls become savepoints. */
   transaction<T>(fn: () => T): T;
@@ -62,6 +63,8 @@ export interface Store {
     additions: Readonly<Record<string, readonly string[]>>,
   ): Manifest;
   getLatestManifest(): Manifest | null;
+  /** Every stored manifest, newest first (People maps an old path through them, R19). */
+  listManifests(): Manifest[];
   /**
    * The most recent manifest stored with llmRevised: true. Manifest drift (spec §6.1 step 4) is
    * measured against it; manifests that only gained members do not move the baseline.
@@ -276,6 +279,7 @@ export function openStore(path: string): Store {
     );
 
   return {
+    ...peopleStore(db),
     close: () => db.close(),
     transaction: (fn) => db.transaction(fn)(),
 
@@ -381,6 +385,11 @@ export function openStore(path: string): Store {
     },
 
     getLatestManifest: latestManifest,
+
+    listManifests: () =>
+      (db.prepare("SELECT body FROM manifests ORDER BY seq DESC").all() as BodyRow[]).map((row) =>
+        Manifest.parse(JSON.parse(row.body)),
+      ),
 
     getDriftBaseline: () =>
       readManifest(

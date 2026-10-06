@@ -432,3 +432,31 @@ export function contributorsOf(
   all.sort((a, b) => b.lines - a.lines || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { contributors: all.slice(0, limit), more: Math.max(0, all.length - limit) };
 }
+
+/**
+ * One row of the People registry (spec v2 #6 §5 rule 5): a person id ever assigned, with the
+ * salted identity keys it stands for. Private: it never leaves the store, since even salted keys
+ * of an excluded person's emails are theirs. A redirect row names the id it now points to and
+ * keeps no keys; an excluded row keeps its keys so the person stays excluded.
+ */
+export const RegistryRow = z
+  .object({
+    id: PersonId,
+    /** Creation order: R13's "oldest row" breaks a tie, and a new id never reuses a row's. */
+    order: count,
+    name: PersonName,
+    kind: PersonKind,
+    status: z.enum(["active", "redirect", "excluded"]),
+    to: PersonId.nullable(),
+    /** Salted SHA-256 identity keys, sorted, without repeats. */
+    keys: z.array(z.string().regex(/^[0-9a-f]{64}$/)),
+  })
+  .superRefine((row, ctx) => {
+    if ((row.status === "redirect") !== (row.to !== null))
+      ctx.addIssue({ code: "custom", message: "only a redirect names a target", path: ["to"] });
+    if (row.to === row.id)
+      ctx.addIssue({ code: "custom", message: "a row cannot redirect to itself", path: ["to"] });
+    if (!row.keys.every((k, i) => i === 0 || (row.keys[i - 1] ?? "") < k))
+      ctx.addIssue({ code: "custom", message: "keys are sorted, without repeats", path: ["keys"] });
+  });
+export type RegistryRow = z.infer<typeof RegistryRow>;

@@ -70,3 +70,11 @@ export class StaleArchitectureParentError extends StoreError {
     );
   }
 }
+
+export class StalePersonParentError extends StoreError {
+  constructor(personId: string, current: string | null, parent: string | null) {
+    super(
+      `the narrative revision for ${personId} names parent ${parent ?? "none"}, but the current one is ${current ?? "none"}`,
+    );
+  }
+}
