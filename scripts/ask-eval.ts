@@ -33,8 +33,8 @@ import { exitWithError, requireApiKey, writeFileAtomic } from "./wiki-cli.ts";
  * pnpm ask:eval <repo> --questions <file> (spec v2 #4 §7): asks the dev set of the M7 question
  * file through the ask (no cache), judges each answer with the M7 judge, and writes report.md and
  * results.json to <out>/eval/ask-<time>/, with support.md for the owner's blind checks and the
- * comparison with his latest complete eval:run dev run (§12.2). States its estimate first;
- * --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
+ * comparison with his latest complete eval:run dev run (§12.2). States its estimate first, then
+ * stops (exit 1) when there is no such run, unless --no-baseline; --dry-run stops there. Never runs the held-out set (R25) and never writes in <repo>.
  * `pnpm ask:eval tally <support.md>` counts a marked support sheet against the entries recorded
  * beside it (support-entries.json).
  */
@@ -89,6 +89,15 @@ async function main(): Promise<void> {
     batchJudge: args.batch,
   });
   console.error(askEvalEstimateLine(estimate, args));
+  // The comparison the run exists for is found before any paid call (spec v2 #4 §12.2).
+  const baseline = devBaseline(out, loaded.hash);
+  if (baseline === null && args.baseline) {
+    console.error(
+      `no complete \`eval:run --set dev\` run on this question file is in ${join(out, "eval")}; run \`pnpm eval:run <repo> --questions <file> --set dev\` first, or pass --no-baseline`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (args.dryRun) return;
   requireApiKey("ask:eval");
   const now = new Date();
@@ -126,7 +135,6 @@ async function main(): Promise<void> {
       ),
   });
   const report = join(runDir, "report.md");
-  const baseline = devBaseline(out, loaded.hash);
   writeFileSync(
     report,
     renderAskReport({

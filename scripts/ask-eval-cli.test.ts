@@ -31,7 +31,9 @@ describe("parseAskEvalArgs", () => {
       maxUsd: 1.5,
       batch: true,
       dryRun: false,
+      baseline: true,
     });
+    expect(parseAskEvalArgs(["r", "--questions", "q", "--no-baseline"]).baseline).toBe(false);
   });
 
   it("refuses the held-out set, saying why", () => {

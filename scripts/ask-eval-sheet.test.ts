@@ -240,6 +240,28 @@ describe("devBaseline and criteriaLines", () => {
     }
   });
 
+  it("takes the latest by its start time, not by its name or its text", () => {
+    const out = mkdtempSync(join(tmpdir(), "repowiki-ask-baseline-"));
+    try {
+      // dev-z started first; dev-a's offset makes it the latest though its text sorts first.
+      devRun(out, "dev-z", info("2026-10-02T09:00:00.000Z"), 1);
+      const latest = devRun(out, "dev-a", info("2026-10-02T08:30:00.000-02:00"), 2);
+      devRun(out, "dev-m", info("2026-10-02T08:00:00.000Z"), 0);
+      expect(devBaseline(out, "f".repeat(64))?.runDir).toBe(latest);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it("does not call the bar met against a wiki agent that got none right", () => {
+    const zero = { runDir: "/x/eval/dev-a", wikiCorrect: 0, questions: 2 };
+    const two = result(2);
+    const none = { ...two, rows: two.rows.map((r) => ({ ...r, score: 0 as const })) };
+    const line = criteriaLines(none, zero).join("\n");
+    expect(line).not.toContain(": met");
+    expect(line).toContain("cannot be scored: the wiki agent got none right");
+  });
+
   it("says when there is nothing to compare against", () => {
     expect(criteriaLines(result(2), null).join("\n")).toContain("cannot be scored yet");
   });

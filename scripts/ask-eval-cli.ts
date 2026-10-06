@@ -16,7 +16,7 @@ import { DEFAULT_QUESTION_USD } from "./serve-cli.ts";
 import { badOption, once, priced } from "./wiki-cli.ts";
 
 export const ASK_EVAL_USAGE =
-  "usage: pnpm ask:eval <repo-path> --questions <file> [--set dev|smoke] [--out dir] [--config file.json] [--max-usd N] [--no-batch] [--dry-run]";
+  "usage: pnpm ask:eval <repo-path> --questions <file> [--set dev|smoke] [--out dir] [--config file.json] [--max-usd N] [--no-batch] [--no-baseline] [--dry-run]";
 
 /** The run asks no question once its next one could cross this, unless --max-usd says otherwise. */
 export const DEFAULT_ASK_EVAL_USD = 1.5;
@@ -31,6 +31,8 @@ export interface AskEvalArgs {
   maxUsd: number;
   batch: boolean;
   dryRun: boolean;
+  /** False (--no-baseline) runs without a dev run of the wiki agent to compare with. */
+  baseline: boolean;
 }
 
 const fail = (problem: string) => new CliError(`${problem}; ${ASK_EVAL_USAGE}`);
@@ -76,6 +78,7 @@ export function parseAskEvalArgs(argv: readonly string[]): AskEvalArgs {
     maxUsd,
     batch: once("--no-batch", v["no-batch"], ASK_EVAL_USAGE) !== true,
     dryRun: once("--dry-run", v["dry-run"], ASK_EVAL_USAGE) === true,
+    baseline: once("--no-baseline", v["no-baseline"], ASK_EVAL_USAGE) !== true,
   };
 }
 
@@ -90,6 +93,7 @@ function parse(argv: readonly string[]) {
       config: { type: "string", multiple: true },
       "max-usd": { type: "string", multiple: true },
       "no-batch": { type: "boolean", multiple: true },
+      "no-baseline": { type: "boolean", multiple: true },
       "dry-run": { type: "boolean", multiple: true },
     },
   });

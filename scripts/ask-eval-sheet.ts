@@ -207,12 +207,13 @@ export interface DevBaseline {
 
 /**
  * The run spec v2 #4 §12.2 compares against: the latest complete `eval:run --set dev` under
- * `<out>/eval/` that asked the wiki agent the same question file (same hash), or null.
+ * `<out>/eval/` that asked the wiki agent the same question file (same hash), or null. Latest
+ * by the instant it started (Date.parse, so an offset compares right), ties by directory.
  */
 export function devBaseline(out: string, questionsHash: string): DevBaseline | null {
   const dir = join(out, "eval");
   if (!existsSync(dir)) return null;
-  let best: (DevBaseline & { startedAt: string }) | null = null;
+  let best: (DevBaseline & { started: number }) | null = null;
   for (const name of readdirSync(dir)) {
     if (!name.startsWith("dev-")) continue;
     const runDir = join(dir, name);
@@ -222,12 +223,17 @@ export function devBaseline(out: string, questionsHash: string): DevBaseline | n
       if (!info.agents.includes("wiki")) continue;
       const summary = summarize(info, readRecords(runDir));
       if (!summary.complete) continue;
-      if (best === null || info.startedAt > best.startedAt) {
+      const started = Date.parse(info.startedAt);
+      if (
+        best === null ||
+        started > best.started ||
+        (started === best.started && runDir > best.runDir)
+      ) {
         best = {
           runDir,
           wikiCorrect: summary.agents.wiki.correct,
           questions: info.questions.length,
-          startedAt: info.startedAt,
+          started,
         };
       }
     } catch {
@@ -246,9 +252,11 @@ export function criteriaLines(result: AskEvalResult, baseline: DevBaseline | nul
   const accuracy =
     baseline === null
       ? "no complete `eval:run --set dev` run on this question file is in the out dir's eval/ folder, so this cannot be scored yet; run `pnpm eval:run <repo> --questions <file> --set dev` first."
-      : baseline.questions !== n
-        ? `the run compared against (${markdownText(baseline.runDir, 300)}) asked ${baseline.questions} questions and this one ${n}, so they cannot be compared.`
-        : `the ask got ${correct} of ${n} and the wiki agent ${baseline.wikiCorrect} of ${baseline.questions} in ${markdownText(baseline.runDir, 300)}: ${correct * 100 >= baseline.wikiCorrect * ACCURACY_PERCENT ? "met" : "not met"} (at least ${ACCURACY_PERCENT}% of the wiki agent's).`;
+      : baseline.wikiCorrect === 0
+        ? `cannot be scored: the wiki agent got none right in ${markdownText(baseline.runDir, 300)}, so there is no score to reach.`
+        : baseline.questions !== n
+          ? `the run compared against (${markdownText(baseline.runDir, 300)}) asked ${baseline.questions} questions and this one ${n}, so they cannot be compared.`
+          : `the ask got ${correct} of ${n} and the wiki agent ${baseline.wikiCorrect} of ${baseline.questions} in ${markdownText(baseline.runDir, 300)}: ${correct * 100 >= baseline.wikiCorrect * ACCURACY_PERCENT ? "met" : "not met"} (at least ${ACCURACY_PERCENT}% of the wiki agent's).`;
   return [
     "",
     "## Accuracy, grounding and routing (spec v2 #4 \u00A712.2-4)",
