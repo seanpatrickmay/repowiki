@@ -1,6 +1,7 @@
 import {
   type GitHubPull,
   type GitHubSnapshot,
+  hasCitableLines,
   InFlight,
   type InFlightPull,
   type InFlightSummary,
@@ -36,13 +37,21 @@ export interface DeriveInput {
   suggest?: Suggest;
   driftThreshold?: number;
   log?: (line: string) => void;
+  /**
+   * An error as one line for `log` (the scripts' describeError: redacted, printable, causes with
+   * --verbose); by default its message.
+   */
+  describeError?: (error: unknown) => string;
 }
 
 /** One pull request as derived, before its summary is settled. */
 export interface DerivedPull {
   /** Its snapshot entry, with `summary: null`. */
   pull: InFlightPull;
-  /** Its summary request; null when its head is not fetched or it keeps no file. */
+  /**
+   * Its summary request; null when its head is not fetched or it has no citable line (no kept file
+   * adds or changes text lines, or the pack shows none of them): nothing to summarise, no spend.
+   */
   request: SummaryRequest | null;
   /** The cached summary for that request, or null. */
   cached: InFlightSummary | null;
@@ -105,8 +114,8 @@ async function requestOf(
   manifest: Manifest,
   model: string,
 ): Promise<SummaryRequest | null> {
+  if (!hasCitableLines(impact.files)) return null;
   const kept = impact.changes.flatMap((c) => (c.newPath === null ? [] : [c.newPath]));
-  if (kept.length === 0 && impact.changes.length === 0) return null;
   const old = new Set(impact.changes.flatMap((c) => (c.oldPath === null ? [] : [c.oldPath])));
   const read = (sha: string | null, only: Set<string>) =>
     sha === null || only.size === 0
@@ -116,7 +125,7 @@ async function requestOf(
     read(impact.mergeBase, old),
     read(pull.headRefOid, new Set(kept)),
   ]);
-  return summaryRequest(
+  const request = summaryRequest(
     {
       pull,
       manifest,
@@ -128,6 +137,8 @@ async function requestOf(
     },
     model,
   );
+  // A claim must cite a changed line the pack shows: with none shown, no answer could verify.
+  return [...request.changed.values()].some((lines) => lines.size > 0) ? request : null;
 }
 
 /**
@@ -140,6 +151,9 @@ async function requestOf(
 export async function deriveInFlight(input: DeriveInput): Promise<Derived> {
   const { store, snapshot } = input;
   const log = input.log ?? (() => {});
+  const describe =
+    input.describeError ??
+    ((error: unknown) => (error instanceof Error ? error.message : String(error)));
   const wikiHead = store.getHead();
   const manifest = store.getLatestManifest();
   if (wikiHead === null || manifest === null)
@@ -187,8 +201,7 @@ export async function deriveInFlight(input: DeriveInput): Promise<Derived> {
         };
       } catch (error) {
         if (isMissingObject(error)) corrupt = true;
-        const why = error instanceof Error ? error.message : String(error);
-        log(`#${pull.number}: impact not computed: ${why}`);
+        log(`#${pull.number}: impact not computed: ${describe(error)}`);
         derived = { ...derived, pull: { ...bare(pull, "missing", manifest), closes } };
       }
     }

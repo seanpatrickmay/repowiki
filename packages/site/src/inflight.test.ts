@@ -140,6 +140,28 @@ describe("pullView", () => {
       "Its head commit could not be fetched, so its impact could not be computed.",
     );
     expect(view.summary).toBeNull();
+    expect(view.summaryNote).toBe("No summary of this pull request yet.");
     expect(view.title).toBe(HOSTILE_PULL_TITLE);
+  });
+
+  it("says there is nothing to summarise for a fetched pull with no added or changed lines", () => {
+    const pull = fixtureInFlight().pulls[0] as InFlight["pulls"][number];
+    const deletes = {
+      ...pull,
+      closes: [],
+      summary: null,
+      files: pull.files.map((f) => ({ ...f, status: "deleted" as const, additions: 0 })),
+    };
+    const s = site({ pulls: [deletes], issues: [] });
+    const view = pullView(s, inflightOf(s), deletes);
+    expect(view.summary).toBeNull();
+    expect(view.summaryNote).toBe(
+      "There is nothing to summarise: it adds or changes no lines of text.",
+    );
+    const fetched = { ...pull, closes: [], summary: null };
+    const t = site({ pulls: [fetched], issues: [] });
+    expect(pullView(t, inflightOf(t), fetched).summaryNote).toBe(
+      "No summary of this pull request yet.",
+    );
   });
 });

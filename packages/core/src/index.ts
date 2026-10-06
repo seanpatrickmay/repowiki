@@ -70,6 +70,7 @@ export {
   GitHubSnapshot,
   githubBlobUrl,
   githubUrl,
+  hasCitableLines,
   INFLIGHT_API_FILES,
   INFLIGHT_BODY_MAX_LENGTH,
   INFLIGHT_BRANCH_MAX_LENGTH,

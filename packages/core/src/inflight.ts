@@ -146,6 +146,16 @@ export const InFlightFile = z
   });
 export type InFlightFile = z.infer<typeof InFlightFile>;
 
+/**
+ * Whether a pull request's files hold a line a summary could cite (spec v2 #9 §7.1): some file it
+ * keeps (not deleted) adds or removes text lines. A binary file counts none; a file whose lines are
+ * only removed is citable at the head lines beside the removal. Otherwise there is nothing to
+ * summarise: no request is made, and the page says so.
+ */
+export function hasCitableLines(files: readonly InFlightFile[]): boolean {
+  return files.some((f) => f.status !== "deleted" && f.additions + f.deletions > 0);
+}
+
 /** What a pull request does to one feature (R8). `churn` is null where it would be infinite. */
 export const InFlightFeature = z.object({
   featureId: FeatureId,

@@ -199,6 +199,79 @@ describe("deriveInFlight", () => {
   });
 });
 
+describe("deriveInFlight's summary requests (R9, R14)", () => {
+  it("makes no request for a pull with no citable lines, so a refresh spends nothing on it", async () => {
+    const head = fx.pushPull(4, fx.first, { "src/deliverables/crud.py": null });
+    const snapshot = makeGitHubSnapshot({
+      pulls: [makeGitHubPull({ number: 4, headRefOid: head, closes: [] })],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const derived = await derive(snapshot, heads);
+    expect(derived.pulls[0]?.pull.files.map((f) => [f.path, f.status])).toEqual([
+      ["src/deliverables/crud.py", "deleted"],
+    ]);
+    expect(derived.pulls[0]?.request).toBeNull();
+    const p = provider();
+    const done = await complete(derived, p.provider);
+    expect(p.calls).toHaveLength(0);
+    expect(done.status.get(4)).toBe("none");
+  });
+
+  it("gives each pull its own key, finds a stored answer by it, and derives the same twice", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const four = fx.pushPull(4, fx.first, {
+      "src/signals/ingest.py": ingestWith(13, "    # A blank sentence makes no signal."),
+    });
+    const both = {
+      ...snapshot,
+      pulls: [
+        ...snapshot.pulls,
+        makeGitHubPull({
+          number: 4,
+          headRefOid: four,
+          closes: [],
+          updatedAt: "2026-09-30T09:00:00Z",
+        }),
+      ],
+    };
+    const fetched = fetchHeads(dir, fx.url, both.pulls, { protocol: "file" }).heads;
+    const derived = await derive(both, fetched);
+    expect(await derive(both, fetched)).toEqual(derived);
+    const [one, , , other] = derived.pulls;
+    const key = one?.request?.key ?? "";
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(other?.request?.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(other?.request?.key).not.toBe(key);
+    expect(one?.cached).toBeNull();
+    const done = await complete(derived, provider().provider);
+    const summary = done.inflight.pulls[0]?.summary;
+    if (summary == null) throw new Error("pull request #1 was summarised");
+    const again = await derive(both, fetched);
+    expect(again.pulls[0]?.cached).toEqual(summary);
+    expect(again.pulls[3]?.cached).toEqual(done.inflight.pulls[3]?.summary ?? null);
+  });
+
+  it("logs a pull request's failure through the caller's describeError", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    for (const entry of readdirSync(join(dir, "objects"))) {
+      if (/^[0-9a-f]{2}$/.test(entry) || entry === "pack")
+        rmSync(join(dir, "objects", entry), { recursive: true });
+    }
+    const logged: string[] = [];
+    await deriveInFlight({
+      store: fx.store,
+      dir,
+      snapshot,
+      heads,
+      model: MODEL,
+      log: (l) => logged.push(l),
+      describeError: (error) => `described: ${error instanceof Error ? error.name : "?"}`,
+    });
+    expect(logged[0]).toBe("#1: impact not computed: described: GitError");
+  });
+});
+
 describe("the summary round", () => {
   it("estimates the misses before any call, at 700 output tokens and at the 1,500 cap", async () => {
     const { snapshot, heads } = snapshotWithPulls();

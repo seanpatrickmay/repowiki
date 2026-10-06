@@ -2,6 +2,7 @@ import {
   claimAnchor,
   githubBlobUrl,
   githubUrl,
+  hasCitableLines,
   type InFlight,
   type InFlightPull,
   type IssueEvidence,
@@ -184,6 +185,8 @@ export interface PullView {
   merge: string;
   /** Null when the head was not fetched; the page says so. */
   summary: { html: string; refs: { n: number; label: string; href: string }[] }[] | null;
+  /** Plain text the page shows in place of a null summary. */
+  summaryNote: string;
   features: {
     anchor: string;
     feature: FeatureRef;
@@ -233,6 +236,10 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
       ? MERGE_WORDS[pull.merge]
       : `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`,
     summary,
+    summaryNote:
+      fetched && !hasCitableLines(pull.files)
+        ? "There is nothing to summarise: it adds or changes no lines of text."
+        : "No summary of this pull request yet.",
     // Every feature it touches, then any whose page cites a file it changes: each has an anchor
     // the article's markers link to.
     features: [...new Set([...pull.features, ...pull.effects].map((f) => f.featureId))].map(

@@ -32,7 +32,7 @@ import {
   suggestFor,
 } from "./inflight-cli.ts";
 import { CliError } from "./manifest-cli.ts";
-import { lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
+import { describeError, lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
 
 /** What a refresh works on: the documented repository, its out dir and store, and the flags. */
 export interface RefreshContext {
@@ -79,6 +79,7 @@ function derive(
     model: ctx.models.inflight,
     suggest: suggestFor(buildExport(ctx.store, exportOptions(ctx))),
     log: ctx.log,
+    describeError: (error) => describeError(error, ctx.args.verbose),
   });
 }
 
