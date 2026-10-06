@@ -16,3 +16,4 @@ export {
   type MailmapRule,
   parseMailmap,
 } from "./mailmap.ts";
+export { type Assigned, assignIds } from "./registry.ts";
