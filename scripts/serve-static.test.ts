@@ -11,6 +11,7 @@ import {
   contentTypeFor,
   listenLoopback,
   resolveStaticPath,
+  serveBuilding,
   serveRequests,
 } from "./serve-static.ts";
 
@@ -204,6 +205,46 @@ describe("serveRequests on a loopback socket", () => {
         "x-content-type-options": "nosniff",
       });
       expect(lines).toEqual(["serve: GET /boom failed (read failed here)"]);
+    } finally {
+      await new Promise((resolve) => listening.server.close(resolve));
+    }
+  });
+
+  it("answers 503 while the site builds, but 421 first for a foreign Host", async () => {
+    const csp = "default-src 'self'";
+    let port = 0;
+    const listening = await listenLoopback(serveBuilding({ csp, port: () => port }), 0);
+    port = listening.port;
+    const get = (headers: Record<string, string>) =>
+      new Promise<{ status: number; headers: Record<string, unknown>; body: string }>(
+        (resolve, reject) => {
+          const req = httpRequest({ host: "127.0.0.1", port, path: "/", headers }, (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => {
+              text += chunk;
+            });
+            res.on("end", () =>
+              resolve({ status: res.statusCode ?? 0, headers: res.headers, body: text }),
+            );
+          });
+          req.on("error", reject);
+          req.end();
+        },
+      );
+    try {
+      const foreign = await get({ host: `evil.example:${port}` });
+      expect(foreign.status).toBe(421);
+      expect(foreign.headers["content-security-policy"]).toBe(`${csp}; frame-ancestors 'none'`);
+      const building = await get({});
+      expect(building.status).toBe(503);
+      expect(building.headers).toMatchObject({
+        "cache-control": "no-store",
+        "retry-after": "5",
+        "content-security-policy": `${csp}; frame-ancestors 'none'`,
+        "x-content-type-options": "nosniff",
+      });
+      expect(building.body).toBe("The site is being built; try again in a moment.\n");
     } finally {
       await new Promise((resolve) => listening.server.close(resolve));
     }

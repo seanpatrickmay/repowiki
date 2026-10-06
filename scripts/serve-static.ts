@@ -134,6 +134,33 @@ export function serveRequests(options: {
 }
 
 /**
+ * wiki:serve's answer while the site is still being built: the Host guard first (421, R18, as
+ * serveRequests), then 503 with the security headers, no-store and Retry-After.
+ */
+export function serveBuilding(options: {
+  csp: string;
+  port: () => number;
+}): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
+  const headers = securityHeaders(options.csp);
+  return async (request, response) => {
+    const allowed = hostAllowed(request.headers.host, options.port());
+    response.writeHead(allowed ? 503 : 421, {
+      ...headers,
+      "cache-control": "no-store",
+      ...(allowed ? { "retry-after": "5" } : {}),
+      "content-type": "text/plain; charset=utf-8",
+    });
+    response.end(
+      request.method === "HEAD"
+        ? undefined
+        : allowed
+          ? "The site is being built; try again in a moment.\n"
+          : "This server answers only as 127.0.0.1 or localhost.\n",
+    );
+  };
+}
+
+/**
  * Listens on 127.0.0.1 only (spec v2 #4 R18: there is no --host); a busy port is a CliError
  * naming --port. Resolves with the server and the port it took (`port` 0 takes any free one).
  */

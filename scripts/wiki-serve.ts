@@ -8,7 +8,6 @@ import {
   createAskSession,
   exportHash,
   openAnswerCache,
-  securityHeaders,
 } from "@repowiki/ask";
 import { WikiBuildError } from "@repowiki/engine";
 import { createClaudeToolProvider, createLedger } from "@repowiki/llm";
@@ -23,7 +22,7 @@ import {
   totalsLine,
   typicalQuestionUsd,
 } from "./serve-cli.ts";
-import { listenLoopback, serveRequests } from "./serve-static.ts";
+import { listenLoopback, serveBuilding, serveRequests } from "./serve-static.ts";
 import { exitWithError } from "./wiki-cli.ts";
 
 /** How long a stop waits for a question in flight before it exits anyway. */
@@ -60,19 +59,9 @@ async function main(): Promise<void> {
   // Everything that can fail fast does so before a site build that can take minutes.
   const models = loadModels(args.config);
   let port = args.port;
-  const building = securityHeaders(CONTENT_SECURITY_POLICY);
-  let handle: (request: IncomingMessage, response: ServerResponse) => Promise<void> = async (
-    _request,
-    response,
-  ) => {
-    response.writeHead(503, {
-      ...building,
-      "cache-control": "no-store",
-      "retry-after": "5",
-      "content-type": "text/plain; charset=utf-8",
-    });
-    response.end("The site is being built; try again in a moment.\n");
-  };
+  let handle: (request: IncomingMessage, response: ServerResponse) => Promise<void> = serveBuilding(
+    { csp: CONTENT_SECURITY_POLICY, port: () => port },
+  );
   const listening = await listenLoopback((request, response) => handle(request, response), port);
   port = listening.port;
   const siteDir = join(out, "site");
