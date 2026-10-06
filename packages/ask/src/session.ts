@@ -171,7 +171,14 @@ export function createAskSession(options: AskSessionOptions): AskSession {
         const usd = response.cost.turns === 0 ? 0 : (response.cost.usd ?? questionUsd);
         spent += usd;
         totals.usd = spent;
-        if (["answered", "partial", "not-found"].includes(response.status)) {
+        // Only a finished answer is kept (R12): answered or partial, or a not-found the model
+        // gave itself. A not-found left by a refused or unusable answer is a failure, as are
+        // budget and error answers: asking again may answer.
+        const finished =
+          response.status === "answered" ||
+          response.status === "partial" ||
+          (response.status === "not-found" && response.refused === 0);
+        if (finished) {
           // A cache that cannot be written loses only the saving: the reader still gets the answer.
           try {
             cache.append({

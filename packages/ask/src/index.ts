@@ -35,6 +35,7 @@ export {
 export {
   ASK_MAX_TOKENS,
   ASK_TEMPERATURE,
+  ASK_TURN_TIMEOUT_MS,
   AskError,
   type AskQuestionOptions,
   type AskResult,
@@ -42,6 +43,7 @@ export {
   BOUND_CHARS_PER_TOKEN,
   CALL_ANSWER_NOW,
   retryText,
+  TOOL_USE_PROMPT_TOKENS,
   turnBound,
 } from "./loop.ts";
 export {

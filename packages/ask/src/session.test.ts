@@ -125,6 +125,19 @@ describe("createAskSession", () => {
     expect(requests).toHaveLength(2);
   });
 
+  it("caches the model's own not-found, but not one a refused or unusable answer left", async () => {
+    const own = answerTurn([], "not-found");
+    const refused = answerTurn([["It is in `nowhere_at_all`.", ["signals#s-1"]]]);
+    const { session: s, requests } = session([refused, refused, own, ANSWER]);
+    const failed = await s.ask(ask("Where are signals made?"));
+    expect(failed).toMatchObject({ status: "not-found", refused: 1 });
+    const second = await s.ask(ask("Where are signals made?"));
+    expect(second).toMatchObject({ status: "not-found", refused: 0, cached: false });
+    expect(requests).toHaveLength(3);
+    expect((await s.ask(ask("Where are signals made?"))).cached).toBe(true);
+    expect(requests).toHaveLength(3);
+  });
+
   it("logs a question that throws after a paid turn, and counts what it spent", async () => {
     const broken = {
       content: null,

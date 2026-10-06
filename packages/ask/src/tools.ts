@@ -7,6 +7,7 @@ import {
   type SearchIndex,
   searchResults,
   toolSet,
+  unmarkHandles,
   type WikiView,
 } from "@repowiki/query";
 import { z } from "zod";
@@ -34,7 +35,9 @@ export function createAskTools(
       z.strictObject({ query: z.string().trim().min(1).max(200) }),
       ({ query }) => {
         events.searched(query);
-        return searchResults(view, pages, query);
+        // Lead summaries are claim text: handle-shaped text in them is unmarked (spec v2 #4
+        // §9.1), here so that query's own searchResults stays byte-stable (C4).
+        return unmarkHandles(searchResults(view, pages, query));
       },
     ),
     defineTool(

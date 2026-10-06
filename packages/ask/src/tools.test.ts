@@ -35,6 +35,23 @@ describe("createAskTools", () => {
     expect(searched).toEqual(["deliverables"]);
   });
 
+  it("unmarks handle-shaped text in the lead summaries search lists", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const lead = wiki.pages
+      .find((p) => p.featureId === "deliverables")
+      ?.sections.find((s) => s.key === "lead")?.claims[0];
+    if (lead === undefined) throw new Error("no lead");
+    lead.text = "Deliverables {signals#s-8} are {x{a#b}#y} records.";
+    const view = new WikiView(wiki);
+    const tools = createAskTools(view, pageSearchIndex(view), {
+      searched: () => {},
+      read: () => {},
+    });
+    const text = tools.run("search", { query: "deliverables" }).text;
+    expect(text).toContain("Deliverables (signals#s-8) are (x(a#b)#y) records.");
+    expect(text).not.toMatch(/\{[^{}\n]*#[^{}\n]*\}/);
+  });
+
   it("reads a page with handles and reports its id, title and handles", () => {
     const { tools, read } = setup();
     const result = tools.run("read_page", { id: "legacy-signals" });
