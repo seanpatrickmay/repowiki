@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { plainClaimText } from "@repowiki/core";
-import { readRecords, readRunInfo, summarize, tallySheet } from "@repowiki/eval";
-import { handleClaim, markdownText, type WikiView } from "@repowiki/query";
+import { RUN_INFO_FILE, readRecords, readRunInfo, summarize, tallySheet } from "@repowiki/eval";
+import { cut, handleClaim, markdownText, oneLine, type WikiView } from "@repowiki/query";
 import type { AskEvalResult } from "./ask-eval-run.ts";
 
 /** Sentences the owner's blind support check reads (spec v2 #4 §12.3). */
@@ -203,20 +203,30 @@ export interface DevBaseline {
   runDir: string;
   wikiCorrect: number;
   questions: number;
+  /** When that run started, and the wiki commit it asked. */
+  startedAt: string;
+  head: string;
 }
 
 /**
  * The run spec v2 #4 §12.2 compares against: the latest complete `eval:run --set dev` under
- * `<out>/eval/` that asked the wiki agent the same question file (same hash), or null. Latest
- * by the instant it started (Date.parse, so an offset compares right), ties by directory.
+ * `<out>/eval/` that asked the wiki agent the same question file (same hash), or null. A run is a
+ * folder with a run.json, whatever its name (`--run-dir`); a folder without one (ask:eval's own)
+ * is not a run, and one whose run or records cannot be read is skipped with one line through
+ * `onSkip`. Latest by the instant it started (Date.parse, so an offset compares right), ties by
+ * directory.
  */
-export function devBaseline(out: string, questionsHash: string): DevBaseline | null {
+export function devBaseline(
+  out: string,
+  questionsHash: string,
+  onSkip: (line: string) => void = () => {},
+): DevBaseline | null {
   const dir = join(out, "eval");
   if (!existsSync(dir)) return null;
   let best: (DevBaseline & { started: number }) | null = null;
-  for (const name of readdirSync(dir)) {
-    if (!name.startsWith("dev-")) continue;
-    const runDir = join(dir, name);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const runDir = join(dir, entry.name);
+    if (!entry.isDirectory() || !existsSync(join(runDir, RUN_INFO_FILE))) continue;
     try {
       const info = readRunInfo(runDir);
       if (info.set !== "dev" || info.questionsHash !== questionsHash) continue;
@@ -233,30 +243,71 @@ export function devBaseline(out: string, questionsHash: string): DevBaseline | n
           runDir,
           wikiCorrect: summary.agents.wiki.correct,
           questions: info.questions.length,
+          startedAt: info.startedAt,
+          head: info.head,
           started,
         };
       }
-    } catch {
-      // Not a run directory eval:run wrote whole: it is no baseline.
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      onSkip(`skipped ${runDir}: ${cut(oneLine(why), 300)}`);
     }
   }
-  return best === null
-    ? null
-    : { runDir: best.runDir, wikiCorrect: best.wikiCorrect, questions: best.questions };
+  if (best === null) return null;
+  const { started: _started, ...baseline } = best;
+  return baseline;
+}
+
+/**
+ * What ask:eval does about its baseline before any paid call (spec v2 #4 §12.2): the dev set
+ * names the run it compares with, or with none stops in one line (exit 1) unless --no-baseline
+ * (`required` false) lets it go on; a dry run with none still shows its estimate, says the run
+ * would stop, and exits 0. The smoke set scores nothing, so it never needs one.
+ */
+export function baselineGate(at: {
+  set: "dev" | "smoke";
+  required: boolean;
+  dryRun: boolean;
+  baseline: DevBaseline | null;
+  evalDir: string;
+}): { line: string | null; stop: boolean; exitCode: 0 | 1 } {
+  if (at.set === "smoke") return { line: null, stop: false, exitCode: 0 };
+  if (at.baseline !== null) {
+    return {
+      line: `comparing with ${at.baseline.runDir} (started ${at.baseline.startedAt}, the wiki at ${at.baseline.head.slice(0, 7)})`,
+      stop: false,
+      exitCode: 0,
+    };
+  }
+  if (!at.required) return { line: null, stop: false, exitCode: 0 };
+  const why = `no complete \`eval:run --set dev\` run on this question file is in ${at.evalDir}; run \`pnpm eval:run <repo> --questions <file> --set dev\` first, or pass --no-baseline`;
+  return at.dryRun
+    ? { line: `no baseline yet: the run would stop; ${why}`, stop: true, exitCode: 0 }
+    : { line: why, stop: true, exitCode: 1 };
 }
 
 /** Spec v2 #4 §12.2-4's lines for report.md: the accuracy comparison and the owner's checks. */
-export function criteriaLines(result: AskEvalResult, baseline: DevBaseline | null): string[] {
+export function criteriaLines(
+  result: AskEvalResult,
+  baseline: DevBaseline | null,
+  at: { set: "dev" | "smoke"; head: string },
+): string[] {
   const correct = result.rows.filter((r) => r.score === 1).length;
   const n = result.rows.length;
+  const commits =
+    baseline === null || baseline.head === at.head
+      ? ""
+      : ` That run asked the wiki at ${baseline.head.slice(0, 7)}; this one at ${at.head.slice(0, 7)}.`;
   const accuracy =
-    baseline === null
-      ? "no complete `eval:run --set dev` run on this question file is in the out dir's eval/ folder, so this cannot be scored yet; run `pnpm eval:run <repo> --questions <file> --set dev` first."
-      : baseline.wikiCorrect === 0
-        ? `cannot be scored: the wiki agent got none right in ${markdownText(baseline.runDir, 300)}, so there is no score to reach.`
-        : baseline.questions !== n
-          ? `the run compared against (${markdownText(baseline.runDir, 300)}) asked ${baseline.questions} questions and this one ${n}, so they cannot be compared.`
-          : `the ask got ${correct} of ${n} and the wiki agent ${baseline.wikiCorrect} of ${baseline.questions} in ${markdownText(baseline.runDir, 300)}: ${correct * 100 >= baseline.wikiCorrect * ACCURACY_PERCENT ? "met" : "not met"} (at least ${ACCURACY_PERCENT}% of the wiki agent's).`;
+    at.set === "smoke"
+      ? "not compared: the smoke set scores nothing."
+      : baseline === null
+        ? "no complete `eval:run --set dev` run on this question file is in the out dir's eval/ folder, so this cannot be scored yet; run `pnpm eval:run <repo> --questions <file> --set dev` first."
+        : baseline.wikiCorrect === 0
+          ? `cannot be scored: the wiki agent got none right in ${markdownText(baseline.runDir, 300)}, so there is no score to reach.`
+          : baseline.questions !== n
+            ? `the run compared against (${markdownText(baseline.runDir, 300)}) asked ${baseline.questions} questions and this one ${n}, so they cannot be compared.`
+            : `the ask got ${correct} of ${n} and the wiki agent ${baseline.wikiCorrect} of ${baseline.questions} in ${markdownText(baseline.runDir, 300)}: ${correct * 100 >= baseline.wikiCorrect * ACCURACY_PERCENT ? "met" : "not met"} (at least ${ACCURACY_PERCENT}% of the wiki agent's).${commits}`;
   return [
     "",
     "## Accuracy, grounding and routing (spec v2 #4 \u00A712.2-4)",

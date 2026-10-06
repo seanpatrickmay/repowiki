@@ -16,6 +16,7 @@ import { loadExport, WikiView } from "@repowiki/query";
 import { askEvalEstimateLine, estimateAskEval, parseAskEvalArgs } from "./ask-eval-cli.ts";
 import { checkAskableQuestions, renderAskReport, runAskEval } from "./ask-eval-run.ts";
 import {
+  baselineGate,
   criteriaLines,
   devBaseline,
   readSheetEntries,
@@ -90,12 +91,18 @@ async function main(): Promise<void> {
   });
   console.error(askEvalEstimateLine(estimate, args));
   // The comparison the run exists for is found before any paid call (spec v2 #4 §12.2).
-  const baseline = devBaseline(out, loaded.hash);
-  if (baseline === null && args.baseline) {
-    console.error(
-      `no complete \`eval:run --set dev\` run on this question file is in ${join(out, "eval")}; run \`pnpm eval:run <repo> --questions <file> --set dev\` first, or pass --no-baseline`,
-    );
-    process.exitCode = 1;
+  const baseline =
+    args.set === "dev" ? devBaseline(out, loaded.hash, (line) => console.error(line)) : null;
+  const gate = baselineGate({
+    set: args.set,
+    required: args.baseline,
+    dryRun: args.dryRun,
+    baseline,
+    evalDir: join(out, "eval"),
+  });
+  if (gate.line !== null) console.error(gate.line);
+  if (gate.stop) {
+    process.exitCode = gate.exitCode;
     return;
   }
   if (args.dryRun) return;
@@ -144,7 +151,7 @@ async function main(): Promise<void> {
       set: args.set,
       startedAt,
       result,
-      extra: criteriaLines(result, baseline),
+      extra: criteriaLines(result, baseline, { set: args.set, head: wiki.head }),
     }),
   );
   const sheet = supportSheet(view, result, { repo: wiki.repo, head: wiki.head, startedAt });

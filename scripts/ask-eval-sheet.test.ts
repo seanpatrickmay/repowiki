@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeAskResponse } from "@repowiki/core/test-fixtures";
@@ -14,6 +14,7 @@ import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AskEvalResult, AskEvalRow } from "./ask-eval-run.ts";
 import {
+  baselineGate,
   criteriaLines,
   devBaseline,
   SUPPORT_SAMPLE,
@@ -54,6 +55,14 @@ function result(n: number): AskEvalResult {
   return { rows, overBudget: [], spentUsd: 0.2 };
 }
 const AT = { repo: "sample", head: "a".repeat(40), startedAt: "2026-10-05T12:00:00.000Z" };
+const DEV = { set: "dev" as const, head: "a".repeat(40) };
+const BASELINE = {
+  runDir: "/o/eval/dev-a",
+  wikiCorrect: 2,
+  questions: 2,
+  startedAt: "2026-10-01T00:00:00.000Z",
+  head: "a".repeat(40),
+};
 
 describe("supportSheet", () => {
   it("samples twenty sentences with their cited claims' full text, blind, then a routing line a question", () => {
@@ -226,15 +235,23 @@ describe("devBaseline and criteriaLines", () => {
       devRun(out, "dev-c", info("2026-10-03T00:00:00.000Z"), 0, false);
       devRun(out, "dev-d", info("2026-10-04T00:00:00.000Z", "0".repeat(64)), 0);
       const baseline = devBaseline(out, "f".repeat(64));
-      expect(baseline).toEqual({ runDir: latest, wikiCorrect: 2, questions: 2 });
+      expect(baseline).toEqual({
+        runDir: latest,
+        wikiCorrect: 2,
+        questions: 2,
+        startedAt: "2026-10-02T00:00:00.000Z",
+        head: "a".repeat(40),
+      });
       const two = result(2);
-      expect(criteriaLines(two, baseline).join("\n")).toContain(
+      expect(criteriaLines(two, baseline, DEV).join("\n")).toContain(
         "the ask got 2 of 2 and the wiki agent 2 of 2 in",
       );
       expect(
-        criteriaLines({ ...two, rows: two.rows.map((r) => ({ ...r, score: 0 })) }, baseline).join(
-          "\n",
-        ),
+        criteriaLines(
+          { ...two, rows: two.rows.map((r) => ({ ...r, score: 0 })) },
+          baseline,
+          DEV,
+        ).join("\n"),
       ).toContain(": not met (at least 90% of the wiki agent's).");
     } finally {
       rmSync(out, { recursive: true, force: true });
@@ -258,12 +275,105 @@ describe("devBaseline and criteriaLines", () => {
     const zero = { runDir: "/x/eval/dev-a", wikiCorrect: 0, questions: 2 };
     const two = result(2);
     const none = { ...two, rows: two.rows.map((r) => ({ ...r, score: 0 as const })) };
-    const line = criteriaLines(none, zero).join("\n");
+    const line = criteriaLines(none, { ...BASELINE, ...zero }, DEV).join("\n");
     expect(line).not.toContain(": met");
     expect(line).toContain("cannot be scored: the wiki agent got none right");
   });
 
   it("says when there is nothing to compare against", () => {
-    expect(criteriaLines(result(2), null).join("\n")).toContain("cannot be scored yet");
+    expect(criteriaLines(result(2), null, DEV).join("\n")).toContain("cannot be scored yet");
+  });
+
+  it("finds a dev run by its run.json, whatever its folder is called, and says which it skipped", () => {
+    const out = mkdtempSync(join(tmpdir(), "repowiki-ask-baseline-"));
+    try {
+      const named = devRun(out, "my-baseline", info("2026-10-02T00:00:00.000Z"), 2);
+      devRun(out, "dev-held", { ...info("2026-10-03T00:00:00.000Z"), set: "held-out" }, 2);
+      devRun(out, "dev-repo", { ...info("2026-10-04T00:00:00.000Z"), agents: ["repo"] }, 2);
+      mkdirSync(join(out, "eval", "ask-2026-10-05"));
+      writeFileSync(join(out, "eval", "ask-2026-10-05", "results.json"), "{}");
+      writeFileSync(join(out, "eval", "notes.txt"), "not a run");
+      mkdirSync(join(out, "eval", "dev-broken"));
+      writeFileSync(join(out, "eval", "dev-broken", "run.json"), "{");
+      const skipped: string[] = [];
+      expect(devBaseline(out, "f".repeat(64), (line) => skipped.push(line))?.runDir).toBe(named);
+      expect(skipped).toEqual([
+        `skipped ${join(out, "eval", "dev-broken")}: cannot read ${join(out, "eval", "dev-broken", "run.json")}`,
+      ]);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it("calls the bar met at 90% of the wiki agent's, and not below", () => {
+    const twenty = result(20);
+    const graded = (correct: number) => ({
+      ...twenty,
+      rows: twenty.rows.map((r, i) => ({ ...r, score: i < correct ? (1 as const) : null })),
+    });
+    const full = { ...BASELINE, wikiCorrect: 20, questions: 20 };
+    expect(criteriaLines(graded(18), full, DEV).join("\n")).toContain(
+      "the ask got 18 of 20 and the wiki agent 20 of 20",
+    );
+    expect(criteriaLines(graded(18), full, DEV).join("\n")).toContain(": met (at least 90%");
+    expect(criteriaLines(graded(17), full, DEV).join("\n")).toContain(": not met (at least 90%");
+    expect(criteriaLines(graded(20), { ...full, questions: 19 }, DEV).join("\n")).toContain(
+      "asked 19 questions and this one 20, so they cannot be compared",
+    );
+  });
+
+  it("says when the run compared against asked another commit of the wiki", () => {
+    const line = criteriaLines(result(2), BASELINE, { set: "dev", head: "b".repeat(40) }).join(
+      "\n",
+    );
+    expect(line).toContain("That run asked the wiki at aaaaaaa; this one at bbbbbbb.");
+    expect(criteriaLines(result(2), BASELINE, DEV).join("\n")).not.toContain("That run asked");
+  });
+
+  it("compares nothing on the smoke set", () => {
+    const line = criteriaLines(result(2), null, { set: "smoke", head: "a".repeat(40) }).join("\n");
+    expect(line).toContain(
+      "- Accuracy against the wiki agent: not compared: the smoke set scores nothing.",
+    );
+  });
+});
+
+describe("baselineGate", () => {
+  const WHY =
+    "no complete `eval:run --set dev` run on this question file is in /o/eval; run `pnpm eval:run <repo> --questions <file> --set dev` first, or pass --no-baseline";
+  const gate = (over: Partial<Parameters<typeof baselineGate>[0]>) =>
+    baselineGate({
+      set: "dev",
+      required: true,
+      dryRun: false,
+      baseline: null,
+      evalDir: "/o/eval",
+      ...over,
+    });
+
+  it("names the dev run it compares with", () => {
+    expect(gate({ baseline: BASELINE })).toEqual({
+      line: `comparing with ${BASELINE.runDir} (started ${BASELINE.startedAt}, the wiki at aaaaaaa)`,
+      stop: false,
+      exitCode: 0,
+    });
+  });
+
+  it("stops a run with none in one line, exit 1, before any call", () => {
+    expect(gate({})).toEqual({ line: WHY, stop: true, exitCode: 1 });
+  });
+
+  it("lets a dry run with none show its estimate and say the run would stop, exit 0", () => {
+    expect(gate({ dryRun: true })).toEqual({
+      line: `no baseline yet: the run would stop; ${WHY}`,
+      stop: true,
+      exitCode: 0,
+    });
+  });
+
+  it("goes on with none under --no-baseline, and never needs one for the smoke set", () => {
+    expect(gate({ required: false })).toEqual({ line: null, stop: false, exitCode: 0 });
+    expect(gate({ set: "smoke" })).toEqual({ line: null, stop: false, exitCode: 0 });
+    expect(gate({ set: "smoke", dryRun: true })).toEqual({ line: null, stop: false, exitCode: 0 });
   });
 });
