@@ -38,7 +38,10 @@ export function mergeTree(
   dir: string,
   wikiHead: string,
   head: string,
-): { merge: "clean"; tree: string } | { merge: "conflicts" | "unknown"; tree: null } {
+):
+  | { merge: "clean"; tree: string }
+  | { merge: "conflicts"; tree: null }
+  | { merge: "unknown"; tree: null; reason: "old-git" | "unrelated" } {
   const out = inflightGit(dir, [
     "merge-tree",
     "--write-tree",
@@ -52,9 +55,9 @@ export function mergeTree(
   // A conflict exits 1 with the conflicted tree on stdout and, with --no-messages, no stderr.
   if (out.status === 1 && isSha(tree) && out.stderr.trim() === "")
     return { merge: "conflicts", tree: null };
-  if (out.status === 129) return { merge: "unknown", tree: null };
+  if (out.status === 129) return { merge: "unknown", tree: null, reason: "old-git" };
   if (out.status === 128 && /refusing to merge unrelated histories/.test(out.stderr))
-    return { merge: "unknown", tree: null };
+    return { merge: "unknown", tree: null, reason: "unrelated" };
   throw new GitError(`git merge-tree failed in ${dir}: ${firstLine(out.stderr)}`);
 }
 
@@ -196,6 +199,8 @@ export function fileLevelEffects(
 /** A pull request's changed files, features, merge state and effects on the wiki (R7, R8). */
 export interface PullImpact extends PullChanges {
   merge: "clean" | "conflicts" | "unknown";
+  /** Why the merge is unknown, when git said; null otherwise (and for a pull behind the wiki). */
+  mergeReason: "old-git" | "unrelated" | null;
   effects: InFlightEffect[];
   /** The wiki's head does not hold the fork point (R27): every effect only may change. */
   behind: boolean;
@@ -223,6 +228,7 @@ export async function pullImpact(
     return {
       ...changes,
       merge: "unknown",
+      mergeReason: null,
       effects: fileLevelEffects(pages, changes.changes),
       behind,
     };
@@ -235,5 +241,6 @@ export async function pullImpact(
           reason: inflightLine(s.reason, INFLIGHT_REASON_MAX_LENGTH),
           certain: true,
         }));
-  return { ...changes, merge: merged.merge, effects, behind };
+  const mergeReason = merged.merge === "unknown" ? merged.reason : null;
+  return { ...changes, merge: merged.merge, mergeReason, effects, behind };
 }

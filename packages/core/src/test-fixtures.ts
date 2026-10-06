@@ -309,6 +309,7 @@ export function makeInFlightPull(overrides: Partial<InFlightPull> = {}): InFligh
     baseSha: SHA_A,
     behind: false,
     merge: "clean",
+    mergeReason: null,
     files: [
       {
         path: "src/signals/ingest.py",

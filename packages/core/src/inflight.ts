@@ -208,6 +208,8 @@ export const InFlightPull = z
      */
     behind: z.boolean().default(false),
     merge: z.enum(["clean", "conflicts", "unknown"]),
+    /** Why git could not merge it: a git older than 2.38, or a head with unrelated history. */
+    mergeReason: z.enum(["old-git", "unrelated"]).nullable().default(null),
     files: z.array(InFlightFile).max(INFLIGHT_MAX_FILES),
     /** Changed files beyond those listed. */
     filesTruncated: count,

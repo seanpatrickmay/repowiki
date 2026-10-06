@@ -1373,6 +1373,19 @@ function placedExport() {
   return inflightExport({ pulls: [placed, ...rest, behind] });
 }
 
+describe("the work in progress index of an export with no snapshot", () => {
+  it("says there is none, unlinked, out of search and out of robots' indexes", () => {
+    const page = site.read("special/in-progress/index.html");
+    expect(page).toContain("This wiki has no snapshot of its open pull requests and issues.");
+    expect(page).toContain('<meta name="robots" content="noindex"');
+    expect(page).not.toContain("data-pagefind-body");
+    for (const other of htmlFiles(site.outDir).filter(
+      (p) => p !== "special/in-progress/index.html",
+    ))
+      expect(site.read(other), other).not.toContain('href="/special/in-progress/"');
+  });
+});
+
 describe("the work in progress pages (spec v2 #9 §6.2)", () => {
   beforeAll(() => {
     inflightSite = buildFixtureSite([], placedExport());
@@ -1392,6 +1405,14 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
       "Its head commit could not be fetched, so its impact could not be computed.",
     );
     expect(missing).toContain("No summary of this pull request yet.");
+  });
+
+  it("escapes a hostile pull request title in the Main Page box", () => {
+    const box = /<section[^>]*mp-in-progress[\s\S]*?<\/section>/.exec(
+      inflightSite.read("index.html"),
+    );
+    expect(box?.[0]).toContain(`#13 ${ESCAPED_PULL_TITLE}`);
+    expect(box?.[0]).not.toContain("<script>alert(1)");
   });
 
   it("says on a pull's page and its article's section that the wiki is behind its base (R27)", () => {
