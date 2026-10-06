@@ -84,15 +84,24 @@ export function pullRequestOf(subject: string): number | null {
   return match === null ? null : Number(match[1]);
 }
 
+/** What PR assignment reads and writes of a commit: readHistory's and readAuthorship's both fit. */
+export interface PullRequestCommit {
+  sha: string;
+  parents: readonly string[];
+  subject: string;
+  pr: number | null;
+}
+
 /**
  * Walks the first-parent chain oldest first. A commit takes the number of the innermost
  * "Merge pull request #N" that brought it in: that merge's second and later parents (and what they
  * reached) get N, its first parent keeps the enclosing number. Any other commit keeps the PR its own
- * subject names, else the number it was reached with.
+ * subject names, else the number it was reached with. `commits` are newest first, as git log
+ * lists them; the one copy, shared by readHistory and People's readAuthorship.
  */
-function assignPullRequests(commits: CommitInfo[]): void {
+export function assignPullRequests(commits: PullRequestCommit[]): void {
   const bySha = new Map(commits.map((c) => [c.sha, c]));
-  const chain: CommitInfo[] = [];
+  const chain: PullRequestCommit[] = [];
   for (let c = commits[0]; c !== undefined; c = bySha.get(c.parents[0] ?? "")) chain.push(c);
   const seen = new Set<string>();
   const mark = (start: string): void => {

@@ -1,3 +1,4 @@
+export { type AuthoredCommit, type AuthoredFile, readAuthorship } from "./authorship.ts";
 export {
   DEFAULT_MAX_FILE_BYTES,
   type ImportEdge,
@@ -38,4 +39,4 @@ export { type CommitInfo, pullRequestOf, readHistory, readSources } from "./hist
 export type { SourceLanguage } from "./languages.ts";
 export type { SymbolDef, SymbolKind } from "./symbols.ts";
 /** Test-only: scripted git repositories (spec §8's fixture repo builder), for other modules' tests. */
-export { createTestRepo, type TestRepo } from "./test-repo.ts";
+export { createTestRepo, type TestAuthor, type TestRepo } from "./test-repo.ts";
