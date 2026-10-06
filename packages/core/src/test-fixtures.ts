@@ -434,6 +434,7 @@ export function makeGitHubSnapshot(overrides: Partial<GitHubSnapshot> = {}): Git
     issues: [makeGitHubIssue()],
     omitted: { pulls: 0, issues: 0 },
     dropped: 0,
+    droppedPaths: 0,
     ...overrides,
   };
 }

@@ -105,7 +105,7 @@ describe("wiki-inflight.ts as a process (no network)", () => {
     const result = run("--github", "acme/demo", "--dry-run");
     expect(result.status).toBe(0);
     expect(result.stderr.split("\n").slice(0, 3)).toEqual([
-      "acme/demo: 3 open pull requests, 3 open issues; 1 malformed entry dropped",
+      "acme/demo: 3 open pull requests, 3 open issues; 1 malformed entry dropped; 3 unsafe file paths dropped",
       expect.stringMatching(
         /^pull-request heads: 1 fetched, 2 missing, 0 moved since GitHub was read; the fetch said: /,
       ),

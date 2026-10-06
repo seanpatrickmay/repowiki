@@ -123,6 +123,8 @@ export function readLine(snapshot: GitHubSnapshot): string {
     );
   if (snapshot.dropped > 0)
     parts.push(`${plural(snapshot.dropped, "malformed entry", "malformed entries")} dropped`);
+  if (snapshot.droppedPaths > 0)
+    parts.push(`${plural(snapshot.droppedPaths, "unsafe file path")} dropped`);
   return parts.join("; ");
 }
 

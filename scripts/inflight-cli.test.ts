@@ -95,6 +95,9 @@ describe("the lines it prints", () => {
     ).toBe(
       "acme/demo: 0 open pull requests, 1 open issue; 3 more pull requests and 0 more issues not read (the caps); 2 malformed entries dropped",
     );
+    expect(readLine(makeGitHubSnapshot({ droppedPaths: 1 }))).toBe(
+      "acme/demo: 1 open pull request, 1 open issue; 1 unsafe file path dropped",
+    );
   });
 
   it("counts the heads, and gives the fetch's first line redacted", () => {

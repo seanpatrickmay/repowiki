@@ -23,6 +23,8 @@ export const INFLIGHT_LABEL_MAX_LENGTH = 50;
 export const INFLIGHT_BRANCH_MAX_LENGTH = 100;
 export const INFLIGHT_EVIDENCE_MAX_LENGTH = 120;
 export const INFLIGHT_REASON_MAX_LENGTH = 300;
+/** Code points of a changed file's path from GitHub or git (R13). */
+export const INFLIGHT_PATH_MAX_LENGTH = 4096;
 /** A summary's claims, each claim's citations and features, and an issue's features (R10, R12). */
 export const INFLIGHT_MAX_SUMMARY_CLAIMS = 5;
 export const INFLIGHT_MAX_CLAIM_CITATIONS = 3;
@@ -68,6 +70,21 @@ const line = (max: number) =>
 
 const count = z.int().nonnegative();
 const number = z.int().positive();
+
+/**
+ * Whether a changed file's path is safe to store, show and prompt with (R13): a repo-relative
+ * path of at most INFLIGHT_PATH_MAX_LENGTH code points that inflightLine leaves as it is, so it
+ * holds no control, line-break, tab or bidi character. Ingest drops (and counts) one that is not.
+ */
+export function isInflightPath(path: string): boolean {
+  return RepoPath.safeParse(path).success && inflightLine(path, INFLIGHT_PATH_MAX_LENGTH) === path;
+}
+
+/** A changed file's path as the snapshot stores it: see isInflightPath. */
+export const InflightPath = RepoPath.refine(
+  isInflightPath,
+  `expected one plain path of at most ${INFLIGHT_PATH_MAX_LENGTH}`,
+);
 
 /** The documented repository on GitHub (R24). Every URL the site shows is built from it. */
 export const GitHubRepo = z.object({
@@ -298,7 +315,7 @@ export const GitHubPull = z.object({
   /** Issues it closes, as GitHub lists them (open or not). */
   closes: z.array(number).max(INFLIGHT_MAX_CLOSES),
   /** GitHub's first INFLIGHT_API_FILES changed paths: the file list of a PR whose head is not fetched. */
-  files: z.array(RepoPath).max(INFLIGHT_API_FILES),
+  files: z.array(InflightPath).max(INFLIGHT_API_FILES),
   filesTotal: count,
 });
 export type GitHubPull = z.infer<typeof GitHubPull>;
@@ -324,6 +341,8 @@ export const GitHubSnapshot = z
     omitted: z.object({ pulls: count, issues: count }),
     /** Nodes GitHub returned that failed to parse, and were left out. */
     dropped: count,
+    /** Changed paths GitHub listed that fail isInflightPath, and were left out. */
+    droppedPaths: count.default(0),
   })
   .superRefine((snapshot, ctx) => {
     const numbers = (list: readonly { number: number }[]) =>

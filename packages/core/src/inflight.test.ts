@@ -3,11 +3,13 @@ import {
   GitHubSnapshot,
   githubBlobUrl,
   githubUrl,
+  INFLIGHT_PATH_MAX_LENGTH,
   InFlight,
   InFlightFile,
   InFlightPull,
   inflightBody,
   inflightLine,
+  isInflightPath,
 } from "./inflight.ts";
 import { LedgerEntry, LlmConfigFile, LlmRole, RunKind } from "./llm.ts";
 import {
@@ -174,6 +176,23 @@ describe("GitHubSnapshot", () => {
       const issues = makeGitHubSnapshot({ issues: [makeGitHubIssue({ body })] });
       expect(GitHubSnapshot.safeParse(issues).success).toBe(false);
     }
+  });
+
+  it("refuses a changed path that is over 4,096 code points or not one plain line", () => {
+    expect(INFLIGHT_PATH_MAX_LENGTH).toBe(4096);
+    const long = `src/${"a".repeat(INFLIGHT_PATH_MAX_LENGTH)}.py`;
+    for (const path of ["a\u202Eb.py", "a\nb.py", "a\tb.py", "a\u0000b", "a/\u200Bb", long]) {
+      expect(isInflightPath(path)).toBe(false);
+      const snapshot = makeGitHubSnapshot({ pulls: [makeGitHubPull({ files: [path] })] });
+      expect(GitHubSnapshot.safeParse(snapshot).success).toBe(false);
+    }
+    const ok = `src/${"a".repeat(INFLIGHT_PATH_MAX_LENGTH - 7)}.py`;
+    expect([...ok]).toHaveLength(INFLIGHT_PATH_MAX_LENGTH);
+    expect(isInflightPath(ok)).toBe(true);
+    const snapshot = makeGitHubSnapshot({
+      pulls: [makeGitHubPull({ files: [ok, "[[x]]/`y`.py"] })],
+    });
+    expect(GitHubSnapshot.safeParse(snapshot).success).toBe(true);
   });
 
   it("refuses a repository name of dots, an invalid owner, and a host other than github.com", () => {
