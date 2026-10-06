@@ -3,7 +3,7 @@ import "../styles/wiki.css";
 import AskPanel from "../components/AskPanel.astro";
 import { CONTENT_SECURITY_POLICY } from "../csp.ts";
 import { getSite } from "../site.ts";
-import { ARCHITECTURE_URL } from "../urls.ts";
+import { ARCHITECTURE_URL, IN_PROGRESS_URL } from "../urls.ts";
 
 interface Props {
   /** Shown in the browser tab as "<title> - <repo> wiki". */
@@ -57,7 +57,7 @@ const { wiki, architecture } = getSite();
           <li><a href="/special/all-pages/">All articles</a></li>
           {architecture !== null && (
             <li><a href={ARCHITECTURE_URL}>About {architecture.title}</a></li>
-          )}
+          )}{wiki.inflight !== null && <li><a href={IN_PROGRESS_URL}>In progress</a></li>}
         </ul>
       </nav>
       <main id="content" class="content">

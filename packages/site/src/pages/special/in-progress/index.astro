@@ -1,0 +1,101 @@
+---
+import { inflightIndexView } from "../../../inflight.ts";
+import Layout from "../../../layouts/Layout.astro";
+import { getSite } from "../../../site.ts";
+
+const site = getSite();
+const inflight = site.wiki.inflight;
+const view = inflight === null ? null : inflightIndexView(site, inflight);
+---
+<Layout title="Work in progress">
+  <Fragment slot="head">
+    <meta name="robots" content="noindex" />
+  </Fragment>
+  <article class="article inflight">
+    <h1 class="page-title">Work in progress</h1>
+    {view === null ? (
+      <p>
+        This wiki has no snapshot of its open pull requests and issues. Run
+        <code>pnpm wiki:inflight</code> to read them from GitHub.
+      </p>
+    ) : (
+      <>
+        <p class="tagline">{view.status.line}</p>
+        {view.status.stale !== null && (
+          <div class="ambox ambox-stale" role="note">{view.status.stale}</div>
+        )}
+        <p class="inflight-note">
+          Titles, labels and names come from GitHub as written; nothing here is in the wiki's
+          search.
+        </p>
+        <h2 id="open-pull-requests">Open pull requests</h2>
+        {view.pulls.length === 0 ? (
+          <p>No open pull requests.</p>
+        ) : (
+          <table class="wikitable">
+            <thead>
+              <tr>
+                <th scope="col">Pull request</th>
+                <th scope="col">Author</th>
+                <th scope="col">Last updated</th>
+                <th scope="col">Features touched</th>
+                <th scope="col">Claims it would change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.pulls.map((pull) => (
+                <tr>
+                  <td>
+                    <a href={pull.href}>#{pull.number} {pull.title}</a>
+                    {pull.badges.map((badge) => <span class="badge">{badge}</span>)}
+                  </td>
+                  <td>{pull.author}</td>
+                  <td>{pull.updated}</td>
+                  <td>
+                    {pull.features.length === 0 ? "none" : pull.features.map((f, i) => (
+                      <>
+                        {i > 0 && ", "}
+                        {f.href === null ? f.title : <a href={f.href}>{f.title}</a>}
+                      </>
+                    ))}
+                  </td>
+                  <td>{pull.claims}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {view.more.map((line) => <p class="inflight-more">{line}</p>)}
+        <h2 id="planned-work">Planned work</h2>
+        {view.planned.length === 0 && view.unmapped.length === 0 && <p>No open issues.</p>}
+        {view.planned.map((group) => (
+          <>
+            <h3>{group.feature.href === null ? group.feature.title : <a href={group.feature.href}>{group.feature.title}</a>}</h3>
+            <ul class="inflight-issues">
+              {group.issues.map((issue) => (
+                <li>
+                  <a href={issue.href}>#{issue.number} {issue.title}</a>
+                  {issue.labels.map((label) => <span class="badge">{label}</span>)}
+                  <span class="inflight-evidence">({issue.evidence})</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ))}
+        {view.unmapped.length > 0 && (
+          <>
+            <h3 id="not-mapped">Not mapped to a feature</h3>
+            <ul class="inflight-issues">
+              {view.unmapped.map((issue) => (
+                <li>
+                  <a href={issue.href}>#{issue.number} {issue.title}</a>
+                  {issue.labels.map((label) => <span class="badge">{label}</span>)}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </>
+    )}
+  </article>
+</Layout>

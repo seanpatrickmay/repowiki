@@ -715,3 +715,38 @@ ins {
   --pagefind-ui-primary: var(--link);
   --pagefind-ui-tag: var(--bg-subtle);
 }
+
+/* Work in progress (spec v2 #9 §6.2): GitHub's text, plainly set apart. */
+.wikitable {
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}
+
+.wikitable th,
+.wikitable td {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.wikitable th {
+  background: var(--bg-subtle);
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.inflight-note,
+.inflight-more,
+.inflight-evidence {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
