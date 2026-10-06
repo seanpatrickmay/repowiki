@@ -15,6 +15,7 @@ import { build, preview } from "astro";
 import { UsageError } from "./args.ts";
 import { loadExport } from "./load.ts";
 import { writeSearchIndex } from "./search-index.ts";
+import { siteMarker } from "./site-format.ts";
 import { writeSiteRoot } from "./site-root.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -106,7 +107,8 @@ export interface BuildResult {
 
 /**
  * Validates the export, renders the static site into outDir, puts the wiki's llms.txt and the
- * export it lists at the site's root (F07), then indexes the site with Pagefind.
+ * export it lists at the site's root (F07), indexes the site with Pagefind, and last writes the
+ * marker with the site code's format (siteMarker, taken when the build starts).
  */
 export async function buildSite(
   exportFile: string,
@@ -116,6 +118,7 @@ export async function buildSite(
   const wiki = loadExport(exportFile);
   validateOutDir(exportFile, outDir);
   setBuildEnv(exportFile, repoUrl);
+  const marker = siteMarker();
 
   // Astro puts a static build's server chunks in <cwd>/.astro/ when the out dir is outside the
   // cwd, so each build gets its own cwd under packages/site/.astro (where the chunks still find
@@ -132,11 +135,13 @@ export async function buildSite(
     rmSync(buildCwd, { recursive: true, force: true });
   }
 
-  // Write marker file to allow rebuilds
+  // An empty marker allows a rebuild; only a finished build's marker names its format, so a
+  // build cut short (a half-written Pagefind index) is not current for wiki:serve.
   writeFileSync(`${outDir}/.repowiki-site`, "");
   writeSiteRoot(outDir, wiki);
-
-  return writeSearchIndex(outDir);
+  const result = await writeSearchIndex(outDir);
+  writeFileSync(`${outDir}/.repowiki-site`, marker);
+  return result;
 }
 
 /** Serves a built site on http://127.0.0.1:4321/ until the process is stopped. */

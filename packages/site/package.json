@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./build": "./src/build.ts",
-    "./csp": "./src/csp.ts"
+    "./csp": "./src/csp.ts",
+    "./format": "./src/site-format.ts"
   },
   "dependencies": {
     "@repowiki/core": "workspace:*",

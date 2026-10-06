@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
+import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import {
   type BuiltSite,
@@ -270,7 +271,8 @@ describe("site build directory safety", () => {
       const result = runCli(["build", "--export", exportFile, "--out", outDir]);
       expect(result.status).toBe(0);
       expect(existsSync(join(outDir, "index.html"))).toBe(true);
-      expect(existsSync(join(outDir, ".repowiki-site"))).toBe(true);
+      // The marker is written last, with the site code's format: a build cut short has none.
+      expect(readFileSync(join(outDir, ".repowiki-site"), "utf8")).toBe(siteMarker());
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
