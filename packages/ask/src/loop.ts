@@ -1,6 +1,7 @@
 import type { AskAnswerStatus, AskProgress, AskResponse, TokenUsage } from "@repowiki/core";
 import {
   callCostUsd,
+  LlmTimeoutError,
   priceFor,
   type TextBlock,
   type ToolProvider,
@@ -190,6 +191,14 @@ export async function askQuestion(options: AskQuestionOptions): Promise<AskResul
     } catch (failure) {
       stop = "error";
       error = cut(oneLine(failure instanceof Error ? failure.message : String(failure)), 300);
+      if (failure instanceof LlmTimeoutError) {
+        // The turn was sent and may have been billed: count its upper bound, as for an
+        // unpriced turn, so the question's and the session's spend never fall short.
+        turns++;
+        usd = usd === null ? null : usd + bound;
+        spent += bound;
+        options.onSpend?.(bound);
+      }
       break;
     }
     turns++;

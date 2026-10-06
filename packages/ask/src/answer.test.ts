@@ -66,6 +66,15 @@ describe("codeTokens", () => {
     ["a quoted call", "It calls `loadSecrets(path)`.", ["loadSecrets()"]],
     ["a file inside a quoted call", "It calls `load(secrets.txt)`.", ["load()", "secrets.txt"]],
     ["a call's possessive", "save_signal()'s result", ["save_signal()"]],
+    ["a zero-width space", "Keys live in secrets\u200B.txt now.", ["secrets.txt"]],
+    ["a soft hyphen", "Keys live in secrets\u00AD.txt now.", ["secrets.txt"]],
+    ["a word joiner", "Keys live in secrets\u2060.txt now.", ["secrets.txt"]],
+    ["a full-width dot", "Keys live in secrets\uFF0Etxt now.", ["secrets.txt"]],
+    [
+      "full-width letters",
+      "Keys live in \uFF53\uFF45\uFF43\uFF52\uFF45\uFF54\uFF53.txt now.",
+      ["secrets.txt"],
+    ],
   ])("finds the token behind %s", (_name, text, tokens) => {
     expect(codeTokens(text)).toEqual(tokens);
   });
@@ -77,6 +86,11 @@ describe("codeTokens", () => {
       "docs/",
     ]);
     expect(codeTokens("One or more file(s) and class(es) change.")).toEqual([]);
+    expect(codeTokens("Each API(s) and URL(s) it calls.")).toEqual([]);
+    expect(codeTokens("It calls `ingest_chunk(save_signal(x))` once.")).toEqual([
+      "ingest_chunk()",
+      "save_signal()",
+    ]);
     expect(codeTokens("The pipeline (see below) runs and/or waits \u2014 then stops.")).toEqual([
       "and/or",
     ]);
@@ -113,6 +127,20 @@ describe("ungroundedToken", () => {
     "It calls loadSecrets(path) first.",
   ])("refuses a name hidden by punctuation or call syntax: %s", (text) => {
     expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).not.toBeNull();
+  });
+
+  it("refuses a name hidden by an invisible or full-width character", () => {
+    for (const text of ["Keys live in secrets\u200B.txt.", "Keys live in secrets\uFF0Etxt."]) {
+      expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).toBe("secrets.txt");
+    }
+  });
+
+  it("does not refuse a plural in capitals or a nested call its claims write", () => {
+    const claims = claimsOf("signals#s-1");
+    expect(ungroundedToken(view, "Its API(s) and URL(s) stay as they are.", claims)).toBeNull();
+    expect(
+      ungroundedToken(view, "It runs `ingest_chunk(save_signal(x))` for a chunk.", claims),
+    ).toBeNull();
   });
 
   it("grounds a call with arguments by its name", () => {

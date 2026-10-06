@@ -58,7 +58,10 @@ const NAME_LEAD = /^(?:-+|\.{2,}(?!\/))/;
 const NAME_TAIL = /[.-]+$/;
 /** What follows a name that makes it a call: `()` or `(args)`. */
 const CALL_AFTER = /^\([^()\n]*\)/;
-/** `file(s)`, `class(es)`: a plural after a lowercase word, not a call. */
+/** Invisible format characters, which can split a name without showing (removed first). */
+const INVISIBLE = /[\p{Cf}\u200B-\u200D\u2060\uFEFF]/gu;
+
+/** `file(s)`, `API(es)`: a plural after a word of one case, not a call. */
 const PLURAL_AFTER = /^\(e?s\)/;
 
 /**
@@ -66,14 +69,19 @@ const PLURAL_AFTER = /^\(e?s\)/;
  * that contains `/` or `_`, is a call, or ends in a source-file extension. A name is a run of
  * letters, digits, `.`, `/`, `_` and `-`; any other character (Unicode quotes, dashes, ellipses,
  * apostrophes, symbols) ends it, so `secrets.txt's` and a curly-quoted `secrets.txt` both give
- * `secrets.txt`. A sentence's dots and dashes at a name's ends are not part of it. `name(args)`
- * is the call `name()`, and its arguments are read as names too.
+ * `secrets.txt`. The text is NFKC-normalised and its invisible format characters removed first,
+ * so neither a full-width form nor a zero-width space hides a name. A sentence's dots and dashes
+ * at a name's ends are not part of it. `name(args)` is the call `name()`, and its arguments
+ * (nested calls in backticks included) are read as names too; `file(s)` or `API(s)` after a word
+ * of one case is a plural.
  */
 export function codeTokens(text: string): string[] {
   const tokens: string[] = [];
-  const rest = text.replace(/`([^`]*)`/g, (_span, inner: string) => {
+  // NFKC first, so a full-width dot or letter is the ASCII one, then no invisible character.
+  const plain = text.normalize("NFKC").replace(INVISIBLE, "");
+  const rest = plain.replace(/`([^`]*)`/g, (_span, inner: string) => {
     const code = inner.trim();
-    const call = /^([\p{L}\p{N}._/-]+)\(([^()\n]*)\)$/u.exec(code);
+    const call = /^([\p{L}\p{N}._/-]+)\((.*)\)$/su.exec(code);
     if (call !== null) tokens.push(`${call[1]}()`);
     else if (code !== "") tokens.push(code);
     return ` ${call?.[2] ?? ""} `;
@@ -86,7 +94,7 @@ export function codeTokens(text: string): string[] {
     const call =
       run.endsWith(word) &&
       CALL_AFTER.test(after) &&
-      !(PLURAL_AFTER.test(after) && /^\p{Ll}+$/u.test(word));
+      !(PLURAL_AFTER.test(after) && /^(\p{Ll}+|\p{Lu}+)$/u.test(word));
     if (call) tokens.push(`${word}()`);
     else if (/[/_]/.test(word) || SOURCE_EXTENSION.test(word)) tokens.push(word);
   }

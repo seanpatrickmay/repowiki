@@ -99,6 +99,16 @@ export interface ToolProviderOptions {
 }
 
 /**
+ * A turn the API did not answer within its timeout. It was sent, so it may have been billed: the
+ * Ask loop counts its upper bound as spent.
+ */
+export class LlmTimeoutError extends LlmError {
+  constructor(timeoutMs: number, options?: ErrorOptions) {
+    super(`the API did not answer within ${timeoutMs / 1000} s`, options);
+  }
+}
+
+/**
  * Every text the provider sends goes through `toWellFormed()`: a lone surrogate (half of an astral
  * character, left by a cut that counted UTF-16 units) becomes U+FFFD, as the API refuses it.
  */
@@ -183,9 +193,7 @@ export function createClaudeToolProvider(options: ToolProviderOptions): ToolProv
         message = await client.messages.create(params, signal === undefined ? {} : { signal });
       } catch (error) {
         if (signal?.aborted !== true) throw error;
-        throw new LlmError(`the API did not answer within ${(timeoutMs ?? 0) / 1000} s`, {
-          cause: error,
-        });
+        throw new LlmTimeoutError(timeoutMs ?? 0, { cause: error });
       }
       const usage: TokenUsage = {
         in: message.usage.input_tokens,

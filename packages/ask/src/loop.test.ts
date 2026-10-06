@@ -1,5 +1,5 @@
 import { AskResponse, NOT_FOUND_SENTENCE } from "@repowiki/core";
-import { callCostUsd } from "@repowiki/llm";
+import { callCostUsd, LlmTimeoutError } from "@repowiki/llm";
 import { WikiView } from "@repowiki/query";
 import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -210,6 +210,31 @@ describe("askQuestion", () => {
     });
     expect(response.readNext.length).toBeGreaterThan(0);
     expect(error).toBe("overloaded retry later");
+  });
+
+  it("counts a turn that timed out after it was sent at its bound, as it may have been billed", async () => {
+    const spends: number[] = [];
+    const { provider, requests } = scriptedProvider([
+      { tool: "search", input: { query: "signals" } },
+      { error: new LlmTimeoutError(60_000) },
+    ]);
+    const { response, error } = await askQuestion({
+      provider,
+      view,
+      indexes: askIndexes(view),
+      question: QUESTION,
+      page: null,
+      model: "claude-haiku-4-5",
+      questionUsd: 0.05,
+      onSpend: (usd) => spends.push(usd),
+      now: () => new Date("2026-10-05T12:00:00Z"),
+    });
+    const bound = turnBound("claude-haiku-4-5", requests[1] as never);
+    expect(error).toBe("the API did not answer within 60 s");
+    expect(response.status).toBe("error");
+    expect(response.cost.turns).toBe(2);
+    expect(response.cost.usd).toBeCloseTo(TURN_USD + bound, 12);
+    expect(spends).toEqual([TURN_USD, bound]);
   });
 
   it("refuses a model with no price before any call", async () => {
