@@ -18,7 +18,7 @@ const id = full ? "ask-page" : "ask-panel";
       </button>
     )}
   </div>
-  <form class="ask-form" data-ask-form>
+  <form class="ask-form" data-ask-form hidden={full}>
     <label for={`${id}-q`} class="visually-hidden">Your question</label>
     <textarea id={`${id}-q`} name="question" rows="3" maxlength="500" required></textarea>
     <button type="submit">Ask</button>

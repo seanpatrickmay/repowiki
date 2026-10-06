@@ -174,6 +174,27 @@ describe("renderAnswer", () => {
     ]);
   });
 
+  it("previews the page a link goes to, read from the link itself", () => {
+    const base = makeAskResponse();
+    const [first, second] = base.sources;
+    if (first === undefined || second === undefined) throw new Error("no sources");
+    const root = render({
+      ...base,
+      sources: [{ ...first, href: "/wiki/deliverables/#claim-d-1" }, second],
+    });
+    const marks = root.querySelectorAll("a").filter((a) => a.textContent === "[1]");
+    expect(marks.map((m) => m.getAttribute("data-preview"))).toEqual([
+      "deliverables",
+      "deliverables",
+    ]);
+    const about = render({
+      ...base,
+      sources: [{ ...first, pageId: "special:about", href: "/special/about/#claim-s-1" }, second],
+    });
+    const aboutMarks = about.querySelectorAll("a").filter((a) => a.textContent === "[1]");
+    expect(aboutMarks.map((m) => m.getAttribute("data-preview"))).toEqual([null, null]);
+  });
+
   it("lists the sources, Read next and the footer", () => {
     const root = render(makeAskResponse());
     const sources = root.querySelector("ol")?.querySelectorAll("li") ?? [];
@@ -242,6 +263,26 @@ describe("sseReader", () => {
       { event: "status", data: '{"step":"search","query":"a"}' },
       { event: "answer", data: '{"x":\n1}' },
     ]);
+  });
+
+  it("ends a frame at any two line ends, mixed ones included, and reads CRLF split across chunks", () => {
+    const mixed = sseReader();
+    expect(
+      mixed.feed('event: status\ndata: {"a":1}\n\r\nevent: answer\rdata: {"b":2}\r\n\n'),
+    ).toEqual([
+      { event: "status", data: '{"a":1}' },
+      { event: "answer", data: '{"b":2}' },
+    ]);
+    const split = sseReader();
+    // The last CR may be half of a CRLF: the frame waits for the next chunk, then both are read.
+    expect(split.feed("event: a\r\ndata: 1\r\n\r")).toEqual([]);
+    expect(split.feed("\nevent: b\r\ndata: 2\r\n\r\n")).toEqual([
+      { event: "a", data: "1" },
+      { event: "b", data: "2" },
+    ]);
+    const crs = sseReader();
+    expect(crs.feed("event: a\rdata: 1\r\r")).toEqual([]);
+    expect(crs.feed("\n")).toEqual([{ event: "a", data: "1" }]);
   });
 
   it("keeps an unfinished frame for the next chunk, and stops past 64 KiB", () => {

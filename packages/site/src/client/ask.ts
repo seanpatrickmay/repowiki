@@ -3,6 +3,7 @@
 // page is served by pnpm wiki:serve, and otherwise routes the question to pages with the
 // Pagefind index the site already ships. Answers are rendered by ask-render.ts as text only.
 import type { AskResponse, AskStatus } from "@repowiki/core";
+import { ASK_QUESTION_MAX_LENGTH } from "@repowiki/core/ask-limits";
 import {
   type AskDocument,
   type AskNode,
@@ -28,6 +29,7 @@ export interface AskElement extends AskNode {
 
 export interface AskEvent {
   key?: string;
+  defaultPrevented?: boolean;
   preventDefault(): void;
 }
 
@@ -155,7 +157,11 @@ export function installAsk(env: AskEnv): void {
       return parsed.flatMap((k) => {
         const response = guardResponse((k as Kept | null)?.response);
         const question = (k as Kept | null)?.question;
-        return response === null || typeof question !== "string" ? [] : [{ question, response }];
+        return response === null ||
+          typeof question !== "string" ||
+          [...question].length > ASK_QUESTION_MAX_LENGTH
+          ? []
+          : [{ question, response }];
       });
     } catch {
       return [];
@@ -186,6 +192,8 @@ export function installAsk(env: AskEnv): void {
     const live = panel.querySelector("[data-ask-live]");
     const result = panel.querySelector("[data-ask-result]");
     if (form === null || input === null || live === null || result === null) continue;
+    // /special/ask/'s form is hidden until now: without the client it could only reload the page.
+    form.hidden = false;
     let asking = false;
 
     const routes = async (question: string, why: string) => {
@@ -357,13 +365,14 @@ export function installAsk(env: AskEnv): void {
     button.setAttribute("aria-expanded", String(open));
     store.set(OPEN_KEY, open ? "1" : "0");
     if (open) void probe();
-    if (focus) (open ? (sidebar.querySelector("textarea") ?? sidebar) : button).focus();
+    if (focus) (open ? sidebar.querySelector("textarea") : button)?.focus();
   };
   button.hidden = false;
   button.addEventListener("click", () => setOpen(sidebar.hidden, true));
   sidebar.querySelector("[data-ask-close]")?.addEventListener("click", () => setOpen(false, true));
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !sidebar.hidden) setOpen(false, true);
+    // An Escape another widget (a hover preview) already handled is not the panel's.
+    if (event.key === "Escape" && !event.defaultPrevented && !sidebar.hidden) setOpen(false, true);
   });
   if (store.get(OPEN_KEY) === "1") setOpen(true, false);
 }

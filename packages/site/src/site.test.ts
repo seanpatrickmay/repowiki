@@ -518,6 +518,11 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
       expect(html, page).toContain(
         '<aside id="ask-panel" class="ask-sidebar" data-pagefind-ignore="all" hidden>',
       );
+      const main = html.indexOf("</main>");
+      expect({ page, after: main >= 0 && html.indexOf('<aside id="ask-panel"') > main }).toEqual({
+        page,
+        after: true,
+      });
     }
   });
 
@@ -542,6 +547,8 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
     expect(html).not.toContain("data-ask-open");
     expect(html).not.toContain('id="ask-panel"');
     expect(html).toContain('<meta name="robots" content="noindex">');
+    // Without the client the form could only reload the page: it shows once the client runs.
+    expect(html).toContain('<form class="ask-form" data-ask-form hidden>');
   });
 
   it("ships the ask client in the Layout's script, with no zod in the browser", () => {
@@ -551,13 +558,22 @@ describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
       .filter((js) => js.includes("/api/ask/status"));
     expect(client).toHaveLength(1);
     expect(client[0]).toContain("/pagefind/pagefind.js");
-    expect(client[0]).not.toMatch(/ZodError|\$ZodType/);
+    expect(client[0]).not.toMatch(/ZodError|\$ZodType|too_big|invalid_type/);
   });
 
   it("covers the viewport under 720px", () => {
     const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
     const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
-    expect(css).toMatch(/@media[^{]*720px[^{]*\{[^@]*\.ask-sidebar\{[^}]*position:\s*fixed/);
+    // The rule must sit inside the 720px block itself: no "}}" (the block's end) before it.
+    expect(css).toMatch(
+      /@media[^{]*720px[^{]*\{(?:(?!\}\})[^@])*\.ask-sidebar\{[^}]*position:\s*fixed/,
+    );
+  });
+
+  it("outlines the question box on keyboard focus, as links and buttons are", () => {
+    const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
+    const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
+    expect(css).toMatch(/textarea:focus-visible/);
   });
 });
 
