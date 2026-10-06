@@ -1,0 +1,174 @@
+import { type AskIndexes, askQuestion } from "@repowiki/ask";
+import type { AskResponse } from "@repowiki/core";
+import { type EvalQuestion, judgeAnswer } from "@repowiki/eval";
+import { callCostUsd, type Provider, type ToolProvider } from "@repowiki/llm";
+import { markdownText, type WikiView } from "@repowiki/query";
+import { DEFAULT_QUESTION_USD } from "./serve-cli.ts";
+
+/** One question's result: the ask's response, how long it took, and the judge's grade. */
+export interface AskEvalRow {
+  id: string;
+  kind: string;
+  question: string;
+  response: AskResponse;
+  /** Milliseconds from the question to its answer. */
+  ms: number;
+  /** The judge's 0/1 grade, or null when the judgment failed. */
+  score: 0 | 1 | null;
+  judgeUsd: number | null;
+}
+
+export interface AskEvalResult {
+  rows: AskEvalRow[];
+  /** Questions not asked because the next could have crossed --max-usd. */
+  overBudget: string[];
+  spentUsd: number;
+}
+
+/** An answer as the judge reads it: its sentences, joined as one answer. */
+export const answerText = (response: AskResponse): string =>
+  response.sentences.map((s) => s.text).join(" ");
+
+/**
+ * Asks each question through askQuestion with no cache (spec v2 #4 §7), one at a time, while the
+ * next question's ceiling fits under `maxUsd` (C12); then judges every answer with the M7 judge,
+ * the calls together so they go as one batch.
+ */
+export async function runAskEval(options: {
+  view: WikiView;
+  indexes: AskIndexes;
+  questions: readonly EvalQuestion[];
+  provider: ToolProvider;
+  judge: Provider;
+  model: string;
+  batchJudge: boolean;
+  maxUsd: number;
+  perQuestionCeilingUsd: readonly number[];
+  clock?: () => number;
+  log?: (line: string) => void;
+}): Promise<AskEvalResult> {
+  const clock = options.clock ?? (() => performance.now());
+  const log = options.log ?? (() => {});
+  const asked: Omit<AskEvalRow, "score" | "judgeUsd">[] = [];
+  const overBudget: string[] = [];
+  let spent = 0;
+  let committed = 0;
+  for (const [i, question] of options.questions.entries()) {
+    const ceiling = options.perQuestionCeilingUsd[i] ?? DEFAULT_QUESTION_USD;
+    if (committed + ceiling > options.maxUsd + 1e-12) {
+      overBudget.push(question.id);
+      continue;
+    }
+    log(`[${i + 1}/${options.questions.length}] ${question.id}: asking`);
+    const started = clock();
+    const { response } = await askQuestion({
+      provider: options.provider,
+      view: options.view,
+      indexes: options.indexes,
+      question: question.question,
+      page: null,
+      model: options.model,
+      questionUsd: DEFAULT_QUESTION_USD,
+    });
+    const ms = clock() - started;
+    spent += response.cost.usd ?? DEFAULT_QUESTION_USD;
+    committed += ceiling - DEFAULT_QUESTION_USD + (response.cost.usd ?? DEFAULT_QUESTION_USD);
+    asked.push({ id: question.id, kind: question.kind, question: question.question, response, ms });
+  }
+  if (asked.length > 0)
+    log(`judging ${asked.length} answers${options.batchJudge ? " in one batch" : ""}`);
+  const byId = new Map(options.questions.map((q) => [q.id, q]));
+  const judged = await Promise.allSettled(
+    asked.map((row) =>
+      judgeAnswer(
+        options.judge,
+        byId.get(row.id) as EvalQuestion,
+        answerText(row.response),
+        options.batchJudge,
+      ),
+    ),
+  );
+  const rows = asked.map((row, i): AskEvalRow => {
+    const outcome = judged[i];
+    if (outcome?.status !== "fulfilled") return { ...row, score: null, judgeUsd: null };
+    const j = outcome.value;
+    const usd = j.model === null ? 0 : callCostUsd(j.model, j.usage, j.batch);
+    if (usd !== null) spent += usd;
+    return { ...row, score: j.score, judgeUsd: usd };
+  });
+  return { rows, overBudget, spentUsd: spent };
+}
+
+/** The middle value, or null for none. */
+export function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? (sorted[mid] as number)
+    : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+}
+
+/** Spec v2 #4 §12.5's bars: median and most per question, and median time to the answer. */
+export const MEDIAN_USD_BAR = 0.015;
+export const MAX_USD_BAR = 0.05;
+export const MEDIAN_SECONDS_BAR = 8;
+
+const usd4 = (usd: number | null) => (usd === null ? "unknown" : `$${usd.toFixed(4)}`);
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+
+/**
+ * report.md (spec v2 #4 §7): every question's status, grade, turns, cost and time; the accuracy,
+ * the medians and the most a question cost; that every shown sentence cites a claim the model
+ * was shown; and §12.5's bars. Question text never appears; ids are kebab-case.
+ */
+export function renderAskReport(at: {
+  repo: string;
+  head: string;
+  model: string;
+  set: string;
+  startedAt: string;
+  result: AskEvalResult;
+  extra?: readonly string[];
+}): string {
+  const { rows } = at.result;
+  const correct = rows.filter((r) => r.score === 1).length;
+  const costs = rows.map((r) => r.response.cost.usd ?? DEFAULT_QUESTION_USD);
+  const times = rows.map((r) => r.ms);
+  const shown = rows.flatMap((r) =>
+    r.response.status === "answered" || r.response.status === "partial" ? r.response.sentences : [],
+  );
+  const cited = shown.filter((s) => s.sources.length > 0).length;
+  const medianUsd = median(costs);
+  const maxUsd = costs.length === 0 ? null : Math.max(...costs);
+  const medianMs = median(times);
+  const met = (ok: boolean) => (ok ? "met" : "not met");
+  const lines = [
+    `# Ask eval: ${markdownText(at.repo, 80)} at ${at.head.slice(0, 7)}`,
+    "",
+    `${rows.length} ${at.set} questions asked through the ask with ${markdownText(at.model, 60)} (at most ${usd4(DEFAULT_QUESTION_USD)} a question, no answer cache), each judged by the M7 judge. The run began ${at.startedAt}.`,
+    "",
+    "| Question | Kind | Status | Correct | Turns | Cost | Time |",
+    "|---|---|---|---|---:|---:|---:|",
+    ...rows.map(
+      (r) =>
+        `| ${r.id} | ${r.kind} | ${r.response.status} | ${r.score === null ? "unjudged" : r.score === 1 ? "yes" : "no"} | ${r.response.cost.turns} | ${usd4(r.response.cost.usd)} | ${seconds(r.ms)} |`,
+    ),
+    "",
+    "## Totals",
+    "",
+    `- Accuracy: ${correct} of ${rows.length}${rows.length === 0 ? "" : ` (${Math.round((100 * correct) / rows.length)}%)`}${rows.some((r) => r.score === null) ? `; ${rows.filter((r) => r.score === null).length} unjudged` : ""}.`,
+    `- Cost a question: median ${usd4(medianUsd)}, most ${usd4(maxUsd)}; the run cost ${usd4(at.result.spentUsd)} with judging.`,
+    `- Time from the question to its answer: median ${medianMs === null ? "none" : seconds(medianMs)}, most ${times.length === 0 ? "none" : seconds(Math.max(...times))}.`,
+    `- Grounding: ${cited} of ${shown.length} shown sentences cite at least one claim the model was shown.`,
+    `- Not asked (the next question could have crossed --max-usd): ${at.result.overBudget.length === 0 ? "none" : at.result.overBudget.join(", ")}.`,
+    "",
+    "## Cost and speed (spec v2 #4 §12.5)",
+    "",
+    `- Median cost at most ${usd4(MEDIAN_USD_BAR)}: ${medianUsd === null ? "no answers" : met(medianUsd <= MEDIAN_USD_BAR)}.`,
+    `- Most a question cost at most ${usd4(MAX_USD_BAR)}: ${maxUsd === null ? "no answers" : met(maxUsd <= MAX_USD_BAR)}.`,
+    `- Median time at most ${MEDIAN_SECONDS_BAR} s: ${medianMs === null ? "no answers" : met(medianMs <= MEDIAN_SECONDS_BAR * 1000)}.`,
+    ...(at.extra ?? []),
+  ];
+  return `${lines.join("\n")}\n`;
+}

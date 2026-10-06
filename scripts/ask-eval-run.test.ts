@@ -1,0 +1,151 @@
+import { askIndexes } from "@repowiki/ask";
+import { answerTurn, scriptedProvider } from "@repowiki/ask/test-provider";
+import type { EvalQuestion } from "@repowiki/eval";
+import type { GenerateRequest, Provider } from "@repowiki/llm";
+import { WikiView } from "@repowiki/query";
+import { type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { answerText, median, renderAskReport, runAskEval } from "./ask-eval-run.ts";
+
+let sample: SampleWiki;
+beforeAll(() => {
+  sample = sampleWiki();
+});
+afterAll(() => sample.repo.remove());
+
+const QUESTIONS: EvalQuestion[] = [
+  {
+    id: "q-where",
+    set: "dev",
+    kind: "where",
+    question: "Which function turns a chunk into signals?",
+    reference: "ingest_chunk in src/signals/ingest.py.",
+  },
+  {
+    id: "q-how",
+    set: "dev",
+    kind: "how",
+    question: "How does ingest_chunk save each signal it makes?",
+    reference: "With save_signal.",
+  },
+];
+
+/** A judge that finds the reference's one fact when the answer names ingest_chunk. */
+function fakeJudge() {
+  const requests: GenerateRequest<unknown>[] = [];
+  const judge: Provider = {
+    async generate<T>(request: GenerateRequest<T>) {
+      requests.push(request as GenerateRequest<unknown>);
+      const turn = JSON.parse(request.messages[0]?.content ?? "{}") as { candidate: string };
+      const present = turn.candidate.includes("ingest_chunk");
+      const output = {
+        facts: [{ fact: "ingest_chunk", essential: true, present }],
+        contradicts: false,
+        reason: present ? "Names the function." : "Does not name it.",
+      } as T;
+      return {
+        output,
+        usage: { in: 800, out: 100, cacheRead: 0, cacheWrite: 0 },
+        model: "claude-haiku-4-5-20251001",
+      };
+    },
+  };
+  return { judge, requests };
+}
+
+describe("runAskEval", () => {
+  const ANSWER = answerTurn([["Signals are made by `ingest_chunk`.", ["signals#s-1"]]]);
+  const run = (maxUsd = 1.5) => {
+    const view = new WikiView(sample.wiki);
+    const { provider, requests } = scriptedProvider([ANSWER, ANSWER]);
+    const { judge, requests: judged } = fakeJudge();
+    let now = 0;
+    const result = runAskEval({
+      view,
+      indexes: askIndexes(view),
+      questions: QUESTIONS,
+      provider,
+      judge,
+      model: "claude-haiku-4-5",
+      batchJudge: true,
+      maxUsd,
+      perQuestionCeilingUsd: [0.06, 0.06],
+      clock: () => (now += 1500),
+    });
+    return { result, requests, judged };
+  };
+
+  it("asks every question, times it, and judges the answers in one batch", async () => {
+    const { result, requests, judged } = run();
+    const { rows, overBudget, spentUsd } = await result;
+    expect(rows.map((r) => [r.id, r.response.status, r.score, r.ms])).toEqual([
+      ["q-where", "answered", 1, 1500],
+      ["q-how", "answered", 1, 1500],
+    ]);
+    expect(requests).toHaveLength(2);
+    expect(judged).toHaveLength(2);
+    expect(judged.every((r) => r.batch === true && r.purpose === "evalJudge")).toBe(true);
+    expect(overBudget).toEqual([]);
+    expect(spentUsd).toBeGreaterThan(0);
+  });
+
+  it("asks a question only while its ceiling fits under --max-usd", async () => {
+    const { rows, overBudget } = await run(0.07).result;
+    expect(rows.map((r) => r.id)).toEqual(["q-where"]);
+    expect(overBudget).toEqual(["q-how"]);
+  });
+
+  it("gives the judge the sentences joined as one answer", () => {
+    const response = { sentences: [{ text: "One." }, { text: "Two." }] };
+    expect(answerText(response as never)).toBe("One. Two.");
+  });
+});
+
+describe("renderAskReport", () => {
+  it("states each question, the totals, the grounding and spec §12.5's bars", async () => {
+    const view = new WikiView(sample.wiki);
+    const { provider } = scriptedProvider([
+      answerTurn([["Signals are made by `ingest_chunk`.", ["signals#s-1"]]]),
+      answerTurn([], "not-found"),
+    ]);
+    const result = await runAskEval({
+      view,
+      indexes: askIndexes(view),
+      questions: QUESTIONS,
+      provider,
+      judge: fakeJudge().judge,
+      model: "claude-haiku-4-5",
+      batchJudge: true,
+      maxUsd: 1.5,
+      perQuestionCeilingUsd: [0.06, 0.06],
+      clock: (() => {
+        let t = 0;
+        return () => (t += 3000);
+      })(),
+    });
+    const report = renderAskReport({
+      repo: "sample*<b>",
+      head: sample.sha,
+      model: "claude-haiku-4-5",
+      set: "dev",
+      startedAt: "2026-10-05T12:00:00.000Z",
+      result,
+    });
+    expect(report).toContain(`# Ask eval: sample\\*\\<b\\> at ${sample.sha.slice(0, 7)}`);
+    expect(report).toContain("| q-where | where | answered | yes | 1 | $0.0030 | 3.0 s |");
+    expect(report).toContain("| q-how | how | not-found | no | 1 | $0.0030 | 3.0 s |");
+    expect(report).toContain("- Accuracy: 1 of 2 (50%).");
+    expect(report).toContain(
+      "- Grounding: 1 of 1 shown sentences cite at least one claim the model was shown.",
+    );
+    expect(report).toContain("- Median cost at most $0.0150: met.");
+    expect(report).toContain("- Median time at most 8 s: met.");
+    expect(report).not.toContain("How does ingest_chunk save");
+  });
+
+  it("finds the median of an odd and an even count", () => {
+    expect(median([3, 1, 2])).toBe(2);
+    expect(median([4, 1, 3, 2])).toBe(2.5);
+    expect(median([])).toBeNull();
+  });
+});
