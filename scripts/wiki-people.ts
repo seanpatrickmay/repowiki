@@ -23,12 +23,10 @@ import {
   peopleTable,
   renderPeopleSummary,
   storeCopy,
+  WIKI_PEOPLE_RUN_PREFIX,
 } from "./people-cli.ts";
 import { runPeopleStep } from "./people-run.ts";
 import { acquireBuildLock, exitWithError, lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
-
-/** wiki:people's ledger run ids start with this, then the sha and the start time. */
-export const WIKI_PEOPLE_RUN_PREFIX = "wiki-people-";
 
 /**
  * pnpm wiki:people <repo> … (spec v2 #6 §10): turns People on for a built wiki and refreshes it at
