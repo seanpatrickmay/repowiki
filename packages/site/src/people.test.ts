@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildSiteModel } from "./model.ts";
-import { computedLead, peopleIndexView, peopleRoutes, personView } from "./people.ts";
+import {
+  activityRoutes,
+  activityView,
+  computedLead,
+  peopleIndexView,
+  peopleRoutes,
+  personView,
+} from "./people.ts";
 import { fixtureExport } from "./test-fixtures.ts";
 import { fixturePeople, HOSTILE_PERSON_NAME, peopleExport } from "./test-people.ts";
 
@@ -97,5 +104,40 @@ describe("personView", () => {
     expect(personView(site, later, "ada-lovelace").due).toBe(
       "2 newer commits are not yet in the narrative.",
     );
+  });
+});
+
+describe("the activity pages (R22)", () => {
+  it("are all time, then each year and month with commits, and none without People", () => {
+    expect(activityRoutes(site).map((r) => r.period)).toEqual([
+      undefined,
+      "2025",
+      "2025-12",
+      "2026",
+      "2026-01",
+      "2026-02",
+      "2026-03",
+    ]);
+    expect(activityRoutes(buildSiteModel(fixtureExport(), null))).toEqual([]);
+  });
+
+  it("zoom from all time to a year by week, then to a month by day", () => {
+    const all = activityView(site, people, undefined);
+    expect([all.title, all.up, all.down.map((d) => d.href)]).toEqual([
+      "Activity",
+      null,
+      ["/special/activity/2025/", "/special/activity/2026/"],
+    ]);
+    expect(all.chart).toContain('<a href="/special/activity/2026/">');
+    const year = activityView(site, people, "2026");
+    expect(year.title).toBe("Activity in 2026");
+    expect(year.up).toEqual({ label: "All time", href: "/special/activity/" });
+    expect(year.chart).toContain("Week of 5 Jan 2026");
+    expect(year.chart).toContain('<a href="/special/activity/2026-01/">');
+    const month = activityView(site, people, "2026-02");
+    expect(month.title).toBe("Activity in February 2026");
+    expect(month.up).toEqual({ label: "2026", href: "/special/activity/2026/" });
+    expect(month.chart.split("</svg>")[0]).not.toContain("<a href=");
+    expect(month.chart).toContain("10 Feb 2026: 1 commit");
   });
 });

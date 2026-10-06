@@ -1,0 +1,27 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import { activityRoutes, activityView } from "../../../people.ts";
+import { getSite } from "../../../site.ts";
+import { PEOPLE_URL } from "../../../urls.ts";
+
+/** Generated only when the export has People, for each year and month with commits (R22). */
+export function getStaticPaths() {
+  return activityRoutes(getSite()).map((route) => ({ params: { period: route.period } }));
+}
+
+const site = getSite();
+const people = site.wiki.people;
+if (people === null) throw new Error("activity pages need an export with People");
+const view = activityView(site, people, Astro.params.period);
+---
+<Layout title={view.title}>
+  <h1 class="page-title">{view.title}</h1>
+  <p class="tagline">From the {site.wiki.repo} wiki</p>
+  <p>
+    {view.up !== null && <><a href={view.up.href}>{view.up.label}</a> · </>}<a href={PEOPLE_URL}>People</a>
+  </p>
+  <Fragment set:html={view.chart} />
+  {view.down.length > 0 && (
+    <ul class="activity-periods">{view.down.map((d) => <li><a href={d.href}>{d.label}</a></li>)}</ul>
+  )}
+</Layout>

@@ -8,8 +8,10 @@ import {
 import {
   barChart,
   bucketFor,
+  bucketLabel,
   bucketStarts,
   heatmap,
+  periodDays,
   repositorySeries,
   sparkline,
 } from "./activity-svg.ts";
@@ -17,7 +19,7 @@ import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
-import { personUrl } from "./urls.ts";
+import { activityUrl, personUrl } from "./urls.ts";
 
 /** Every /people/<path>/ page: the index, a person, or a merged-away id's redirect. */
 export type PeopleRoute =
@@ -78,11 +80,7 @@ export interface PeopleIndexView {
  * /people/: the repository's activity, every person with a page by commits, the bots, and each
  * feature's contributors by current lines (R23's "and N more" lands here).
  */
-export function peopleIndexView(
-  site: SiteModel,
-  people: PeopleExport,
-  activityHref: (year: string) => string | null = () => null,
-): PeopleIndexView {
+export function peopleIndexView(site: SiteModel, people: PeopleExport): PeopleIndexView {
   const { snapshot } = people;
   const days = [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others].map(
     (d) => d.day,
@@ -94,7 +92,8 @@ export function peopleIndexView(
     label: `Commits to ${site.wiki.repo} by ${bucket}`,
     bucket,
     starts: bucketStarts(from, to, bucket),
-    hrefOf: (start) => activityHref(start.slice(0, 4)),
+    // Every bar has commits in it, so its year has an activity page.
+    hrefOf: (start) => activityUrl(start.slice(0, 4)),
   });
   const total = Math.max(1, snapshot.totalLines);
   return {
@@ -237,5 +236,95 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
       newer === 0
         ? null
         : `${counted(newer, "newer commit")} ${newer === 1 ? "is" : "are"} not yet in the narrative.`,
+  };
+}
+
+/** The activity pages (spec v2 #6 §11, R22): all time, then each year and month with commits. */
+export function activityRoutes(site: SiteModel): { period: string | undefined }[] {
+  const people = site.wiki.people;
+  if (people === null) return [];
+  const days = activityDays(people);
+  const years = [...new Set(days.map((d) => d.slice(0, 4)))];
+  const months = [...new Set(days.map((d) => d.slice(0, 7)))];
+  return [{ period: undefined }, ...[...years, ...months].sort().map((period) => ({ period }))];
+}
+
+/** Every day with a commit, the anonymous series' included, sorted. */
+function activityDays(people: PeopleExport): string[] {
+  const { snapshot } = people;
+  return [
+    ...new Set(
+      [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others].map((d) => d.day),
+    ),
+  ].sort();
+}
+
+export interface ActivityView {
+  /** Plain text. */
+  title: string;
+  /** Trusted HTML: the stacked chart. */
+  chart: string;
+  /** The zoom levels around this one: the period above, and the periods below with commits. */
+  up: { label: string; href: string } | null;
+  down: { label: string; href: string }[];
+}
+
+/**
+ * /special/activity/[<yyyy>[-<mm>]]/: the repository's commits by person over the period, all
+ * time by R22's bucket, a year by ISO week, a month by day; every bar leads one level down.
+ */
+export function activityView(
+  site: SiteModel,
+  people: PeopleExport,
+  period: string | undefined,
+): ActivityView {
+  const days = activityDays(people);
+  const active = new Set(
+    activityRoutes(site).flatMap((r) => (r.period === undefined ? [] : [r.period])),
+  );
+  const { from, to } =
+    period === undefined ? { from: days[0] ?? "", to: days.at(-1) ?? "" } : periodDays(period);
+  const bucket = period === undefined ? bucketFor(from, to) : period.length === 4 ? "week" : "day";
+  const below = (start: string): string | null => {
+    // All time links each bar to its year, whatever its bucket; a month is the finest level.
+    if (period === undefined)
+      return active.has(start.slice(0, 4)) ? activityUrl(start.slice(0, 4)) : null;
+    if (bucket === "day") return null;
+    // A week leads to the month most of it falls in, when that month had commits.
+    const mid = new Date(Date.parse(`${start}T00:00:00Z`) + 3 * 86_400_000)
+      .toISOString()
+      .slice(0, 7);
+    return mid.startsWith(period) && active.has(mid) ? activityUrl(mid) : null;
+  };
+  const name =
+    period === undefined
+      ? null
+      : period.length === 4
+        ? period
+        : bucketLabel(`${period}-01`, "month");
+  const title = name === null ? "Activity" : `Activity in ${name}`;
+  return {
+    title,
+    chart: barChart(repositorySeries(people.snapshot, from, to, personUrl), {
+      label: `Commits to ${site.wiki.repo}${name === null ? "" : ` in ${name}`} by ${bucket}`,
+      bucket,
+      starts: bucketStarts(from, to, bucket),
+      hrefOf: below,
+    }),
+    up:
+      period === undefined
+        ? null
+        : period.length === 4
+          ? { label: "All time", href: activityUrl() }
+          : { label: period.slice(0, 4), href: activityUrl(period.slice(0, 4)) },
+    down: [...active]
+      .filter((p) =>
+        period === undefined ? p.length === 4 : p.length === 7 && p.startsWith(`${period}-`),
+      )
+      .sort()
+      .map((p) => ({
+        label: p.length === 4 ? p : bucketLabel(`${p}-01`, "month"),
+        href: activityUrl(p),
+      })),
   };
 }

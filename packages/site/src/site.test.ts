@@ -1589,6 +1589,26 @@ describe("the People pages (spec v2 #6 §11)", () => {
       });
   });
 
+  it("builds the activity zoom pages, out of search, for periods with commits only", async () => {
+    const pages = htmlFiles(peopleSite.outDir).filter((p) => p.startsWith("special/activity/"));
+    expect(pages).toEqual([
+      "special/activity/2025-12/index.html",
+      "special/activity/2025/index.html",
+      "special/activity/2026-01/index.html",
+      "special/activity/2026-02/index.html",
+      "special/activity/2026-03/index.html",
+      "special/activity/2026/index.html",
+      "special/activity/index.html",
+    ]);
+    for (const page of pages)
+      expect(peopleSite.read(page), page).not.toContain("data-pagefind-body");
+    await expect(peopleNormalized("special/activity/2026/index.html")).toMatchFileSnapshot(
+      "__snapshots__/special-activity-2026.html",
+    );
+    expect(peopleSite.read("people/index.html")).toContain('<a href="/special/activity/2026/">');
+    expect(existsSync(join(site.outDir, "special", "activity"))).toBe(false);
+  });
+
   it("links People last in the nav, only when the export has People", () => {
     const nav =
       /<nav class="site-nav"[\s\S]*?<\/nav>/.exec(peopleSite.read("index.html"))?.[0] ?? "";
