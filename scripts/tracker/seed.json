@@ -1380,6 +1380,168 @@
       "labels": ["v2", "type:task", "area:infra"],
       "parent": "F07",
       "body": "**Deliverable:** the fixes the whole-milestone review asks for, and the owner's runbook for spec v2 #5 section 11 posted on #11 and #12.\n\n**Done when:** the review's findings are fixed or ruled on, and the runbook is on #11 and #12. The scored runs are the owner's. Plan: docs/superpowers/plans/2026-10-04-repowiki-m8-agent-interface.md Task 17."
+    },
+    {
+      "key": "M9-1",
+      "title": "[M9] tracker: M9 tickets",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F09",
+      "closed": true,
+      "body": "**Deliverable:** M9 tickets M9-1..M9-23 in seed.json, under F09.\n\n**Done when:** the seed creates M9-2..M9-23 under F09 (#13). Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 1."
+    },
+    {
+      "key": "M9-2",
+      "title": "[M9] core: the Ask schemas, claimAnchor and the ask role",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** core's ask.ts (ASK_* limits, NOT_FOUND_SENTENCE, claimAnchor, ASK_HREF, AskRequest, AskSource, AskResponse with its cross-field checks, AskStatus, AskProgress); LlmRole gains ask; llm's DEFAULT_MODELS.ask is claude-haiku-4-5 (C6); makeAskResponse in core's test fixtures.\n\n**Done when:** tests pass, an M7 ledger row and a config without models.ask still parse, and M7's and M8's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 2."
+    },
+    {
+      "key": "M9-3",
+      "title": "[M9] llm: force a named tool with toolChoice { tool }",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** ToolTurnRequest.toolChoice takes \"auto\", \"none\" or { tool: name }; { tool } maps to { type: \"tool\", name, disable_parallel_tool_use: true } and a name not among the turn's tools is an LlmError before any request.\n\n**Done when:** tests pass and M7's and M8's cassettes replay unchanged (their request bodies carry no tool_choice change). Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 3."
+    },
+    {
+      "key": "M9-4",
+      "title": "[M9] query: read a page with claim handles, and the page, section and claim hrefs",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** query's ask-page.ts (readPageWithHandles: readPage with an opt-in claimHandle option and no revision list, returning { text, handles }; unmarkHandles; handleOf, hasHandle, handleClaim) and hrefs.ts (pageHref, sectionHref, claimHref); readPage's PageOptions gains claimHandle and history: false, its default output unchanged (C4).\n\n**Done when:** tests pass, v1-tools.txt is unchanged, and M7's and M8's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 4."
+    },
+    {
+      "key": "M9-5",
+      "title": "[M9] query: the claim-level search index",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** query's claim-index.ts (claimSearchIndex: one BM25F document per claim of every active page and the About article, fields title x2, text x1, cites x1; search with a per-page cap; claimLine); search.ts's searchIndex generic over its fields with an optional boost, its default unchanged.\n\n**Done when:** tests pass, v1-tools.txt is unchanged, and M7's and M8's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 5."
+    },
+    {
+      "key": "M9-6",
+      "title": "[M9] site: claim anchors and the :target highlight",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F09",
+      "body": "**Deliverable:** article.ts's anchoredClaim wraps each claim whose id passes claimAnchor in <span class=\"claim\" id=\"claim-<id>\"> on articles, old revisions and the About article (once per page); wiki.css highlights .claim:target; the site's crawl test checks every claim anchor id is unique per page.\n\n**Done when:** tests pass and the two changed snapshots show only the added spans. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 6."
+    },
+    {
+      "key": "M9-7",
+      "title": "[M9] ask: create @repowiki/ask with the prompt, the answer tool and the turn-1 pack",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** packages/ask (@repowiki/ask: core, llm, query, zod) and its boundary test (no engine, eval, site, network module or fetch); prompt.ts (ASK_PROMPT_VERSION, MAX_TURNS, MAX_ANSWER_WORDS, AnswerInput, answerTool, askSystemPrompt); tools.ts (createAskTools: search and read_page in handles mode); pack.ts (askIndexes, hintedPage, turnOnePack); the CLAUDE.md layout line.\n\n**Done when:** tests pass, including the boundary test. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 7."
+    },
+    {
+      "key": "M9-8",
+      "title": "[M9] ask: answer validation, identifier grounding and the response",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** ask's answer.ts: codeTokens and ungroundedToken (R6), checkAnswer (shown handles only, at most four a sentence, one neutralised line of at most 400, six sentences and 120 words, a reason per refused sentence), readNextOf (the model's pages, then the page search), buildResponse (sources numbered by first citation, AskResponse-parsed).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 8."
+    },
+    {
+      "key": "M9-9",
+      "title": "[M9] ask: the bounded tool loop with a budget per turn",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** ask's loop.ts: askQuestion (turn 1 with the pack; at most 4 turns plus one grounding retry; one tool a turn; answer forced on turn 4, after a prose turn and when the budget left covers this turn's bound but not two; a budget stop before any turn that could cross the cap; provider errors as status error; tokens and dollars summed), turnBound at 2.5 characters a token; test-provider.ts (scriptedProvider, answerTurn) on the ./test-provider subpath.\n\n**Done when:** tests pass. No test calls a model: the provider is scripted. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 9."
+    },
+    {
+      "key": "M9-10",
+      "title": "[M9] ask: the recorded cassette on the fixture and a hostile page",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** packages/ask/src/ask.claude.test.ts and its cassette __cassettes__/ask.json, recorded live once (about $0.05): four questions on sampleWiki() plus a hostile Operator notes page (answered from the pack, one page read, off-topic, aimed at the hostile page), asserting invariants only: every cited handle was shown, no ungrounded identifier, secrets.txt never appears, off-topic is not-found, one ledger row a turn.\n\n**Done when:** tests pass, ask.json replays in CI with no network, and the secret scan passes. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 10."
+    },
+    {
+      "key": "M9-11",
+      "title": "[M9] ask: the answer cache",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** ask's cache.ts: exportHash (SHA-256 of the canonical JSON of head, manifest, pages and architecture), normalizeQuestion (NFKC, case-folded, whitespace collapsed, closing ?.! dropped), answerKey, AskRecord, openAnswerCache (<out>/ask/answers.jsonl, bad lines counted, a torn last line handled, compaction past 5 MB by temp file and rename).\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 11."
+    },
+    {
+      "key": "M9-12",
+      "title": "[M9] ask: the serve session (caps, one in flight, the log line)",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** ask's session.ts: createAskSession (indexes built once; a cache hit first, then busy, then the session cap as a budget answer; only answered, partial and not-found answers cached; one terminal line a question through oneLine and cut), BusyError.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 12."
+    },
+    {
+      "key": "M9-13",
+      "title": "[M9] ask: the HTTP handler, its request guard and its headers",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F09",
+      "body": "**Deliverable:** ask's http.ts: createAskHandler (GET /api/ask/status; POST /api/ask as SSE status and answer frames; R18's guard: 421 Host, 403 Origin or Sec-Fetch-Site, 415 content type, 413 over 4 KiB, 400 bad question, 405 OPTIONS and other methods, 404 unknown ask path, 503 in routing mode, 429 busy), securityHeaders (the site's CSP plus frame-ancestors 'none', nosniff, no-referrer, COOP and CORP same-origin; no-store on /api/), hostAllowed, sseFrame; a loopback test on 127.0.0.1:0.\n\n**Done when:** tests pass. The only socket is the loopback test's, on 127.0.0.1. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 13."
+    },
+    {
+      "key": "M9-14",
+      "title": "[M9] scripts: the static file server and the CSP constant",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F09",
+      "body": "**Deliverable:** packages/site/src/csp.ts (CONTENT_SECURITY_POLICY, rendered by Layout.astro, the meta byte for byte as before, C10) and the site's ./build and ./csp subpaths; scripts/serve-static.ts (resolveStaticPath with §7's traversal rules, contentTypeFor, serveRequests guarding every request's Host and handing /api/ask to the handler, listenLoopback on 127.0.0.1 only with a busy port named as --port).\n\n**Done when:** tests pass and every site snapshot is unchanged (the CSP meta is rendered from the constant). Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 14."
+    },
+    {
+      "key": "M9-15",
+      "title": "[M9] scripts: pnpm wiki:serve",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F09",
+      "body": "**Deliverable:** scripts/serve-cli.ts (parseWikiServeArgs with --port 0..65535, --question-usd in (0, 1], --max-usd in (0, 20] and at least --question-usd; siteIsCurrent; typicalQuestionUsd from the export's median page; serveEstimateLine; totalsLine) and scripts/wiki-serve.ts (resolveOutDir, the rebuild when the site's export copy differs or --repo-url is given, routing mode without a key or with --no-ask, the estimate line before any call, the serving line, SIGINT and SIGTERM waiting up to 30 s for a question in flight, then the session's total); pnpm wiki:serve; the CLAUDE.md command line.\n\n**Done when:** tests pass; the process tests run with every ANTHROPIC_* variable removed and make no call. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 15."
+    },
+    {
+      "key": "M9-16",
+      "title": "[M9] site: the Ask sidebar's shell, header button and /special/ask/",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F09",
+      "body": "**Deliverable:** components/AskPanel.astro (the form, a 500-character textarea, two aria-live polite regions, a noscript line); Layout.astro's askSidebar prop, the hidden header button (aria-expanded, aria-controls) and the hidden <aside> outside Pagefind's index; pages/special/ask.astro (noindex); urls.ts's ASK_URL; wiki.css's sidebar styles (beside the content, covering the viewport under 720 px).\n\n**Done when:** tests pass and the seven changed snapshots show only the button and the aside. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 16."
+    },
+    {
+      "key": "M9-17",
+      "title": "[M9] site: render an answer as text, with the response guard and the SSE reader",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F09",
+      "body": "**Deliverable:** client/ask-render.ts: safeHref (R19's pattern), guardResponse and guardProgress (hand-written mirrors of AskResponse and AskProgress), renderAnswer (textContent only; backtick spans as <code>; source marks; Sources, Read next and the footer), sseReader (frames split anywhere, CRLF, comments, a 64 KiB stop), excerptParts and renderRoutes for Pagefind; client/test-dom.ts, a fake DOM whose innerHTML throws.\n\n**Done when:** tests pass, and the client imports nothing at run time but its own modules (no zod in the browser). Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 17."
+    },
+    {
+      "key": "M9-18",
+      "title": "[M9] site: the sidebar client (status probe, served mode, Pagefind fallback, sessionStorage)",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F09",
+      "body": "**Deliverable:** client/ask.ts: installAsk (the disclosure button, Escape and focus return, the status probe, POST /api/ask read as SSE, progress in the live region, the answer guarded and rendered, Ask again with fresh, routing through Pagefind on a 404, a network error, a non-status body or routing mode, the open state and the last ten answers in sessionStorage behind try/catch), pageHint; Layout.astro loads it.\n\n**Done when:** tests pass, the built bundle holds the client and no zod. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 18."
+    },
+    {
+      "key": "M9-19",
+      "title": "[M9] eval: run a question set through the ask and report it",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F09",
+      "body": "**Deliverable:** scripts/ask-eval-run.ts: runAskEval (each question through askQuestion with no cache, one at a time while spent plus its ceiling fits --max-usd; the answers judged by the M7 judge, batched; time from the request to the answer measured in process), answerText, median, renderAskReport (accuracy, cost and time per question, totals, medians, spec §12.5's bars).\n\n**Done when:** tests pass, with a scripted provider and a scripted judge. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 19."
+    },
+    {
+      "key": "M9-20",
+      "title": "[M9] eval: pnpm ask:eval",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F09",
+      "body": "**Deliverable:** scripts/ask-eval-cli.ts (parseAskEvalArgs: --set dev or smoke, held-out refused with R25's reason; estimateAskEval and askEvalEstimateLine: the typical cost, the ceiling and --max-usd) and scripts/ask-eval.ts (the question file loaded and checked against the repo; the estimate before any call; --dry-run stops there; <out>/eval/ask-<time>/report.md and results.json); wiki-cli's LiveCommand gains ask:eval; pnpm ask:eval; the CLAUDE.md command line.\n\n**Done when:** tests pass; the process tests run with every ANTHROPIC_* variable removed and make no call. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 20."
+    },
+    {
+      "key": "M9-21",
+      "title": "[M9] eval: the blind support sheet and its tally",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F09",
+      "body": "**Deliverable:** scripts/ask-eval-sheet.ts: supportSheet (20 sentences in an order fixed by the run's start time, each with its cited claims' full text and no question, grade or agent; then a routing line a question naming the first source's page), tallySupport (the M7 sheet's mark rules, Support and Routing counted apart; passes at 90% and 80%); ask:eval writes support.md; pnpm ask:eval tally <support.md>.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 21."
+    },
+    {
+      "key": "M9-22",
+      "title": "[M9] eval: compare the ask with the wiki agent's latest dev run",
+      "labels": ["v2", "type:task", "area:eval"],
+      "parent": "F09",
+      "body": "**Deliverable:** ask-eval-sheet.ts's devBaseline (the latest complete eval:run --set dev under <out>/eval/ with the wiki agent on the same question file's hash) and criteriaLines (spec §12.2's comparison in integer arithmetic, naming the run, or why it cannot be scored; §12.3-4's checks); report.md gains them.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 22."
+    },
+    {
+      "key": "M9-23",
+      "title": "[M9] final review fixes and the owner's runbook",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F09",
+      "body": "**Deliverable:** the fixes the whole-milestone review asks for, and the owner's runbook for spec v2 #4 section 12 posted on #13.\n\n**Done when:** the review's findings are fixed or ruled on, and the runbook is on #13. The scored run is the owner's. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 23."
     }
   ]
 }
