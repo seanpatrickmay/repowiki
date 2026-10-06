@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
@@ -109,12 +117,19 @@ export async function buildSite(
   validateOutDir(exportFile, outDir);
   setBuildEnv(exportFile, repoUrl);
 
+  // Astro puts a static build's server chunks in <cwd>/.astro/ when the out dir is outside the
+  // cwd, so each build gets its own cwd under packages/site/.astro (where the chunks still find
+  // packages/site's node_modules): builds that shared one cwd raced on .astro/.prerender, and
+  // the caller's cwd stays clean.
   const previousCwd = process.cwd();
+  mkdirSync(join(ROOT, ".astro"), { recursive: true });
+  const buildCwd = mkdtempSync(join(ROOT, ".astro", "build-"));
   try {
-    process.chdir(ROOT);
+    process.chdir(buildCwd);
     await build(astroConfig(outDir));
   } finally {
     process.chdir(previousCwd);
+    rmSync(buildCwd, { recursive: true, force: true });
   }
 
   // Write marker file to allow rebuilds

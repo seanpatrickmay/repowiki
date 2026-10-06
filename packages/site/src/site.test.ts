@@ -367,6 +367,28 @@ describe(".astro dir confinement", () => {
       rmSync(cliCwd, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("keeps each build's server chunks out of packages/site, so concurrent builds do not race", () => {
+    // Astro puts a static build's server chunks in <cwd>/.astro/.prerender when the out dir is
+    // outside the cwd; builds that shared packages/site as their cwd overwrote each other's.
+    const shared = fileURLToPath(new URL("../.astro/.prerender", import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-site-race-"));
+    rmSync(shared, { recursive: true, force: true });
+    mkdirSync(join(shared, ".."), { recursive: true });
+    writeFileSync(
+      shared,
+      "a file where a build that shares packages/site's .astro needs a directory",
+    );
+    try {
+      const exportFile = join(dir, "export.json");
+      writeFileSync(exportFile, JSON.stringify(fixtureExport(), null, 2));
+      const result = runCli(["build", "--export", exportFile, "--out", join(dir, "site")]);
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      rmSync(shared, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
 
 describe("page shell", () => {
