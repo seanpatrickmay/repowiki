@@ -8,7 +8,7 @@ import { DEFAULT_DRIFT_THRESHOLD, inputAt, planPages, planUpdate } from "../fres
 import { createTestRepo, scrubbedGitEnv } from "../index/index.ts";
 import { fileLevelEffects, mergeTree, pullImpact, staleClaims } from "./effects.ts";
 import { ensureInflightRepo, fetchHeads, pullRef } from "./heads.ts";
-import type { ImpactContext } from "./impact.ts";
+import { forkPoint, type ImpactContext } from "./impact.ts";
 import { type Edits, type InflightFixture, inflightFixture } from "./test-inflight.ts";
 
 // Each test builds a fixture wiki, a remote and inflight.git: seconds on a loaded machine.
@@ -163,6 +163,49 @@ describe("pullImpact (R7)", () => {
     } finally {
       orphan.remove();
     }
+  });
+});
+
+describe("a pull request's own changes (R27)", () => {
+  it("diffs a pull request forked past the wiki's head from its fork point, and it only may change", async () => {
+    // Main moves on past the wiki's head (another pull request merged, wiki:update not run yet),
+    // editing ingest.py's cited lines; then a pull request forks from it and edits crud.py.
+    const main = fx.pushPull(90, fx.first, {
+      "src/signals/ingest.py": ingestWith(12, "    signals = list()"),
+    });
+    const head = pull(5, { "src/deliverables/crud.py": "x = 1\n" }, main);
+    const fork = forkPoint(ctx.dir, main, head);
+    expect(fork).toBe(main);
+    const impact = await pullImpact(ctx, head, pages, fork as string);
+    expect(impact.mergeBase).toBe(main);
+    expect(impact.files.map((f) => f.path)).toEqual(["src/deliverables/crud.py"]);
+    expect(impact.features.map((f) => f.featureId)).toEqual(["deliverables"]);
+    expect(impact.behind).toBe(true);
+    expect(impact.merge).toBe("unknown");
+    expect(impact.effects.map((e) => [e.featureId, e.claimId, e.certain])).toEqual([
+      ["deliverables", "c1", false],
+      ["deliverables", "c2", false],
+    ]);
+  });
+
+  it("keeps R7's certain effects when the fork point is in the wiki", async () => {
+    const head = pull(1, { "src/signals/ingest.py": ingestWith(12, "    signals = list()") });
+    const fork = forkPoint(ctx.dir, fx.first, head);
+    expect(fork).toBe(fx.first);
+    const impact = await pullImpact(ctx, head, pages, fork as string);
+    expect(impact).toEqual(await pullImpact(ctx, head, pages));
+    expect(impact.behind).toBe(false);
+    expect(impact.merge).toBe("clean");
+    expect(impact.effects.map((e) => [e.claimId, e.certain])).toEqual([
+      ["c1", true],
+      ["c2", true],
+    ]);
+  });
+
+  it("finds no fork point for a base inflight.git lacks or none was given", () => {
+    const head = pull(1, { "a.py": "a\n" });
+    expect(forkPoint(ctx.dir, null, head)).toBeNull();
+    expect(forkPoint(ctx.dir, "e".repeat(40), head)).toBeNull();
   });
 });
 

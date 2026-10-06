@@ -16,7 +16,7 @@ import {
   readSources,
 } from "../index/index.ts";
 import { firstLine, INFLIGHT_GIT, inflightGit } from "./heads.ts";
-import { type ImpactContext, type PullChanges, pullChanges } from "./impact.ts";
+import { type ImpactContext, isAncestorIn, type PullChanges, pullChanges } from "./impact.ts";
 
 /** A claim of a current page that a move of the wiki would mark stale, and the remap's reason. */
 export interface StaleClaim {
@@ -194,20 +194,35 @@ export function fileLevelEffects(
 export interface PullImpact extends PullChanges {
   merge: "clean" | "conflicts" | "unknown";
   effects: InFlightEffect[];
+  /** The wiki's head does not hold the fork point (R27): every effect only may change. */
+  behind: boolean;
 }
 
 /**
- * Everything the snapshot says a fetched pull request would do (R7): its files and features
- * (pullChanges), then the claims of `pages` (the current pages of active features) it would make
- * stale if it merged now, from the merged tree; a conflict or an old git falls back to
- * fileLevelEffects.
+ * Everything the snapshot says a fetched pull request would do (R7, R27): its own files and
+ * features, from `fork` (the fork point; by default the merge base with the wiki's head) to its
+ * head (pullChanges). When the wiki's head holds the fork point, the claims of `pages` (the
+ * current pages of active features) it would make stale if it merged now, from the merged tree,
+ * with a conflict or an old git falling back to fileLevelEffects. When it does not (the wiki is
+ * behind the pull request's base), merging with the wiki's head would credit the base's newer
+ * commits to the pull request, so no merge is tried and its effects are fileLevelEffects.
  */
 export async function pullImpact(
   ctx: ImpactContext,
   head: string,
   pages: readonly Revision[],
+  fork?: string,
 ): Promise<PullImpact> {
-  const changes = await pullChanges(ctx, head);
+  const changes = await pullChanges(ctx, head, fork);
+  const behind =
+    changes.mergeBase !== null && !isAncestorIn(ctx.dir, changes.mergeBase, ctx.wikiHead);
+  if (behind)
+    return {
+      ...changes,
+      merge: "unknown",
+      effects: fileLevelEffects(pages, changes.changes),
+      behind,
+    };
   const merged = mergeTree(ctx.dir, ctx.wikiHead, head);
   const effects =
     merged.tree === null
@@ -217,5 +232,5 @@ export async function pullImpact(
           reason: inflightLine(s.reason, INFLIGHT_REASON_MAX_LENGTH),
           certain: true,
         }));
-  return { ...changes, merge: merged.merge, effects };
+  return { ...changes, merge: merged.merge, effects, behind };
 }

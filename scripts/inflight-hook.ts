@@ -53,7 +53,8 @@ const key = (c: { featureId: string; claimId: string }) => `${c.featureId}/${c.c
  * from a snapshot derived against the update's starting head, against the claims the move from
  * `from` to `to` makes stale on the pages as they were (staleClaims). Only an update that merged
  * exactly one pull request, counting every merge in the range, snapshot or not, is comparable;
- * else "not comparable" with why. "not compared" with why for a replay, a snapshot derived
+ * else "not comparable" with why, as for a pull request predicted against a wiki behind its base
+ * (R27: its effects were file-level). "not compared" with why for a replay, a snapshot derived
  * elsewhere, or a merged pull request the snapshot does not hold or could not work out.
  */
 export async function compareLine(
@@ -81,6 +82,8 @@ export async function compareLine(
   if (pull === undefined) return `Predictions not compared: #${number} is not in the snapshot.`;
   if (pull.head !== "fetched")
     return `Predictions not compared: #${pull.number}'s impact was not computed.`;
+  if (pull.behind)
+    return `Predictions not comparable: #${pull.number} was predicted against a wiki behind its base.`;
   const predicted = new Set(pull.effects.filter((e) => e.certain).map(key));
   const actual = new Set((await staleClaims(repo, before.from, to, before.pages)).map(key));
   const both = [...predicted].filter((k) => actual.has(k)).length;

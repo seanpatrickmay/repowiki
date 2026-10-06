@@ -32,7 +32,7 @@ const status = inflightStatus(site, inflight);
       <a href={view.githubHref}>Pull request #{view.number} on GitHub</a>
       {view.badges.map((badge) => <span class="badge">{badge}</span>)}
     </p>
-    {status.stale !== null && <div class="ambox ambox-stale" role="note">{status.stale}</div>}
+    {status.stale !== null && <div class="ambox ambox-stale" role="note">{status.stale}</div>}{view.behind !== null && <div class="ambox ambox-stale" role="note">{view.behind}</div>}
     <p>
       By {view.author}; opened {view.created}, last updated {view.updated}; base branch
       <code>{view.base}</code>.

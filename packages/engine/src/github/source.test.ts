@@ -104,6 +104,14 @@ describe("ghSource", () => {
     expect(snapshot.droppedPaths).toBe(7);
   });
 
+  it("reads each pull request's base oid (R27), null where GitHub gives none", () => {
+    const { run, calls } = fakeGh();
+    const snapshot = read(run);
+    expect(calls[0]?.find((a) => a.startsWith("query="))).toContain("baseRefName baseRefOid");
+    expect(snapshot.pulls.find((p) => p.number === 12)?.baseRefOid).toBe("b".repeat(40));
+    expect(snapshot.pulls.find((p) => p.number === 13)?.baseRefOid).toBeNull();
+  });
+
   it("badges bots and drafts, and nulls a deleted author", () => {
     const snapshot = read(fakeGh().run);
     const bot = snapshot.pulls.find((p) => p.number === 14);

@@ -52,6 +52,7 @@ function snapshotWithPulls(): {
       makeGitHubPull({
         number: 1,
         headRefOid: one,
+        baseRefOid: fx.first,
         closes: [7, 99],
         updatedAt: "2026-10-03T09:00:00Z",
       }),
@@ -66,6 +67,7 @@ function snapshotWithPulls(): {
       makeGitHubPull({
         number: 3,
         headRefOid: three,
+        baseRefOid: fx.first,
         closes: [],
         updatedAt: "2026-10-01T09:00:00Z",
       }),
@@ -199,11 +201,90 @@ describe("deriveInFlight", () => {
   });
 });
 
+describe("deriveInFlight against each pull request's own base (R27)", () => {
+  it("credits main's newer commits to no pull request forked after them", async () => {
+    // The reviewer's probe: the wiki is built at fx.first; main moves on (ingest.py's cited lines)
+    // with wiki:update not yet run; then pull request #5 forks from main and edits crud.py.
+    const main = fx.pushPull(90, fx.first, {
+      "src/signals/ingest.py": ingestWith(12, "    signals = list()"),
+    });
+    const head = fx.pushPull(5, main, { "src/deliverables/crud.py": "x = 1\n" });
+    const snapshot = makeGitHubSnapshot({
+      pulls: [makeGitHubPull({ number: 5, headRefOid: head, baseRefOid: main, closes: [] })],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const [five] = (await derive(snapshot, heads)).pulls;
+    expect(five?.pull).toMatchObject({
+      head: "fetched",
+      mergeBase: main,
+      baseSha: main,
+      behind: true,
+      merge: "unknown",
+    });
+    expect(five?.pull.files.map((f) => f.path)).toEqual(["src/deliverables/crud.py"]);
+    expect(five?.pull.features.map((f) => f.featureId)).toEqual(["deliverables"]);
+    expect(five?.pull.effects.map((e) => `${e.featureId}/${e.claimId}/${e.certain}`)).toEqual([
+      "deliverables/c1/false",
+      "deliverables/c2/false",
+    ]);
+    // Its summary request shows only its own lines, none of main's.
+    expect(five?.request?.user).toContain("crud.py");
+    expect(five?.request?.user).not.toContain("ingest.py");
+  });
+
+  it("keeps R7's certain effects for a pull request forked from the wiki's head", async () => {
+    const head = fx.pushPull(1, fx.first, {
+      "src/signals/ingest.py": ingestWith(12, "    signals = list()"),
+    });
+    const withBase = makeGitHubSnapshot({
+      pulls: [makeGitHubPull({ number: 1, headRefOid: head, baseRefOid: fx.first, closes: [] })],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, withBase.pulls, { protocol: "file" });
+    const [one] = (await derive(withBase, heads)).pulls;
+    expect(one?.pull).toMatchObject({ behind: false, merge: "clean", mergeBase: fx.first });
+    expect(one?.pull.effects.map((e) => `${e.claimId}/${e.certain}`)).toEqual([
+      "c1/true",
+      "c2/true",
+    ]);
+  });
+
+  it("treats a pull request whose base was not read as behind: GitHub's files, no request", async () => {
+    const head = fx.pushPull(6, fx.first, { "src/deliverables/crud.py": "x = 1\n" });
+    const snapshot = makeGitHubSnapshot({
+      pulls: [
+        makeGitHubPull({
+          number: 6,
+          headRefOid: head,
+          baseRefOid: null,
+          closes: [],
+          files: ["src/deliverables/crud.py"],
+        }),
+      ],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const [six] = (await derive(snapshot, heads)).pulls;
+    expect(six?.pull).toMatchObject({
+      head: "fetched",
+      mergeBase: null,
+      behind: true,
+      merge: "unknown",
+      files: [],
+    });
+    expect(six?.pull.features.map((f) => f.featureId)).toEqual(["deliverables"]);
+    expect(six?.pull.effects.every((e) => !e.certain)).toBe(true);
+    expect(six?.pull.effects.map((e) => e.claimId)).toEqual(["c1", "c2"]);
+    expect(six?.request).toBeNull();
+  });
+});
+
 describe("deriveInFlight's summary requests (R9, R14)", () => {
   it("makes no request for a pull with no citable lines, so a refresh spends nothing on it", async () => {
     const head = fx.pushPull(4, fx.first, { "src/deliverables/crud.py": null });
     const snapshot = makeGitHubSnapshot({
-      pulls: [makeGitHubPull({ number: 4, headRefOid: head, closes: [] })],
+      pulls: [makeGitHubPull({ number: 4, headRefOid: head, baseRefOid: fx.first, closes: [] })],
       issues: [],
     });
     const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
@@ -230,6 +311,7 @@ describe("deriveInFlight's summary requests (R9, R14)", () => {
         makeGitHubPull({
           number: 4,
           headRefOid: four,
+          baseRefOid: fx.first,
           closes: [],
           updatedAt: "2026-09-30T09:00:00Z",
         }),

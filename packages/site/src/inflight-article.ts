@@ -1,6 +1,7 @@
 import { githubUrl } from "@repowiki/core";
 import {
   badges,
+  behindNotice,
   evidenceText,
   type InflightStatus,
   inflightStatus,
@@ -36,6 +37,8 @@ export interface ArticleInflight {
     badges: string[];
     /** Plain text: how many of this page's claims it would change. */
     changes: string;
+    /** Plain text: R27's notice when the wiki is behind its base, else null. */
+    behind: string | null;
     /** Trusted HTML: its summary claims that name this feature. */
     claims: string[];
   }[];
@@ -115,6 +118,7 @@ export function articleInflight(site: SiteModel, featureId: string): ArticleInfl
           pull.head === "fetched"
             ? `would change ${plural(mine.size, "claim", "claims")} here`
             : "its impact could not be computed",
+        behind: behindNotice(pull),
         claims: (pull.summary?.claims ?? [])
           .filter((c) => c.features.includes(featureId))
           .map((c) => renderInline(c.text, links)),

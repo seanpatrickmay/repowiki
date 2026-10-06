@@ -195,7 +195,18 @@ export const InFlightPull = z
     closes: z.array(number).max(INFLIGHT_MAX_CLOSES),
     head: z.enum(["fetched", "missing", "moved"]),
     headSha: GitSha,
+    /**
+     * The fork point (R27): merge-base(base oid, head), where the pull request's own changes start;
+     * null when it is not known.
+     */
     mergeBase: GitSha.nullable(),
+    /** The base branch's tip GitHub reported (baseRefOid); null when GitHub gave none. */
+    baseSha: GitSha.nullable().default(null),
+    /**
+     * True when the wiki's head does not hold the fork point, or the base was not read (R27): every
+     * effect is then file-level "may change", and the pages say to run wiki:update.
+     */
+    behind: z.boolean().default(false),
     merge: z.enum(["clean", "conflicts", "unknown"]),
     files: z.array(InFlightFile).max(INFLIGHT_MAX_FILES),
     /** Changed files beyond those listed. */
@@ -216,7 +227,10 @@ export const InFlightPull = z
         issue("a pull request without its head has no merge", ["merge"]);
       if (pull.summary !== null)
         issue("a pull request without its head has no summary", ["summary"]);
+      if (pull.behind) issue("only a fetched pull request is judged behind", ["behind"]);
     }
+    if (pull.behind && pull.effects.some((e) => e.certain))
+      issue("a pull request the wiki is behind has no certain effect", ["effects"]);
     const touched = new Set(pull.features.map((f) => f.featureId));
     if (touched.size !== pull.features.length) issue("a feature is listed twice", ["features"]);
     pull.summary?.claims.forEach((claim, c) => {
@@ -320,6 +334,8 @@ export const GitHubPull = z.object({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   baseRef: line(INFLIGHT_BRANCH_MAX_LENGTH),
+  /** The base branch's tip when GitHub was read (R27); null in a snapshot stored before it. */
+  baseRefOid: GitSha.nullable().default(null),
   headRefOid: GitSha,
   labels,
   /** Issues it closes, as GitHub lists them (open or not). */

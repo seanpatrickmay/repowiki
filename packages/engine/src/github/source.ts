@@ -34,7 +34,7 @@ export const PULLS_QUERY = `query($owner: String!, $name: String!, $first: Int!,
       nodes {
         number title body isDraft createdAt updatedAt
         author { __typename login }
-        baseRefName headRefOid
+        baseRefName baseRefOid headRefOid
         labels(first: ${INFLIGHT_MAX_LABELS}) { nodes { name } }
         closingIssuesReferences(first: ${INFLIGHT_MAX_CLOSES}) { nodes { number } }
         files(first: ${INFLIGHT_API_FILES}) { totalCount nodes { path } }
@@ -91,6 +91,8 @@ const RawPull = z.object({
   updatedAt: IsoDateTime,
   author: RawAuthor,
   baseRefName: z.string(),
+  /** The base branch's tip (R27); a missing one is null, so the pull request reads as behind. */
+  baseRefOid: GitSha.nullable().optional(),
   headRefOid: GitSha,
   labels: RawLabels,
   closingIssuesReferences: z
@@ -156,6 +158,7 @@ export function normalisePull(
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     baseRef: inflightLine(raw.baseRefName, INFLIGHT_BRANCH_MAX_LENGTH) || "(unknown)",
+    baseRefOid: raw.baseRefOid ?? null,
     headRefOid: raw.headRefOid,
     labels: labelsOf(raw.labels),
     closes: [...new Set(closes)].slice(0, INFLIGHT_MAX_CLOSES),

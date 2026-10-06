@@ -24,6 +24,7 @@
               "login": "octo-dev"
             },
             "baseRefName": "main",
+            "baseRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "headRefOid": "cccccccccccccccccccccccccccccccccccccccc",
             "labels": {
               "nodes": [

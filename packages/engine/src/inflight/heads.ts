@@ -34,6 +34,8 @@ const REPO_CONFIG: readonly [string, string][] = [
 
 /** The ref a pull request's head is fetched to. */
 export const pullRef = (n: number): string => `refs/repowiki/pull/${n}`;
+/** The ref its base branch's tip (GitHub's baseRefOid) is fetched to, by oid (R27). */
+export const baseRef = (n: number): string => `refs/repowiki/base/${n}`;
 
 /** Where a pull request's head stands after a fetch (R6). */
 export type HeadState = "fetched" | "missing" | "moved";
@@ -178,7 +180,10 @@ export interface FetchOptions {
   timeoutMs?: number;
 }
 
-/** Why a fetch failed, on one line, and whether it is a missing remote ref (a closed pull). */
+/**
+ * Why a fetch failed, on one line, and whether it is a missing remote ref: a closed pull request's
+ * head, or a base oid the remote no longer serves ("not our ref", a force-pushed branch).
+ */
 interface FetchFailure {
   line: string;
   missingRef: boolean;
@@ -221,7 +226,10 @@ function fetch(
   if (out.status === 0) return null;
   if (out.timedOut)
     return { line: `git fetch timed out after ${timeoutMs / 1000} s`, missingRef: false };
-  return { line: firstLine(out.stderr), missingRef: /couldn't find remote ref/i.test(out.stderr) };
+  return {
+    line: firstLine(out.stderr),
+    missingRef: /couldn't find remote ref|not our ref/i.test(out.stderr),
+  };
 }
 
 /** What fetchHeads did: each pull request's head, and the first fetch error, if any. */
@@ -231,31 +239,31 @@ export interface FetchedHeads {
 }
 
 /**
- * Fetches every pull request's `refs/pull/<n>/head` into `refs/repowiki/pull/<n>` in one call
- * (R6); when that call fails on a missing remote ref (a pull request closed since GitHub was read
- * makes the whole fetch fail), each is fetched on its own. Any other failure (a timeout, an auth
- * or network failure) ends the step with its one line: no fetch is retried. A head whose fetched
- * commit differs from `headRefOid` is fetched once more, then `moved`; one that could not be
- * fetched is `missing`. Refs of pull requests no longer listed are deleted.
+ * Fetches every pull request's `refs/pull/<n>/head` into `refs/repowiki/pull/<n>`, and each base
+ * oid GitHub reported into `refs/repowiki/base/<n>` (R27), in one call (R6); when that call fails
+ * on a missing remote ref (a pull request closed since GitHub was read, or a base the remote no
+ * longer serves, makes the whole fetch fail), each ref is fetched on its own. Any other failure
+ * (a timeout, an auth or network failure) ends the step with its one line: no fetch is retried. A
+ * head whose fetched commit differs from `headRefOid` is fetched once more, then `moved`; one that
+ * could not be fetched is `missing`; a base that could not be fetched is simply not there. Refs of
+ * pull requests no longer listed are deleted.
  */
 export function fetchHeads(
   dir: string,
   url: string,
-  pulls: readonly { number: number; headRefOid: string }[],
+  pulls: readonly { number: number; headRefOid: string; baseRefOid?: string | null }[],
   options: FetchOptions = {},
 ): FetchedHeads {
   const spec = (n: number) => `+refs/pull/${n}/head:${pullRef(n)}`;
-  const failure =
-    pulls.length === 0
-      ? null
-      : fetch(
-          dir,
-          url,
-          pulls.map((p) => spec(p.number)),
-          options,
-        );
+  const specs = pulls.flatMap((p) => [
+    spec(p.number),
+    ...(p.baseRefOid != null && isSha(p.baseRefOid)
+      ? [`+${p.baseRefOid}:${baseRef(p.number)}`]
+      : []),
+  ]);
+  const failure = pulls.length === 0 ? null : fetch(dir, url, specs, options);
   if (failure === null || failure.missingRef) {
-    if (failure !== null) for (const p of pulls) fetch(dir, url, [spec(p.number)], options);
+    if (failure !== null) for (const one of specs) fetch(dir, url, [one], options);
     for (const p of pulls) {
       const sha = refSha(dir, p.number);
       if (sha !== null && sha !== p.headRefOid) fetch(dir, url, [spec(p.number)], options);
@@ -283,10 +291,15 @@ export function headStates(
   );
 }
 
-/** Deletes the refs of pull requests that are not listed (closed or merged since). */
+/** Deletes the head and base refs of pull requests that are not listed (closed or merged since). */
 function pruneHeadRefs(dir: string, pulls: readonly { number: number }[]): void {
-  const keep = new Set(pulls.map((p) => pullRef(p.number)));
-  const refs = inflightGit(dir, ["for-each-ref", "--format=%(refname)", "refs/repowiki/pull/"]);
+  const keep = new Set(pulls.flatMap((p) => [pullRef(p.number), baseRef(p.number)]));
+  const refs = inflightGit(dir, [
+    "for-each-ref",
+    "--format=%(refname)",
+    "refs/repowiki/pull/",
+    "refs/repowiki/base/",
+  ]);
   const stale = refs.stdout.split("\n").filter((ref) => ref !== "" && !keep.has(ref));
   if (stale.length === 0) return;
   inflightGit(dir, ["update-ref", "--stdin"], {

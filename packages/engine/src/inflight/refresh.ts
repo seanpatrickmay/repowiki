@@ -13,9 +13,9 @@ import { callCostUsd, type Provider } from "@repowiki/llm";
 import { DEFAULT_DRIFT_THRESHOLD } from "../freshness/index.ts";
 import { DEFAULT_MAX_FILE_BYTES, readSources } from "../index/index.ts";
 import type { Store } from "../store/index.ts";
-import { type PullImpact, pullImpact } from "./effects.ts";
+import { fileLevelEffects, type PullImpact, pullImpact } from "./effects.ts";
 import { type HeadState, INFLIGHT_GIT, isMissingObject } from "./heads.ts";
-import { featuresFromPaths, type ImpactContext } from "./impact.ts";
+import { featuresFromPaths, forkPoint, type ImpactContext } from "./impact.ts";
 import { mapIssues, type Suggest } from "./issues.ts";
 import { type SummaryRequest, summarize, summaryRequest } from "./summary.ts";
 import { INFLIGHT_MAX_OUTPUT_TOKENS } from "./summary-pack.ts";
@@ -83,12 +83,37 @@ function bare(pull: GitHubPull, head: HeadState, manifest: Manifest): Omit<InFli
     ...common(pull),
     head,
     mergeBase: null,
+    behind: false,
     merge: "unknown",
     files: [],
     filesTruncated: 0,
     features: featuresFromPaths(manifest, pull.files),
     effects: [],
     summary: null,
+  };
+}
+
+/**
+ * A fetched pull request whose base was not read (R27: no base oid from GitHub, or its fetch
+ * failed): behind, from GitHub's file list, every claim citing one of those files only may
+ * change, and no summary this run (its own diff is unknown).
+ */
+function baseUnread(
+  pull: GitHubPull,
+  manifest: Manifest,
+  pages: readonly Revision[],
+): Omit<InFlightPull, "closes"> {
+  const listed = pull.files.map((path) => ({
+    status: "modified" as const,
+    oldPath: path,
+    newPath: path,
+    hunks: [],
+    binary: false,
+  }));
+  return {
+    ...bare(pull, "fetched", manifest),
+    behind: true,
+    effects: fileLevelEffects(pages, listed),
   };
 }
 
@@ -103,6 +128,7 @@ function common(pull: GitHubPull) {
     baseRef: pull.baseRef,
     labels: pull.labels,
     headSha: pull.headRefOid,
+    baseSha: pull.baseRefOid,
   };
 }
 
@@ -143,8 +169,9 @@ async function requestOf(
 
 /**
  * Steps 5-6 of a refresh (spec v2 #9 §4.1) with no network and no LLM call: each fetched pull
- * request's impact against the store's head and current pages (pullImpact), each other one from
- * GitHub's file list, each fetched one's summary request and its cached answer, and the issues
+ * request's impact from its fork point against the store's head and current pages (pullImpact,
+ * R27; one whose base was not read is baseUnread), each other one from GitHub's file list, each
+ * fetched one's summary request and its cached answer, and the issues
  * mapped to features. A git failure on one pull request makes it `missing` with a log line; a
  * missing or corrupt object also sets `corrupt`, so an online run can rebuild inflight.git once.
  */
@@ -180,7 +207,12 @@ export async function deriveInFlight(input: DeriveInput): Promise<Derived> {
     };
     if (state === "fetched") {
       try {
-        const impact = await pullImpact(ctx, pull.headRefOid, pages);
+        const fork = forkPoint(input.dir, pull.baseRefOid, pull.headRefOid);
+        if (fork === null) {
+          pulls.push({ ...derived, pull: { ...baseUnread(pull, manifest, pages), closes } });
+          continue;
+        }
+        const impact = await pullImpact(ctx, pull.headRefOid, pages, fork);
         const request = await requestOf(input.dir, pull, impact, manifest, input.model);
         derived = {
           pull: {
@@ -188,6 +220,7 @@ export async function deriveInFlight(input: DeriveInput): Promise<Derived> {
             closes,
             head: "fetched",
             mergeBase: impact.mergeBase,
+            behind: impact.behind,
             merge: impact.merge,
             files: impact.files,
             filesTruncated: impact.filesTruncated,
