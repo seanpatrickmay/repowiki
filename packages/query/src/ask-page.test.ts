@@ -40,7 +40,7 @@ describe("readPageWithHandles", () => {
     expect(text).toContain("See also: deliverables (Deliverables)");
   });
 
-  it("is readPage without its history line when no claim has a handle to show", () => {
+  it("is readPage without its history line once each claim's handle mark is taken off", () => {
     const view = new WikiView(sample.wiki);
     const plain = readPage(view, "signals")
       .split("\n")

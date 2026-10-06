@@ -46,12 +46,20 @@ export interface SearchIndex {
 
 /**
  * BM25F over the documents' fields: a small, deterministic ranking with no dependency. `boost`
- * names the fields and how much a match in each counts; the default is the page search's.
+ * names the fields and how much a match in each counts; only the page search's own documents may
+ * leave it out, for the page search's.
  */
-export function searchIndex<F extends string = SearchField>(
+export function searchIndex(docs: readonly SearchDoc<SearchField>[]): SearchIndex;
+export function searchIndex<F extends string>(
   docs: readonly SearchDoc<F>[],
-  boost: Readonly<Record<F, number>> = BOOST as Readonly<Record<F, number>>,
+  boost: Readonly<Record<F, number>>,
+): SearchIndex;
+export function searchIndex<F extends string>(
+  docs: readonly SearchDoc<F>[],
+  given?: Readonly<Record<F, number>>,
 ): SearchIndex {
+  // Only the first overload omits the boost, and its fields are the page search's own.
+  const boost = given ?? (BOOST as Readonly<Record<string, number>> as Readonly<Record<F, number>>);
   const fields = Object.keys(boost) as F[];
   const counted = docs.map((doc) => {
     const tf = new Map<string, Map<F, number>>();

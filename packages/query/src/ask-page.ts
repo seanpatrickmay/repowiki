@@ -56,7 +56,7 @@ export function readPageWithHandles(
       : resolved.kind === "page"
         ? resolved.featureId
         : null;
-  const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+  const token = globalThis.crypto.randomUUID();
   const marked: string[] = [];
   const page = readPage(view, id, max, {
     history: false,

@@ -38,6 +38,14 @@ describe("searchIndex", () => {
     expect(twins.search("queue", 8)).toEqual(["a", "b"]);
   });
 
+  it("takes the page search's boost only for the page search's own fields", () => {
+    const custom: SearchDoc<"text">[] = [{ id: "a", fields: { text: "queue" } }];
+    // @ts-expect-error: documents of other fields must name their boost
+    const unboosted = () => searchIndex(custom);
+    expect(typeof unboosted).toBe("function");
+    expect(searchIndex(custom, { text: 1 }).search("queue", 8)).toEqual(["a"]);
+  });
+
   it("returns at most `limit` ids and nothing for a query of stop words or unknown words", () => {
     const index = searchIndex(docs);
     expect(index.search("signals scheduler deliverables", 2)).toHaveLength(2);
