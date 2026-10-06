@@ -293,4 +293,30 @@ describe("createClaudeToolProvider", () => {
       if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
     }
   });
+
+  it("ends a turn that outlasts its timeout with an LlmError, retrying nothing and recording no row", async () => {
+    let calls = 0;
+    const hung: FetchLike = (_input, init) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    };
+    const ledger = createLedger();
+    const provider = createClaudeToolProvider({
+      models: DEFAULT_MODELS,
+      ledger,
+      runId: "ask-run",
+      apiKey: "canned",
+      fetch: hung,
+      timeoutMs: 50,
+    });
+    const started = Date.now();
+    const turn = provider.turn(request);
+    await expect(turn).rejects.toBeInstanceOf(LlmError);
+    await expect(turn).rejects.toThrow("the API did not answer within 0.05 s");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(calls).toBe(1);
+    expect(ledger.entries()).toEqual([]);
+  });
 });

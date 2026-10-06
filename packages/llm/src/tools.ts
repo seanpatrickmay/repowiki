@@ -90,6 +90,12 @@ export interface ToolProviderOptions {
   /** Replaces global fetch, e.g. with a cassette in tests. */
   fetch?: FetchLike;
   now?: () => Date;
+  /**
+   * The most one turn may take, its retries included; past it the call is aborted and the turn
+   * rejects with an LlmError (the Ask sidebar's turns, so a hung call frees the session). Unset,
+   * the SDK's own timeout applies.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -170,7 +176,17 @@ export function createClaudeToolProvider(options: ToolProviderOptions): ToolProv
         messages: messageParams(request),
         ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       };
-      const message = await client.messages.create(params);
+      const timeoutMs = options.timeoutMs;
+      const signal = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
+      let message: Awaited<ReturnType<typeof client.messages.create>>;
+      try {
+        message = await client.messages.create(params, signal === undefined ? {} : { signal });
+      } catch (error) {
+        if (signal?.aborted !== true) throw error;
+        throw new LlmError(`the API did not answer within ${(timeoutMs ?? 0) / 1000} s`, {
+          cause: error,
+        });
+      }
       const usage: TokenUsage = {
         in: message.usage.input_tokens,
         out: message.usage.output_tokens,
