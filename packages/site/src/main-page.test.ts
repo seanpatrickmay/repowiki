@@ -1,4 +1,5 @@
-import { SHA_C } from "@repowiki/core/test-fixtures";
+import type { InFlight } from "@repowiki/core";
+import { makeInFlightPull, SHA_C } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   allPagesEntries,
@@ -10,6 +11,7 @@ import {
 } from "./main-page.ts";
 import { buildSiteModel } from "./model.ts";
 import { fixtureExport, HOSTILE_TITLE } from "./test-fixtures.ts";
+import { fixtureInFlight, inflightExport } from "./test-inflight.ts";
 
 const site = buildSiteModel(fixtureExport(), null);
 
@@ -212,6 +214,7 @@ describe("mainPageView", () => {
       featured: null,
       didYouKnow: [],
       recent: [],
+      inProgress: null,
     });
   });
 });
@@ -246,5 +249,28 @@ describe("allPagesEntries", () => {
       { href: "/wiki/reports/", title: "Reports", note: "disambiguation" },
       { href: "/wiki/signals/", title: "Signal ingestion", note: null },
     ]);
+  });
+});
+
+describe("the Main Page's In progress box (spec v2 #9 §6.2)", () => {
+  it("lists the most recently updated open pull requests, at most five", () => {
+    const base = fixtureInFlight();
+    const pull = base.pulls[0] as InFlight["pulls"][number];
+    const pulls = [20, 21, 22, 23, 24, 25].map((number, i) =>
+      makeInFlightPull({ ...pull, number, closes: [], updatedAt: `2026-09-2${i}T09:00:00Z` }),
+    );
+    const view = mainPageView(buildSiteModel(inflightExport({ pulls, issues: [] }), null));
+    expect(view.inProgress?.href).toBe("/special/in-progress/");
+    expect(view.inProgress?.status).toBe(
+      "From GitHub on 30 September 2026, against commit ccccccc.",
+    );
+    expect(view.inProgress?.pulls.map((p) => [p.number, p.href, p.date])).toEqual([
+      [25, "/special/in-progress/pr/25/", "25 September 2026"],
+      [24, "/special/in-progress/pr/24/", "24 September 2026"],
+      [23, "/special/in-progress/pr/23/", "23 September 2026"],
+      [22, "/special/in-progress/pr/22/", "22 September 2026"],
+      [21, "/special/in-progress/pr/21/", "21 September 2026"],
+    ]);
+    expect(mainPageView(buildSiteModel(fixtureExport(), null)).inProgress).toBeNull();
   });
 });

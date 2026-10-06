@@ -1,13 +1,16 @@
 import type { Revision } from "@repowiki/core";
 import { formatDate } from "./format.ts";
+import { inflightStatus } from "./inflight.ts";
 import { renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
 import { leadSummary } from "./summary.ts";
-import { ARCHITECTURE_URL, articleUrl } from "./urls.ts";
+import { ARCHITECTURE_URL, articleUrl, IN_PROGRESS_URL, pullUrl } from "./urls.ts";
 
 export const DID_YOU_KNOW_COUNT = 5;
 export const RECENT_COUNT = 5;
+/** Open pull requests the Main Page's In progress box lists. */
+export const IN_PROGRESS_COUNT = 5;
 
 export interface MainPageView {
   articleCount: number;
@@ -19,6 +22,15 @@ export interface MainPageView {
   featured: { href: string; leadHtml: string } | null;
   didYouKnow: { html: string; href: string; title: string }[];
   recent: { href: string; title: string; date: string }[];
+  /**
+   * The In progress box (spec v2 #9 §6.2): the most recently updated open pull requests (plain
+   * text titles) and the snapshot's date, or null when the export has no snapshot.
+   */
+  inProgress: {
+    href: string;
+    status: string;
+    pulls: { href: string; number: number; title: string; date: string }[];
+  } | null;
 }
 
 /** Deterministic rotation seeded by the head sha: the same export always shows the same page. */
@@ -155,5 +167,25 @@ export function mainPageView(site: SiteModel): MainPageView {
           leadHtml: lead.map((claim) => renderInline(claim.text, links)).join(" "),
         };
 
-  return { articleCount: active.length, architecture, featured, didYouKnow, recent };
+  const inflight = site.wiki.inflight;
+  const inProgress =
+    inflight === null
+      ? null
+      : {
+          href: IN_PROGRESS_URL,
+          status: inflightStatus(site, inflight).line,
+          pulls: [...inflight.pulls]
+            .sort(
+              (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.number - b.number,
+            )
+            .slice(0, IN_PROGRESS_COUNT)
+            .map((pull) => ({
+              href: pullUrl(pull.number),
+              number: pull.number,
+              title: pull.title,
+              date: formatDate(pull.updatedAt),
+            })),
+        };
+
+  return { articleCount: active.length, architecture, featured, didYouKnow, recent, inProgress };
 }
