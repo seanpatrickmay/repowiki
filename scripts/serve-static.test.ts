@@ -66,6 +66,8 @@ describe("resolveStaticPath", () => {
     "/nope.html",
     "/%E0%A4%A",
     "relative/index.html",
+    "/index.html/",
+    "/wiki/signals/index.html/",
   ])("refuses %s", (url) => {
     expect(resolveStaticPath(site, url)).toBeNull();
   });
@@ -245,6 +247,89 @@ describe("serveRequests on a loopback socket", () => {
         "x-content-type-options": "nosniff",
       });
       expect(building.body).toBe("The site is being built; try again in a moment.\n");
+    } finally {
+      await new Promise((resolve) => listening.server.close(resolve));
+    }
+  });
+
+  it("answers HEAD with a file's length and no body, as GET would send it", async () => {
+    let port = 0;
+    const listening = await listenLoopback(
+      serveRequests({
+        siteDir: site,
+        csp: "default-src 'self'",
+        port: () => port,
+        ask: async () => false,
+      }),
+      0,
+    );
+    port = listening.port;
+    const call = (method: string) =>
+      new Promise<{ status: number; length: unknown; body: string }>((resolve, reject) => {
+        const req = httpRequest(
+          { host: "127.0.0.1", port, method, path: "/wiki/signals/" },
+          (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => {
+              text += chunk;
+            });
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                length: res.headers["content-length"],
+                body: text,
+              }),
+            );
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    try {
+      expect(await call("GET")).toEqual({ status: 200, length: "14", body: "<p>signals</p>" });
+      expect(await call("HEAD")).toEqual({ status: 200, length: "14", body: "" });
+    } finally {
+      await new Promise((resolve) => listening.server.close(resolve));
+    }
+  });
+
+  it("answers a handler that throws past serveRequests with a 500 that still has safe headers", async () => {
+    const listening = await listenLoopback(async () => {
+      throw new Error("boom");
+    }, 0);
+    try {
+      const response = await new Promise<{ status: number; headers: Record<string, unknown> }>(
+        (resolve, reject) => {
+          const req = httpRequest({ host: "127.0.0.1", port: listening.port, path: "/" }, (res) => {
+            res.resume();
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
+          });
+          req.on("error", reject);
+          req.end();
+        },
+      );
+      expect(response.status).toBe(500);
+      expect(response.headers).toMatchObject({
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+      });
+    } finally {
+      await new Promise((resolve) => listening.server.close(resolve));
+    }
+  });
+
+  it("logs a server error after it is listening, on one line", async () => {
+    const lines: string[] = [];
+    const listening = await listenLoopback(
+      async () => {},
+      0,
+      (line) => lines.push(line),
+    );
+    try {
+      listening.server.emit("error", new Error("too many open files\nnow"));
+      expect(lines).toEqual(["serve: the server failed (too many open files now)"]);
     } finally {
       await new Promise((resolve) => listening.server.close(resolve));
     }

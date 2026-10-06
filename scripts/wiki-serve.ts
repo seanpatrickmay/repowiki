@@ -64,7 +64,11 @@ async function main(): Promise<void> {
   let handle: (request: IncomingMessage, response: ServerResponse) => Promise<void> = serveBuilding(
     { csp: CONTENT_SECURITY_POLICY, port: () => port },
   );
-  const listening = await listenLoopback((request, response) => handle(request, response), port);
+  const listening = await listenLoopback(
+    (request, response) => handle(request, response),
+    port,
+    (line) => console.error(line),
+  );
   port = listening.port;
   const siteDir = join(out, "site");
   if (args.repoUrl !== null || !siteIsCurrent(siteDir, wiki)) {
