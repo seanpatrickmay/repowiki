@@ -191,7 +191,7 @@ describe("createClaudeToolProvider", () => {
     const { bodies, fetch } = cannedTurns([
       { type: "tool_use", id: "tu_3", name: "answer", input: { text: "In ingest.py." } },
     ]);
-    const { provider } = setup(fetch);
+    const { provider, ledger } = setup(fetch);
     const result = await provider.turn({
       ...request,
       tools: [search, answer],
@@ -210,6 +210,8 @@ describe("createClaudeToolProvider", () => {
       new LlmError("the turn forces tool answer, which is not one of its tools"),
     );
     expect(bodies).toHaveLength(1);
+    // The refused turn made no call, so the ledger holds only the first turn's row.
+    expect(ledger.entries()).toHaveLength(1);
   });
 
   it("never sends an empty or whitespace-only text block, which the API refuses", async () => {
