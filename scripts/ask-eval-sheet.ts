@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { plainClaimText } from "@repowiki/core";
-import { RUN_INFO_FILE, readRecords, readRunInfo, summarize, tallySheet } from "@repowiki/eval";
+import {
+  ACCURACY_PERCENT,
+  RUN_INFO_FILE,
+  readRecords,
+  readRunInfo,
+  summarize,
+  tallySheet,
+} from "@repowiki/eval";
 import { cut, handleClaim, markdownText, oneLine, type WikiView } from "@repowiki/query";
 import type { AskEvalResult } from "./ask-eval-run.ts";
 
@@ -11,8 +18,8 @@ export const SUPPORT_SAMPLE = 20;
 /** §12.3: 18 of 20 supported; §12.4: 16 of 20 routed to the right page, as shares. */
 export const SUPPORT_PERCENT = 90;
 export const ROUTING_PERCENT = 80;
-/** §12.2: the ask's accuracy at least 90% of the wiki agent's on the same questions. */
-export const ACCURACY_PERCENT = 90;
+/** §12.2: the ask's accuracy at least 90% of the wiki agent's: M7's pass test's own share. */
+export { ACCURACY_PERCENT };
 
 const ROUTING_HEADING = "## Routing";
 

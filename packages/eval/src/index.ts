@@ -86,6 +86,7 @@ export {
 } from "./run.ts";
 export { SPOT_CHECK_FILE, SpotCheck, spotCheckSample } from "./spot-check.ts";
 export {
+  ACCURACY_PERCENT,
   ACCURACY_SHARE,
   buildTokensOf,
   type EvalSummary,
