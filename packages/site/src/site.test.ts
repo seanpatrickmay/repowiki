@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
+import { HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -1306,5 +1307,70 @@ describe("search", () => {
     expect(source).not.toMatch(
       /innerHTML|outerHTML|insertAdjacentHTML|document\.write|location\.(?:href|assign|replace)|\beval\(|new Function|fetch\(/,
     );
+  });
+});
+
+/** The fixture with a snapshot of its open pull requests and issues, and HOSTILE_PULL_TITLE. */
+let inflightSite: BuiltSite;
+const inflightNormalized = (path: string): string =>
+  inflightSite.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
+const inflightPages = (): string[] =>
+  htmlFiles(inflightSite.outDir).filter((page) => page.startsWith("special/in-progress/"));
+const ESCAPED_PULL_TITLE =
+  "&lt;script&gt;alert(1)&lt;/script&gt; [[signals]] [x](javascript:alert(1)) &quot;q&quot; &amp; &#39;p&#39;";
+
+describe("the work in progress pages (spec v2 #9 §6.2)", () => {
+  beforeAll(() => {
+    inflightSite = buildFixtureSite([], inflightExport());
+  }, 120_000);
+  afterAll(() => inflightSite?.cleanup());
+
+  it("renders a page per pull request", async () => {
+    await expect(inflightNormalized("special/in-progress/pr/12/index.html")).toMatchFileSnapshot(
+      "__snapshots__/special-in-progress-pr-12.html",
+    );
+    const missing = inflightSite.read("special/in-progress/pr/13/index.html");
+    expect(missing).toContain(`<h1 class="page-title">${ESCAPED_PULL_TITLE}</h1>`);
+    expect(missing).toContain(
+      "Its head commit could not be fetched, so its impact could not be computed.",
+    );
+    expect(missing).toContain("No summary of this pull request yet.");
+  });
+
+  it("renders the index of open pull requests and planned work", async () => {
+    await expect(inflightNormalized("special/in-progress/index.html")).toMatchFileSnapshot(
+      "__snapshots__/special-in-progress.html",
+    );
+  });
+
+  it("prints GitHub's text as text, keeps it out of search, and links only real pages", () => {
+    expect(HOSTILE_PULL_TITLE.startsWith("<script>")).toBe(true);
+    expect(inflightPages().length).toBeGreaterThan(0);
+    for (const page of inflightPages()) {
+      const html = inflightSite.read(page);
+      expect(html).not.toContain("<script>alert(1)");
+      expect(html).not.toContain('href="javascript:');
+      expect(html).not.toContain("data-pagefind-body");
+      expect(html).toContain('<meta name="robots" content="noindex">');
+    }
+    expect(brokenLinks(inflightSite.outDir).broken).toEqual([]);
+    for (const page of htmlFiles(inflightSite.outDir))
+      expect({ page, offsite: offsiteResources(inflightSite.read(page)) }).toEqual({
+        page,
+        offsite: [],
+      });
+  });
+
+  it("links In progress after About in the nav, and lists no work in flight in llms.txt", () => {
+    const nav =
+      /<nav class="site-nav"[\s\S]*?<\/nav>/.exec(inflightSite.read("index.html"))?.[0] ?? "";
+    expect(nav.indexOf('href="/special/about/"')).toBeGreaterThan(0);
+    expect(nav.indexOf('href="/special/in-progress/"')).toBeGreaterThan(
+      nav.indexOf('href="/special/about/"'),
+    );
+    expect(inflightSite.read("llms.txt")).toBe(renderLlmsTxt(inflightExport()));
+    expect(inflightSite.read("llms.txt")).not.toMatch(/in-progress|pull request/i);
+    // An export with no snapshot links no In progress page.
+    expect(site.read("index.html")).not.toContain('href="/special/in-progress/"');
   });
 });

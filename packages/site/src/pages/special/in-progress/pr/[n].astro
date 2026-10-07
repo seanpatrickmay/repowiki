@@ -1,0 +1,100 @@
+---
+import type { InFlightPull } from "@repowiki/core";
+import { inflightStatus, pullView } from "../../../../inflight.ts";
+import Layout from "../../../../layouts/Layout.astro";
+import { getSite } from "../../../../site.ts";
+import { IN_PROGRESS_URL } from "../../../../urls.ts";
+
+export function getStaticPaths() {
+  return (getSite().wiki.inflight?.pulls ?? []).map((pull) => ({
+    params: { n: String(pull.number) },
+    props: { pull },
+  }));
+}
+
+interface Props {
+  pull: InFlightPull;
+}
+
+const site = getSite();
+const inflight = site.wiki.inflight;
+if (inflight === null) throw new Error("a pull request page needs a snapshot");
+const view = pullView(site, inflight, Astro.props.pull);
+const status = inflightStatus(site, inflight);
+---
+<Layout title={`Pull request #${view.number}`}>
+  <Fragment slot="head">
+    <meta name="robots" content="noindex" />
+  </Fragment>
+  <article class="article inflight">
+    <h1 class="page-title">{view.title}</h1>
+    <p class="tagline">
+      <a href={view.githubHref}>Pull request #{view.number} on GitHub</a>
+      {view.badges.map((badge) => <span class="badge">{badge}</span>)}
+    </p>
+    {status.stale !== null && <div class="ambox ambox-stale" role="note">{status.stale}</div>}
+    <p>
+      By {view.author}; opened {view.created}, last updated {view.updated}; base branch
+      <code>{view.base}</code>.
+    </p>
+    <p>{view.merge}</p>
+    <p class="inflight-more">{status.line} <a href={IN_PROGRESS_URL}>All work in progress</a></p>
+    <h2 id="summary">Summary</h2>
+    {view.summary === null ? (
+      <p>No summary of this pull request yet.</p>
+    ) : (
+      <>
+        <p class="inflight-note">Generated from the pull request's code and description.</p>
+        <ul class="inflight-summary">
+          {view.summary.map((claim) => (
+            <li>
+              <span set:html={claim.html} />
+              {claim.refs.map((ref) => (
+                <sup class="reference"><a href={ref.href} title={ref.label}>[{ref.n}]</a></sup>
+              ))}
+            </li>
+          ))}
+        </ul>
+        <ol class="references">
+          {view.summary.flatMap((claim) => claim.refs).map((ref) => (
+            <li><a href={ref.href}><code>{ref.label}</code></a></li>
+          ))}
+        </ol>
+      </>
+    )}
+    <h2 id="features-touched">Features touched</h2>
+    {view.features.length === 0 ? (
+      <p>It touches no feature of the wiki.</p>
+    ) : (
+      view.features.map((f) => (
+        <section aria-labelledby={f.anchor}>
+          <h3 id={f.anchor}>{f.feature.href === null ? f.feature.title : <a href={f.feature.href}>{f.feature.title}</a>}</h3>
+          <p>
+            {f.files}.{f.drifts && " It would trigger a manifest revision."}
+          </p>
+          {f.effects.length > 0 && (
+            <ul class="inflight-effects">
+              {f.effects.map((e) => (
+                <li>
+                  {e.href === null ? <q>{e.text}</q> : <a href={e.href}><q>{e.text}</q></a>}
+                  {e.certain ? " would go out of date: " : " may change: "}
+                  {e.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))
+    )}
+    {view.closes.length > 0 && (
+      <>
+        <h2 id="closes">Closes</h2>
+        <ul>
+          {view.closes.map((issue) => (
+            <li><a href={issue.href}>Issue #{issue.number} on GitHub</a></li>
+          ))}
+        </ul>
+      </>
+    )}
+  </article>
+</Layout>
