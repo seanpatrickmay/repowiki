@@ -244,7 +244,7 @@ function pruneHeadRefs(dir: string, pulls: readonly { number: number }[]): void 
  */
 export function isMissingObject(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error);
-  return /bad object|missing (?:blob|tree|commit|object)|unable to read|could not read|is corrupt|not a valid object|could not fetch [0-9a-f]+ from promisor|object .* is missing|invalid object/i.test(
+  return /bad object|missing (?:blob|tree|commit|object)|unable to read|could not read|is corrupt|not a valid (?:object|commit)|could not fetch [0-9a-f]+ from promisor|object .* is missing|invalid object/i.test(
     text,
   );
 }

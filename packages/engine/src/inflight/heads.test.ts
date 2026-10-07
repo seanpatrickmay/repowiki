@@ -204,6 +204,7 @@ describe("isMissingObject", () => {
     "error: unable to read tree 0123",
     "fatal: could not fetch 0123abcd from promisor remote",
     "fatal: loose object 0123 (stored in x) is corrupt",
+    "fatal: Not a valid commit name 0123",
   ])("knows %s", (message) => {
     expect(isMissingObject(new Error(message))).toBe(true);
   });

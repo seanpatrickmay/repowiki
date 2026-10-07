@@ -42,6 +42,12 @@ export {
   type Suggest,
 } from "./issues.ts";
 export {
+  type Derived,
+  type DerivedPull,
+  type DeriveInput,
+  deriveInFlight,
+} from "./refresh.ts";
+export {
   InFlightAnswer,
   type SummaryOutcome,
   type SummaryRequest,

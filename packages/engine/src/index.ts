@@ -86,6 +86,8 @@ export {
   type UnresolvedImport,
 } from "./index/index.ts";
 export {
+  type Derived,
+  deriveInFlight,
   ensureInflightRepo,
   type FetchedHeads,
   fetchHeads,
