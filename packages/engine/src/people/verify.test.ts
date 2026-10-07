@@ -1,9 +1,12 @@
+import { makeManifest } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import type { AuthoredCommit } from "../index/index.ts";
+import type { IdentityGroup } from "./identities.ts";
 import type { PersonPack } from "./pack.ts";
 import {
   commitFeatureLookup,
   type PersonVerifyContext,
+  personVerifyContext,
   statedDates,
   verifyPersonClaim,
 } from "./verify.ts";
@@ -202,5 +205,132 @@ describe("commitFeatureLookup", () => {
     );
     expect(lookup(M)).toEqual(["deliverables"]);
     expect(lookup(A)).toEqual(["signals"]);
+  });
+});
+
+describe("verifyPersonClaim's checks against disguises (the Task 19 ruling)", () => {
+  const cite = [`commit:${A}`];
+  const one = (text: string) => problems("chronicle", claim(text, cite));
+  const NAMED = "the claim names another person; name no one but the page's subject";
+  const STATISTIC = "the claim states a statistic; the infobox has the numbers, so leave them out";
+
+  it("checks names and counts inside code spans and link targets too (I1)", () => {
+    expect(one("In March 2026, with `Grace Hopper`, x changed.")).toEqual([NAMED]);
+    expect(one("In March 2026, with [[Grace Hopper]], x changed.")).toEqual([NAMED]);
+    expect(one("In March 2026, [[signals|Grace Hopper's]] x changed.")).toEqual([NAMED]);
+    expect(one("In March 2026, `12 commits` changed x.")).toEqual([STATISTIC]);
+  });
+
+  it("reads names and addresses in their normalised form (I2)", () => {
+    for (const name of [
+      "Grace  Hopper",
+      "Grace\u00A0Hopper",
+      "\uFF27race Hopper",
+      "**Grace** Hopper",
+      "_Grace_ Hopper",
+    ])
+      expect(one(`In March 2026, with ${name}, x changed.`), JSON.stringify(name)).toEqual([NAMED]);
+    for (const address of [
+      "ada\uFF20example.com",
+      "ada\uFE6Bexample.com",
+      "ada@\uFF45xample\uFF0Ecom",
+    ])
+      expect(one(`In March 2026, ${address} changed x.`), JSON.stringify(address)).toEqual([
+        "the claim holds an email address; never write one",
+      ]);
+  });
+
+  it("refuses counts in words and around adjectives, never a year's comma (I3)", () => {
+    for (const text of [
+      "In March 2026, three commits added scoring.",
+      "In March 2026, a dozen commits added scoring.",
+      "In March 2026, forty percent of scoring moved.",
+      "In March 2026, 40% of scoring moved.",
+      "In March 2026, 3 new files added scoring.",
+      "In March 2026, 12 of the commits added scoring.",
+      "In March 2026, 3 pull-requests added scoring.",
+      "In March 2026, 1,200 lines moved.",
+    ])
+      expect(one(text), text).toEqual([STATISTIC]);
+    for (const text of [
+      "In March 2026, commits added scoring.",
+      "On 14 March 2026, files under the parser moved.",
+      "In 2026, lines of the parser moved.",
+      "In 2026 the files of the parser moved.",
+      "In March 2026, someone's lines moved.",
+    ])
+      expect(one(text), text).toEqual([]);
+  });
+
+  it("gives a range's first month the year that closes it (I5)", () => {
+    expect(statedDates("between January and March 2026")).toEqual([
+      { text: "January", from: "2026-01-01", to: "2026-01-31" },
+      { text: "March 2026", from: "2026-03-01", to: "2026-03-31" },
+    ]);
+    expect(statedDates("from February to April 2026")[0]).toMatchObject({ from: "2026-02-01" });
+    const lead = (text: string) => problems("lead", claim(text, [], ["c1"]));
+    expect(lead("**Ada Lovelace** contributed between March and April 2026.")).toEqual([]);
+    expect(lead("**Ada Lovelace** contributed between January and April 2026.")[0]).toMatch(
+      /outside its person's dates 2026-03-14 to 2026-04-03/,
+    );
+  });
+
+  it("refuses month 00 and day 0, and reads abbreviated months, ordinals and ISO times", () => {
+    for (const text of ["2026-00", "0 March 2026", "March 0, 2026", "2026-03-00"])
+      expect(statedDates(text), text).toEqual([{ text, from: "", to: "" }]);
+    expect(statedDates("On 15 Mar 2026")).toEqual([
+      { text: "15 Mar 2026", from: "2026-03-15", to: "2026-03-15" },
+    ]);
+    expect(statedDates("On 15th Sept. 2026")[0]).toMatchObject({ from: "2026-09-15" });
+    expect(statedDates("On March 15th, 2026")[0]).toMatchObject({
+      from: "2026-03-15",
+      to: "2026-03-15",
+    });
+    expect(statedDates("at 2026-03-15T10:00:00Z")[0]).toMatchObject({
+      from: "2026-03-15",
+      to: "2026-03-15",
+    });
+    // A day-precise wrong date is refused, not read as the whole year.
+    expect(one("On 15 Mar 2026, x changed.")[0]).toMatch(/outside/);
+  });
+});
+
+describe("personVerifyContext (R17)", () => {
+  const group = (name: string, excluded = false, otherNames: string[] = []) =>
+    ({
+      name,
+      otherNames,
+      identities: [{ name, email: "x@e.com" }],
+      excluded,
+      firstCommit: "2026-03-14T10:00:00+01:00",
+      lastCommit: "2026-04-03T00:00:00Z",
+    }) as unknown as IdentityGroup;
+
+  it("names every other person, excluded ones included, but none the person also bears", () => {
+    const refreshed = {
+      sha: A,
+      commits: [],
+      commitFeatures: new Map(),
+      identities: {
+        groups: [
+          group("Ada Lovelace", false, ["Countess"]),
+          group("Kim Hidden", true),
+          group("Ada Lovelace"),
+          group("Grace Hopper", false, ["Amazing Grace"]),
+        ],
+        groupOf: () => 0,
+      },
+    } as unknown as Parameters<typeof personVerifyContext>[0];
+    const ctx = personVerifyContext(refreshed, 0, pack, makeManifest());
+    expect([...ctx.otherNames].sort()).toEqual(["amazing grace", "grace hopper", "kim hidden"]);
+    expect(ctx.firstCommit).toBe("2026-03-14T10:00:00+01:00");
+    const kim = verifyPersonClaim(
+      "chronicle",
+      claim("In March 2026, with Kim Hidden, x changed.", [`commit:${A}`]),
+      { ...ctx, verify: { ...ctx.verify, commits: [commit(A, "x", "2026-03-14T10:00:00+01:00")] } },
+    );
+    expect(kim.problems).toContain(
+      "the claim names another person; name no one but the page's subject",
+    );
   });
 });
