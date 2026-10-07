@@ -35,12 +35,14 @@ export async function inputAt(repo: TestRepo, sha: string): Promise<UpdateInput>
 }
 
 /**
- * A fixture repository and an in-memory store built at its first commit (spec §8): signals owns
+ * A fixture repository and a store (in memory, or at `db`) built at its first commit (spec §8): signals owns
  * src/signals/ (ingest.py, store.py) and docs/signals.md, deliverables owns src/deliverables/
  * crud.py; each has a stored page whose overview claim cites its code and whose history claim
  * cites the first commit. The project's article is stored too, written from both pages. Test-only.
  */
-export async function builtWiki(): Promise<{ repo: TestRepo; store: Store; first: string }> {
+export async function builtWiki(
+  db = ":memory:",
+): Promise<{ repo: TestRepo; store: Store; first: string }> {
   const repo = createTestRepo();
   repo.write("src/signals/ingest.py", INGEST_PY);
   repo.write("src/signals/store.py", STORE_PY);
@@ -159,7 +161,7 @@ export async function builtWiki(): Promise<{ repo: TestRepo; store: Store; first
       },
     ],
   });
-  const store = openStore(":memory:");
+  const store = openStore(db);
   store.putManifest(manifest, { llmRevised: true });
   store.putRevision(
     page(

@@ -40,9 +40,20 @@ export interface InflightFixture {
   remove(): void;
 }
 
-export async function inflightFixture(): Promise<InflightFixture> {
-  const { repo, store, first } = await builtWiki();
+/**
+ * `onDisk` stores the wiki at `<out>/wiki.db`, for process tests; the fixture's handle is then
+ * closed, and `store` must not be used.
+ */
+export async function inflightFixture(
+  options: { onDisk?: boolean } = {},
+): Promise<InflightFixture> {
   const root = mkdtempSync(join(tmpdir(), "repowiki-inflight-"));
+  const out = join(root, "out");
+  mkdirSync(out);
+  const { repo, store, first } = await builtWiki(
+    options.onDisk === true ? join(out, "wiki.db") : ":memory:",
+  );
+  if (options.onDisk === true) store.close();
   const run = (cwd: string, args: string[], env: Record<string, string> = {}): string =>
     execFileSync("git", args, {
       cwd,
@@ -53,8 +64,6 @@ export async function inflightFixture(): Promise<InflightFixture> {
   const work = join(root, "work");
   run(root, ["clone", "--quiet", "--bare", repo.dir, remote]);
   run(root, ["clone", "--quiet", remote, work]);
-  const out = join(root, "out");
-  mkdirSync(out);
   let day = 100;
   return {
     repo,
@@ -87,7 +96,7 @@ export async function inflightFixture(): Promise<InflightFixture> {
       run(remote, ["update-ref", "-d", `refs/pull/${n}/head`]);
     },
     remove() {
-      store.close();
+      if (options.onDisk !== true) store.close();
       repo.remove();
       rmSync(root, { recursive: true, force: true });
     },
