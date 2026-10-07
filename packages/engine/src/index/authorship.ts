@@ -1,4 +1,5 @@
-import { assertSha, GitError, type GitOptions, git, isSha } from "./git.ts";
+import { spawnSync } from "node:child_process";
+import { assertSha, GitError, type GitOptions, git, gitEnv, isSha } from "./git.ts";
 import { assignPullRequests } from "./history.ts";
 
 /** One file a commit changed, with its line counts (spec v2 #6 R20). */
@@ -38,16 +39,85 @@ const NUMSTAT = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/;
 /** The format's fields after its leading NUL: one token each, NUL-separated. */
 const FIELDS = 8;
 
+/** How long the People log may run before it is stopped (the fix-forward ruling: 10 minutes). */
+export const AUTHORSHIP_TIMEOUT_MS = 600_000;
+/** The most log output read: below V8's longest string, so decoding it cannot throw. */
+export const AUTHORSHIP_MAX_BYTES = 256 * 1024 * 1024;
+
+/** Whether `git version`'s output names git 2.40 or later, the first with `--attr-source`. */
+export function attrSourceSupported(version: string): boolean {
+  const match = /^git version (\d+)\.(\d+)/.exec(version.trim());
+  if (match === null) return false;
+  const [major, minor] = [Number(match[1]), Number(match[2])];
+  return major > 2 || (major === 2 && minor >= 40);
+}
+
+let attributesAtSha: boolean | undefined;
+
+/**
+ * Whether this machine's git reads attributes at the sha (`--attr-source`, git 2.40 or later),
+ * asked once. With an older git, attributes in the work tree may shape the counts, and the People
+ * summary says so.
+ */
+export function gitReadsAttributesAtSha(): boolean {
+  if (attributesAtSha === undefined) {
+    const out = spawnSync("git", ["version"], { env: gitEnv(), timeout: 10_000 });
+    attributesAtSha = attrSourceSupported(out.stdout?.toString("utf8") ?? "");
+  }
+  return attributesAtSha;
+}
+
 /** A numstat count; null for a binary change ("-"). */
 const lines = (text: string): number | null => (text === "-" ? null : Number(text));
+
+/**
+ * The pinned log argv (C13, the fix-forward ruling): no replace refs, attributes read at the sha
+ * (git 2.40 or later) and never from a configured attributes file, git's default big-file
+ * threshold, UTF-8 output, renames on (copies off) with git's default limit, the root commit's
+ * diff, myers, no merge diffs, no signature, no colour, external diff or textconv.
+ */
+export function authorshipArgs(sha: string, attributesAtSha: boolean): string[] {
+  return [
+    "--no-replace-objects",
+    ...(attributesAtSha ? [`--attr-source=${sha}`] : []),
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.attributesFile=/dev/null",
+    "-c",
+    "core.bigFileThreshold=512m",
+    "-c",
+    "i18n.logOutputEncoding=UTF-8",
+    "-c",
+    "diff.renames=true",
+    "-c",
+    "diff.renameLimit=1000",
+    "log",
+    "-z",
+    "-M",
+    "--root",
+    "--numstat",
+    "--diff-merges=off",
+    "--diff-algorithm=myers",
+    "--no-show-signature",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--format=%x00%H%x00%P%x00%aI%x00%cI%x00%an%x00%ae%x00%s%x00%b",
+    "--end-of-options",
+    sha,
+  ];
+}
 
 /**
  * Every commit reachable from `sha`, newest first by commit date, with its raw author, author
  * date, subject, a merge's title line, each changed file's numstat with renames followed, and the
  * pull request it arrived in (readHistory's assignment, shared). The log is parsed on NUL, which
  * no name, email, subject, body or path can hold, so repository text cannot move a record
- * boundary. Every option that shapes the counts is pinned in argv (C13): myers, renames on and
- * copies off, no merge diffs, no signature, no external diff or textconv.
+ * boundary. Every option that shapes the counts is pinned in argv (authorshipArgs), so the counts
+ * follow the sha, not the repository's config or work tree. The log stops after
+ * AUTHORSHIP_TIMEOUT_MS and past AUTHORSHIP_MAX_BYTES of output, with a GitError, unless
+ * `options` says otherwise.
  */
 export function readAuthorship(
   repo: string,
@@ -55,31 +125,11 @@ export function readAuthorship(
   options: GitOptions = {},
 ): AuthoredCommit[] {
   assertSha(sha);
-  const tokens = git(
-    repo,
-    [
-      "-c",
-      "core.fsmonitor=false",
-      "-c",
-      "diff.renames=true",
-      "-c",
-      "diff.renameLimit=1000",
-      "log",
-      "-z",
-      "-M",
-      "--numstat",
-      "--diff-merges=off",
-      "--diff-algorithm=myers",
-      "--no-show-signature",
-      "--no-color",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--format=%x00%H%x00%P%x00%aI%x00%cI%x00%an%x00%ae%x00%s%x00%b",
-      "--end-of-options",
-      sha,
-    ],
-    options,
-  )
+  const tokens = git(repo, authorshipArgs(sha, gitReadsAttributesAtSha()), {
+    timeoutMs: AUTHORSHIP_TIMEOUT_MS,
+    maxBytes: AUTHORSHIP_MAX_BYTES,
+    ...options,
+  })
     .toString("utf8")
     .split("\0");
   const unparseable = () => new GitError(`unparseable commit record in git log of ${sha}`);

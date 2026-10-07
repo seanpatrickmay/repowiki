@@ -10,6 +10,7 @@ import {
 } from "@repowiki/engine/test-people";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  attributesNotes,
   DEFAULT_PEOPLE_MAX_USD,
   exclusionNotes,
   loadPeopleFile,
@@ -285,5 +286,14 @@ describe("renderPeopleSummary", () => {
   it("says nothing of exclusion when nobody is excluded", () => {
     expect(exclusionNotes(0, false)).toEqual([]);
     expect(exclusionNotes(2, true)).toHaveLength(1);
+  });
+});
+
+describe("attributesNotes (the fix-forward ruling on --attr-source)", () => {
+  it("notes work-tree attributes only when git cannot read them at the sha", () => {
+    expect(attributesNotes(true)).toEqual([]);
+    expect(attributesNotes(false)).toEqual([
+      "Attributes from the work tree may apply: this git (before 2.40) cannot read .gitattributes at the sha, so line counts may follow the work tree's.",
+    ]);
   });
 });

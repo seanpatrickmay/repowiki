@@ -419,6 +419,18 @@ export function exclusionNotes(excluded: number, othersShown: boolean): string[]
 export const PEOPLE_SCRATCH_PREFIX = ".people-scratch-";
 
 /**
+ * What the People summary says when git cannot read attributes at the sha (`--attr-source` needs
+ * git 2.40): a work tree's `.gitattributes` may then mark files binary or shape their counts.
+ */
+export function attributesNotes(attributesAtSha: boolean): string[] {
+  return attributesAtSha
+    ? []
+    : [
+        "Attributes from the work tree may apply: this git (before 2.40) cannot read .gitattributes at the sha, so line counts may follow the work tree's.",
+      ];
+}
+
+/**
  * A throwaway copy of the out dir's wiki.db, taken under the build lock (planner ruling R17):
  * people:suggest and wiki:people --dry-run read and refresh it, so the real store is never
  * written or migrated. The copy holds names and salted keys, so it goes under the out dir

@@ -1,5 +1,13 @@
+import { chmodSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readAuthorship } from "./authorship.ts";
+import {
+  AUTHORSHIP_TIMEOUT_MS,
+  attrSourceSupported,
+  gitReadsAttributesAtSha,
+  readAuthorship,
+} from "./authorship.ts";
+import { GitError, GitTimeoutError } from "./git.ts";
 import { readHistory } from "./history.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
@@ -7,6 +15,11 @@ const ADA = { name: "Ada Lovelace", email: "ada@example.com" };
 const BOB = { name: "bob", email: "12345+bob-dev@users.noreply.github.com" };
 
 let repo: TestRepo;
+/** Setting and unsetting one key of the repository's own config. */
+const configured = (key: string, value: string): [() => void, () => void] => [
+  () => repo.git("config", key, value),
+  () => repo.git("config", "--unset", key),
+];
 beforeEach(() => {
   repo = createTestRepo();
 });
@@ -115,30 +128,120 @@ describe("readAuthorship (spec v2 #6 R5, R6, R20)", () => {
     ).toEqual(["\nlead.py", "a\tb.py", "x#y%z.py", "ünï.py"].sort());
   });
 
-  it("is not moved by the repository's config: mailmap, signatures, copies, merge diffs", () => {
+  it("is not moved by the repository's config, attributes, replace refs or signatures", () => {
     repo.write(".mailmap", "Someone Else <else@example.com> <ada@example.com>\n");
-    repo.write("a.py", "a\nb\nc\nd\ne\nf\n");
+    repo.write("a.py", "a\nU\nb\nb\nU\n");
+    repo.write("r1.py", "1\n2\n3\n4\n5\n6\n7\n8\n");
+    repo.write("r2.py", "a\nb\nc\nd\ne\nf\ng\nh\n");
     repo.commit("init", "+0000", ADA);
-    repo.write("copy.py", "a\nb\nc\nd\ne\nf\n");
     repo.git("switch", "-q", "-c", "side");
     repo.write("s.py", "s\n");
     repo.commit("side", "+0000", ADA);
     repo.git("switch", "-q", "main");
-    repo.write("a.py", "a\nb\nc\nd\ne\nf\ng\n");
+    // myers counts this edit +4 -3, patience +5 -4; copy.py copies a.py in the commit that
+    // changes it, so copy detection would see it; both renames change a line, so they are
+    // inexact and a rename limit of 1 would drop them.
+    repo.write("a.py", "b\nU\nU\nb\na\nV\n");
+    repo.write("copy.py", "a\nU\nb\nb\nU\n");
+    repo.git("mv", "r1.py", "s1.py");
+    repo.git("mv", "r2.py", "s2.py");
+    repo.write("s1.py", "1\n2\n3\n4\n5\n6\n7\n9\n");
+    repo.write("s2.py", "a\nb\nc\nd\ne\nf\ng\ni\n");
     repo.commit("copy and change", "+0000", ADA);
-    const head = repo.merge("side", "Merge branch 'side'");
+    repo.merge("side", "Merge branch 'side'");
+    // The head is a signed commit (a crafted gpgsig header): only showing signatures runs gpg.
+    const signed = repo
+      .git("cat-file", "commit", "HEAD")
+      .replace(
+        /^(committer .*)$/m,
+        "$1\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n -----END PGP SIGNATURE-----",
+      );
+    repo.write(".git/signed-commit", `${signed}\n`);
+    const head = repo.git("hash-object", "-t", "commit", "-w", ".git/signed-commit");
+    repo.git("update-ref", "refs/heads/main", head);
+    const ran = join(repo.dir, ".git", "gpg-ran");
+    repo.write(".git/gpg-canary.sh", `#!/bin/sh\ntouch '${ran}'\nexit 1\n`);
+    chmodSync(join(repo.dir, ".git", "gpg-canary.sh"), 0o755);
+    repo.write(".git/hostile-attributes", "*.py -diff\n");
+    repo.git("config", "gpg.program", join(repo.dir, ".git", "gpg-canary.sh"));
+    // A replacement commit with another author, and an uncommitted .gitattributes.
+    const init = repo.git("rev-list", "--max-parents=0", "HEAD");
+    const other = repo
+      .git("cat-file", "commit", init)
+      .replace(/^author .*$/m, "author Someone Else <else@example.com> 1767312000 +0000");
+    repo.write(".git/other-commit", `${other}\n`);
+    const replacement = repo.git("hash-object", "-t", "commit", "-w", ".git/other-commit");
+
+    // What plain git log shows: each case below must change it, so each pin can fail.
+    const plain = () => repo.git("log", "-z", "--numstat", "--format=%x00%H%x00%an%x00%s", head);
     const clean = readAuthorship(repo.dir, head);
-    for (const [key, value] of [
-      ["log.mailmap", "true"],
-      ["log.showSignature", "true"],
-      ["diff.renames", "copies"],
-      ["log.diffMerges", "first-parent"],
-      ["diff.algorithm", "patience"],
-    ])
-      repo.git("config", key as string, value as string);
+    const before = plain();
+    const cases: [string, () => void, () => void][] = [
+      ["diff.renames", ...configured("diff.renames", "copies")],
+      ["diff.algorithm", ...configured("diff.algorithm", "patience")],
+      ["diff.renameLimit", ...configured("diff.renameLimit", "1")],
+      ["log.showRoot", ...configured("log.showRoot", "false")],
+      ["core.bigFileThreshold", ...configured("core.bigFileThreshold", "1")],
+      [
+        "core.attributesFile",
+        ...configured("core.attributesFile", join(repo.dir, ".git", "hostile-attributes")),
+      ],
+      ["i18n.logOutputEncoding", ...configured("i18n.logOutputEncoding", "UTF-16")],
+      [
+        "refs/replace",
+        () => repo.git("replace", init, replacement),
+        () => repo.git("replace", "-d", init),
+      ],
+    ];
+    if (gitReadsAttributesAtSha())
+      cases.push([
+        "work-tree .gitattributes",
+        () => repo.write(".gitattributes", "*.py -diff\n"),
+        () => rmSync(join(repo.dir, ".gitattributes")),
+      ]);
+    for (const [name, set, unset] of cases) {
+      set();
+      expect(plain(), name).not.toBe(before);
+      expect(readAuthorship(repo.dir, head), name).toEqual(clean);
+      unset();
+    }
+    const [setSignatures] = configured("log.showSignature", "true");
+    setSignatures();
+    // These two change no plain `git log` (log.diffMerges applies only with -m); set for good measure.
+    repo.git("config", "log.mailmap", "true");
+    repo.git("config", "log.diffMerges", "first-parent");
+    plain();
+    expect(existsSync(ran), "the canary shows plain git log runs gpg").toBe(true);
+    rmSync(ran);
     expect(readAuthorship(repo.dir, head)).toEqual(clean);
-    expect(clean[0]?.files).toEqual([]);
+    expect(existsSync(ran)).toBe(false);
+
     expect(clean.find((c) => c.subject === "init")?.authorName).toBe("Ada Lovelace");
+    expect(clean.find((c) => c.subject === "init")?.files).toHaveLength(4);
+    expect(clean.find((c) => c.subject.startsWith("Merge"))?.files).toEqual([]);
+    expect(clean.find((c) => c.subject === "copy and change")?.files).toEqual([
+      { path: "a.py", oldPath: null, added: 4, deleted: 3 },
+      { path: "copy.py", oldPath: null, added: 5, deleted: 0 },
+      { path: "s1.py", oldPath: "r1.py", added: 1, deleted: 1 },
+      { path: "s2.py", oldPath: "r2.py", added: 1, deleted: 1 },
+    ]);
+  });
+
+  it("stops at its output cap and its time limit with a GitError", () => {
+    repo.write("a.py", "1\n");
+    const sha = repo.commit("init", "+0000", ADA);
+    expect(() => readAuthorship(repo.dir, sha, { maxBytes: 16 })).toThrow(GitError);
+    expect(() => readAuthorship(repo.dir, sha, { maxBytes: 16 })).toThrow(/16-byte limit/);
+    expect(() => readAuthorship(repo.dir, sha, { timeoutMs: 1 })).toThrow(GitTimeoutError);
+    expect(AUTHORSHIP_TIMEOUT_MS).toBe(600_000);
+  });
+
+  it("reads attributes at the sha only on git 2.40 or later", () => {
+    expect(attrSourceSupported("git version 2.39.3 (Apple Git-146)")).toBe(false);
+    expect(attrSourceSupported("git version 2.40.0")).toBe(true);
+    expect(attrSourceSupported("git version 2.47.1")).toBe(true);
+    expect(attrSourceSupported("git version 3.0.0")).toBe(true);
+    expect(attrSourceSupported("not git")).toBe(false);
   });
 
   it("refuses a sha that is not 40 hex", () => {
