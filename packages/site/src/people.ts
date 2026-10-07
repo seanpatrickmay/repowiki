@@ -7,9 +7,10 @@ import {
 } from "@repowiki/core";
 import {
   barChart,
-  bucketFor,
   bucketLabel,
   bucketStarts,
+  chartWindow,
+  FIRST_CHART_DAY,
   heatmap,
   periodDays,
   repositorySeries,
@@ -82,16 +83,16 @@ export interface PeopleIndexView {
  */
 export function peopleIndexView(site: SiteModel, people: PeopleExport): PeopleIndexView {
   const { snapshot } = people;
-  const days = [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others].map(
-    (d) => d.day,
+  const window = chartWindow(
+    [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others],
+    headDay(people),
   );
-  const from = days.reduce((a, b) => (b < a ? b : a), days[0] ?? snapshot.commitDate.slice(0, 10));
-  const to = days.reduce((a, b) => (b > a ? b : a), from);
-  const bucket = bucketFor(from, to);
+  const { from, to, bucket } = window;
   const chart = barChart(repositorySeries(snapshot, from, to, personUrl), {
     label: `Commits to ${site.wiki.repo} by ${bucket}`,
     bucket,
-    starts: bucketStarts(from, to, bucket),
+    starts: window.starts,
+    note: window.note,
     // Every bar has commits in it, so its year has an activity page.
     hrefOf: (start) => activityUrl(start.slice(0, 4)),
   });
@@ -170,11 +171,17 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
     renderInline(c.text, links) + markersHtml(refs?.markers.get(c.id) ?? []);
   const claims = (key: string) => narrative?.sections.find((s) => s.key === key)?.claims ?? [];
   const total = Math.max(1, snapshot.totalLines);
-  const days = p.activity.map((d) => d.day);
-  const from = days[0] ?? p.firstCommit.slice(0, 10);
-  const to = days.at(-1) ?? from;
-  const bucket = bucketFor(from, to);
-  const years = [...new Set(days.map((d) => d.slice(0, 4)))];
+  const window = chartWindow(p.activity, headDay(people));
+  const { bucket } = window;
+  // A heatmap per year the chart draws: a crafted date outside it gets none.
+  const years = [
+    ...new Set(
+      p.activity
+        .map((d) => d.day)
+        .filter((d) => d >= window.from && d <= window.to)
+        .map((d) => d.slice(0, 4)),
+    ),
+  ];
   const newer =
     narrative === null
       ? 0
@@ -201,7 +208,8 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
     chart: barChart([{ label: p.name, href: null, cls: "series-1", activity: p.activity }], {
       label: `${p.name}'s commits by ${bucket}`,
       bucket,
-      starts: bucketStarts(from, to, bucket),
+      starts: window.starts,
+      note: window.note,
       hrefOf: (start) => `#activity-${start.slice(0, 4)}`,
     }),
     years: years.map((year) => ({
@@ -249,12 +257,21 @@ export function activityRoutes(site: SiteModel): { period: string | undefined }[
   return [{ period: undefined }, ...[...years, ...months].sort().map((period) => ({ period }))];
 }
 
-/** Every day with a commit, the anonymous series' included, sorted. */
+/** The head commit's day: the latest a chart draws (the Task 30 ruling). */
+const headDay = (people: PeopleExport): string => people.snapshot.commitDate.slice(0, 10);
+
+/**
+ * Every day with a commit, the anonymous series' included, sorted, within the days a chart draws
+ * (1970 to the head's day), so a crafted date gets no zoom page.
+ */
 function activityDays(people: PeopleExport): string[] {
   const { snapshot } = people;
+  const last = headDay(people);
   return [
     ...new Set(
-      [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others].map((d) => d.day),
+      [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others]
+        .map((d) => d.day)
+        .filter((d) => d >= FIRST_CHART_DAY && d <= last),
     ),
   ].sort();
 }
@@ -278,13 +295,15 @@ export function activityView(
   people: PeopleExport,
   period: string | undefined,
 ): ActivityView {
-  const days = activityDays(people);
   const active = new Set(
     activityRoutes(site).flatMap((r) => (r.period === undefined ? [] : [r.period])),
   );
-  const { from, to } =
-    period === undefined ? { from: days[0] ?? "", to: days.at(-1) ?? "" } : periodDays(period);
-  const bucket = period === undefined ? bucketFor(from, to) : period.length === 4 ? "week" : "day";
+  const all = chartWindow(
+    [...people.snapshot.people.flatMap((p) => p.activity), ...people.snapshot.others],
+    headDay(people),
+  );
+  const { from, to } = period === undefined ? all : periodDays(period);
+  const bucket = period === undefined ? all.bucket : period.length === 4 ? "week" : "day";
   const below = (start: string): string | null => {
     // All time links each bar to its year, whatever its bucket; a month is the finest level.
     if (period === undefined)
@@ -308,8 +327,9 @@ export function activityView(
     chart: barChart(repositorySeries(people.snapshot, from, to, personUrl), {
       label: `Commits to ${site.wiki.repo}${name === null ? "" : ` in ${name}`} by ${bucket}`,
       bucket,
-      starts: bucketStarts(from, to, bucket),
+      starts: period === undefined ? all.starts : bucketStarts(from, to, bucket),
       hrefOf: below,
+      note: period === undefined ? all.note : null,
     }),
     up:
       period === undefined
