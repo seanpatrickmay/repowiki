@@ -8,6 +8,7 @@ import {
   UpdateError,
   WikiBuildError,
 } from "@repowiki/engine";
+import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
@@ -48,7 +49,18 @@ async function main(): Promise<void> {
       // none (nothing cited changed, no article due) needs no key.
       if (needsKey(estimate)) requireApiKey("wiki:update");
       const log = (line: string) => console.error(line);
+      const before = beforeUpdate(store);
       const ran = await runUpdate(store, input, args, models, repoName, log);
+      // The work in flight follows the new head, offline, before the export is written (C14).
+      const inflight =
+        before === null
+          ? []
+          : await inflightAfterUpdate(
+              { repo, out, repoName, store, models, log },
+              before,
+              ran.update.to,
+              false,
+            );
       // An article that failed after the update was stored still gets the export and summary.
       const { summary, exportPath, summaryPath } = writeUpdateOutputs(
         store,
@@ -56,6 +68,7 @@ async function main(): Promise<void> {
         repoName,
         ran,
         estimate,
+        inflight,
       );
       console.log(summary);
       console.log(`Wrote ${exportPath} and ${summaryPath}; store: ${db}`);

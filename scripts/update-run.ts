@@ -198,7 +198,8 @@ export async function runUpdate(
 /**
  * Writes an update's export.json and update-<sha7>.md in `out`, once the store has moved: after
  * a finished update, and after one whose About article failed once its pages were stored, so the
- * export is never behind the store. Returns the summary and both paths.
+ * export is never behind the store. `extra` (the work-in-flight section) ends the summary.
+ * Returns the summary and both paths.
  */
 export function writeUpdateOutputs(
   store: Store,
@@ -206,15 +207,17 @@ export function writeUpdateOutputs(
   repoName: string,
   ran: RanUpdate,
   estimate: UpdateEstimate | null,
+  extra: readonly string[] = [],
 ): { summary: string; exportPath: string; summaryPath: string } {
   const exportPath = join(out, "export.json");
   writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });
-  const summary = renderUpdateSummary(
+  const rendered = renderUpdateSummary(
     repoName,
     ran.update,
     estimate,
     totalsOf(store.listLedger(ran.runId)),
   );
+  const summary = extra.length === 0 ? rendered : `${rendered}\n${extra.join("\n")}`;
   const summaryPath = join(out, `update-${ran.update.to.slice(0, 7)}.md`);
   writeFileAtomic(summaryPath, summary);
   return { summary, exportPath, summaryPath };
