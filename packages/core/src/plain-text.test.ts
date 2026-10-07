@@ -61,6 +61,10 @@ describe("withoutEmails (planner ruling R5, the fix-forward ruling)", () => {
       "ada@example\u0085.com",
       "ada@\u202Eexample.com",
       "ada@example.c\u2028om",
+      // A zero-width joiner or non-joiner anywhere in the address (the wave A re-review).
+      "kim.q7hidden\u200D@example.com",
+      "kim.q7hidden@\u200Cexample.com",
+      "kim.q7hidden@example\u200D.com",
     ])
       expect(withoutEmails(`Fix for ${disguised}`), JSON.stringify(disguised)).toBe(
         "Fix for [email]",

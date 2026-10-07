@@ -41,6 +41,7 @@ describe("match keys (spec v2 #6 §5)", () => {
     // A name key can hold an address, as an author's name can: its value is redacted too.
     expect(shownMatchKey("name:Ada@Example.com")).toBe("name:[email]");
     expect(shownMatchKey("name:Ada\uFF20example.com")).toBe("name:[email]");
+    expect(shownMatchKey("name:kim.q7hidden\u200D@example.com")).toBe("name:[email]");
     expect(shownMatchKey("nope")).toBe("a malformed key");
   });
 });
