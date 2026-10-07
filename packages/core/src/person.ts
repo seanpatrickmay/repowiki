@@ -256,12 +256,16 @@ export type PersonRevisionReason = z.infer<typeof PersonRevisionReason>;
 /** The reader's tokens: a code span is held aside before a [[link]] token is read. */
 const READER_TOKEN = /`[^`]+`|\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 
-/** The targets of a claim's feature link tokens, in order: `[[id]]` and `[[id|words]]`, not wp:. */
+/**
+ * The targets of a claim's feature link tokens, in order: `[[id]]` and `[[id|words]]`, not wp:,
+ * and only targets FeatureId accepts (spec v2 #6 §5 rule 1: `[[featureId]]`), so `[[ ]]` or
+ * `[[Not A Feature]]` is no feature link.
+ */
 export function featureLinkTargets(text: string): string[] {
   const targets: string[] = [];
   for (const match of text.matchAll(READER_TOKEN)) {
     const target = match[1]?.trim();
-    if (target !== undefined && !target.startsWith("wp:")) targets.push(target);
+    if (target !== undefined && FeatureId.safeParse(target).success) targets.push(target);
   }
   return targets;
 }
@@ -327,10 +331,14 @@ export const PersonRevision = z
     sections: z.array(PersonSection).min(1),
   })
   .superRefine((revision, ctx) => {
-    if (!revision.id.startsWith(`person-${revision.personId}-${revision.sha.slice(0, 12)}-`)) {
+    const prefix = `person-${revision.personId}-${revision.sha.slice(0, 12)}-`;
+    if (
+      !revision.id.startsWith(prefix) ||
+      !/^[1-9][0-9]*$/.test(revision.id.slice(prefix.length))
+    ) {
       ctx.addIssue({
         code: "custom",
-        message: "the id must carry the person id and the first 12 characters of the sha",
+        message: "the id must be person-<person id>-<first 12 characters of the sha>-<n>",
         path: ["id"],
       });
     }

@@ -26,6 +26,13 @@ describe("featureLinkTargets", () => {
     ]);
     expect(featureLinkTargets("[[wp:Queue]] and `[[signals]]`")).toEqual([]);
   });
+
+  it("keeps only targets shaped like a feature id", () => {
+    expect(featureLinkTargets("[[ ]] and [[Not A Feature]] and [[signals]]")).toEqual(["signals"]);
+    expect(featureLinkTargets("[[sig\uE000nals]] and [[-x]] and [[ signals ]]")).toEqual([
+      "signals",
+    ]);
+  });
 });
 
 describe("personClaimViolations (spec v2 #6 §5 rule 1)", () => {
@@ -40,6 +47,8 @@ describe("personClaimViolations (spec v2 #6 §5 rule 1)", () => {
     ["areas", areas({ kind: "limitation" }), "areas claims must be fact claims"],
     ["areas", areas({ text: "No link." }), "links exactly one feature"],
     ["areas", areas({ text: "[[signals]] and [[deliverables]]" }), "links exactly one feature"],
+    ["areas", areas({ text: "[[ ]] x" }), "links exactly one feature"],
+    ["areas", areas({ text: "[[Not A Feature]] x" }), "links exactly one feature"],
   ];
   for (const [key, claim, problem] of cases) {
     it(`refuses a ${key} claim: ${problem}`, () => {
@@ -65,11 +74,15 @@ describe("PersonRevision", () => {
       makePersonRevision({ id: "person-grace-hopper-aaaaaaaaaaaa-1" }),
       makePersonRevision({ id: "person-ada-lovelace-bbbbbbbbbbbb-1" }),
       makePersonRevision({ id: "ada-lovelace-1" }),
+      makePersonRevision({ id: "person-ada-lovelace-aaaaaaaaaaaa-bbbbbbbbbbbb-1" }),
+      makePersonRevision({ id: "person-ada-lovelace-aaaaaaaaaaaa-0" }),
+      makePersonRevision({ id: "person-ada-lovelace-AAAAAAAAAAAA-1" }),
       makePersonRevision({ sections: [lead, area, chron] as never }),
       makePersonRevision({ sections: [chron, lead] as never }),
       makePersonRevision({ reason: "update" }),
     ];
-    for (const revision of bad) expect(PersonRevision.safeParse(revision).success).toBe(false);
+    for (const revision of bad)
+      expect(PersonRevision.safeParse(revision).success, revision.id).toBe(false);
   });
 
   it("accepts a whole rewrite that continues a chain", () => {
