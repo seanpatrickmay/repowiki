@@ -1,7 +1,12 @@
-import { type BuildJournal, buildJournal, configuredEmail } from "@repowiki/engine";
+import { type BuildJournal, buildJournal } from "@repowiki/engine";
 import { createLedger, type Provider, totalsOf } from "@repowiki/llm";
 import type { HookContext } from "./inflight-hook.ts";
-import { loadPeopleFile, peopleFilePath, WIKI_PEOPLE_RUN_PREFIX } from "./people-cli.ts";
+import {
+  loadPeopleFile,
+  ownerEmailOf,
+  peopleFilePath,
+  WIKI_PEOPLE_RUN_PREFIX,
+} from "./people-cli.ts";
 import { runPeopleStep } from "./people-run.ts";
 import { lazyClaudeProvider, problemLine } from "./wiki-cli.ts";
 
@@ -10,6 +15,8 @@ export interface PeopleHookContext extends HookContext {
   batch: boolean;
   /** --people-max-usd (R26). */
   maxUsd: number;
+  /** The out dir's build lock the update holds, or null for a test's in-memory store. */
+  lock: string | null;
   /** A test seam: the round's provider and journal instead of Claude's. */
   connect?: () => { provider: Provider; journal: BuildJournal };
 }
@@ -35,7 +42,8 @@ export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[
       repoName: ctx.repoName,
       store,
       config: loadPeopleFile(peopleFilePath(ctx.repo, ctx.out, null)),
-      ownerEmail: configuredEmail(ctx.repo),
+      ownerEmail: ownerEmailOf(ctx.repo, log),
+      lock: ctx.lock,
       narrative: true,
       only: null,
       rebuildBlame: false,

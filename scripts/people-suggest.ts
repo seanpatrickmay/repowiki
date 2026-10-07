@@ -1,11 +1,12 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { configuredEmail, openStore, readPeople, WikiBuildError } from "@repowiki/engine";
+import { openStore, readPeople, WikiBuildError } from "@repowiki/engine";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
   loadPeopleFile,
+  ownerEmailOf,
   parseSuggestArgs,
   peopleFilePath,
   renderSuggest,
@@ -41,7 +42,8 @@ function main(): void {
       const sha = store.getHead();
       if (sha === null)
         throw new WikiBuildError(`the wiki at ${db} has no head; run pnpm wiki:build first`);
-      const read = readPeople({ repo, sha, store, config, ownerEmail: configuredEmail(repo) });
+      const ownerEmail = ownerEmailOf(repo, (line) => console.error(line));
+      const read = readPeople({ repo, sha, store, config, ownerEmail });
       for (const warning of read.warnings) console.error(problemLine(warning));
       console.log(renderSuggest(read, config));
     } finally {

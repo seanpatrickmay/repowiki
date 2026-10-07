@@ -19,6 +19,7 @@ const prepare = (file: unknown, narrative = true) =>
     store: fx.store,
     config: PeopleConfig.parse(file),
     ownerEmail: null,
+    lock: null,
     manifest: fx.manifest,
     narrative,
     only: null,

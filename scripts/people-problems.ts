@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { configuredEmail, personRevisionProblems, readPeople, type Store } from "@repowiki/engine";
-import { loadPeopleFile, peopleFilePath } from "./people-cli.ts";
+import { personRevisionProblems, readPeople, type Store } from "@repowiki/engine";
+import { loadPeopleFile, ownerEmailOf, peopleFilePath } from "./people-cli.ts";
 
 /** What wiki:check found about People. */
 export interface PeopleCheck {
@@ -52,7 +52,8 @@ export function checkPeopleStored(store: Store, repo: string, out: string): Peop
     problems.push(`people file: ${err instanceof Error ? err.message : String(err)}`);
     config = loadPeopleFile(join(out, "no-such-people-file.json"));
   }
-  const read = readPeople({ repo, sha, store, config, ownerEmail: configuredEmail(repo) });
+  const ownerEmail = ownerEmailOf(repo, (line) => console.error(line));
+  const read = readPeople({ repo, sha, store, config, ownerEmail });
   const revisions = snapshot === null ? [] : store.listCurrentPersonRevisions();
   if (snapshot !== null) {
     const manifests = store.listManifests();

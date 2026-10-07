@@ -29,6 +29,7 @@ const turnOn = () =>
     store: fx.store,
     config: PeopleConfig.parse({}),
     ownerEmail: configuredEmail(fx.repo.dir),
+    lock: null,
   });
 const hook = (extra: Partial<Parameters<typeof peopleAfterUpdate>[0]> = {}) =>
   peopleAfterUpdate({
@@ -39,6 +40,7 @@ const hook = (extra: Partial<Parameters<typeof peopleAfterUpdate>[0]> = {}) =>
     models: DEFAULT_MODELS,
     log: () => {},
     command: "wiki:update",
+    lock: null,
     batch: true,
     maxUsd: 0.5,
     ...extra,

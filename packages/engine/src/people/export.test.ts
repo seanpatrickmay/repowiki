@@ -28,6 +28,7 @@ const refresh = (file: unknown = {}) =>
     store: fx.store,
     config: PeopleConfig.parse(file),
     ownerEmail: configuredEmail(fx.repo.dir),
+    lock: null,
   });
 const options = { repo: "demo", exportedAt: "2026-10-06T12:00:00Z" };
 

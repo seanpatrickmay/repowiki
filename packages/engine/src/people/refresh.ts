@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
 import type { PeopleConfig } from "@repowiki/core";
-import { type AuthoredCommit, readAuthorship, readBlobAt } from "../index/index.ts";
+import {
+  AUTHORSHIP_TIMEOUT_MS,
+  type AuthoredCommit,
+  PEOPLE_READ_TIMEOUT_MS,
+  readAuthorship,
+  readBlobAt,
+} from "../index/index.ts";
 import { type Store, StoreError } from "../store/index.ts";
 import { type ResolvedIdentities, resolveIdentities } from "./identities.ts";
 import { type Mailmap, parseMailmap } from "./mailmap.ts";
@@ -27,6 +34,12 @@ export interface ReadInput {
   store: Store;
   config: PeopleConfig;
   ownerEmail: string | null;
+  /**
+   * The People step's git time limits (the fix-forward ruling): the log (AUTHORSHIP_TIMEOUT_MS,
+   * 10 minutes) and every other read (PEOPLE_READ_TIMEOUT_MS, 2 minutes); blame's is
+   * RefreshInput.timeoutMs.
+   */
+  timeouts?: { logMs?: number; readMs?: number };
 }
 
 /**
@@ -36,8 +49,11 @@ export interface ReadInput {
  */
 export function readPeople(input: ReadInput): PeopleRead {
   const { repo, sha, store, config } = input;
-  const commits = readAuthorship(repo, sha);
-  const mailmap = parseMailmap(readBlobAt(repo, sha, ".mailmap") ?? "");
+  const read = { timeoutMs: input.timeouts?.readMs ?? PEOPLE_READ_TIMEOUT_MS };
+  const commits = readAuthorship(repo, sha, {
+    timeoutMs: input.timeouts?.logMs ?? AUTHORSHIP_TIMEOUT_MS,
+  });
+  const mailmap = parseMailmap(readBlobAt(repo, sha, ".mailmap", read) ?? "");
   const identities = resolveIdentities({
     commits,
     mailmap,
@@ -48,7 +64,7 @@ export function readPeople(input: ReadInput): PeopleRead {
   const assigned = assignIds(identities.groups, store.listPeopleRegistry());
   const known = new Set(commits.map((c) => c.sha));
   const ignoreRevs = config.ignoreRevs
-    ? ignoreRevsFrom(readBlobAt(repo, sha, ".git-blame-ignore-revs") ?? "", known)
+    ? ignoreRevsFrom(readBlobAt(repo, sha, ".git-blame-ignore-revs", read) ?? "", known)
     : [];
   const warnings = [...identities.warnings];
   if (mailmap.skipped > 0) warnings.push(`.mailmap: ${mailmap.skipped} malformed lines skipped`);
@@ -59,17 +75,40 @@ export interface RefreshInput extends ReadInput {
   /** wiki:people --rebuild-blame. */
   rebuildBlame?: boolean;
   concurrency?: number;
+  /** Blame's time limit per file (BLAME_TIMEOUT_MS). */
   timeoutMs?: number;
+  /**
+   * The out dir's build lock file the caller holds (the store is rewritten whole from what was
+   * read before blame, so two refreshes must never overlap), or null for a store no other run can
+   * open: in memory, or a throwaway copy.
+   */
+  lock: string | null;
+}
+
+/** Throws unless `lock` is a build lock this process holds (its first line names our pid). */
+function assertLockHeld(lock: string): void {
+  let line = "";
+  try {
+    line = readFileSync(lock, "utf8");
+  } catch {
+    // No lock file: not held.
+  }
+  if (!line.startsWith(`pid ${process.pid} `))
+    throw new StoreError(
+      `the People refresh needs the out dir's build lock (${lock}), held by this run`,
+    );
 }
 
 export type Refreshed = PeopleRead & ComputedSnapshot & { ownership: Ownership };
 
 /**
  * The People refresh (spec v2 #6 §4 steps 1-5, §9): readPeople, blame through the cache, the
- * snapshot, and then the snapshot and the registry stored in one transaction. No LLM call.
- * Throws a StoreError when the store has no manifest for the sha's wiki.
+ * snapshot, and then the snapshot and the registry stored in one transaction. No LLM call. The
+ * caller holds the out dir's build lock (`lock`, asserted). Throws a StoreError when the store
+ * has no manifest at all.
  */
 export async function refreshPeople(input: RefreshInput): Promise<Refreshed> {
+  if (input.lock !== null) assertLockHeld(input.lock);
   const manifests = input.store.listManifests();
   if (manifests.length === 0)
     throw new StoreError("the store has no manifest; run pnpm wiki:build first");
@@ -79,6 +118,7 @@ export async function refreshPeople(input: RefreshInput): Promise<Refreshed> {
     ...(input.rebuildBlame === undefined ? {} : { rebuild: input.rebuildBlame }),
     ...(input.concurrency === undefined ? {} : { concurrency: input.concurrency }),
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    readTimeoutMs: input.timeouts?.readMs ?? PEOPLE_READ_TIMEOUT_MS,
   });
   for (const { path } of ownership.timedOut)
     read.warnings.push(

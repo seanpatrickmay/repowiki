@@ -4,7 +4,6 @@ import { basename, join, resolve } from "node:path";
 import { type PeopleConfig, parseMatchKey } from "@repowiki/core";
 import {
   buildJournal,
-  configuredEmail,
   openStore,
   readPeople,
   type Store,
@@ -16,6 +15,7 @@ import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
   loadPeopleFile,
+  ownerEmailOf,
   PEOPLE_USAGE,
   type PeopleArgs,
   parsePeopleArgs,
@@ -26,7 +26,13 @@ import {
   WIKI_PEOPLE_RUN_PREFIX,
 } from "./people-cli.ts";
 import { runPeopleStep } from "./people-run.ts";
-import { acquireBuildLock, exitWithError, lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
+import {
+  acquireBuildLock,
+  BUILD_LOCK,
+  exitWithError,
+  lazyClaudeProvider,
+  requireApiKey,
+} from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:people <repo> … (spec v2 #6 §10): turns People on for a built wiki and refreshes it at
@@ -52,7 +58,8 @@ async function main(): Promise<void> {
   if (args.dryRun) {
     const copy = storeCopy(out);
     try {
-      await withStore(copy.path, (store) => people(args, repo, out, store, config, models));
+      // The copy is this run's alone: no lock to hold for it.
+      await withStore(copy.path, (store) => people(args, repo, out, store, config, models, null));
     } finally {
       copy.remove();
     }
@@ -63,7 +70,7 @@ async function main(): Promise<void> {
     await withStore(db, async (store) => {
       if (args.disable) return disable(repo, out, store);
       if (args.forget !== null) return forget(args.forget, repo, out, store, config);
-      return people(args, repo, out, store, config, models);
+      return people(args, repo, out, store, config, models, join(out, BUILD_LOCK));
     });
   } finally {
     release();
@@ -105,7 +112,8 @@ function forget(key: string, repo: string, out: string, store: Store, config: Pe
   if (parsed === null) throw new CliError(PEOPLE_USAGE);
   const salted = saltedKey(store.getPeopleSalt(), `${parsed.kind}:${parsed.value}`);
   const sha = store.getHead() as string;
-  const read = readPeople({ repo, sha, store, config, ownerEmail: configuredEmail(repo) });
+  const ownerEmail = ownerEmailOf(repo, (line) => console.error(line));
+  const read = readPeople({ repo, sha, store, config, ownerEmail });
   const ids = new Set<string>();
   read.identities.groups.forEach((g, i) => {
     if (g.keys.includes(salted)) ids.add(read.assigned.ids[i] as string);
@@ -129,6 +137,7 @@ async function people(
   store: Store,
   config: PeopleConfig,
   models: ModelConfig,
+  lock: string | null,
 ): Promise<void> {
   const repoName = basename(repo);
   const sha = store.getHead() as string;
@@ -140,7 +149,8 @@ async function people(
     repoName,
     store,
     config,
-    ownerEmail: configuredEmail(repo),
+    ownerEmail: ownerEmailOf(repo, log),
+    lock,
     narrative: args.narrative,
     only: args.only.length === 0 ? null : new Set(args.only),
     rebuildBlame: args.rebuildBlame,

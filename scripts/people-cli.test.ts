@@ -16,6 +16,7 @@ import {
   exclusionNotes,
   loadPeopleFile,
   narrativeCeilingUsd,
+  ownerEmailOf,
   parsePeopleArgs,
   parseSuggestArgs,
   parseUsd,
@@ -307,5 +308,14 @@ describe("attributesNotes (the fix-forward ruling on --attr-source)", () => {
     expect(attributesNotes(false)).toEqual([
       "Attributes from the work tree may apply: this git (before 2.40) cannot read .gitattributes at the sha, so line counts may follow the work tree's.",
     ]);
+  });
+});
+
+describe("ownerEmailOf (the fix-forward ruling on the owner lookup)", () => {
+  it("notes a git failure once instead of passing it off as no owner", () => {
+    const lines: string[] = [];
+    expect(ownerEmailOf("/no/such/repository/x", (line) => lines.push(line))).toBeNull();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^owner not found: /);
   });
 });

@@ -75,6 +75,8 @@ export interface BlameTreeOptions {
   maxFileBytes?: number;
   /** wiki:people --rebuild-blame: forget the cache first. */
   rebuild?: boolean;
+  /** listBlobs' and streamBlobs' time limit (no limit when absent). */
+  readTimeoutMs?: number;
   /** The blame to run (default blameFile); tests replace it. */
   blame?: typeof blameFile;
 }
@@ -112,7 +114,8 @@ export async function blameTree(
     store.setPeopleMeta("blame-ignore", ignore);
   }
   const maxBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-  const blobs = listBlobs(repo, sha);
+  const read = options.readTimeoutMs === undefined ? {} : { timeoutMs: options.readTimeoutMs };
+  const blobs = listBlobs(repo, sha, read);
   // A path RepoPath refuses (a backslash, say) is left out, as the indexer leaves it out.
   const wanted = blobs.filter(
     (b) => RepoPath.safeParse(b.path).success && !isLockfile(b.path) && b.size <= maxBytes,
@@ -133,7 +136,7 @@ export async function blameTree(
   const oids = [...new Set(todo.map((b) => b.oid))];
   const sniffed = new Map<string, { binary: boolean; lines: number }>();
   let next = 0;
-  for await (const data of streamBlobs(repo, oids, 0)) {
+  for await (const data of streamBlobs(repo, oids, 0, read)) {
     sniffed.set(oids[next++] as string, { binary: data.head.includes(0), lines: data.lines });
   }
   const text = todo.filter((b) => sniffed.get(b.oid)?.binary !== true);
