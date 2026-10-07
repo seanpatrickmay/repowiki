@@ -17,7 +17,7 @@ import {
 } from "./inflight-run.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { acquireBuildLock, exitWithError, problemLine } from "./wiki-cli.ts";
+import { acquireBuildLock, exitWithError, peoplePrintingFor, problemLine } from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:inflight <repo>: reads the repository's open pull requests and issues through the
@@ -47,6 +47,8 @@ async function main(): Promise<void> {
   const release = acquireBuildLock(out, log);
   try {
     const store = openStore(db);
+    // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+    peoplePrintingFor(store);
     try {
       const ctx: RefreshContext = { repo, out, repoName, store, args, models, log };
       if (args.clear) {

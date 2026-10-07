@@ -200,6 +200,13 @@ describe("pnpm wiki:check's People half (spec v2 #6 §9)", () => {
     expect(leaked.status).toBe(1);
     expect(leaked.stderr).toContain("llms.txt holds an author's email address");
     scan([leaked.stdout, leaked.stderr]);
+    // A fullwidth at sign is the same address once normalised (the Task 28 ruling).
+    const exported = join(fx.out, "export.json");
+    writeFileSync(llms, readFileSync(llms, "utf8").replace("KIM.q7hidden@example.com", ""));
+    writeFileSync(exported, `${readFileSync(exported, "utf8")}\n kim.q7hidden\uFF20example.com\n`);
+    const fullwidth = run(CHECK);
+    expect(fullwidth.stderr).toContain("export.json holds an author's email address");
+    expect(fullwidth.stderr).not.toContain("llms.txt holds");
   });
 });
 

@@ -48,6 +48,7 @@ import {
   BUILD_LOCK,
   describeError,
   exitWithError,
+  peoplePrintingFor,
   problemLine,
   requireApiKey,
   writeFileAtomic,
@@ -88,6 +89,8 @@ async function main(): Promise<void> {
   const release = args.dryRun ? () => {} : acquireBuildLock(out, (line) => console.error(line));
   try {
     const store = openStore(db);
+    // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+    peoplePrintingFor(store);
     try {
       await replay(store, { ...args, from, to }, repo, out, models);
     } finally {

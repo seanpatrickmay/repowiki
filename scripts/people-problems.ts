@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { normalizedText } from "@repowiki/core";
 import { personRevisionProblems, readPeople, type Store } from "@repowiki/engine";
 import { loadPeopleFile, ownerEmailOf, peopleFilePath } from "./people-cli.ts";
 
@@ -66,17 +67,20 @@ export function checkPeopleStored(store: Store, repo: string, out: string): Peop
           revisions,
           manifests,
           manifestAt: (at) => store.getManifest(at) ?? latest,
+          latest,
+          pages: new Set(store.listCurrentRevisions().map((page) => page.featureId)),
         }),
       );
   }
+  // Both sides normalised (NFKC, invisible characters dropped), so a fullwidth or small at sign
+  // or dot is the same address (the Task 28 ruling).
+  const seen = (text: string) => normalizedText(text).toLowerCase();
   const emails = [
-    ...new Set(
-      read.commits.map((c) => c.authorEmail.trim().toLowerCase()).filter((e) => e.includes("@")),
-    ),
+    ...new Set(read.commits.map((c) => seen(c.authorEmail)).filter((e) => e.includes("@"))),
   ];
   const files = outputFiles(out);
   for (const file of files) {
-    const text = readFileSync(file, "utf8").toLowerCase();
+    const text = seen(readFileSync(file, "utf8"));
     if (emails.some((email) => text.includes(email)))
       problems.push(`${relative(out, file)} holds an author's email address`);
   }

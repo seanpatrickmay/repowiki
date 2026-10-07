@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { GitError, openStore, readHistory } from "@repowiki/engine";
 import { checkPeopleStored } from "./people-problems.ts";
-import { problemLine } from "./wiki-cli.ts";
+import { peoplePrintingFor, problemLine } from "./wiki-cli.ts";
 import { checkWiki } from "./wiki-problems.ts";
 
 /**
@@ -65,6 +65,8 @@ try {
   copyFileSync(db, copy);
   if (existsSync(`${db}-wal`)) copyFileSync(`${db}-wal`, `${copy}-wal`);
   const store = openStore(copy);
+  // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+  peoplePrintingFor(store);
   try {
     const manifest = store.getLatestManifest();
     const pages = store.listCurrentRevisions();

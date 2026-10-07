@@ -14,7 +14,13 @@ import { resolveOutDir } from "./out-dir.ts";
 import { peopleAfterUpdate, peopleCeilingLine } from "./people-hook.ts";
 import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
 import { estimateFor, needsKey, readInput, runUpdate, writeUpdateOutputs } from "./update-run.ts";
-import { acquireBuildLock, BUILD_LOCK, exitWithError, requireApiKey } from "./wiki-cli.ts";
+import {
+  acquireBuildLock,
+  BUILD_LOCK,
+  exitWithError,
+  peoplePrintingFor,
+  requireApiKey,
+} from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:update <repo> <rev>: moves the wiki stored for <repo> from its head to <rev> (spec
@@ -41,6 +47,8 @@ async function main(): Promise<void> {
   const release = args.dryRun ? () => {} : acquireBuildLock(out, (line) => console.error(line));
   try {
     const store = openStore(db);
+    // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+    peoplePrintingFor(store);
     try {
       const input = await readInput(repo, sha);
       const estimate = estimateFor(store, input, args, models, repoName);

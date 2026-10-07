@@ -1,4 +1,4 @@
-import type { Architecture, Manifest, Revision } from "@repowiki/core";
+import { type Architecture, linkRoutes, type Manifest, type Revision } from "@repowiki/core";
 import { quote } from "../verify/index.ts";
 import { linkTokensIn } from "./links.ts";
 
@@ -122,20 +122,8 @@ export function architectureLinksWithoutPage(
   return count;
 }
 
-/**
- * Whether an id still leads to a page in `latest` (spec §8 "no links to nonexistent IDs"): a
- * redirect or disambiguation page, an active feature (one with no page is counted by
- * linksWithoutPage, not a problem), or a retired feature that has a stored page. An id the manifest
- * no longer holds does not. A redirect whose target retired with no page still routes here.
- */
-function routingIn(latest: Manifest, pages: ReadonlySet<string>): (id: string) => boolean {
-  const kindOf = new Map(latest.features.map((f) => [f.id, f.status.kind]));
-  return (id) => {
-    const kind = kindOf.get(id);
-    if (kind === "redirect" || kind === "disambiguation" || kind === "active") return true;
-    return kind === "retired" && pages.has(id);
-  };
-}
+/** linkRoutes, under the name this module's checks were written with. */
+const routingIn = linkRoutes;
 
 /** The distinct ids of the [[id]] links in a text that point inside the wiki (not `wp:`). */
 function wikiTargetsIn(text: string): string[] {

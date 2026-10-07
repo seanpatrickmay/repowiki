@@ -5,7 +5,13 @@ import { LLMS_TXT_FILE } from "@repowiki/core";
 import { openStore, WikiBuildError, writeExport } from "@repowiki/engine";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { acquireBuildLock, EXPORT_USAGE, exitWithError, parseExportArgs } from "./wiki-cli.ts";
+import {
+  acquireBuildLock,
+  EXPORT_USAGE,
+  exitWithError,
+  parseExportArgs,
+  peoplePrintingFor,
+} from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:export <repo> [--out dir] [--verbose]: writes export.json and llms.txt next to wiki.db from the
@@ -31,6 +37,8 @@ function main(): void {
   const release = acquireBuildLock(out, (line) => console.error(line));
   try {
     const store = openStore(db);
+    // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+    peoplePrintingFor(store);
     try {
       const exportPath = join(out, "export.json");
       writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });

@@ -13,7 +13,7 @@ import {
   SUGGEST_USAGE,
   storeCopy,
 } from "./people-cli.ts";
-import { exitWithError, problemLine } from "./wiki-cli.ts";
+import { exitWithError, printPeopleSafely, problemLine } from "./wiki-cli.ts";
 
 /**
  * pnpm people:suggest <repo> [--out dir] [--people-file file] (spec v2 #6 §6 step 6, §10): who
@@ -23,6 +23,8 @@ import { exitWithError, problemLine } from "./wiki-cli.ts";
  * (planner ruling). Never writes in <repo>.
  */
 function main(): void {
+  // People's own commands always print scrubbed of addresses (the Task 28 ruling).
+  printPeopleSafely(true);
   const args = parseSuggestArgs(process.argv.slice(2));
   const repo = resolve(args.repo);
   if (!existsSync(repo) || !statSync(repo).isDirectory())
