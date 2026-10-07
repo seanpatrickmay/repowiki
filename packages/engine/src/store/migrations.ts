@@ -79,6 +79,17 @@ export const MIGRATIONS: readonly Migration[] = [
   WHERE seq = (SELECT MIN(seq) FROM manifests)
     AND NOT EXISTS (SELECT 1 FROM manifests WHERE llm_revised = 1);
   `,
+  // Work in flight (spec v2 #9 §5.2, C2): the GitHub snapshot and the derived one, each a single
+  // row, and the pull-request summaries by request key. Additive: no stored body changes.
+  `
+  CREATE TABLE github_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), body TEXT NOT NULL);
+  CREATE TABLE inflight (id INTEGER PRIMARY KEY CHECK (id = 1), body TEXT NOT NULL);
+  CREATE TABLE inflight_summaries (
+    request_key TEXT PRIMARY KEY,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 interface StoredFeature {
