@@ -93,6 +93,7 @@ export {
   ensureInflightRepo,
   estimateSummaries,
   type FetchedHeads,
+  type FetchOptions,
   fetchHeads,
   githubFetchUrl,
   type HeadState,
