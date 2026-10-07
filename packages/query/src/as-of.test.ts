@@ -1,5 +1,5 @@
 import type { WikiExport } from "@repowiki/core";
-import { makeInFlight } from "@repowiki/core/test-fixtures";
+import { makeInFlight, makePeopleSnapshot } from "@repowiki/core/test-fixtures";
 import { isAncestor, resolveCommit } from "@repowiki/engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -125,6 +125,12 @@ describe("viewAt", () => {
     expect(
       viewAt(wiki, { kind: "commit", sha: h.commits.third }, ancestor).wiki.inflight,
     ).toBeNull();
+  });
+
+  it("shows no People: today's people are not the past's", () => {
+    const wiki = { ...h.wiki, people: { snapshot: makePeopleSnapshot(), pages: [] } };
+    expect(viewAt(wiki, { kind: "date", date: "2026-01-03" }, ancestor).wiki.people).toBeNull();
+    expect(viewAt(wiki, { kind: "commit", sha: h.commits.third }, ancestor).wiki.people).toBeNull();
   });
 
   it("leaves out a feature with no page yet, and gives a renamed feature its old title", () => {
