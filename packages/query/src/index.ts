@@ -41,6 +41,7 @@ export {
 export { claimHref, pageHref, sectionHref } from "./hrefs.ts";
 export { ExportLoadError, loadExport } from "./load.ts";
 export {
+  type RankedMatch,
   type SearchDoc,
   type SearchField,
   type SearchIndex,

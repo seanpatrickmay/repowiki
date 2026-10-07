@@ -57,6 +57,20 @@ describe("searchIndex", () => {
     expect(index.search("signals", 1.5)).toEqual(["signals"]);
   });
 
+  it("ranks with scores in search's order, cut the same way", () => {
+    const index = searchIndex(docs);
+    const ranked = index.ranked("signals cron", 8);
+    expect(ranked.map((m) => m.id)).toEqual(index.search("signals cron", 8));
+    expect(ranked.map((m) => m.id)).toEqual(["scheduler", "signals", "deliverables"]);
+    for (const [i, match] of ranked.entries()) {
+      expect(match.score).toBeGreaterThan(0);
+      if (i > 0) expect(match.score).toBeLessThanOrEqual(ranked[i - 1]?.score ?? 0);
+    }
+    expect(index.ranked("signals", 1.5)).toEqual([ranked.find((m) => m.id === "signals")]);
+    expect(index.ranked("kubernetes", 8)).toEqual([]);
+    expect(index.ranked("signals", 0)).toEqual([]);
+  });
+
   it("takes other fields and boosts, the default staying the page search's", () => {
     const fields = [
       { id: "a", fields: { name: "queue", text: "worker" } },
