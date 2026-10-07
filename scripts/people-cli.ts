@@ -1,8 +1,21 @@
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { type PeopleConfig, PersonId, parseMatchKey, parsePeopleConfig } from "@repowiki/core";
+import {
+  type PeopleConfig,
+  PersonId,
+  parseMatchKey,
+  parsePeopleConfig,
+  withoutEmails,
+} from "@repowiki/core";
 import {
   markdownCodeSpan,
   maskEmail,
@@ -73,14 +86,25 @@ export function peopleFilePath(repo: string, out: string, flag: string | null): 
 }
 
 /**
- * The people file at `path`, parsed (R9); every default when there is none. A file that is not
- * JSON or fails the schema is a usage error listing what is wrong, never an email key's value.
+ * The people file at `path`, parsed (R9); every default when there is none. A broken link or an
+ * unreadable file is a usage error, never the defaults (they would publish an excluded person),
+ * as is a file that is not JSON or fails the schema, listing what is wrong, never an email key's
+ * value.
  */
 export function loadPeopleFile(path: string): PeopleConfig {
-  if (!existsSync(path)) return parsePeopleConfig({}).config as PeopleConfig;
+  if (!existsSync(path)) {
+    if (isEntry(path)) throw new CliError(`the people file ${path} is a broken link`);
+    return parsePeopleConfig({}).config as PeopleConfig;
+  }
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    throw new CliError(`cannot read the people file ${path}`);
+  }
   let json: unknown;
   try {
-    json = JSON.parse(readFileSync(path, "utf8"));
+    json = JSON.parse(text);
   } catch {
     throw new CliError(`${path} is not a JSON people file`);
   }
@@ -90,16 +114,39 @@ export function loadPeopleFile(path: string): PeopleConfig {
   return parsed.config;
 }
 
+/** Whether anything, a dangling link included, is at `path`. */
+function isEntry(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * people:suggest's report (spec v2 #6 §6 step 6): one row per person with their names, masked
- * emails, logins, commits, how the rules joined them and whether they get a narrative; then each
- * suggested merge with its rule and the people-file entry to paste. Every string is a code span
- * (`cell`), so no name can break the table or reach the terminal raw.
+ * emails, logins, commits, how the rules joined them and whether they get a narrative (consent,
+ * then maxNarratives by rank, as planNarratives ranks); then each suggested merge with its rule
+ * and the people-file entry to paste. Every string is a code span (`cell`), so no name can break
+ * the table, and every part but the masked addresses (built from the parsed address and stripped
+ * of control characters by maskEmail) passes withoutEmails as a final guard (R10).
  */
 export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
   const { groups } = read.identities;
-  const narrative = (g: (typeof groups)[number]) =>
-    !wantsNarrative(g, config) ? "no" : g.narrative === true ? "yes (people file)" : "yes (owner)";
+  const ids = read.assigned.ids;
+  const guarded = (text: string) => cell(withoutEmails(text));
+  const ranked = groups
+    .map((g, i) => ({ g, id: ids[i] ?? "" }))
+    .filter(({ g }) => wantsNarrative(g, config))
+    .sort((a, b) => b.g.commits - a.g.commits || (a.id < b.id ? -1 : 1));
+  const rank = new Map(ranked.map(({ g }, r) => [g, r]));
+  const narrative = (g: (typeof groups)[number]) => {
+    const r = rank.get(g);
+    if (r === undefined) return "no";
+    if (r >= config.maxNarratives) return `no (over the cap of ${config.maxNarratives})`;
+    return g.narrative === true ? "yes (people file)" : "yes (owner)";
+  };
   const lines = [
     "| Id | Name | Other names | Emails | Logins | Commits | Joined by | Narrative |",
     "|---|---|---|---|---|---:|---|---|",
@@ -107,18 +154,18 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
       const id = g.excluded
         ? "excluded"
         : g.kind === "bot"
-          ? `${cell(read.assigned.ids[i] ?? "")} (bot)`
-          : cell(read.assigned.ids[i] ?? "");
+          ? `${guarded(ids[i] ?? "")} (bot)`
+          : guarded(ids[i] ?? "");
       const emails = [...new Set(g.identities.map((p) => maskEmail(p.email.toLowerCase())))];
       return [
         "",
         id,
-        cell(g.name),
-        g.otherNames.map(cell).join(", "),
+        guarded(g.name),
+        g.otherNames.map(guarded).join(", "),
         emails.map(cell).join(", "),
-        g.logins.map(cell).join(", "),
+        g.logins.map(guarded).join(", "),
         count(g.commits),
-        g.reasons.join(", "),
+        withoutEmails(g.reasons.join(", ")),
         narrative(g),
         "",
       ]
@@ -135,8 +182,8 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
     );
     for (const s of suggestions) {
       lines.push(
-        `- ${cell(groups[s.handle]?.name ?? "")} and ${cell(groups[s.name]?.name ?? "")}: ${s.rule}`,
-        `  ${suggestionSnippet(groups, s)}`,
+        `- ${guarded(groups[s.handle]?.name ?? "")} and ${guarded(groups[s.name]?.name ?? "")}: ${s.rule}`,
+        ...suggestionSnippet(groups, ids, s).map((line) => `  ${withoutEmails(line)}`),
       );
     }
   }
@@ -368,14 +415,19 @@ export function exclusionNotes(excluded: number, othersShown: boolean): string[]
   return notes;
 }
 
+/** The prefix of a throwaway store copy's directory in the out dir. */
+export const PEOPLE_SCRATCH_PREFIX = ".people-scratch-";
+
 /**
  * A throwaway copy of the out dir's wiki.db, taken under the build lock (planner ruling R17):
  * people:suggest and wiki:people --dry-run read and refresh it, so the real store is never
- * written or migrated. `remove` deletes the copy.
+ * written or migrated. The copy holds names and salted keys, so it goes under the out dir
+ * (`<out>/.people-scratch-*`), which is outside the documented repository, never under TMPDIR,
+ * which may not be. `remove` deletes the copy.
  */
 export function storeCopy(out: string): { path: string; remove: () => void } {
   const db = join(out, "wiki.db");
-  const scratch = mkdtempSync(join(tmpdir(), "repowiki-people-"));
+  const scratch = mkdtempSync(join(out, PEOPLE_SCRATCH_PREFIX));
   const remove = () => rmSync(scratch, { recursive: true, force: true });
   try {
     const release = acquireBuildLock(out, (line) => console.error(line));

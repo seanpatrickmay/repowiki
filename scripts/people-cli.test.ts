@@ -2,7 +2,12 @@ import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PeopleConfig } from "@repowiki/core";
 import { configuredEmail, readPeople } from "@repowiki/engine";
-import { PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
+import {
+  KIM,
+  PEOPLE_SECRETS,
+  type PeopleFixture,
+  peopleFixture,
+} from "@repowiki/engine/test-people";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PEOPLE_MAX_USD,
@@ -75,6 +80,9 @@ describe("renderSuggest (spec v2 #6 §6 step 6)", () => {
   let fx: PeopleFixture;
   beforeEach(async () => {
     fx = await peopleFixture();
+    // Kim once committed with her address as her name: it must give no key and show nowhere.
+    fx.repo.write("docs/kim.md", "kim\n");
+    fx.repo.commit("docs: kim", "+0000", { name: KIM.email, email: KIM.email });
     // A handle for Kim Hidden from another address: suggested, never applied (R8).
     fx.repo.write("docs/more.md", "more\n");
     fx.head = fx.repo.commit("docs: more", "+0000", {
@@ -99,7 +107,7 @@ describe("renderSuggest (spec v2 #6 §6 step 6)", () => {
   it("lists each person with masked emails, logins, commits and narrative consent", () => {
     const text = render();
     expect(text).toContain("`ada-lovelace`");
-    expect(text).toContain("`ada…@example.com`");
+    expect(text).toContain("`a…@example.com`");
     expect(text).toContain("`bob-q7login`");
     expect(text).toMatch(/`dependabot-bot` \(bot\)/);
     // Ada is the owner (the repository's user.email); nobody else consented.
@@ -113,7 +121,20 @@ describe("renderSuggest (spec v2 #6 §6 step 6)", () => {
     const text = render();
     expect(text).toContain("`kimh` and `Kim Hidden`: handle = first name + last initial");
     expect(text).toContain('{"name":"Kim Hidden","match":["name:kim hidden","name:kimh"]}');
+    expect(text).toContain("A name of kim-hidden gives no name key");
     expect(text).toMatch(/`kimh`.*\| no \|/);
+    for (const secret of PEOPLE_SECRETS) expect(text).not.toContain(secret);
+  });
+
+  it("says no to a consenting person past maxNarratives in rank", () => {
+    const consent = { minCommits: 2, people: [{ match: ["login:bob-q7login"], narrative: true }] };
+    const capped = render({ ...consent, maxNarratives: 1 });
+    // Ada (3 commits) ranks before bob (2): only she fits a cap of one.
+    expect(capped).toMatch(/`Ada Lovelace`.*\| yes \(owner\) \|/);
+    expect(capped).toMatch(/`bob`.*\| no \(over the cap of 1\) \|/);
+    expect(render({ ...consent, maxNarratives: 0 })).toMatch(
+      /`Ada Lovelace`.*\| no \(over the cap of 0\) \|/,
+    );
   });
 
   it("marks an excluded person and a people-file narrative", () => {

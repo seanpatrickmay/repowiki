@@ -33,10 +33,19 @@ const groups = (commits: AuthoredCommit[], file: unknown = {}, ownerEmail: strin
   }).groups;
 
 describe("maskEmail (spec v2 #6 R10)", () => {
-  it("shows three characters of the local part and the domain", () => {
-    expect(maskEmail("wyatt.brown@uni.example")).toBe("wya…@uni.example");
-    expect(maskEmail("ab@x.io")).toBe("ab…@x.io");
+  it("shows at most the first character of the local part, and the domain", () => {
+    expect(maskEmail("wyatt.brown@uni.example")).toBe("w…@uni.example");
+    expect(maskEmail("abc@x.io")).toBe("a…@x.io");
+    // A local part under three characters shows nothing of itself.
+    expect(maskEmail("ab@x.io")).toBe("…@x.io");
+    expect(maskEmail("a@x.io")).toBe("…@x.io");
     expect(maskEmail("not-an-email")).toBe("…");
+  });
+
+  it("strips control and invisible characters from the address it masks", () => {
+    expect(maskEmail("\u001b[31mve@ex\u202Eample.com\u0085")).toBe("[…@example.com");
+    expect(maskEmail("\u200Beve@ex\u00ADample.com")).toBe("e…@example.com");
+    expect(maskEmail("eve@\u001b]8;;x\u0007.com")).toBe("e…@]8;;x.com");
   });
 });
 
@@ -77,12 +86,34 @@ describe("suggestMerges (spec v2 #6 R8)", () => {
     const team = groups([by("wyattb", "w1@e.com", 1), by("Wyatt Brown", "w2@e.com", 2)]);
     const [suggestion] = suggestMerges(team);
     if (suggestion === undefined) throw new Error("expected a suggestion");
-    const snippet = suggestionSnippet(team, suggestion);
+    const lines = suggestionSnippet(team, ["a", "b"], suggestion);
+    expect(lines).toHaveLength(1);
+    const snippet = lines[0] ?? "";
     expect(JSON.parse(snippet)).toEqual({
       name: "Wyatt Brown",
       match: ["name:wyatt brown", "name:wyattb"],
     });
     expect(snippet).not.toContain("@");
+  });
+
+  it("builds keys from cleaned names: a name holding an address gives no key, and the snippet says to add that person by id", () => {
+    const team = groups([
+      by("wyattb", "w1@e.com", 1),
+      by("Wyatt Brown", "wyatt.q7secret@e.com", 2),
+      by("wyatt.q7secret@e.com", "wyatt.q7secret@e.com", 3),
+    ]);
+    const [suggestion] = suggestMerges(team);
+    if (suggestion === undefined) throw new Error("expected a suggestion");
+    const ids = team.map((_, i) => `person-${i}`);
+    const lines = suggestionSnippet(team, ids, suggestion);
+    expect(JSON.parse(lines[0] ?? "")).toEqual({
+      name: "Wyatt Brown",
+      match: ["name:wyatt brown", "name:wyattb"],
+    });
+    expect(lines.slice(1)).toEqual([
+      `A name of ${ids[suggestion.name]} gives no name key: add that person's other keys to the entry by hand (people:suggest never prints an address).`,
+    ]);
+    expect(lines.join("\n")).not.toContain("q7secret");
   });
 });
 
