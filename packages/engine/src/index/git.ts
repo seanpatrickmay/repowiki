@@ -19,6 +19,25 @@ export interface GitOptions {
    * for every command in its own object store (C13).
    */
   env?: Readonly<Record<string, string>>;
+  /**
+   * `repo` is a git directory RepoWiki owns (work in flight's bare inflight.git, C13): name it with
+   * `--git-dir=`, never `-C` (which would walk up to any repository around a broken one), and run
+   * without any ANTHROPIC_* variable.
+   */
+  gitDir?: boolean;
+}
+
+/** The argv that names `repo`: `--git-dir=<repo>` for GitOptions.gitDir, else `-C <repo>`. */
+export function repoArgs(repo: string, options: GitOptions = {}): string[] {
+  return options.gitDir === true ? [`--git-dir=${repo}`] : ["-C", repo];
+}
+
+/** scrubbedGitEnv() plus GitOptions.env, without ANTHROPIC_* variables under GitOptions.gitDir. */
+export function gitEnv(options: GitOptions = {}): NodeJS.ProcessEnv {
+  const env = scrubbedGitEnv({ ...options.env });
+  if (options.gitDir === true)
+    for (const name of Object.keys(env)) if (name.startsWith("ANTHROPIC_")) delete env[name];
+  return env;
 }
 
 /** The GitTimeoutError for a call that ran past `timeoutMs`, or null for any other failure. */
@@ -131,20 +150,27 @@ function unsafeRepositoryCause(repo: string): string {
 export function gitFailureCause(
   repo: string,
   stderr: string,
-  options: { unreadableObject?: boolean } = {},
+  options: { unreadableObject?: boolean; git?: GitOptions } = {},
 ): string | undefined {
   if (UNSAFE_REPOSITORY_STDERR.test(stderr)) return unsafeRepositoryCause(repo);
   if (PARTIAL_CLONE_STDERR.test(stderr)) return PARTIAL_CLONE_CAUSE;
   // `unreadableObject`: the caller knows the failure is a read that went wrong (git grep's exit 1
   // with a message), whatever git's wording; in a partial clone that is a missing blob.
-  if (options.unreadableObject === true && isPartialClone(repo)) return PARTIAL_CLONE_CAUSE;
+  if (options.unreadableObject === true && isPartialClone(repo, options.git))
+    return PARTIAL_CLONE_CAUSE;
   return undefined;
 }
 
-/** True when `repo` is a partial clone: a remote is marked promisor, or extensions.partialClone names one. */
-function isPartialClone(repo: string): boolean {
+/**
+ * True when `repo` is a partial clone: a remote is marked promisor, or extensions.partialClone
+ * names one. Read with the caller's GitOptions (inflight.git's own config only, C13).
+ */
+function isPartialClone(repo: string, options: GitOptions = {}): boolean {
   const config = (...args: string[]) =>
-    spawnSync("git", ["-C", repo, "config", ...args], { env: scrubbedGitEnv() });
+    spawnSync("git", [...repoArgs(repo, options), "config", ...args], {
+      env: gitEnv(options),
+      timeout: options.timeoutMs,
+    });
   const named = config("--get", "extensions.partialClone");
   if (named.status === 0 && (named.stdout?.toString("utf8").trim() ?? "") !== "") return true;
   const promisors = config("--get-regexp", "^remote\\..*\\.promisor$");
@@ -156,9 +182,9 @@ function isPartialClone(repo: string): boolean {
  * `timeoutMs`, a git that runs longer is stopped and reported as a GitTimeoutError.
  */
 export function git(repo: string, args: readonly string[], options: GitOptions = {}): Buffer {
-  const result = spawnSync("git", ["-C", repo, ...args], {
+  const result = spawnSync("git", [...repoArgs(repo, options), ...args], {
     maxBuffer: 1 << 30,
-    env: scrubbedGitEnv({ ...options.env }),
+    env: gitEnv(options),
     timeout: options.timeoutMs,
   });
   if (result.error) {
@@ -166,7 +192,7 @@ export function git(repo: string, args: readonly string[], options: GitOptions =
   }
   if (result.status !== 0) {
     const stderr = result.stderr.toString("utf8").trim();
-    const cause = gitFailureCause(repo, stderr);
+    const cause = gitFailureCause(repo, stderr, { git: options });
     throw new GitError(
       cause === undefined
         ? `git ${args[0]} failed in ${repo}: ${stderr}`
@@ -176,7 +202,11 @@ export function git(repo: string, args: readonly string[], options: GitOptions =
   return result.stdout;
 }
 
-/** A full 40-hex object id (SHA-1 repositories only; SHA-256 ids are 64 hex and are refused). */
+/**
+ * A full 40-hex object id (SHA-1 repositories only; SHA-256 ids are 64 hex and are refused).
+ * assertSha and assertOid make the same check on purpose, each with its own message (a commit's
+ * sha, any object's id): keep them in step.
+ */
 export function isSha(value: string): boolean {
   return /^[0-9a-f]{40}$/.test(value);
 }
@@ -194,8 +224,8 @@ export function assertOid(oid: string): void {
 /** Full 40-character sha of the commit `rev` names; a GitTimeoutError past `timeoutMs`. */
 export function resolveCommit(repo: string, rev: string, options: GitOptions = {}): string {
   const args = ["rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`];
-  const out = spawnSync("git", ["-C", repo, ...args], {
-    env: scrubbedGitEnv({ ...options.env }),
+  const out = spawnSync("git", [...repoArgs(repo, options), ...args], {
+    env: gitEnv(options),
     timeout: options.timeoutMs,
   });
   if (out.error)
@@ -359,8 +389,8 @@ export async function* streamBlobs(
   options: GitOptions = {},
 ): AsyncGenerator<StreamedBlob, void, undefined> {
   if (oids.length === 0) return;
-  const child = spawn("git", ["-C", repo, "cat-file", "--batch"], {
-    env: scrubbedGitEnv({ ...options.env }),
+  const child = spawn("git", [...repoArgs(repo, options), "cat-file", "--batch"], {
+    env: gitEnv(options),
     stdio: ["pipe", "pipe", "pipe"],
   });
   let spawnFailure: Error | undefined;
@@ -400,7 +430,7 @@ export async function* streamBlobs(
     }
     if (code === 0) return null;
     const why = stderr.trim() || (signal === null ? `exit status ${code}` : `signal ${signal}`);
-    const cause = gitFailureCause(repo, stderr);
+    const cause = gitFailureCause(repo, stderr, { git: options });
     return new GitError(
       cause === undefined
         ? `git cat-file failed in ${repo}: ${why}`

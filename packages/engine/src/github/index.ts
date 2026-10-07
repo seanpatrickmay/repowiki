@@ -4,6 +4,7 @@ export {
   type GhResult,
   type GhRunner,
   ghEnv,
+  REDIRECTING_GH_ENV,
   spawnGh,
 } from "./gh.ts";
 export {

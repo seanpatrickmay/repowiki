@@ -5,7 +5,8 @@ import {
   GitError,
   type GitOptions,
   git,
-  scrubbedGitEnv,
+  gitEnv,
+  repoArgs,
   timeoutError,
 } from "./git.ts";
 import { pullRequestOf } from "./history.ts";
@@ -225,8 +226,8 @@ export function isAncestor(
   assertSha(ancestor);
   assertSha(descendant);
   const args = ["merge-base", "--is-ancestor", ancestor, descendant];
-  const out = spawnSync("git", ["-C", repo, ...args], {
-    env: scrubbedGitEnv({ ...options.env }),
+  const out = spawnSync("git", [...repoArgs(repo, options), ...args], {
+    env: gitEnv(options),
     timeout: options.timeoutMs,
   });
   if (out.error) {
@@ -241,9 +242,9 @@ export function isAncestor(
 }
 
 /** Every commit reachable from `sha`, itself included. */
-export function reachableCommits(repo: string, sha: string): Set<string> {
+export function reachableCommits(repo: string, sha: string, options: GitOptions = {}): Set<string> {
   assertSha(sha);
-  const out = git(repo, ["rev-list", "--end-of-options", sha]).toString("utf8");
+  const out = git(repo, ["rev-list", "--end-of-options", sha], options).toString("utf8");
   return new Set(out.split("\n").filter((line) => line !== ""));
 }
 
@@ -261,20 +262,29 @@ export interface ReplayStep {
  * request (a squash merge's trailing "(#N)", see pullRequestOf), oldest first, then `to` itself
  * when it is neither, so the replay ends where it was asked to. `from` must be an ancestor of `to`.
  */
-export function replaySteps(repo: string, from: string, to: string): ReplayStep[] {
+export function replaySteps(
+  repo: string,
+  from: string,
+  to: string,
+  options: GitOptions = {},
+): ReplayStep[] {
   assertSha(from);
   assertSha(to);
-  if (!isAncestor(repo, from, to)) {
+  if (!isAncestor(repo, from, to, options)) {
     throw new GitError(`${from} is not an ancestor of ${to}`);
   }
-  const out = git(repo, [
-    "rev-list",
-    "--first-parent",
-    "--reverse",
-    "--format=%H %P%x00%s",
-    "--end-of-options",
-    `${from}..${to}`,
-  ]).toString("utf8");
+  const out = git(
+    repo,
+    [
+      "rev-list",
+      "--first-parent",
+      "--reverse",
+      "--format=%H %P%x00%s",
+      "--end-of-options",
+      `${from}..${to}`,
+    ],
+    options,
+  ).toString("utf8");
   const commits = out
     .split("\n")
     .filter((line) => line !== "" && !line.startsWith("commit "))

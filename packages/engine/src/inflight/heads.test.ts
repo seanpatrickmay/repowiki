@@ -16,10 +16,14 @@ import { createTestRepo } from "../index/index.ts";
 import {
   baseRef,
   ensureInflightRepo,
+  FETCH_TIMEOUT_MS,
   fetchHeads,
   githubFetchUrl,
   headStates,
   INFLIGHT_DIR,
+  INFLIGHT_GIT,
+  INFLIGHT_GIT_ENV,
+  INFLIGHT_READ_TIMEOUT_MS,
   inflightGit,
   isMissingObject,
   pullRef,
@@ -100,6 +104,8 @@ describe("ensureInflightRepo (R5)", () => {
       "/dev/null",
       "/dev/null",
     ]);
+    const tree = inflightGit(dir, ["config", "--get", "attr.tree"]);
+    expect([tree.status, tree.stdout]).toEqual([0, "\n"]);
     expect(existsSync(join(dir, "hooks"))).toBe(false);
   });
 
@@ -248,6 +254,80 @@ describe("fetchHeads (R6)", () => {
     });
   });
 
+  it("stops fetching one by one at the first failure that is not a missing ref", async () => {
+    const dir = ensureInflightRepo(fx.out, fx.repo.dir);
+    const log = join(fx.out, "git-calls.txt");
+    // The batch fails on a missing ref; every later fetch hangs (a network that went away).
+    script(
+      join(fx.out, "bin"),
+      "git",
+      `case " $* " in *" fetch "*) echo fetch >> '${log}'; [ "$(wc -l < '${log}')" -eq 1 ] && { echo "fatal: couldn't find remote ref refs/pull/9/head" >&2; exit 128; }; exec /bin/sleep 30;; esac\nexec '${realGit()}' "$@"`,
+    );
+    const pulls = [1, 2, 3].map((number) => ({ number, headRefOid: "e".repeat(40) }));
+    await withEnv({ PATH: `${join(fx.out, "bin")}:${process.env.PATH ?? ""}` }, () => {
+      const { problem } = fetchHeads(dir, fx.url, pulls, { protocol: "file", timeoutMs: 500 });
+      expect(problem).toBe("git fetch timed out after 0.5 s");
+    });
+    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(2);
+  });
+
+  it("runs gh's credential helper with gh's scrubbed variables, and drops TLS and trace overrides", async () => {
+    const bin = join(fx.out, "bin");
+    const seen = join(fx.out, "gh-env.txt");
+    script(bin, "gh", `/usr/bin/env > '${seen}'\nexit 0`);
+    const server = spawn(
+      process.execPath,
+      [
+        "-e",
+        `require("node:http").createServer((q, s) => { s.writeHead(401, { "WWW-Authenticate": 'Basic realm="x"' }); s.end(); }).listen(0, "127.0.0.1", function () { console.log(this.address().port); });`,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    try {
+      const port = await new Promise<string>((resolve) =>
+        server.stdout.once("data", (data) => resolve(String(data).trim())),
+      );
+      const env = {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        GIT_ALLOW_PROTOCOL: "http",
+        GH_HOST: "evil.example",
+        GH_DEBUG: "api",
+        GH_PAGER: "cat",
+        GH_ENTERPRISE_TOKEN: "enterprise-value",
+        GIT_SSL_NO_VERIFY: "1",
+        GIT_TRACE_CURL: join(fx.out, "curl-trace.txt"),
+        GIT_TRACE_REDACT: "0",
+      };
+      await withEnv(env, () => {
+        const dir = ensureInflightRepo(fx.out, fx.repo.dir);
+        const url = `http://127.0.0.1:${port}/acme/demo.git`;
+        fetchHeads(dir, url, [{ number: 1, headRefOid: fx.first }], {
+          protocol: "http",
+          timeoutMs: 20_000,
+        });
+      });
+      const vars = new Map(
+        readFileSync(seen, "utf8")
+          .split("\n")
+          .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+      );
+      for (const name of [
+        "GH_HOST",
+        "GH_DEBUG",
+        "GH_PAGER",
+        "GH_ENTERPRISE_TOKEN",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_TRACE_CURL",
+        "GIT_TRACE_REDACT",
+      ])
+        expect(vars.has(name), name).toBe(false);
+      expect([vars.get("GH_PROMPT_DISABLED"), vars.get("NO_COLOR")]).toEqual(["1", "1"]);
+      expect(existsSync(join(fx.out, "curl-trace.txt"))).toBe(false);
+    } finally {
+      server.kill();
+    }
+  });
+
   it("never asks the user's askpass programs, even when gh gives no credential (R6)", async () => {
     const bin = join(fx.out, "bin");
     const marker = join(fx.out, "askpass-ran");
@@ -316,13 +396,32 @@ describe("fetchHeads (R6)", () => {
     expect(refs).toBe(pullRef(2));
   });
 
+  it("says so when it cannot delete the refs of a pull request no longer open", async () => {
+    const a = fx.pushPull(1, fx.first, { "a.py": "a\n" });
+    const dir = ensureInflightRepo(fx.out, fx.repo.dir);
+    fetchHeads(dir, fx.url, [{ number: 1, headRefOid: a }], FILE);
+    script(
+      join(fx.out, "bin"),
+      "git",
+      `case " $* " in *" update-ref "*) echo "fatal: cannot lock ref" >&2; exit 128;; esac\nexec '${realGit()}' "$@"`,
+    );
+    await withEnv({ PATH: `${join(fx.out, "bin")}:${process.env.PATH ?? ""}` }, () => {
+      expect(fetchHeads(dir, fx.url, [], FILE).problem).toBe(
+        "could not delete the refs of closed pull requests: fatal: cannot lock ref",
+      );
+    });
+  });
+
   it("never uses a transport other than the one it allows, so GIT_ALLOW_PROTOCOL=file stops https (C13)", () => {
     const saved = process.env.GIT_ALLOW_PROTOCOL;
     process.env.GIT_ALLOW_PROTOCOL = "file";
     try {
       const dir = ensureInflightRepo(fx.out, fx.repo.dir);
-      const url = githubFetchUrl({ owner: "acme", name: "demo" });
-      expect(url).toBe("https://github.com/acme/demo.git");
+      expect(githubFetchUrl({ owner: "acme", name: "demo" })).toBe(
+        "https://github.com/acme/demo.git",
+      );
+      // A local https URL: were the protocol check ever to let it through, nothing leaves the host.
+      const url = "https://127.0.0.1:9/acme/demo.git";
       const { heads, problem } = fetchHeads(dir, url, [{ number: 1, headRefOid: fx.first }]);
       expect(heads.get(1)).toBe("missing");
       expect(problem).toMatch(/transport 'https' not allowed/);
@@ -345,7 +444,10 @@ describe("fetchHeads (R6)", () => {
     try {
       const dir = ensureInflightRepo(fx.out, fx.repo.dir);
       // Control: a plain git honours the rewrite and would fetch from the file remote.
-      execFileSync("git", ["-C", dir, "ls-remote", url], { stdio: "ignore", env: process.env });
+      execFileSync("git", ["-C", dir, "ls-remote", url], {
+        stdio: "ignore",
+        env: { ...process.env, GIT_ALLOW_PROTOCOL: "file" },
+      });
       const { heads } = fetchHeads(dir, url, [{ number: 1, headRefOid: a }], {
         protocol: "file",
         timeoutMs: 20_000,
@@ -377,6 +479,23 @@ describe("headStates (offline)", () => {
   });
 });
 
+describe("INFLIGHT_GIT and inflightGit's time limit", () => {
+  it("names inflight.git by --git-dir for the index module's reads, and limits each read", async () => {
+    expect(INFLIGHT_GIT).toEqual({
+      env: INFLIGHT_GIT_ENV,
+      gitDir: true,
+      timeoutMs: INFLIGHT_READ_TIMEOUT_MS,
+    });
+    expect([INFLIGHT_READ_TIMEOUT_MS, FETCH_TIMEOUT_MS]).toEqual([120_000, 600_000]);
+    const dir = ensureInflightRepo(fx.out, fx.repo.dir);
+    script(join(fx.out, "bin"), "git", "exec /bin/sleep 30");
+    await withEnv({ PATH: `${join(fx.out, "bin")}:${process.env.PATH ?? ""}` }, () => {
+      const out = inflightGit(dir, ["rev-parse", "HEAD"], { timeoutMs: 300 });
+      expect([out.status, out.timedOut]).toEqual([null, true]);
+    });
+  });
+});
+
 describe("isMissingObject", () => {
   it.each([
     "fatal: bad object 0123",
@@ -388,7 +507,11 @@ describe("isMissingObject", () => {
     expect(isMissingObject(new Error(message))).toBe(true);
   });
 
-  it("is false for any other failure", () => {
-    expect(isMissingObject(new Error("fatal: not a git repository"))).toBe(false);
+  it.each([
+    "fatal: not a git repository",
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "fatal: Not a valid object name refs/repowiki/pull/9",
+  ])("is false for any other failure: %s", (message) => {
+    expect(isMissingObject(new Error(message))).toBe(false);
   });
 });

@@ -70,6 +70,9 @@ function codeCitations(claim: Claim) {
  * touches count: a body claim citing a file changed between `from` and `to`, and a lead that
  * summarizes one of them; a claim that was already failing at `from` is not the move's doing.
  * The same function measures a prediction (to = a merged tree) and an update (to = its commit).
+ * `options` defaults to plain reads of `repo`: a caller in inflight.git passes INFLIGHT_GIT. Unlike
+ * the update's page plan, a stale-kept lead on a page dirty for another reason is not predicted
+ * stale: that is a page-level rewrite, not a claim this move makes stale.
  */
 export async function staleClaims(
   repo: string,

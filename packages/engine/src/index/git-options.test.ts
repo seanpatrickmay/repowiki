@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { indexRepo } from "./build-index.ts";
-import { diffCommits, diffTrees, isAncestor } from "./diff.ts";
+import { diffCommits, diffTrees, isAncestor, reachableCommits, replaySteps } from "./diff.ts";
 import { GitError, GitTimeoutError, git, resolveCommit, streamBlobs } from "./git.ts";
 import { readHistory, readSources } from "./history.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
@@ -115,6 +115,43 @@ describe("GitOptions.env", () => {
     expect(ran("sources")).toEqual(["cat-file", "ls-tree"]);
     expect(ran("diff")).toContain("diff");
     expect(ran("ancestor")).toEqual(["merge-base"]);
+  });
+});
+
+describe("GitOptions.gitDir", () => {
+  it("names the repository with --git-dir, never -C, and runs without ANTHROPIC_* variables", async () => {
+    repo.write("src/a.py", "def a():\n    return 1\n");
+    const first = repo.commit("first");
+    repo.write("src/a.py", "def a():\n    return 2\n");
+    const second = repo.commit("second");
+    const bare = join(dir, "bare.git");
+    execFileSync("git", ["clone", "--quiet", "--bare", repo.dir, bare]);
+    const log = join(dir, "calls.txt");
+    const bin = fakeGit(
+      "bin",
+      `printf '%s %s\\n' "$1" "\${ANTHROPIC_TEST_KEY:-none}" >> '${log}'\nexec '${realGit()}' "$@"`,
+    );
+    const saved = { PATH: process.env.PATH, KEY: process.env.ANTHROPIC_TEST_KEY };
+    process.env.PATH = `${bin}:${saved.PATH ?? ""}`;
+    process.env.ANTHROPIC_TEST_KEY = "leaked";
+    const own = { gitDir: true };
+    try {
+      expect(resolveCommit(bare, second, own)).toBe(second);
+      await indexRepo(bare, second, { git: own });
+      readHistory(bare, second, own);
+      await readSources(bare, second, 1000, own);
+      diffTrees(bare, first, second, undefined, own);
+      expect(isAncestor(bare, first, second, own)).toBe(true);
+      expect(reachableCommits(bare, second, own).size).toBe(2);
+      expect(replaySteps(bare, first, second, own).map((s) => s.sha)).toEqual([second]);
+    } finally {
+      process.env.PATH = saved.PATH;
+      if (saved.KEY === undefined) delete process.env.ANTHROPIC_TEST_KEY;
+      else process.env.ANTHROPIC_TEST_KEY = saved.KEY;
+    }
+    const calls = readFileSync(log, "utf8").trim().split("\n");
+    expect(calls.length).toBeGreaterThan(8);
+    expect(calls.filter((line) => line !== `--git-dir=${bare} none`)).toEqual([]);
   });
 });
 

@@ -45,7 +45,7 @@ export interface InflightFixture {
   out: string;
   /** Commits `edits` on `base` in the contributor's clone and pushes it as pull request `n`. */
   pushPull(n: number, base: string, edits: Edits, message?: string): string;
-  /** Deletes `refs/pull/<n>/head` from the remote, as GitHub does for nothing; tests use it. */
+  /** Deletes `refs/pull/<n>/head` from the remote: a head the fetch can no longer find. */
   deletePull(n: number): void;
   remove(): void;
 }
