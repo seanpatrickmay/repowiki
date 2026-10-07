@@ -54,7 +54,11 @@ export function assignIds(
   stored: readonly RegistryRow[],
 ): Assigned {
   const rows = stored.filter((row) => row.status !== "redirect");
-  const groupKeys = groups.map((group) => new Set(group.keys));
+  // A shared placeholder address counts for nothing: it is no evidence of who a row is.
+  const groupKeys = groups.map((group) => {
+    const placeholders = new Set(group.placeholderKeys);
+    return new Set(group.keys.filter((k) => !placeholders.has(k)));
+  });
   const emailKeys = groups.map((group) => new Set(group.emailKeys));
   const loginKeys = groups.map((group) => new Set(group.loginKeys));
   // Each stored person goes to the group sharing the most strong keys with it (spec v2 #6 R9's
@@ -73,7 +77,7 @@ export function assignIds(
       const emails = shared(emailKeys[g] as Set<string>, row);
       const logins = shared(loginKeys[g] as Set<string>, row);
       const commits = group.identities
-        .filter((pair) => shared(new Set(pair.keys), row) > 0)
+        .filter((pair) => shared(new Set(pair.keys.filter((k) => groupKeys[g]?.has(k))), row) > 0)
         .reduce((n, pair) => n + pair.allCommits, 0);
       const score = [emails, logins, all - emails - logins, commits];
       const better = score.findIndex((v, i) => v !== bestScore[i]);

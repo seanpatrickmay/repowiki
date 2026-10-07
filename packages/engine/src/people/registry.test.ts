@@ -207,6 +207,19 @@ describe("assignIds (spec v2 #6 R13)", () => {
     expect(next.redirects).toEqual([]);
   });
 
+  it("never counts a shared placeholder address as a strong key (as T10's joins)", () => {
+    const first = assign([by("Pat Doe", "noreply@github.com", 1)]);
+    // Pat's row holds the shared placeholder; a busier stranger now commits with it.
+    const commits = [
+      by("Pat Doe", "pat@e.com", 1),
+      by("Zed Roe", "noreply@github.com", 2),
+      by("Zed Roe", "noreply@github.com", 3),
+    ];
+    const next = assign(commits, first.registry);
+    expect(next.ids).toEqual(["pat-doe", "zed-roe"]);
+    expect(next.redirects).toEqual([]);
+  });
+
   it("refuses a people-file id an unmatched stored row or a retired id holds", () => {
     const orphan: RegistryRow = {
       id: "gone",
