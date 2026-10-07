@@ -138,12 +138,15 @@ export {
 } from "./manifest/index.ts";
 export {
   type IdentityGroup,
+  MAX_FIX_OUTPUT_TOKENS,
+  MAX_PERSON_OUTPUT_TOKENS,
   maskEmail,
   type NarrativePlan,
   type PeopleRead,
   type PersonOutcome,
   type PersonRequest,
   type PreparedPeople,
+  peopleCacheKey,
   peopleSystemPrompt,
   personRevisionProblems,
   personTurn,

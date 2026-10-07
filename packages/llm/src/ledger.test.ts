@@ -15,6 +15,9 @@ describe("pricing", () => {
       cacheRead: 0.1,
     });
     expect(priceFor("claude-haiku-4-5-20251001")).toEqual(priceFor("claude-haiku-4-5"));
+    // Only the table's own ids: a prototype key is no model.
+    for (const id of ["constructor", "toString", "__proto__", "hasOwnProperty-20251001"])
+      expect(priceFor(id), id).toBeNull();
     expect(priceFor("claude-unknown-1")).toBeNull();
   });
 

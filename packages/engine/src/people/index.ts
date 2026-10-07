@@ -97,6 +97,7 @@ export {
   verifyPersonClaim,
 } from "./verify.ts";
 export {
+  MAX_FIX_OUTPUT_TOKENS,
   type PersonOutcome,
   type PersonRequest,
   personRequest,

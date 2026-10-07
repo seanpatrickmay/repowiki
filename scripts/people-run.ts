@@ -6,6 +6,7 @@ import {
   type PersonOutcome,
   type PersonRequest,
   type PreparedPeople,
+  peopleCacheKey,
   peopleSystemPrompt,
   personTurn,
   preparePeople,
@@ -85,17 +86,24 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     only: input.only,
   });
   for (const warning of prepared.refreshed.warnings) log(problemLine(warning));
-  // A whole narrative's and an append's system prompts differ (APPEND_INSTRUCTIONS).
-  const systemTokens = [false, true].map((append) =>
-    estimateTokens(peopleSystemPrompt(input.repoName, manifest, append)),
-  );
-  const ceiling = (r: PersonRequest) =>
-    narrativeCeilingUsd(
+  // A whole narrative's and an append's system prompts differ (APPEND_INSTRUCTIONS); each is
+  // priced with the cache-write premium when its calls would carry a key (writePeople's rule,
+  // counted over every due request, so never under the round's own count).
+  const systems = [false, true].map((append) => {
+    const system = peopleSystemPrompt(input.repoName, manifest, append);
+    const calls = prepared.requests.filter((r) => r.append === append).length;
+    return { tokens: estimateTokens(system), cached: peopleCacheKey(sha, system, calls) !== null };
+  });
+  const ceiling = (r: PersonRequest) => {
+    const system = systems[r.append ? 1 : 0] as (typeof systems)[0];
+    return narrativeCeilingUsd(
       estimateTokens(personTurn(r.pack, r.append ? r.parent : null)),
-      systemTokens[r.append ? 1 : 0] as number,
+      system.tokens,
       input.models.people,
       input.batch,
+      system.cached,
     );
+  };
   const { taken, over, usd } = withinBudget(prepared.requests, ceiling, input.maxUsd);
   log(
     `${prepared.requests.length} narratives due; ${taken.length} within the $${input.maxUsd.toFixed(2)} ceiling, estimated at most $${usd.toFixed(4)}${input.batch ? " (batched)" : ""}`,

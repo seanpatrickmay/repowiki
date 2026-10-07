@@ -81,7 +81,8 @@ export interface PersonOutcome {
   tokens: TokenUsage;
 }
 
-const MAX_FIX_OUTPUT_TOKENS = 3000;
+/** Longest answer of a retry that fixes claims (R16); the narrative call's is 6,000. */
+export const MAX_FIX_OUTPUT_TOKENS = 3000;
 const ORDER = PersonSectionKey.options;
 const NO_NARRATIVE = "no lead or no body claim survived verification";
 
