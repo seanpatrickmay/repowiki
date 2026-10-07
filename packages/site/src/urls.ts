@@ -8,6 +8,10 @@ export const diffUrl = (id: string, n: number): string => `/wiki/${id}/diff/${n}
 export const previewUrl = (id: string): string => `/api/preview/${id}.json`;
 /** The project's own article (F27). Under /special/, so no feature id or alias can take it. */
 export const ARCHITECTURE_URL = "/special/about/";
+/** Open pull requests and planned work (spec v2 #9 §6.2). */
+export const IN_PROGRESS_URL = "/special/in-progress/";
+/** One open pull request's page. */
+export const pullUrl = (n: number): string => `${IN_PROGRESS_URL}pr/${n}/`;
 /** The Ask panel as a page of its own (spec v2 #4 R21). */
 export const ASK_URL = "/special/ask/";
 

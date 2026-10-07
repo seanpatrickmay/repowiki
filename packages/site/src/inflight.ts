@@ -1,0 +1,158 @@
+import { githubUrl, type InFlight, type InFlightPull, type IssueEvidence } from "@repowiki/core";
+import { formatDate, formatNumber, shortSha } from "./format.ts";
+import { featureLink, type SiteModel } from "./model.ts";
+import { pullUrl } from "./urls.ts";
+
+/** A snapshot read this long before the export was made is stale (R16). */
+export const STALE_AFTER_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A feature as a link when it has a page; plain text otherwise. All text is plain. */
+export interface FeatureRef {
+  title: string;
+  href: string | null;
+}
+
+/** "From GitHub on <date>, against commit <sha7>", and R16's warning when the snapshot is stale. */
+export interface InflightStatus {
+  /** Plain text. */
+  line: string;
+  /** Plain text, or null when the snapshot is current. */
+  stale: string | null;
+}
+
+/**
+ * The snapshot's status against the export, never the build machine's clock, so one export
+ * always renders the same: stale when derived against another head than the export's, or read
+ * from GitHub more than STALE_AFTER_DAYS before the export was made.
+ */
+export function inflightStatus(site: SiteModel, inflight: InFlight): InflightStatus {
+  const line = `From GitHub on ${formatDate(inflight.fetchedAt)}, against commit ${shortSha(inflight.wikiHead)}.`;
+  if (inflight.wikiHead !== site.wiki.head) {
+    return {
+      line,
+      stale: `The wiki has moved on to commit ${shortSha(site.wiki.head)} since this was worked out; run pnpm wiki:inflight to refresh it.`,
+    };
+  }
+  const days = Math.floor(
+    (Date.parse(site.wiki.exportedAt) - Date.parse(inflight.fetchedAt)) / DAY_MS,
+  );
+  return days > STALE_AFTER_DAYS
+    ? {
+        line,
+        stale: `GitHub was read ${formatNumber(days)} days before this wiki was exported; run pnpm wiki:inflight to refresh it.`,
+      }
+    : { line, stale: null };
+}
+
+const featureRef = (site: SiteModel, id: string): FeatureRef => ({
+  title: site.features.get(id)?.title ?? id,
+  href: featureLink(site, id)?.href ?? null,
+});
+
+/** A pull request's badges: Draft, Bot, and "targets <base>" off the default branch (R18, R23). */
+export function badges(inflight: InFlight, pull: InFlightPull): string[] {
+  return [
+    ...(pull.draft ? ["Draft"] : []),
+    ...(pull.author?.bot === true ? ["Bot"] : []),
+    ...(pull.baseRef !== inflight.repo.defaultBranch ? [`targets ${pull.baseRef}`] : []),
+  ];
+}
+
+const authorOf = (pull: { author: InFlightPull["author"] }): string =>
+  pull.author === null ? "a deleted account" : pull.author.login;
+
+/** The claims a pull request would make stale (certain ones) and may change. */
+const effectCount = (pull: InFlightPull): string => {
+  if (pull.head !== "fetched") return "not computed";
+  const certain = pull.effects.filter((e) => e.certain).length;
+  const may = pull.effects.length - certain;
+  return may === 0
+    ? formatNumber(certain)
+    : `${formatNumber(certain)} (+${formatNumber(may)} may change)`;
+};
+
+/** An issue's evidence in words (spec v2 #9 §6.2). Plain text. */
+export function evidenceText(site: SiteModel, evidence: IssueEvidence): string {
+  switch (evidence.kind) {
+    case "pull":
+      return `closed by ${evidence.detail}`;
+    case "path":
+      return `mentions ${evidence.detail}`;
+    case "name":
+      return `names ${featureRef(site, evidence.featureId).title}`;
+    case "label":
+      return `label ${evidence.detail}`;
+    case "search":
+      return "suggested by search";
+  }
+}
+
+export interface IssueRow {
+  number: number;
+  /** Plain text. */
+  title: string;
+  href: string;
+  labels: string[];
+  evidence: string;
+}
+
+export interface InflightIndexView {
+  status: InflightStatus;
+  pulls: {
+    number: number;
+    /** Plain text. */
+    title: string;
+    href: string;
+    badges: string[];
+    author: string;
+    updated: string;
+    features: FeatureRef[];
+    claims: string;
+  }[];
+  planned: { feature: FeatureRef; issues: IssueRow[] }[];
+  unmapped: IssueRow[];
+  /** "And N more …" lines for R19's caps. Plain text. */
+  more: string[];
+}
+
+/** /special/in-progress/: the open pull requests, and the planned work under each feature. */
+export function inflightIndexView(site: SiteModel, inflight: InFlight): InflightIndexView {
+  const planned = new Map<string, IssueRow[]>();
+  const unmapped: IssueRow[] = [];
+  for (const issue of inflight.issues) {
+    const row = (evidence: string): IssueRow => ({
+      number: issue.number,
+      title: issue.title,
+      href: githubUrl(inflight.repo, "issues", issue.number),
+      labels: issue.labels,
+      evidence,
+    });
+    if (issue.features.length === 0) unmapped.push(row("not mapped"));
+    for (const evidence of issue.features) {
+      const rows = planned.get(evidence.featureId) ?? [];
+      rows.push(row(evidenceText(site, evidence)));
+      planned.set(evidence.featureId, rows);
+    }
+  }
+  const { pulls, issues } = inflight.omitted;
+  return {
+    status: inflightStatus(site, inflight),
+    pulls: inflight.pulls.map((pull) => ({
+      number: pull.number,
+      title: pull.title,
+      href: pullUrl(pull.number),
+      badges: badges(inflight, pull),
+      author: authorOf(pull),
+      updated: formatDate(pull.updatedAt),
+      features: pull.features.map((f) => featureRef(site, f.featureId)),
+      claims: effectCount(pull),
+    })),
+    planned: [...planned].map(([id, rows]) => ({ feature: featureRef(site, id), issues: rows })),
+    unmapped,
+    more: [
+      ...(pulls > 0 ? [`And ${formatNumber(pulls)} more open pull requests, not read.`] : []),
+      ...(issues > 0 ? [`And ${formatNumber(issues)} more open issues, not read.`] : []),
+    ],
+  };
+}
