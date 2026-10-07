@@ -24,6 +24,7 @@ describe("articleInflight (spec v2 #9 §6.2)", () => {
         href: "/special/in-progress/pr/12/#feature-signals",
         badges: [],
         changes: "would change 2 claims here",
+        behind: null,
         claims: [expect.stringContaining("page through long chunks with <code>next_page</code>")],
       },
     ]);

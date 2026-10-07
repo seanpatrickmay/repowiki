@@ -306,6 +306,8 @@ export function makeInFlightPull(overrides: Partial<InFlightPull> = {}): InFligh
     head: "fetched",
     headSha: SHA_C,
     mergeBase: SHA_A,
+    baseSha: SHA_A,
+    behind: false,
     merge: "clean",
     files: [
       {
@@ -403,6 +405,7 @@ export function makeGitHubPull(overrides: Partial<GitHubPull> = {}): GitHubPull 
     createdAt: "2026-10-01T09:00:00Z",
     updatedAt: "2026-10-03T09:00:00Z",
     baseRef: "main",
+    baseRefOid: null,
     headRefOid: SHA_C,
     labels: ["area:signals"],
     closes: [7],

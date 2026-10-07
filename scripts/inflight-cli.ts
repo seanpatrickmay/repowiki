@@ -179,6 +179,17 @@ export function renderInflightTable(
           : pull.features.map((f) => cell(f.featureId)).join(", ");
       return `| ${cell(`#${pull.number} ${pull.title}`)} | ${features} | ${effectCell(pull)} | ${status.get(pull.number) ?? "none"} |`;
     }),
+    ...inflight.pulls.flatMap((pull) =>
+      !pull.behind
+        ? []
+        : pull.baseSha === null
+          ? [
+              `#${pull.number}: its base was not read, so its effects only may change; run pnpm wiki:inflight again`,
+            ]
+          : [
+              `#${pull.number}: the wiki is behind this pull request's base (${pull.baseSha.slice(0, 7)}); run pnpm wiki:update for exact predictions`,
+            ],
+    ),
     ...[...failures].map(([n, why]) => `#${n}: no summary this run: ${problemLine(why)}`),
   ];
   return lines.join("\n");

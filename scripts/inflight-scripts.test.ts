@@ -49,7 +49,9 @@ beforeEach(async () => {
   fetchHeads(ensureInflightRepo(fx.out, fx.repo.dir), fx.url, [{ number: 12, headRefOid: head }], {
     protocol: "file",
   });
-  const pulls = readFileSync(join(FIXTURES, "pulls.json"), "utf8").replace("c".repeat(40), head);
+  const pulls = readFileSync(join(FIXTURES, "pulls.json"), "utf8")
+    .replace("c".repeat(40), head)
+    .replace("b".repeat(40), fx.first);
   writeFileSync(join(bin, "pulls.json"), pulls);
   gitDir = listing(join(fx.repo.dir, ".git"));
 });

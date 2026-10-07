@@ -45,7 +45,12 @@ const EDITS = {
 /** Pull requests #1 and #2 read from "GitHub", fetched and stored with no summary call. */
 async function refreshed(): Promise<void> {
   const pulls = ([1, 2] as const).map((n) =>
-    makeGitHubPull({ number: n, headRefOid: fx.pushPull(n, fx.first, EDITS[n]), closes: [] }),
+    makeGitHubPull({
+      number: n,
+      headRefOid: fx.pushPull(n, fx.first, EDITS[n]),
+      baseRefOid: fx.first,
+      closes: [],
+    }),
   );
   const snapshot = makeGitHubSnapshot({ pulls, issues: [] });
   const result = await refreshOnline(
@@ -108,6 +113,17 @@ describe("compareLine (R22)", () => {
       await compareLine(fx.repo.dir, { ...before, inflight: null }, to, new Set([1]), false),
     ).toBe(
       "Predictions not compared: no snapshot was derived against this update's starting head.",
+    );
+  });
+
+  it("does not compare a pull request predicted against a wiki behind its base (R27)", async () => {
+    await refreshed();
+    const before = beforeUpdate(fx.store);
+    if (before?.inflight == null) throw new Error("the fixture has a snapshot");
+    const pulls = before.inflight.pulls.map((p) => (p.number === 1 ? { ...p, behind: true } : p));
+    const behind = { ...before, inflight: { ...before.inflight, pulls } };
+    expect(await compareLine(fx.repo.dir, behind, merge(1), new Set([1]), false)).toBe(
+      "Predictions not comparable: #1 was predicted against a wiki behind its base.",
     );
   });
 });

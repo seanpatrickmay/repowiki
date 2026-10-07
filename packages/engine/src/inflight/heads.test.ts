@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRepo } from "../index/index.ts";
 import {
+  baseRef,
   ensureInflightRepo,
   fetchHeads,
   githubFetchUrl,
@@ -167,6 +168,34 @@ describe("fetchHeads (R6)", () => {
       execFileSync("git", ["-C", fx.repo.dir, "cat-file", "-e", a], { stdio: "ignore" }),
     ).toThrow();
     expect(listing(join(fx.repo.dir, ".git"))).toEqual(before);
+  });
+
+  it("fetches each pull request's base by its oid in the same one call (R27)", async () => {
+    const main = fx.pushPull(90, fx.first, { "b.txt": "b\n" });
+    const a = fx.pushPull(1, main, { "c.txt": "c\n" });
+    const dir = ensureInflightRepo(fx.out, fx.repo.dir);
+    const log = join(fx.out, "git-calls.txt");
+    script(
+      join(fx.out, "bin"),
+      "git",
+      `case " $* " in *" fetch "*) echo fetch >> '${log}';; esac\nexec '${realGit()}' "$@"`,
+    );
+    await withEnv({ PATH: `${join(fx.out, "bin")}:${process.env.PATH ?? ""}` }, () => {
+      const { heads, problem } = fetchHeads(
+        dir,
+        fx.url,
+        [{ number: 1, headRefOid: a, baseRefOid: main }],
+        FILE,
+      );
+      expect(problem).toBeNull();
+      expect(heads.get(1)).toBe("fetched");
+    });
+    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(1);
+    expect(inflightGit(dir, ["rev-parse", baseRef(1)]).stdout.trim()).toBe(main);
+    // A base the remote cannot serve (a force-pushed branch) leaves the head fetched, and the
+    // refresh then treats the base as unknown.
+    const gone = { number: 1, headRefOid: a, baseRefOid: "e".repeat(40) };
+    expect(fetchHeads(dir, fx.url, [gone], FILE).heads.get(1)).toBe("fetched");
   });
 
   it("fetches the rest one by one when one pull request has closed, and marks it missing", () => {

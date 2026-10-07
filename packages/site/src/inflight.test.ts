@@ -1,6 +1,7 @@
 import type { InFlight } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
 import { inflightIndexView, inflightStatus, pullView } from "./inflight.ts";
+import { articleInflight } from "./inflight-article.ts";
 import { buildSiteModel } from "./model.ts";
 import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
 
@@ -223,5 +224,38 @@ describe("pullView", () => {
     expect(pullView(t, inflightOf(t), fetched).summaryNote).toBe(
       "No summary of this pull request yet.",
     );
+  });
+});
+
+describe("a pull request forked past the wiki's head (R27)", () => {
+  const BEHIND =
+    "The wiki is behind this pull's base (aaaaaaa); run wiki:update for exact predictions.";
+  const behind = () => {
+    const pull = fixtureInFlight().pulls[0] as InFlight["pulls"][number];
+    return {
+      ...pull,
+      closes: [],
+      baseSha: "a".repeat(40),
+      behind: true,
+      merge: "unknown" as const,
+      effects: pull.effects.map((e) => ({ ...e, certain: false })),
+    };
+  };
+
+  it("says so on its page and in the article's In progress section, and only may change", () => {
+    const pull = behind();
+    const s = site({ pulls: [pull], issues: [] });
+    const view = pullView(s, inflightOf(s), pull);
+    expect(view.behind).toBe(BEHIND);
+    expect(view.merge).not.toMatch(/git 2\.38/);
+    expect(view.features[0]?.effects.every((e) => !e.certain)).toBe(true);
+    expect(articleInflight(s, "signals")?.pulls[0]?.behind).toBe(BEHIND);
+  });
+
+  it("says nothing for a pull request the wiki's head already holds the base of", () => {
+    const s = site();
+    const inflight = inflightOf(s);
+    expect(pullView(s, inflight, inflight.pulls[0] as InFlight["pulls"][number]).behind).toBeNull();
+    expect(articleInflight(s, "signals")?.pulls[0]?.behind).toBeNull();
   });
 });

@@ -20,7 +20,7 @@ const { view } = Astro.props;
           <li>
             <a href={pull.href}>#{pull.number} {pull.title}</a>
             {pull.badges.map((badge) => <span class="badge">{badge}</span>)}
-            <span class="inflight-evidence">({pull.changes})</span>
+            <span class="inflight-evidence">({pull.changes})</span>{pull.behind !== null && <p class="inflight-behind">{pull.behind}</p>}
             {pull.claims.length > 0 && (
               <ul>
                 {pull.claims.map((html) => <li set:html={html} />)}

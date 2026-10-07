@@ -36,11 +36,14 @@ export interface ImpactContext {
 
 /** A pull request's changed files and what they do to each feature (R8). */
 export interface PullChanges {
-  /** The merge base of the wiki's head and the pull request's head; null when they share none. */
+  /**
+   * Where its own changes start: the fork point given (R27), else the merge base of the wiki's head
+   * and the pull request's head; null when they share none.
+   */
   mergeBase: string | null;
   /**
-   * Every file the pull request changes, from the merge base (else the wiki's head) to its head,
-   * less those with an unsafe path.
+   * Every file the pull request changes, from that commit (else the wiki's head) to its head, less
+   * those with an unsafe path.
    */
   changes: FileChange[];
   /** The first INFLIGHT_MAX_FILES of them by path, each with its feature. */
@@ -59,6 +62,30 @@ export function mergeBase(dir: string, a: string, b: string): string | null {
   if (out.status !== 0 || !isSha(sha))
     throw new GitError(`git merge-base failed in ${dir}: ${firstLine(out.stderr)}`);
   return sha;
+}
+
+/** Whether `ancestor` is `descendant` or one of its ancestors, in inflight.git. */
+export function isAncestorIn(dir: string, ancestor: string, descendant: string): boolean {
+  const out = inflightGit(dir, [
+    "merge-base",
+    "--is-ancestor",
+    "--end-of-options",
+    ancestor,
+    descendant,
+  ]);
+  if (out.status === 0 || out.status === 1) return out.status === 0;
+  throw new GitError(`git merge-base --is-ancestor failed in ${dir}: ${firstLine(out.stderr)}`);
+}
+
+/**
+ * A pull request's fork point (R27): merge-base(base oid, head), the commit GitHub diffs it from.
+ * Null when GitHub gave no base oid, inflight.git does not hold that commit (its fetch failed), or
+ * the two share no history.
+ */
+export function forkPoint(dir: string, baseOid: string | null, head: string): string | null {
+  if (baseOid === null || !isSha(baseOid)) return null;
+  const there = inflightGit(dir, ["cat-file", "-e", "--end-of-options", `${baseOid}^{commit}`]);
+  return there.status === 0 ? mergeBase(dir, baseOid, head) : null;
 }
 
 /**
@@ -222,17 +249,21 @@ function featuresOf(
 }
 
 /**
- * Which files a pull request changes and where they belong (R8): the diff from the merge base to
- * its head, each file in its manifest feature (a rename follows its old path), and every other
- * file that exists at the head placed as an update places a new file (placeNewFiles over an index
- * built at the head, a disputed one by fallbackFeature, never a call). The index is built only
- * when some file needs placing. A file the pull request deletes that the wiki's head lacks has no
- * feature. A change whose path fails isInflightPath (a control, tab, line-break or bidi
- * character, a backslash, or over the cap) is dropped before anything else sees it, and counted
- * in filesTruncated.
+ * Which files a pull request changes and where they belong (R8): the diff from `fork` (R27; by
+ * default the merge base of the wiki's head and its head) to its head, each file in its manifest
+ * feature (a rename follows its old path), and every other file that exists at the head placed as
+ * an update places a new file (placeNewFiles over an index built at the head, a disputed one by
+ * fallbackFeature, never a call). The index is built only when some file needs placing. A file
+ * the pull request deletes that the wiki's head lacks has no feature. A change whose path fails
+ * isInflightPath (a control, tab, line-break or bidi character, a backslash, or over the cap) is
+ * dropped before anything else sees it, and counted in filesTruncated.
  */
-export async function pullChanges(ctx: ImpactContext, head: string): Promise<PullChanges> {
-  const base = mergeBase(ctx.dir, ctx.wikiHead, head);
+export async function pullChanges(
+  ctx: ImpactContext,
+  head: string,
+  fork?: string,
+): Promise<PullChanges> {
+  const base = fork ?? mergeBase(ctx.dir, ctx.wikiHead, head);
   const from = base ?? ctx.wikiHead;
   const diffed = diffTrees(ctx.dir, from, head, undefined, INFLIGHT_GIT);
   const changes = diffed.filter(safeChange);

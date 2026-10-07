@@ -35,10 +35,11 @@ beforeEach(async () => {
   const two = fx.pushPull(2, fx.first, { "src/deliverables/crud.py": "x = 1\n" });
   snapshot = makeGitHubSnapshot({
     pulls: [
-      makeGitHubPull({ number: 1, headRefOid: one, closes: [7] }),
+      makeGitHubPull({ number: 1, headRefOid: one, baseRefOid: fx.first, closes: [7] }),
       makeGitHubPull({
         number: 2,
         headRefOid: two,
+        baseRefOid: fx.first,
         closes: [],
         files: ["src/deliverables/crud.py"],
         updatedAt: "2026-10-02T09:00:00Z",

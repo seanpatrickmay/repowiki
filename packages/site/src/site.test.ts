@@ -1345,7 +1345,32 @@ function placedExport() {
       added: f.added + 1,
     })),
   };
-  return inflightExport({ pulls: [placed, ...rest] });
+  // #14 forks past the wiki's head (R27): its effects only may change, and it says so.
+  const behind = {
+    ...twelve,
+    number: 14,
+    title: "Forked past the wiki",
+    updatedAt: "2026-09-28T09:00:00Z",
+    closes: [],
+    baseSha: "a".repeat(40),
+    behind: true,
+    merge: "unknown" as const,
+    files: [],
+    features: [
+      {
+        featureId: "deliverables",
+        files: 1,
+        changedLines: 4,
+        added: 0,
+        removed: 0,
+        churn: 0,
+        drifts: false,
+      },
+    ],
+    effects: [],
+    summary: null,
+  };
+  return inflightExport({ pulls: [placed, ...rest, behind] });
 }
 
 describe("the work in progress pages (spec v2 #9 §6.2)", () => {
@@ -1367,6 +1392,14 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
       "Its head commit could not be fetched, so its impact could not be computed.",
     );
     expect(missing).toContain("No summary of this pull request yet.");
+  });
+
+  it("says on a pull's page and its article's section that the wiki is behind its base (R27)", () => {
+    const notice =
+      "The wiki is behind this pull&#39;s base (aaaaaaa); run wiki:update for exact predictions.";
+    expect(inflightSite.read("special/in-progress/pr/14/index.html")).toContain(notice);
+    expect(inflightSite.read("wiki/deliverables/index.html")).toContain(notice);
+    expect(inflightSite.read("special/in-progress/pr/12/index.html")).not.toContain(notice);
   });
 
   it("marks an article's changing claims and adds its In progress section, all out of search", async () => {

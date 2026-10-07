@@ -191,6 +191,8 @@ export interface PullView {
   base: string;
   /** Plain text: how the pull request would merge, or why its impact is unknown. */
   merge: string;
+  /** Plain text: R27's notice when the wiki is behind its base, else null. */
+  behind: string | null;
   /** Null when the head was not fetched; the page says so. */
   summary: { html: string; refs: { n: number; label: string; href: string }[] }[] | null;
   /** Plain text the page shows in place of a null summary. */
@@ -213,6 +215,17 @@ const MERGE_WORDS: Record<InFlightPull["merge"], string> = {
   conflicts: "It conflicts with the wiki's commit, so the claims below only may change.",
   unknown: "Git could not merge it with the wiki's commit (that needs git 2.38 or later).",
 };
+
+/**
+ * R27's notice for a pull request the wiki's head does not hold the fork point of, or whose base
+ * was not read: its effects only may change until wiki:update. Null otherwise. Plain text.
+ */
+export function behindNotice(pull: InFlightPull): string | null {
+  if (!pull.behind) return null;
+  return pull.baseSha === null
+    ? "This pull's base was not read, so its claims below only may change; run wiki:inflight again for exact predictions."
+    : `The wiki is behind this pull's base (${shortSha(pull.baseSha)}); run wiki:update for exact predictions.`;
+}
 
 /** The anchor of a feature's part of a pull request page, which article markers link to. */
 export const pullFeatureAnchor = (featureId: string): string => `feature-${featureId}`;
@@ -242,9 +255,12 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
     created: formatDate(pull.createdAt),
     updated: formatDate(pull.updatedAt),
     base: pull.baseRef,
-    merge: fetched
-      ? MERGE_WORDS[pull.merge]
-      : `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`,
+    merge: !fetched
+      ? `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`
+      : pull.behind
+        ? "It was not merged with the wiki's commit, so the claims below only may change."
+        : MERGE_WORDS[pull.merge],
+    behind: behindNotice(pull),
     summary,
     summaryNote:
       fetched && !hasCitableLines(pull.files)

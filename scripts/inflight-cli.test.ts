@@ -183,6 +183,30 @@ describe("the lines it prints", () => {
       "No open pull requests.",
     );
   });
+
+  it("says under the table which pull requests the wiki is behind the base of (R27)", () => {
+    const pull = makeInFlightPull();
+    const behind = makeInFlightPull({
+      number: 14,
+      closes: [],
+      baseSha: "a".repeat(40),
+      behind: true,
+      merge: "unknown",
+      effects: pull.effects.map((e) => ({ ...e, certain: false })),
+    });
+    const unread = makeInFlightPull({ ...behind, number: 15, baseSha: null, effects: [] });
+    const lines = renderInflightTable(
+      makeInFlight({ pulls: [behind, unread], issues: [] }),
+      new Map(),
+      new Map(),
+    ).split("\n");
+    expect(lines.slice(2)).toEqual([
+      "| `#14 Page through long chunks` | `signals` | 0 (+2 may change) | none |",
+      "| `#15 Page through long chunks` | `signals` | 0 | none |",
+      "#14: the wiki is behind this pull request's base (aaaaaaa); run pnpm wiki:update for exact predictions",
+      "#15: its base was not read, so its effects only may change; run pnpm wiki:inflight again",
+    ]);
+  });
 });
 
 describe("suggestFor (C3)", () => {
