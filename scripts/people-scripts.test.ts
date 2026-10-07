@@ -131,7 +131,7 @@ describe("pnpm wiki:people (spec v2 #6 §10)", () => {
     const summary = readFileSync(join(fx.out, `people-${fx.head.slice(0, 7)}.md`), "utf8");
     expect(JSON.parse(exported).people.snapshot.sha).toBe(fx.head);
     expect(summary).toContain(
-      "| `ada-lovelace` | `Ada Lovelace` | 3 | due; not written (--no-narrative) | 0 |",
+      "| `ada-lovelace` | `Ada Lovelace` | 3 | skipped (--no-narrative) | 0 |",
     );
     expect(summary).toContain("This run: no LLM call made.");
     scan([exported, llms, summary, result.stdout, result.stderr]);
@@ -142,7 +142,7 @@ describe("pnpm wiki:people (spec v2 #6 §10)", () => {
     const result = run(PEOPLE);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/ANTHROPIC_API_KEY is not set: pnpm wiki:people/);
-    expect(result.stderr).toMatch(/1 narratives due; 1 within the \$1\.00 ceiling/);
+    expect(result.stderr).toMatch(/1 narrative due; 1 within the \$1\.0000 ceiling/);
   });
 
   it("prints the table and the estimate for a dry run, and leaves the store as it was", () => {
