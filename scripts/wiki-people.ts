@@ -14,12 +14,11 @@ import { createLedger, type ModelConfig, totalsOf } from "@repowiki/llm";
 import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
-  loadPeopleFile,
   ownerEmailOf,
   PEOPLE_USAGE,
   type PeopleArgs,
   parsePeopleArgs,
-  peopleFilePath,
+  peopleConfigFor,
   peopleTable,
   renderPeopleSummary,
   storeCopy,
@@ -57,12 +56,16 @@ async function main(): Promise<void> {
   const db = join(out, "wiki.db");
   if (!existsSync(db)) throw new CliError(`no wiki at ${db}; run pnpm wiki:build first`);
   const models = loadModels(args.config);
-  const config = loadPeopleFile(peopleFilePath(repo, out, args.peopleFile));
+  // --people-file, else the remembered path (the C1 ruling); wiki:people remembers what it read.
+  const configOf = (store: Store) =>
+    peopleConfigFor(store, repo, out, args.peopleFile, true).config;
   if (args.dryRun) {
     const copy = storeCopy(out);
     try {
       // The copy is this run's alone: no lock to hold for it.
-      await withStore(copy.path, (store) => people(args, repo, out, store, config, models, null));
+      await withStore(copy.path, (store) =>
+        people(args, repo, out, store, configOf(store), models, null),
+      );
     } finally {
       copy.remove();
     }
@@ -72,8 +75,8 @@ async function main(): Promise<void> {
   try {
     await withStore(db, async (store) => {
       if (args.disable) return disable(repo, out, store);
-      if (args.forget !== null) return forget(args.forget, repo, out, store, config);
-      return people(args, repo, out, store, config, models, join(out, BUILD_LOCK));
+      if (args.forget !== null) return forget(args.forget, repo, out, store, configOf(store));
+      return people(args, repo, out, store, configOf(store), models, join(out, BUILD_LOCK));
     });
   } finally {
     release();

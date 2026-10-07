@@ -1,12 +1,7 @@
 import { type BuildJournal, buildJournal, type Store } from "@repowiki/engine";
 import { createLedger, type Provider, totalsOf } from "@repowiki/llm";
 import type { HookContext } from "./inflight-hook.ts";
-import {
-  loadPeopleFile,
-  ownerEmailOf,
-  peopleFilePath,
-  WIKI_PEOPLE_RUN_PREFIX,
-} from "./people-cli.ts";
+import { ownerEmailOf, peopleConfigFor, WIKI_PEOPLE_RUN_PREFIX } from "./people-cli.ts";
 import { runPeopleStep } from "./people-run.ts";
 import { lazyClaudeProvider, problemLine } from "./wiki-cli.ts";
 
@@ -36,6 +31,8 @@ export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[
   try {
     // Inside the try: a snapshot that cannot be read is a warning, never a failed update.
     if (store.getPeopleSnapshot() === null) return [];
+    // The file wiki:people was given (the C1 ruling); a lost one refreshes nothing.
+    const { config } = peopleConfigFor(store, ctx.repo, ctx.out, null, false);
     const sha = store.getHead() ?? "";
     const id = `${WIKI_PEOPLE_RUN_PREFIX}${sha}-${new Date().toISOString()}`;
     runId = id;
@@ -45,7 +42,7 @@ export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[
       repo: ctx.repo,
       repoName: ctx.repoName,
       store,
-      config: loadPeopleFile(peopleFilePath(ctx.repo, ctx.out, null)),
+      config,
       ownerEmail: ownerEmailOf(ctx.repo, log),
       lock: ctx.lock,
       narrative: true,

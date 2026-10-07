@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { normalizedText } from "@repowiki/core";
 import { personRevisionProblems, readPeople, type Store } from "@repowiki/engine";
-import { loadPeopleFile, ownerEmailOf, peopleFilePath } from "./people-cli.ts";
+import { loadPeopleFile, ownerEmailOf, peopleConfigFor } from "./people-cli.ts";
 
 /** What wiki:check found about People. */
 export interface PeopleCheck {
@@ -48,7 +48,8 @@ export function checkPeopleStored(store: Store, repo: string, out: string): Peop
   if (sha === null) return { narratives: 0, scanned: 0, problems };
   let config: ReturnType<typeof loadPeopleFile>;
   try {
-    config = loadPeopleFile(peopleFilePath(repo, out, null));
+    // The file wiki:people was given (the C1 ruling); a lost one is a problem.
+    config = peopleConfigFor(store, repo, out, null, false).config;
   } catch (err) {
     problems.push(`people file: ${err instanceof Error ? err.message : String(err)}`);
     config = loadPeopleFile(join(out, "no-such-people-file.json"));

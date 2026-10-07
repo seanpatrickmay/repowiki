@@ -1,10 +1,16 @@
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PeopleConfig } from "@repowiki/core";
 import { buildJournal, configuredEmail, refreshPeople } from "@repowiki/engine";
-import { chronicleProvider, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
+import {
+  chronicleProvider,
+  KIM,
+  type PeopleFixture,
+  peopleFixture,
+} from "@repowiki/engine/test-people";
 import { DEFAULT_MODELS } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { peopleConfigFor } from "./people-cli.ts";
 import { peopleAfterUpdate, peopleCeilingLine } from "./people-hook.ts";
 import { parseReplayArgs, parseUpdateArgs } from "./update-cli.ts";
 
@@ -132,6 +138,74 @@ describe("peopleAfterUpdate's ceiling and failures (the Task 27 ruling)", () => 
     expect(peopleCeilingLine(fx.store, 0.0005)).toBe(
       "People is on: its due narratives are estimated after the refresh, capped at $0.0005 (--people-max-usd)",
     );
+  });
+});
+
+describe("the remembered people file (the C1 ruling)", () => {
+  const elsewhere = () => join(fx.out, "..", "team-people.json");
+  /** wiki:people --people-file <elsewhere>: the file read, its path remembered, People on. */
+  const remembered = async (config: object) => {
+    writeFileSync(elsewhere(), JSON.stringify(config));
+    const read = peopleConfigFor(fx.store, fx.repo.dir, fx.out, elsewhere(), true);
+    await refreshPeople({
+      repo: fx.repo.dir,
+      sha: fx.head,
+      store: fx.store,
+      config: read.config,
+      ownerEmail: configuredEmail(fx.repo.dir),
+      lock: null,
+    });
+  };
+  const statusOf = (name: string) =>
+    fx.store.listPeopleRegistry().find((r) => r.name === name)?.status;
+  const write = () => {
+    const llm = chronicleProvider();
+    return hook({ connect: () => ({ provider: llm.provider, journal: buildJournal(fx.store) }) });
+  };
+
+  it("reads the file wiki:people was given, not <out>/people.json", async () => {
+    await remembered({ exclude: [`email:${KIM.email}`] });
+    const lines = await hook();
+    expect(lines.join("\n")).toContain("Refreshed at");
+    expect(statusOf(KIM.name)).toBe("excluded");
+    expect(fx.store.getPeopleSnapshot()?.people.map((p) => p.name)).not.toContain(KIM.name);
+  });
+
+  it("refreshes nothing, and keeps the exclusion and the narratives, when the file goes missing", async () => {
+    await remembered({ exclude: [`email:${KIM.email}`] });
+    await write();
+    const snapshot = JSON.stringify(fx.store.getPeopleSnapshot());
+    expect(fx.store.listPersonHistory("ada-lovelace")).toHaveLength(1);
+    rmSync(elsewhere());
+    const lines = await write();
+    expect(lines).toEqual([
+      "## People",
+      "",
+      expect.stringMatching(
+        /^Not refreshed: the people file .*team-people\.json is missing; restore it or run pnpm wiki:people --people-file <file>$/,
+      ),
+      "",
+    ]);
+    expect(statusOf(KIM.name)).toBe("excluded");
+    expect(fx.store.listPersonHistory("ada-lovelace")).toHaveLength(1);
+    expect(JSON.stringify(fx.store.getPeopleSnapshot())).toBe(snapshot);
+  });
+
+  it("keeps a narrative a people file consented to when that file goes missing", async () => {
+    // Ada is not the owner here: only the people file's consent gives her a narrative.
+    fx.repo.git("config", "user.email", "someone.q7else@example.com");
+    await remembered({ people: [{ match: ["name:Ada Lovelace"], narrative: true }] });
+    await write();
+    expect(fx.store.listPersonHistory("ada-lovelace")).toHaveLength(1);
+    rmSync(elsewhere());
+    expect((await hook()).join("\n")).toMatch(/Not refreshed: the people file .* is missing/);
+    expect(fx.store.listPersonHistory("ada-lovelace")).toHaveLength(1);
+  });
+
+  it("still runs with no people file at all, as before, when there is nothing it could undo", async () => {
+    await turnOn();
+    await write();
+    expect((await write()).join("\n")).toContain("1 carried");
   });
 });
 
