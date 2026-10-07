@@ -21,7 +21,8 @@ export {
   applyMailmap,
   type Identity,
   type Mailmap,
-  type MailmapRule,
+  type MailmapEntry,
+  type MailmapInfo,
   parseMailmap,
 } from "./mailmap.ts";
 export {
