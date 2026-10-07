@@ -150,4 +150,9 @@ describe("wantsNarrative (the v2 consent ruling)", () => {
     ]);
     expect(wanted({ minCommits: 4 })).toEqual([]);
   });
+
+  it("reads owner: [] as no owner at all, with no fallback to the configured email", () => {
+    expect(wanted({ owner: [] })).toEqual([]);
+    expect(wanted({ owner: ["name:mate two"] })).toEqual(["Mate Two"]);
+  });
 });

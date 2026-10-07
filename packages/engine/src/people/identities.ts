@@ -318,6 +318,7 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
   });
   const anyMatch = (list: readonly number[], keyList: readonly string[]) =>
     list.some((i) => keyList.some((k) => matches(i, k)));
+  // `owner: []` names no owner: only an absent owner falls back to the configured email.
   const ownerKeys =
     config.owner ?? (input.ownerEmail === null ? [] : [`email:${input.ownerEmail.trim()}`]);
   let unnamed = 0;
