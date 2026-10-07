@@ -1,4 +1,5 @@
 import {
+  type ActivityDay,
   type Claim,
   contributorsOf,
   type PeopleExport,
@@ -15,6 +16,7 @@ import {
   periodDays,
   repositorySeries,
   sparkline,
+  zoomPeriod,
 } from "./activity-svg.ts";
 import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
@@ -83,6 +85,9 @@ export interface PeopleIndexView {
  */
 export function peopleIndexView(site: SiteModel, people: PeopleExport): PeopleIndexView {
   const { snapshot } = people;
+  const built = new Set(
+    activityRoutes(site).flatMap((r) => (r.period === undefined ? [] : [r.period])),
+  );
   const window = chartWindow(
     [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others],
     headDay(people),
@@ -93,8 +98,10 @@ export function peopleIndexView(site: SiteModel, people: PeopleExport): PeopleIn
     bucket,
     starts: window.starts,
     note: window.note,
-    // Every bar has commits in it, so its year has an activity page.
-    hrefOf: (start) => activityUrl(start.slice(0, 4)),
+    hrefOf: (_start, days) => {
+      const year = zoomPeriod(days, 4, (y) => built.has(y));
+      return year === null ? null : activityUrl(year);
+    },
   });
   const total = Math.max(1, snapshot.totalLines);
   return {
@@ -115,7 +122,9 @@ export function peopleIndexView(site: SiteModel, people: PeopleExport): PeopleIn
       .map((p) => ({ name: p.name, commits: formatNumber(p.commits) })),
     byFeature: site.wiki.manifest.features
       .filter((f) => f.status.kind === "active" && (snapshot.featureLines[f.id] ?? 0) > 0)
-      .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
+      .sort((a, b) =>
+        a.title < b.title ? -1 : a.title > b.title ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+      )
       .map((f) => ({
         anchor: `feature-${f.id}`,
         feature: featureHtml(site, f.id),
@@ -166,7 +175,8 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
   if (p === undefined) throw new Error(`no person ${personId}`);
   const narrative: PersonRevision | null = people.pages.find((r) => r.personId === p.id) ?? null;
   const refs = narrative === null ? null : collectReferences(narrative);
-  const links = { link: (id: string) => featureLink(site, id) };
+  // A person claim never links Wikipedia (planner ruling R6): defence in depth over the engine's.
+  const links = { link: (id: string) => featureLink(site, id), wikipediaLinks: false };
   const claimHtml = (c: Claim) =>
     renderInline(c.text, links) + markersHtml(refs?.markers.get(c.id) ?? []);
   const claims = (key: string) => narrative?.sections.find((s) => s.key === key)?.claims ?? [];
@@ -210,7 +220,10 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
       bucket,
       starts: window.starts,
       note: window.note,
-      hrefOf: (start) => `#activity-${start.slice(0, 4)}`,
+      hrefOf: (_start, days) => {
+        const year = zoomPeriod(days, 4, (y) => years.includes(y));
+        return year === null ? null : `#activity-${year}`;
+      },
     }),
     years: years.map((year) => ({
       anchor: `activity-${year}`,
@@ -304,16 +317,22 @@ export function activityView(
   );
   const { from, to } = period === undefined ? all : periodDays(period);
   const bucket = period === undefined ? all.bucket : period.length === 4 ? "week" : "day";
-  const below = (start: string): string | null => {
-    // All time links each bar to its year, whatever its bucket; a month is the finest level.
-    if (period === undefined)
-      return active.has(start.slice(0, 4)) ? activityUrl(start.slice(0, 4)) : null;
+  if (period !== undefined && !active.has(period))
+    throw new Error(`no activity page for the period ${JSON.stringify(period)}`);
+  const below = (_start: string, held: readonly ActivityDay[]): string | null => {
+    // All time links each bar to the year holding most of its commits; a month is the finest.
+    if (period === undefined) {
+      const year = zoomPeriod(held, 4, (y) => active.has(y));
+      return year === null ? null : activityUrl(year);
+    }
     if (bucket === "day") return null;
-    // A week leads to the month most of it falls in, when that month had commits.
-    const mid = new Date(Date.parse(`${start}T00:00:00Z`) + 3 * 86_400_000)
-      .toISOString()
-      .slice(0, 7);
-    return mid.startsWith(period) && active.has(mid) ? activityUrl(mid) : null;
+    // A week leads to the month of this year holding most of its commits, when it has a page.
+    const month = zoomPeriod(
+      held.filter((d) => d.day.startsWith(`${period}-`)),
+      7,
+      (m) => active.has(m),
+    );
+    return month === null ? null : activityUrl(month);
   };
   const name =
     period === undefined

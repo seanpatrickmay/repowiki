@@ -182,6 +182,23 @@ const counted = (n: number) => `${formatNumber(n)} ${n === 1 ? "commit" : "commi
 export const barTitle = (label: string, bar: Omit<Bar, "start">): string =>
   `${label}: ${counted(bar.commits)}, +${formatNumber(bar.added)} −${formatNumber(bar.deleted)} lines`;
 
+/**
+ * The year (`unit` 4) or month (`unit` 7) holding most of a bar's commits, the earlier on a tie,
+ * when `built` says it has a page or an anchor; else null (the Task 32 and 34 rulings). Every
+ * chart's zoom link goes through it, so a week starting in another period leads to its commits.
+ */
+export function zoomPeriod(
+  days: readonly ActivityDay[],
+  unit: 4 | 7,
+  built: (period: string) => boolean,
+): string | null {
+  const by = new Map<string, number>();
+  for (const d of days)
+    by.set(d.day.slice(0, unit), (by.get(d.day.slice(0, unit)) ?? 0) + d.commits);
+  const best = [...by].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
+  return best !== undefined && best[1] > 0 && built(best[0]) ? best[0] : null;
+}
+
 /** One series of a chart; `cls` names its CSS colour (`series-1` … `series-8`, `others`, `bots`). */
 export interface Series {
   label: string;
@@ -195,8 +212,11 @@ export interface ChartOptions {
   label: string;
   bucket: Bucket;
   starts: readonly string[];
-  /** Where a bar leads: the next zoom level, or null for the finest. */
-  hrefOf: (start: string) => string | null;
+  /**
+   * Where a bar leads: the next zoom level, or null for the finest. Gets the bar's days with
+   * commits, every series' (zoomPeriod reads them).
+   */
+  hrefOf: (start: string, days: readonly ActivityDay[]) => string | null;
   /** A plain-text note printed under the chart (ChartWindow's), or none. */
   note?: string | null;
 }
@@ -241,7 +261,15 @@ export function barChart(series: readonly Series[], options: ChartOptions): stri
     });
     const hit = `<rect class="bar-hit" x="${x}" y="0" width="${w}" height="${HEIGHT}"><title>${xmlText(barTitle(label, total))}</title></rect>`;
     const body = `${hit}${rects.join("")}`;
-    const href = total.commits === 0 ? null : options.hrefOf(total.start);
+    const href =
+      total.commits === 0
+        ? null
+        : options.hrefOf(
+            total.start,
+            series.flatMap((s) =>
+              s.activity.filter((d) => d.commits > 0 && bucketStart(d.day, bucket) === total.start),
+            ),
+          );
     return href === null ? `<g>${body}</g>` : `<a href="${hrefText(href)}">${body}</a>`;
   });
   const svg = `<svg class="activity-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${xmlText(options.label)}" preserveAspectRatio="none">${groups.join("")}</svg>`;

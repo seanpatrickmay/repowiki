@@ -1,3 +1,4 @@
+import { WikiExport } from "@repowiki/core";
 import { makePersonFacts } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { articleView } from "./article.ts";
@@ -13,6 +14,7 @@ import {
 } from "./people.ts";
 import { fixtureExport } from "./test-fixtures.ts";
 import { fixturePeople, HOSTILE_PERSON_NAME, peopleExport } from "./test-people.ts";
+import { personUrl } from "./urls.ts";
 
 const site = buildSiteModel(peopleExport(), "https://github.com/acme/demo-repo");
 const people = fixturePeople();
@@ -180,5 +182,104 @@ describe("Main contributors (R23)", () => {
     expect(row?.html.match(/<a href="\/people\/p-/g)).toHaveLength(5);
     expect(row?.html).toMatch(/^<a href="\/people\/p-6\/">Person 6<\/a> \(18%\)/);
     expect(row?.html).toContain('<a href="/people/#feature-signals">and 2 more</a>');
+  });
+});
+
+/** The fixture with Ada's activity replaced and nobody else's: for the zoom-link edges. */
+function withActivity(days: { day: string; commits: number }[]) {
+  const base = fixturePeople();
+  const activity = days.map((d) => ({ ...d, added: 1, deleted: 0 }));
+  const people = {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      others: [],
+      people: base.snapshot.people.map((p) => ({
+        ...p,
+        activity: p.id === "ada-lovelace" ? activity : [],
+      })),
+    },
+  };
+  const wiki = WikiExport.parse({ ...fixtureExport(), people });
+  return {
+    site: buildSiteModel(wiki, null),
+    people: wiki.people as NonNullable<typeof wiki.people>,
+  };
+}
+const hrefsIn = (html: string) =>
+  [...(html.split("</svg>")[0] ?? "").matchAll(/<a href="([^"]+)">/g)].map((m) => m[1]);
+
+describe("zoom links at period edges (the Task 32 and Task 34 rulings)", () => {
+  // Weeks: the first bar is the week of 29 December 2025, whose only commit is on 2 January.
+  const straddle = [
+    { day: "2025-06-02", commits: 1 },
+    { day: "2026-01-02", commits: 1 },
+  ];
+
+  it("links a week that starts in December to the year of its commits, on every chart", () => {
+    const { site, people } = withActivity(straddle);
+    const person = personView(site, people, "ada-lovelace");
+    expect(person.chart).toContain("Week of 29 Dec 2025");
+    expect(hrefsIn(person.chart)).toEqual(["#activity-2025", "#activity-2026"]);
+    expect(hrefsIn(peopleIndexView(site, people).chart)).toEqual([
+      "/special/activity/2025/",
+      "/special/activity/2026/",
+    ]);
+    expect(hrefsIn(activityView(site, people, undefined).chart)).toEqual([
+      "/special/activity/2025/",
+      "/special/activity/2026/",
+    ]);
+  });
+
+  it("links a week to the month holding most of its commits, the earlier on a tie", () => {
+    const most = withActivity([
+      { day: "2026-01-31", commits: 1 },
+      { day: "2026-02-01", commits: 2 },
+    ]);
+    expect(hrefsIn(activityView(most.site, most.people, "2026").chart)).toEqual([
+      "/special/activity/2026-02/",
+    ]);
+    const tie = withActivity([
+      { day: "2026-01-31", commits: 1 },
+      { day: "2026-02-01", commits: 1 },
+    ]);
+    expect(hrefsIn(activityView(tie.site, tie.people, "2026").chart)).toEqual([
+      "/special/activity/2026-01/",
+    ]);
+  });
+
+  it("refuses a period with no page, and a person id that is not one", () => {
+    const { site: s, people: p } = withActivity(straddle);
+    for (const bad of ["abc", "2031", "2026-13", "2026-03"])
+      expect(() => activityView(s, p, bad), bad).toThrow(/no activity page/);
+    expect(() => personUrl("Not An Id")).toThrow();
+    expect(() => personUrl("../x")).toThrow();
+    expect(personUrl("ada-lovelace")).toBe("/people/ada-lovelace/");
+    expect(() => personView(s, p, "dependabot-bot")).toThrow();
+    expect(() => personView(s, p, "nobody")).toThrow();
+  });
+
+  it("never renders a person claim's Wikipedia link, and breaks equal feature titles by id", () => {
+    const base = fixturePeople();
+    const page = base.pages[0];
+    if (page === undefined) throw new Error("the fixture has Ada's page");
+    const lead = page.sections[0]?.claims[0];
+    if (lead !== undefined) lead.text = `${lead.text} See [[wp:Git|git]].`;
+    const wiki = WikiExport.parse({ ...fixtureExport(), people: base });
+    const view = personView(buildSiteModel(wiki, null), base, "ada-lovelace");
+    expect(view.leadHtml).toContain("See git.");
+    expect(view.leadHtml).not.toContain("wikipedia.org");
+    const titled = WikiExport.parse({
+      ...fixtureExport(),
+      people: fixturePeople(),
+      manifest: {
+        ...fixtureExport().manifest,
+        features: fixtureExport().manifest.features.map((f) => ({ ...f, title: "Same" })),
+      },
+    });
+    const anchors = peopleIndexView(buildSiteModel(titled, null), fixturePeople()).byFeature.map(
+      (f) => f.anchor,
+    );
+    expect(anchors).toEqual([...anchors].sort());
   });
 });

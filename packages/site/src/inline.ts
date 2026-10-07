@@ -13,6 +13,8 @@ export interface InlineOptions {
   wikipedia?(title: string): string | null;
   /** False renders every link token as its plain label (hover previews). Default true. */
   links?: boolean;
+  /** False renders a [[wp:Title]] token as its plain label (person claims, R6). Default true. */
+  wikipediaLinks?: boolean;
 }
 
 const ESCAPES: Record<string, string> = {
@@ -67,7 +69,7 @@ function renderLink(
     const title = target.slice(3).trim();
     if (title === "") return escapeHtml(originalToken);
     const text = escapeHtml(label ?? title);
-    if (!links) return text;
+    if (!links || options.wikipediaLinks === false) return text;
     const previewId = options.wikipedia?.(title) ?? null;
     const preview = previewId === null ? "" : ` data-preview="${escapeHtml(previewId)}"`;
     return `<a class="external" href="${escapeHtml(wikipediaUrl(title.toWellFormed()))}" title="Wikipedia: ${escapeHtml(title)}"${preview}>${text}</a>`;
