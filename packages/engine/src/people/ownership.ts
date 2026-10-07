@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import {
   type BlameRun,
+  BlameSkippedError,
   blameFile,
   DEFAULT_MAX_FILE_BYTES,
   GitTimeoutError,
@@ -50,6 +51,11 @@ export interface Ownership {
   files: Map<string, BlameRun[]>;
   /** Lines of files whose blame timed out: unattributed (spec v2 #6 §4 step 4). */
   timedOut: { path: string; lines: number }[];
+  /**
+   * Lines of files whose blame could not run for a cause outside the file (BlameSkippedError: a
+   * configured ignore file git cannot read, output past the cap): unattributed, with the cause.
+   */
+  unattributed: { path: string; lines: number; cause: string }[];
   /** Files left out: lockfiles, binaries and files over the size limit (R20). */
   skipped: number;
   /** Files blamed this run, and files whose blame came from the cache (R3). */
@@ -80,7 +86,8 @@ const fingerprint = (revs: readonly string[]): string =>
  * Blames every text file at `sha` (spec v2 #6 R1-R4), from the store's cache where its
  * (path, blob) is there: an unchanged blob has an unchanged blame. Lockfiles, files over the size
  * limit and binaries are skipped; the rest is blamed `concurrency` at a time, each under its
- * timeout (a file that times out is reported, its lines unattributed). Results are folded in path
+ * timeout (a file that times out, or whose blame cannot run for a cause outside it, is reported,
+ * its lines unattributed and nothing cached for it). Results are folded in path
  * order, so the answer does not depend on which blame finished first. The cache is pruned to the
  * head's (path, blob) pairs, and cleared when the ignore list changed or `rebuild` says so.
  */
@@ -119,7 +126,7 @@ export async function blameTree(
   }
   const text = todo.filter((b) => sniffed.get(b.oid)?.binary !== true);
   skipped += todo.length - text.length;
-  const results = new Map<string, BlameRun[] | "timeout">();
+  const results = new Map<string, BlameRun[] | "timeout" | { cause: string }>();
   let cursor = 0;
   const worker = async () => {
     while (cursor < text.length) {
@@ -130,18 +137,26 @@ export async function blameTree(
         });
         results.set(blob.path, runs);
       } catch (error) {
-        if (!(error instanceof GitTimeoutError)) throw error;
-        results.set(blob.path, "timeout");
+        if (error instanceof GitTimeoutError) results.set(blob.path, "timeout");
+        else if (error instanceof BlameSkippedError)
+          results.set(blob.path, { cause: error.message });
+        else throw error;
       }
     }
   };
   await Promise.all(Array.from({ length: options.concurrency ?? 4 }, worker));
   const timedOut: Ownership["timedOut"] = [];
+  const unattributed: Ownership["unattributed"] = [];
   for (const blob of text) {
     const result = results.get(blob.path);
     if (result === undefined) continue;
+    const lines = sniffed.get(blob.oid)?.lines ?? 0;
     if (result === "timeout") {
-      timedOut.push({ path: blob.path, lines: sniffed.get(blob.oid)?.lines ?? 0 });
+      timedOut.push({ path: blob.path, lines });
+      continue;
+    }
+    if (!Array.isArray(result)) {
+      unattributed.push({ path: blob.path, lines, cause: result.cause });
       continue;
     }
     store.putBlameRuns(blob.path, blob.oid, result);
@@ -149,5 +164,6 @@ export async function blameTree(
   }
   store.pruneBlameCache(wanted.map(({ path, oid }) => ({ path, oid })));
   const sorted = new Map([...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-  return { files: sorted, timedOut, skipped, blamed: text.length - timedOut.length, cached };
+  const blamed = text.length - timedOut.length - unattributed.length;
+  return { files: sorted, timedOut, unattributed, skipped, blamed, cached };
 }

@@ -278,6 +278,7 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
   for (const [path, runs] of input.ownership.files)
     for (const [sha, n] of runs) add(path, author.get(sha) ?? -1, n);
   for (const { path, lines: n } of input.ownership.timedOut) add(path, -1, n);
+  for (const { path, lines: n } of input.ownership.unattributed) add(path, -1, n);
 
   // Pull requests (R6): landed by a "Merge pull request #N" merge, or a "Title (#N)" squash.
   const landings = pullRequestLandings(commits, groupOf);

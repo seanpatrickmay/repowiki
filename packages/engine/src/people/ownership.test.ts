@@ -54,7 +54,9 @@ describe("blameTree (spec v2 #6 R1, R3, R20)", () => {
       ["a.py", [[ada, 2]]],
       ["b.py", [[bob, 1]]],
     ]);
-    expect([owned.skipped, owned.blamed, owned.cached, owned.timedOut]).toEqual([3, 2, 0, []]);
+    expect([owned.skipped, owned.blamed, owned.cached, owned.timedOut, owned.unattributed]).toEqual(
+      [3, 2, 0, [], []],
+    );
   });
 
   it("answers an unchanged blob from the cache and blames only what changed", async () => {
@@ -108,6 +110,21 @@ describe("blameTree (spec v2 #6 R1, R3, R20)", () => {
     expect(owned.files.size).toBe(0);
     const again = await blameTree(repo.dir, head, store, { ignoreRevs: [], maxFileBytes: 1000 });
     expect(again.cached).toBe(0);
+  });
+
+  it("leaves every file unattributed, never aborting, when the repository's config breaks blame", async () => {
+    const { head } = tree();
+    repo.git("config", "blame.ignoreRevsFile", "no-such-file");
+    const owned = await blameTree(repo.dir, head, store, { ignoreRevs: [], maxFileBytes: 1000 });
+    expect(owned.files.size).toBe(0);
+    expect(owned.unattributed.map(({ path, lines }) => [path, lines])).toEqual([
+      ["a.py", 2],
+      ["b.py", 1],
+    ]);
+    for (const { cause } of owned.unattributed) expect(cause).toMatch(/blame\.ignoreRevsFile/);
+    repo.git("config", "--unset", "blame.ignoreRevsFile");
+    const again = await blameTree(repo.dir, head, store, { ignoreRevs: [], maxFileBytes: 1000 });
+    expect([again.cached, again.blamed, again.unattributed]).toEqual([0, 2, []]);
   });
 
   it("gives the same answer whatever the concurrency", async () => {
