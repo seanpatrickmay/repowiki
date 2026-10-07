@@ -11,7 +11,7 @@ import {
 import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { peopleAfterUpdate } from "./people-hook.ts";
+import { peopleAfterUpdate, peopleCeilingLine } from "./people-hook.ts";
 import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
 import { estimateFor, needsKey, readInput, runUpdate, writeUpdateOutputs } from "./update-run.ts";
 import { acquireBuildLock, BUILD_LOCK, exitWithError, requireApiKey } from "./wiki-cli.ts";
@@ -45,10 +45,8 @@ async function main(): Promise<void> {
       const input = await readInput(repo, sha);
       const estimate = estimateFor(store, input, args, models, repoName);
       console.error(estimateLine(estimate, args.batch));
-      if (store.getPeopleSnapshot() !== null)
-        console.error(
-          `People is on: its due narratives are estimated after the refresh, capped at $${args.peopleMaxUsd.toFixed(2)} (--people-max-usd)`,
-        );
+      const ceiling = peopleCeilingLine(store, args.peopleMaxUsd);
+      if (ceiling !== null) console.error(ceiling);
       if (args.dryRun) return;
       // Calls are certain, so fail once here rather than once per page; an update that makes
       // none (nothing cited changed, no article due) needs no key.
