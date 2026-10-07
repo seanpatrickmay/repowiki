@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { assertSha, GitError, type GitOptions, git, scrubbedGitEnv, timeoutError } from "./git.ts";
+import {
+  assertOid,
+  assertSha,
+  GitError,
+  type GitOptions,
+  git,
+  scrubbedGitEnv,
+  timeoutError,
+} from "./git.ts";
 import { pullRequestOf } from "./history.ts";
 
 /**
@@ -105,6 +113,32 @@ export function diffCommits(
 ): FileChange[] {
   assertSha(from);
   assertSha(to);
+  return diffObjects(repo, from, to, only, options);
+}
+
+/**
+ * diffCommits between any two tree-ish object ids, a commit or a tree (spec v2 #9 §4: merge-tree
+ * writes a tree, not a commit): the same parse, each id checked as a 40-hex object id.
+ */
+export function diffTrees(
+  repo: string,
+  from: string,
+  to: string,
+  only?: ReadonlySet<string>,
+  options: GitOptions = {},
+): FileChange[] {
+  assertOid(from);
+  assertOid(to);
+  return diffObjects(repo, from, to, only, options);
+}
+
+function diffObjects(
+  repo: string,
+  from: string,
+  to: string,
+  only: ReadonlySet<string> | undefined,
+  options: GitOptions,
+): FileChange[] {
   if (from === to) return [];
   const tokens = git(
     repo,
@@ -192,7 +226,7 @@ export function isAncestor(
   assertSha(descendant);
   const args = ["merge-base", "--is-ancestor", ancestor, descendant];
   const out = spawnSync("git", ["-C", repo, ...args], {
-    env: scrubbedGitEnv(),
+    env: scrubbedGitEnv({ ...options.env }),
     timeout: options.timeoutMs,
   });
   if (out.error) {

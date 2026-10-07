@@ -1,4 +1,4 @@
-import { assertSha, GitError, git, isSha, listBlobs, streamBlobs } from "./git.ts";
+import { assertSha, GitError, type GitOptions, git, isSha, listBlobs, streamBlobs } from "./git.ts";
 
 /** One commit reachable from the indexed sha. */
 export interface CommitInfo {
@@ -21,17 +21,21 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/;
  * The log is parsed on NUL, which cannot occur in a subject, a path, a parent list or a date, so
  * nothing in the repository's own text can move a record boundary.
  */
-export function readHistory(repo: string, sha: string): CommitInfo[] {
+export function readHistory(repo: string, sha: string, options: GitOptions = {}): CommitInfo[] {
   assertSha(sha);
-  const tokens = git(repo, [
-    "log",
-    "-z",
-    "--no-renames",
-    "--name-only",
-    "--format=%x00%H%x00%P%x00%cI%x00%s",
-    "--end-of-options",
-    sha,
-  ])
+  const tokens = git(
+    repo,
+    [
+      "log",
+      "-z",
+      "--no-renames",
+      "--name-only",
+      "--format=%x00%H%x00%P%x00%cI%x00%s",
+      "--end-of-options",
+      sha,
+    ],
+    options,
+  )
     .toString("utf8")
     .split("\0");
   const commits: CommitInfo[] = [];
@@ -113,22 +117,27 @@ function assignPullRequests(commits: CommitInfo[]): void {
 }
 
 /**
- * UTF-8 text of every regular file at `sha` up to maxBytes, by path; binary files are left out.
- * The blobs are streamed through one `cat-file --batch` (each distinct blob once, held whole only
- * up to maxBytes, which none of the listed blobs exceeds), so no git output is buffered whole.
+ * UTF-8 text of every regular file at `sha` (a commit, or a tree) up to maxBytes, by path; binary
+ * files are left out. The blobs are streamed through one `cat-file --batch` (each distinct blob
+ * once, held whole only up to maxBytes, which none of the listed blobs exceeds), so no git output
+ * is buffered whole. With `only`, just those paths are read.
  */
 export async function readSources(
   repo: string,
   sha: string,
   maxBytes: number,
+  options: GitOptions & { only?: ReadonlySet<string> } = {},
 ): Promise<Map<string, string>> {
   assertSha(sha);
-  const blobs = listBlobs(repo, sha).filter((blob) => blob.size <= maxBytes);
+  const { only } = options;
+  const blobs = listBlobs(repo, sha, options).filter(
+    (blob) => blob.size <= maxBytes && (only === undefined || only.has(blob.path)),
+  );
   const oids = [...new Set(blobs.map((blob) => blob.oid))];
   // The text of each distinct blob (null for a binary one), decoded as it streams past.
   const texts = new Map<string, string | null>();
   let next = 0;
-  for await (const data of streamBlobs(repo, oids, maxBytes)) {
+  for await (const data of streamBlobs(repo, oids, maxBytes, options)) {
     const oid = oids[next++] as string;
     if (data.oid !== oid) throw new GitError(`cat-file returned ${data.oid} for ${oid}`);
     if (data.content === null) throw new GitError(`cat-file held no content for blob ${oid}`);

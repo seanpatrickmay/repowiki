@@ -12,6 +12,7 @@ import { type CoChange, computeCoChange, DEFAULT_MAX_FILES_PER_COMMIT } from "./
 import {
   commitFiles,
   GitError,
+  type GitOptions,
   listBlobs,
   resolveCommit,
   type StreamedBlob,
@@ -72,6 +73,8 @@ export interface RepoIndex {
 export interface IndexOptions {
   maxFileBytes?: number;
   maxFilesPerCommit?: number;
+  /** How every git command of the index runs (work in flight's own object store, C13). */
+  git?: GitOptions;
 }
 
 export const DEFAULT_MAX_FILE_BYTES = 1_000_000;
@@ -81,12 +84,14 @@ async function* withContents(
   repo: string,
   blobs: readonly TreeBlob[],
   holdLimit: number,
+  options: GitOptions = {},
 ): AsyncGenerator<[TreeBlob, StreamedBlob], void, undefined> {
   let next = 0;
   for await (const data of streamBlobs(
     repo,
     blobs.map((blob) => blob.oid),
     holdLimit,
+    options,
   )) {
     const blob = blobs[next++] as TreeBlob;
     if (data.oid !== blob.oid) {
@@ -114,8 +119,9 @@ export async function indexRepo(
   if (!Number.isFinite(maxFileBytes) || maxFileBytes < 0) {
     throw new RangeError(`maxFileBytes must be a finite, non-negative number, got ${maxFileBytes}`);
   }
-  const sha = resolveCommit(repo, rev);
-  const listed = listBlobs(repo, sha);
+  const gitOptions = options.git ?? {};
+  const sha = resolveCommit(repo, rev, gitOptions);
+  const listed = listBlobs(repo, sha, gitOptions);
   const isValid = (blob: TreeBlob) => RepoPath.safeParse(blob.path).success;
   const blobs = listed.filter(isValid);
   const invalidPaths = listed
@@ -129,7 +135,12 @@ export async function indexRepo(
     (blob) => blob.path === "package.json" || blob.path.endsWith("/package.json"),
   );
   const packages: WorkspacePackage[] = [];
-  for await (const [blob, data] of withContents(repo, manifests, Number.POSITIVE_INFINITY)) {
+  for await (const [blob, data] of withContents(
+    repo,
+    manifests,
+    Number.POSITIVE_INFINITY,
+    gitOptions,
+  )) {
     const parsed = parseWorkspacePackage(blob.path, data.content?.toString("utf8") ?? "");
     if (parsed !== null) packages.push(parsed);
   }
@@ -145,7 +156,7 @@ export async function indexRepo(
   const callSites: { file: IndexedFile; calls: CallSite[]; bindings: ResolvedBinding[] }[] = [];
 
   // Pass 2: one blob at a time; a blob over maxFileBytes is only counted and sniffed in transit.
-  for await (const [blob, data] of withContents(repo, blobs, maxFileBytes)) {
+  for await (const [blob, data] of withContents(repo, blobs, maxFileBytes, gitOptions)) {
     const content = data.content;
     const binary = data.head.includes(0);
     const language = languageForPath(blob.path);
@@ -217,7 +228,7 @@ export async function indexRepo(
     ),
     unresolved: unresolved.sort((a, b) => byPath(a, b) || (a.specifier < b.specifier ? -1 : 1)),
     coChange: computeCoChange(
-      commitFiles(repo, sha),
+      commitFiles(repo, sha, gitOptions),
       new Set(blobs.map((blob) => blob.path)),
       options.maxFilesPerCommit ?? DEFAULT_MAX_FILES_PER_COMMIT,
     ),

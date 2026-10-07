@@ -12,6 +12,7 @@ export type { CallEdge } from "./calls.ts";
 export { type CoChange, type CoChangePair, DEFAULT_MAX_FILES_PER_COMMIT } from "./cochange.ts";
 export {
   diffCommits,
+  diffTrees,
   type FileChange,
   type Hunk,
   isAncestor,
@@ -21,6 +22,7 @@ export {
   replaySteps,
 } from "./diff.ts";
 export {
+  assertOid,
   assertSha,
   GitError,
   type GitOptions,
