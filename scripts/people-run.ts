@@ -85,11 +85,14 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     only: input.only,
   });
   for (const warning of prepared.refreshed.warnings) log(problemLine(warning));
-  const systemTokens = estimateTokens(peopleSystemPrompt(input.repoName, manifest));
+  // A whole narrative's and an append's system prompts differ (APPEND_INSTRUCTIONS).
+  const systemTokens = [false, true].map((append) =>
+    estimateTokens(peopleSystemPrompt(input.repoName, manifest, append)),
+  );
   const ceiling = (r: PersonRequest) =>
     narrativeCeilingUsd(
       estimateTokens(personTurn(r.pack, r.append ? r.parent : null)),
-      systemTokens,
+      systemTokens[r.append ? 1 : 0] as number,
       input.models.people,
       input.batch,
     );

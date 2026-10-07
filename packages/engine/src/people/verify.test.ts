@@ -81,10 +81,10 @@ describe("verifyPersonClaim (spec v2 #6 §8.4)", () => {
 
   it("refuses code citations and commits the pack does not show (R17)", () => {
     expect(problems("chronicle", claim("In March 2026, x changed.", ["src/a.py:1-2"]))).toEqual([
-      'citation "src/a.py:1-2" is not a commit; person claims cite commits only',
+      "citation 1 is not a commit; person claims cite commits only",
     ]);
     expect(problems("chronicle", claim("In March 2026, x changed.", [`commit:${OTHER}`]))).toEqual([
-      `citation "commit:${OTHER}" is not one of this person's commits the pack shows; cite only those`,
+      "citation 1 is not one of this person's commits the pack shows; cite only those",
     ]);
   });
 
@@ -94,11 +94,11 @@ describe("verifyPersonClaim (spec v2 #6 §8.4)", () => {
     expect(problems("chronicle", claim("In March 2026, x changed.", cite))).toEqual([]);
     expect(problems("chronicle", claim("In 2026, x changed.", cite))).toEqual([]);
     expect(problems("chronicle", claim("On 15 March 2026, x changed.", cite))).toEqual([
-      'the claim states "15 March 2026", outside its cited commits\' dates 2026-03-14 to 2026-03-14',
+      "the claim states a date outside its cited commits' dates 2026-03-14 to 2026-03-14",
     ]);
     expect(problems("chronicle", claim("In April 2026, x changed.", cite))[0]).toMatch(/outside/);
     expect(problems("chronicle", claim("On 31 February 2026, x changed.", cite))).toEqual([
-      'the claim states "31 February 2026", which is not a date',
+      "the claim states a day or month that does not exist",
     ]);
   });
 
@@ -148,10 +148,10 @@ describe("verifyPersonClaim (spec v2 #6 §8.4)", () => {
     expect(
       problems("areas", claim("[[deliverables]]: scoring was added.", [`commit:${A}`])),
     ).toEqual([
-      `the claim cites "commit:${A.slice(0, 12)}", which does not touch "deliverables"; cite the commits that changed it`,
+      `the claim cites commit:${A.slice(0, 12)}, which does not touch the feature deliverables; cite the commits that changed it`,
     ]);
     expect(problems("areas", claim("[[nowhere]]: x.", [`commit:${A}`]))).toEqual([
-      'the claim links "nowhere", which is not a feature of this wiki',
+      "the claim links a target that is not a feature of this wiki",
     ]);
     expect(
       problems("areas", claim("[[signals]] and [[deliverables]]: x.", [`commit:${A}`])),
@@ -332,5 +332,24 @@ describe("personVerifyContext (R17)", () => {
     expect(kim.problems).toContain(
       "the claim names another person; name no one but the page's subject",
     );
+  });
+});
+
+describe("verifyPersonClaim's problems (the Task 19 ruling, I4)", () => {
+  it("never quote the model's text: a name, a path or an address in a citation or link", () => {
+    const out = [
+      ...problems("chronicle", claim("In March 2026, x changed.", ["src/Grace Hopper.py:1-2"])),
+      ...problems("chronicle", claim("In March 2026, x changed.", ["grace@example.com:1-2"])),
+      ...problems("chronicle", claim("In March 2026, x changed.", ["commit:Grace Hopper"])),
+      ...problems("chronicle", claim("In March 2026, x changed.", ["commit:abc"])),
+      ...problems("areas", claim("[[Grace Hopper]]: x changed.", [`commit:${A}`])),
+      ...problems("areas", claim("[[grace-hopper]]: x changed.", [`commit:${A}`])),
+      ...problems(
+        "chronicle",
+        claim(`In March 2026, Grace Hopper wrote src/a.py:1-2.`, [`commit:${A}`]),
+      ),
+    ];
+    expect(out.length).toBeGreaterThan(6);
+    expect(out.join("\n")).not.toMatch(/grace|hopper|example|src\/a/i);
   });
 });

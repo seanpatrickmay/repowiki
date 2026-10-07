@@ -300,7 +300,8 @@ describe("writePeople (spec v2 #6 §8.4)", () => {
       "On 7 February 2026, a signals edge was fixed.",
     ]);
     const turn = requests[0]?.messages[0]?.content ?? "";
-    expect(turn).toContain("# Stored chronicle (kept word for word; do not repeat it)");
+    expect(turn).toContain("# Stored chronicle\n");
+    expect(requests[0]?.system).toContain("This call is an append.");
     expect(turn).toContain("## New episodes, oldest first");
     expect(turn).not.toContain("PR #3");
   });
@@ -429,5 +430,29 @@ describe("writePeople's append and outcome rules (the Task 20 and Task 22 ruling
     const giveUp: PersonFixes = { claims: [{ id: "a2", text: "-", cite: [], supports: [] }] };
     const { log } = await write([bad, giveUp]);
     expect(log.some((l) => l.startsWith("ada-lovelace: dropped an areas claim: "))).toBe(true);
+  });
+});
+
+describe("writePeople's log (the Task 20 ruling)", () => {
+  it("names no one: a dropped claim's problems never quote its citation or link", async () => {
+    const bad = draft();
+    bad.sections[1]?.claims.push({
+      id: "c4",
+      text: "In February 2026, an edge moved.",
+      cite: ["commit:Bob Smith"],
+      supports: [],
+    });
+    bad.sections[2]?.claims.push({
+      id: "a3",
+      text: "[[Bob Smith]]: an edge moved.",
+      cite: [c(fx.feb)],
+      supports: [],
+    });
+    const giveUp: PersonFixes = { claims: [] };
+    const { outcomes, requests, log } = await write([bad, giveUp]);
+    expect(outcomes[0]?.dropped).toHaveLength(2);
+    expect(log.filter((l) => l.includes("dropped"))).toHaveLength(2);
+    expect(log.join("\n")).not.toMatch(/bob/i);
+    expect(requests[1]?.messages.at(-1)?.content).not.toMatch(/bob/i);
   });
 });

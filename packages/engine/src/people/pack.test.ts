@@ -40,12 +40,12 @@ describe("buildPersonPack (spec v2 #6 §8.2)", () => {
       "- deliverables — Deliverables — 1 — 0%",
       "## Episodes, oldest first",
       "### Commits outside pull requests, 2026-01",
-      `- commit:${s(fx.jan)} 2026-01-02 "feat: start signals" — features: signals — files: src/signals/ingest.py`,
+      `- commit:${s(fx.jan)} 2026-01-02 "feat: start signals" — features: signals — files: "src/signals/ingest.py"`,
       `### PR #3 "Add signal ingestion", 2026-01-03 to 2026-01-04, merged 2026-01-05 (commit:${s(fx.pr3)})`,
-      `- commit:${s(fx.a1)} 2026-01-03 "feat: parse chunks" — features: signals — files: src/signals/ingest.py`,
-      `- commit:${s(fx.a2)} 2026-01-04 "feat: store chunks, mail [email]" — features: deliverables — files: src/deliverables/crud.py`,
+      `- commit:${s(fx.a1)} 2026-01-03 "feat: parse chunks" — features: signals — files: "src/signals/ingest.py"`,
+      `- commit:${s(fx.a2)} 2026-01-04 "feat: store chunks, mail [email]" — features: deliverables — files: "src/deliverables/crud.py"`,
       "### Commits outside pull requests, 2026-02",
-      `- commit:${s(fx.feb)} 2026-02-07 "fix: signals \uFFFD edge" — features: signals — files: src/signals/ingest.py`,
+      `- commit:${s(fx.feb)} 2026-02-07 "fix: signals \uFFFD edge" — features: signals — files: "src/signals/ingest.py"`,
       `### Pull requests they merged: #6 "Fix crud" 2026-01-07 (commit:${s(fx.pr6)})`,
     ]);
     expect(p.episodes).toEqual({ full: 3, collapsed: 0, dropped: 0 });

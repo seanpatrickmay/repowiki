@@ -145,15 +145,22 @@ export async function writePeople(
   const log = options.log ?? (() => {});
   const now = options.now ?? (() => new Date());
   const batch = options.batch ?? true;
-  const system = peopleSystemPrompt(options.repoName, manifest);
-  const cacheKey = peopleCacheKey(input.sha, system, input.requests.length);
+  // Whole narratives and appends have their own system prompt (APPEND_INSTRUCTIONS), and each
+  // its own cache key, counted over the calls that send it.
+  const systems = [false, true].map((append) => {
+    const system = peopleSystemPrompt(options.repoName, manifest, append);
+    const calls = input.requests.filter((r) => r.append === append).length;
+    return { system, cacheKey: peopleCacheKey(input.sha, system, calls) };
+  });
   const call = <T>(
+    state: State,
     schema: z.ZodType<T>,
     messages: readonly LlmMessage[],
     maxTokens: number,
     keyed: boolean,
-  ) =>
-    settle(
+  ) => {
+    const { system, cacheKey } = systems[state.request.append ? 1 : 0] as (typeof systems)[0];
+    return settle(
       options.provider.generate({
         purpose: "people",
         featureId: null,
@@ -165,6 +172,7 @@ export async function writePeople(
         ...(keyed && cacheKey !== null ? { cacheKey } : {}),
       }),
     );
+  };
   const states: State[] = input.requests.map((request) => {
     const stored = (key: PersonSectionKey) =>
       request.append ? (request.parent?.sections.find((s) => s.key === key)?.claims ?? []) : [];
@@ -192,6 +200,7 @@ export async function writePeople(
   const first = await Promise.all(
     states.map((state) =>
       call(
+        state,
         PersonDraft,
         [{ role: "user", content: state.pack.text }],
         MAX_PERSON_OUTPUT_TOKENS,
@@ -233,11 +242,18 @@ export async function writePeople(
       state.rejected !== null
         ? {
             kind: "whole" as const,
-            outcome: await call(PersonDraft, retryRequest(state), MAX_PERSON_OUTPUT_TOKENS, false),
+            outcome: await call(
+              state,
+              PersonDraft,
+              retryRequest(state),
+              MAX_PERSON_OUTPUT_TOKENS,
+              false,
+            ),
           }
         : {
             kind: "fixes" as const,
             outcome: await call(
+              state,
               PersonFixes,
               fixRequest(state, PEOPLE_GIVE_UP),
               MAX_FIX_OUTPUT_TOKENS,

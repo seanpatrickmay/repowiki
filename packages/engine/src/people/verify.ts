@@ -237,11 +237,10 @@ function factProblems(
   const [first = "", last = ""] = range;
   if (key === "lead" || days.length > 0) {
     for (const date of dates) {
-      if (date.from === "")
-        problems.push(`the claim states ${quote(date.text)}, which is not a date`);
+      if (date.from === "") problems.push("the claim states a day or month that does not exist");
       else if (date.to < first || date.from > last)
         problems.push(
-          `the claim states ${quote(date.text)}, outside its ${key === "lead" ? "person's" : "cited commits'"} dates ${first} to ${last}`,
+          `the claim states a date outside its ${key === "lead" ? "person's" : "cited commits'"} dates ${first} to ${last}`,
         );
     }
   }
@@ -261,19 +260,29 @@ function factProblems(
   if (key === "areas") {
     const [target] = featureLinkTargets(text);
     if (target !== undefined && !ctx.features.has(target.trim()))
-      problems.push(`the claim links ${quote(target)}, which is not a feature of this wiki`);
+      problems.push("the claim links a target that is not a feature of this wiki");
     else if (target !== undefined) {
       const away = cited.filter(
         (c) => c.kind === "commit" && !ctx.featuresOf(c.sha).includes(target.trim()),
       );
       if (away.length > 0)
         problems.push(
-          `the claim cites ${away.map((c) => quote(`commit:${c.sha.slice(0, 12)}`)).join(", ")}, which ${away.length === 1 ? "does" : "do"} not touch ${quote(target.trim())}; cite the commits that changed it`,
+          `the claim cites ${away.map((c) => `commit:${c.sha.slice(0, 12)}`).join(", ")}, which ${away.length === 1 ? "does" : "do"} not touch the feature ${target.trim()}; cite the commits that changed it`,
         );
     }
   }
   return problems;
 }
+
+/**
+ * A v1 text problem without the model's text in it (I4): the one that quotes the citation-shaped
+ * tokens it found becomes a fixed phrase; the others name only the rule.
+ */
+const unquoted = (problem: string): string =>
+  problem.startsWith("the claim text holds a citation") ||
+  problem.startsWith("the claim text holds citations")
+    ? 'the claim text holds a citation; citations go only in "cite", never in the text'
+    : problem;
 
 export type VerifiedPersonClaim =
   | { claim: Claim; problems: [] }
@@ -283,8 +292,8 @@ export type VerifiedPersonClaim =
  * Checks one claim of a person narrative (spec v2 #6 §8.4), in order: v1's text checks; each
  * reference a commit that resolves; authorship (R17: only shas the pack shows); R18's mechanical
  * checks; and core's personClaimViolations. A lead's citations are dropped, not refused. Commit
- * subjects are stored without emails. Problems quote model text only through quote() and never
- * name a person.
+ * subjects are stored without emails. Problems never quote the model's text (fixed phrases naming
+ * the rule, a citation's place in the list, and ids), so they never name a person.
  */
 export function verifyPersonClaim(
   key: PersonSectionKey,
@@ -294,26 +303,28 @@ export function verifyPersonClaim(
   const problems: string[] = [];
   const text = draft.text.trim();
   if (draft.id === "") problems.push("the claim has no id");
-  problems.push(...claimTextProblems(text, ctx.verify));
+  problems.push(...claimTextProblems(text, ctx.verify).map(unquoted));
   const citations: Citation[] = [];
   let unresolved = false;
-  for (const ref of key === "lead" ? [] : draft.cite) {
+  for (const [i, ref] of (key === "lead" ? [] : draft.cite).entries()) {
+    // Problems name a citation by its place in the cite list, never by its text (I4).
+    const nth = `citation ${i + 1}`;
     if (!/^\s*commit:/i.test(ref)) {
-      problems.push(`citation ${quote(ref)} is not a commit; person claims cite commits only`);
+      problems.push(`${nth} is not a commit; person claims cite commits only`);
       unresolved = true;
       continue;
     }
     const one = resolveReference(ref, ctx.verify);
     if ("problem" in one) {
-      problems.push(one.problem);
+      problems.push(
+        `${nth} names no single commit of this history; give at least 7 hex digits of a sha the pack shows`,
+      );
       unresolved = true;
       continue;
     }
     const c = one.citation;
     if (c.kind !== "commit" || !ctx.pack.shas.has(c.sha)) {
-      problems.push(
-        `citation ${quote(ref)} is not one of this person's commits the pack shows; cite only those`,
-      );
+      problems.push(`${nth} is not one of this person's commits the pack shows; cite only those`);
       unresolved = true;
       continue;
     }

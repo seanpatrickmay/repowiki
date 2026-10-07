@@ -73,10 +73,10 @@ describe("personRevisionProblems (spec v2 #6 §9)", () => {
   it("flags a citation of another person's commit, a wrong date and a link to nowhere", () => {
     const where = `person ada-lovelace (person-ada-lovelace-${fx.feb.slice(0, 12)}-1): c2:`;
     expect(check([revision(fx.b1)])).toEqual([
-      `${where} citation "commit:${fx.b1}" is not one of this person's commits the pack shows; cite only those`,
+      `${where} citation 1 is not one of this person's commits the pack shows; cite only those`,
     ]);
     expect(check([revision(fx.jan, "In March 2026, [[nowhere]] was started.")])).toEqual([
-      `${where} the claim states "March 2026", outside its cited commits' dates 2026-01-02 to 2026-01-02`,
+      `${where} the claim states a date outside its cited commits' dates 2026-01-02 to 2026-01-02`,
       `${where} links to nowhere: [[nowhere]]`,
     ]);
   });

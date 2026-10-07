@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { estimateTokens } from "../manifest/index.ts";
 import type { PersonPack } from "./pack.ts";
 import {
+  APPEND_INSTRUCTIONS,
   MIN_CACHED_PREFIX_TOKENS,
   PEOPLE_INSTRUCTIONS,
   PEOPLE_STYLE,
@@ -66,9 +67,19 @@ describe("personTurn", () => {
 
   it("puts the stored chronicle first, kept word for word, for an append (R25)", () => {
     const turn = personTurn(pack, makePersonRevision());
-    expect(turn).toMatch(/^# Stored chronicle \(kept word for word; do not repeat it\)\n- c1: "/);
-    expect(turn).toContain("ids that differ from the stored ones");
-    expect(turn.endsWith(WRITE_NARRATIVE)).toBe(true);
+    expect(turn).toMatch(/^# Stored chronicle\n- c1: "/);
+    expect(turn.endsWith(`\n\n${WRITE_NARRATIVE}`)).toBe(true);
+  });
+
+  it("puts an append's rules in its system prompt, and none in the user turn (Task 18)", () => {
+    const append = peopleSystemPrompt("demo", makeManifest(), true);
+    expect(append.startsWith(`${PEOPLE_INSTRUCTIONS}\n\n${APPEND_INSTRUCTIONS}\n\n`)).toBe(true);
+    expect(APPEND_INSTRUCTIONS).toContain("ids that differ from the stored ones");
+    expect(APPEND_INSTRUCTIONS).toContain("at most 30");
+    expect(APPEND_INSTRUCTIONS).toContain('"Stored chronicle"');
+    expect(peopleSystemPrompt("demo", makeManifest())).not.toContain(APPEND_INSTRUCTIONS);
+    expect(PEOPLE_INSTRUCTIONS).toContain("at most 30 claims");
+    expect(personTurn(pack, makePersonRevision())).not.toContain("Return chronicle claims");
   });
 
   it("puts the pack after the stored chronicle and before the engine's lines, one line a claim", () => {

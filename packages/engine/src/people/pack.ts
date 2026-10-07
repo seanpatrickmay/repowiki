@@ -208,7 +208,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
 
   const commitLine = (c: AuthoredCommit) => {
     const features = input.commitFeatures.get(c.sha) ?? [];
-    const paths = c.files.slice(0, MAX_PATHS).map((f) => packText(f.path));
+    const paths = c.files.slice(0, MAX_PATHS).map((f) => quoted(f.path));
     const more = c.files.length > MAX_PATHS ? `, and ${c.files.length - MAX_PATHS} more` : "";
     return `- commit:${sha12(c.sha)} ${day(c.authorDate)} ${quoted(c.subject)} — features: ${features.length === 0 ? "none" : features.join(", ")} — files: ${paths.join(", ") || "none"}${more}`;
   };
