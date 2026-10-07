@@ -42,6 +42,23 @@ describe("inflightLine", () => {
     expect(inflightLine("abc   defg", 5)).toBe("abc…");
   });
 
+  it("blanks fillers that render as nothing, and makes a lone surrogate well formed", () => {
+    for (const filler of [
+      "\u034F",
+      "\u115F",
+      "\u1160",
+      "\u2800",
+      "\u3164",
+      "\uFFA0",
+      "\uFE0F",
+      "\uFFFC",
+    ])
+      expect(inflightLine(`a${filler}b`, 200), JSON.stringify(filler)).toBe("a b");
+    expect(inflightLine("\u3164\u3164", 200)).toBe("");
+    expect(inflightLine("a\uD800b", 200)).toBe("a\uFFFDb");
+    expect(inflightBody("a\uD800\u3164b")).toBe("a\uFFFD b");
+  });
+
   it("escapes nothing, and gives the same line again for its own output", () => {
     const hostile = "<script>alert(1)</script> [[signals]] `x` [a](javascript:x)";
     expect(inflightLine(hostile, 200)).toBe(hostile);
@@ -63,6 +80,12 @@ describe("GitHub URLs", () => {
   it("builds a pull request's and an issue's page from the repo and number alone", () => {
     expect(githubUrl(DEMO_REPO, "pull", 12)).toBe("https://github.com/acme/demo/pull/12");
     expect(githubUrl(DEMO_REPO, "issues", 7)).toBe("https://github.com/acme/demo/issues/7");
+  });
+
+  it("encodes the commit too, so no string can change a blob link's shape", () => {
+    expect(githubBlobUrl(DEMO_REPO, "a/../b?c", "a.py", 1, 1)).toBe(
+      "https://github.com/acme/demo/blob/a%2F..%2Fb%3Fc/a.py#L1",
+    );
   });
 
   it("links a file's lines at a commit with percent-encoded path segments", () => {
@@ -144,6 +167,48 @@ describe("InFlight", () => {
     const pull = makeInFlightPull();
     const twice = makeInFlight({ pulls: [pull, pull] });
     expect(paths(InFlight.safeParse(twice))).toContain("pulls");
+    const issue = makeInFlightIssue();
+    const issues = makeInFlight({ issues: [issue, issue] });
+    expect(paths(InFlight.safeParse(issues))).toContain("issues");
+  });
+
+  it.each([
+    [
+      "a feature listed twice",
+      { features: [...makeInFlightPull().features, ...makeInFlightPull().features] },
+      "features",
+    ],
+    ["an issue closed twice", { closes: [7, 7] }, "closes"],
+    [
+      "one claim's effect twice",
+      { effects: [...makeInFlightPull().effects, makeInFlightPull().effects[0]] },
+      "effects",
+    ],
+  ])("refuses a pull request with %s", (_name, overrides, path) => {
+    expect(paths(InFlightPull.safeParse(makeInFlightPull(overrides as never)))).toContain(path);
+  });
+
+  it("refuses an issue listing one closing pull request twice", () => {
+    const issue = makeInFlightIssue({ pulls: [12, 12] });
+    expect(paths(InFlight.safeParse(makeInFlight({ issues: [issue] })))).toContain(
+      "issues.0.pulls",
+    );
+  });
+
+  it.each([
+    [
+      "51 pull requests",
+      {
+        pulls: Array.from({ length: 51 }, (_, i) =>
+          makeInFlightPull({ number: i + 1, closes: [] }),
+        ),
+        issues: [],
+      },
+    ],
+    ["a repository named .", { repo: { ...DEMO_REPO, name: "." } }],
+    ["an uppercase wiki head", { wikiHead: SHA_A.toUpperCase() }],
+  ])("refuses a snapshot with %s", (_name, overrides) => {
+    expect(InFlight.safeParse(makeInFlight(overrides as never)).success).toBe(false);
   });
 
   it("refuses a feature named twice by one issue", () => {
@@ -171,6 +236,14 @@ describe("InFlightFile", () => {
 describe("GitHubSnapshot", () => {
   it("accepts the fixture snapshot", () => {
     expect(GitHubSnapshot.parse(makeGitHubSnapshot())).toEqual(makeGitHubSnapshot());
+  });
+
+  it("refuses a pull request listing one closed issue or one path twice", () => {
+    for (const pull of [
+      makeGitHubPull({ closes: [7, 7] }),
+      makeGitHubPull({ files: ["a.py", "a.py"] }),
+    ])
+      expect(GitHubSnapshot.safeParse(makeGitHubSnapshot({ pulls: [pull] })).success).toBe(false);
   });
 
   it("refuses a body that still holds a newline or a bidi control", () => {

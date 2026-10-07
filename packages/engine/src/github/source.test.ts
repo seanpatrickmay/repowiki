@@ -112,6 +112,51 @@ describe("ghSource", () => {
     expect(snapshot.pulls.find((p) => p.number === 13)?.baseRefOid).toBeNull();
   });
 
+  it("counts a pull request GitHub repeats across pages once, its dropped paths and its gap too", () => {
+    const pulls = fixture("pulls") as {
+      data: { repository: { pullRequests: { totalCount: number; nodes: unknown[] } } };
+    };
+    const connection = pulls.data.repository.pullRequests;
+    // Page shift: #13 is read twice, so one open pull request was never read.
+    connection.nodes.push(connection.nodes[1]);
+    connection.totalCount += 1;
+    const snapshot = read(fakeGh(pulls).run);
+    expect(snapshot.pulls.map((p) => p.number)).toEqual([13, 12, 14]);
+    // The fixture's three refused paths, counted once though #13 came twice.
+    expect(snapshot.droppedPaths).toBe(3);
+    // Five in all, three kept and one dropped: one was never read.
+    expect(snapshot.omitted.pulls).toBe(1);
+  });
+
+  it("skips, never crashes, for an identity no constructor validated", () => {
+    const { run, calls } = fakeGh();
+    expect(ghSource({ run, now }).read({ owner: "acme demo", name: "x" })).toEqual({
+      skip: "acme demo/x is not a GitHub owner/name; pass --github owner/name",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("skips when the issues query fails after the pulls query answered", () => {
+    let n = 0;
+    const run: GhRunner = (args) => {
+      n++;
+      if (args.some((a) => a.includes("pullRequests"))) return ok(fixture("pulls"));
+      return { status: 1, stdout: "", stderr: "gh: Something went wrong\n", failure: null };
+    };
+    expect(ghSource({ run, now }).read(IDENTITY)).toEqual({
+      skip: "GitHub refused the query: gh: Something went wrong",
+    });
+    expect(n).toBe(2);
+  });
+
+  it("drops and counts a null node inside a page", () => {
+    const pulls = fixture("pulls") as {
+      data: { repository: { pullRequests: { nodes: unknown[] } } };
+    };
+    pulls.data.repository.pullRequests.nodes.push(null);
+    expect(read(fakeGh(pulls).run).dropped).toBe(2);
+  });
+
   it("badges bots and drafts, and nulls a deleted author", () => {
     const snapshot = read(fakeGh().run);
     const bot = snapshot.pulls.find((p) => p.number === 14);
@@ -278,6 +323,21 @@ describe("ghSource", () => {
       "no repository",
       { status: 0, stdout: '{"data":{"repository":null}}', stderr: "", failure: null },
       "GitHub has no repository acme/demo that gh can see",
+    ],
+    [
+      "an answer over 32 MiB",
+      { status: null, stdout: "", stderr: "", failure: "overflow" },
+      "GitHub's answer is over 32 MiB",
+    ],
+    [
+      "a gh that could not start",
+      { status: null, stdout: "", stderr: "", failure: "failed" },
+      "gh could not be run",
+    ],
+    [
+      "a gh stopped by a signal",
+      { status: null, stdout: "", stderr: "", failure: null },
+      "gh was stopped before it answered",
     ],
   ] as const)("skips on %s, saying why in one line (R3)", (_name, result, why) => {
     const outcome = ghSource({ run: () => ({ ...result }), now }).read(IDENTITY);

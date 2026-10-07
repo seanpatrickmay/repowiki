@@ -1,6 +1,7 @@
 import {
   type Author,
   GITHUB_LOGIN,
+  GITHUB_NAME,
   type GitHubIssue,
   type GitHubPull,
   GitHubSnapshot,
@@ -225,6 +226,8 @@ function graphql(
   if (out.failure === "timeout") throw new Skip(`gh took longer than ${GH_TIMEOUT_MS / 1000} s`);
   if (out.failure === "overflow") throw new Skip("GitHub's answer is over 32 MiB");
   if (out.failure !== null) throw new Skip("gh could not be run");
+  // No exit status and no spawn error: a signal stopped it.
+  if (out.status === null) throw new Skip("gh was stopped before it answered");
   if (out.status === 4) throw new Skip("gh is not logged in to github.com; run gh auth login");
   if (out.status !== 0) throw new Skip(`GitHub refused the query: ${firstLine(out.stderr)}`);
   try {
@@ -285,6 +288,16 @@ export function ghSource(options: { run?: GhRunner; now?: () => Date } = {}): Gi
   const now = options.now ?? (() => new Date());
   return {
     read(identity) {
+      // An identity built by hand, not by parseGitHubFlag or parseGitHubRemote: a skip, not a crash.
+      if (
+        !GITHUB_LOGIN.test(identity.owner) ||
+        !GITHUB_NAME.test(identity.name) ||
+        identity.name === "." ||
+        identity.name === ".."
+      )
+        return {
+          skip: `${inflightLine(`${identity.owner}/${identity.name}`, 100)} is not a GitHub owner/name; pass --github owner/name`,
+        };
       try {
         const pulls = readConnection(run, PULLS_QUERY, identity, 50, INFLIGHT_MAX_PULLS, (json) => {
           const parsed = PullsAnswer.safeParse(json);
@@ -313,8 +326,8 @@ export function ghSource(options: { run?: GhRunner; now?: () => Date } = {}): Gi
         let dropped = 0;
         let droppedPaths = 0;
         // A node that fails to parse is dropped and counted; one GitHub repeats (pages shift as
-        // items are updated between calls) is kept once.
-        const keep = <T, R extends { number: number }>(
+        // items are updated between calls) is kept once, and normalised (its paths counted) once.
+        const keep = <T extends { number: number }, R>(
           nodes: unknown[],
           schema: z.ZodType<T>,
           normalise: (raw: T) => R,
@@ -323,13 +336,17 @@ export function ghSource(options: { run?: GhRunner; now?: () => Date } = {}): Gi
           for (const node of nodes) {
             const parsed = schema.safeParse(node);
             if (!parsed.success) dropped++;
-            else {
-              const item = normalise(parsed.data);
-              if (!kept.has(item.number)) kept.set(item.number, item);
-            }
+            else if (!kept.has(parsed.data.number))
+              kept.set(parsed.data.number, normalise(parsed.data));
           }
           return [...kept.values()];
         };
+        const keptPulls = keep(pulls.nodes, RawPull, (raw) =>
+          normalisePull(raw, () => droppedPaths++),
+        );
+        const pullsDropped = dropped;
+        const keptIssues = keep(issues.nodes, RawIssue, normaliseIssue);
+        const issuesDropped = dropped - pullsDropped;
         const extra = pulls.extra as { private: boolean; branch: string | undefined };
         const snapshot = GitHubSnapshot.parse({
           repo: {
@@ -341,13 +358,12 @@ export function ghSource(options: { run?: GhRunner; now?: () => Date } = {}): Gi
               inflightLine(extra.branch ?? "", INFLIGHT_BRANCH_MAX_LENGTH) || "(unknown)",
           },
           fetchedAt: now().toISOString(),
-          pulls: keep(pulls.nodes, RawPull, (raw) => normalisePull(raw, () => droppedPaths++)).sort(
-            byActivity,
-          ),
-          issues: keep(issues.nodes, RawIssue, normaliseIssue).sort(byActivity),
+          pulls: keptPulls.sort(byActivity),
+          issues: keptIssues.sort(byActivity),
+          // Beyond the caps, and any a repeat displaced: GitHub's total less what was read.
           omitted: {
-            pulls: Math.max(0, pulls.total - pulls.nodes.length),
-            issues: Math.max(0, issues.total - issues.nodes.length),
+            pulls: Math.max(0, pulls.total - keptPulls.length - pullsDropped),
+            issues: Math.max(0, issues.total - keptIssues.length - issuesDropped),
           },
           dropped,
           droppedPaths,

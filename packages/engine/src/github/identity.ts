@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { GITHUB_LOGIN, GITHUB_NAME } from "@repowiki/core";
-import { scrubbedGitEnv } from "../index/index.ts";
+import { gitFailureCause, scrubbedGitEnv } from "../index/index.ts";
 
 /** A repository on github.com, by its validated owner and name (R24). */
 export interface GitHubIdentity {
@@ -41,14 +41,21 @@ export function parseGitHubRemote(url: string): GitHubIdentity | null {
  * has none or git cannot say.
  */
 export function readOriginUrl(repo: string): string | null {
+  const origin = readOrigin(repo);
+  return "url" in origin ? origin.url : null;
+}
+
+/** origin's URL, or why git gave none: a cause of RepoWiki's own environment, else null. */
+function readOrigin(repo: string): { url: string } | { cause: string | null } {
   const out = spawnSync("git", ["-C", repo, "remote", "get-url", "origin"], {
     env: scrubbedGitEnv(),
     encoding: "utf8",
     timeout: 10_000,
   });
-  if (out.error !== undefined || out.status !== 0) return null;
+  if (out.error !== undefined) return { cause: null };
+  if (out.status !== 0) return { cause: gitFailureCause(repo, out.stderr ?? "") ?? null };
   const url = out.stdout.trim();
-  return url === "" ? null : url;
+  return url === "" ? { cause: null } : { url };
 }
 
 /**
@@ -65,10 +72,12 @@ export function resolveGitHubIdentity(
       ? { skip: "--github must be owner/name, as GitHub spells them" }
       : { identity: parsed };
   }
-  const url = readOriginUrl(repo);
-  if (url === null)
-    return { skip: "the repository has no origin remote; pass --github owner/name" };
-  const parsed = parseGitHubRemote(url);
+  const origin = readOrigin(repo);
+  if (!("url" in origin))
+    return {
+      skip: origin.cause ?? "the repository has no origin remote; pass --github owner/name",
+    };
+  const parsed = parseGitHubRemote(origin.url);
   return parsed === null
     ? { skip: "the origin remote is not a github.com repository; pass --github owner/name" }
     : { identity: parsed };
