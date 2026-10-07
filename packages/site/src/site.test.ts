@@ -1374,3 +1374,22 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
     expect(site.read("index.html")).not.toContain('href="/special/in-progress/"');
   });
 });
+
+describe("site build --no-inflight (R18, C11)", () => {
+  let shared: BuiltSite;
+  beforeAll(() => {
+    shared = buildFixtureSite(["--no-inflight"], inflightExport(), "shared");
+  }, 120_000);
+  afterAll(() => shared?.cleanup());
+
+  it("builds the site and its export copy with no work in flight", () => {
+    expect(JSON.parse(shared.read("export.json")).inflight).toBeNull();
+    expect(shared.read("index.html")).not.toContain("/special/in-progress/");
+    expect(existsSync(join(shared.outDir, "special/in-progress/pr/12/index.html"))).toBe(false);
+    expect(shared.read("special/in-progress/index.html")).toContain(
+      "This wiki has no snapshot of its open pull requests and issues.",
+    );
+    for (const page of htmlFiles(shared.outDir))
+      expect(shared.read(page)).not.toContain("#12 Page");
+  });
+});

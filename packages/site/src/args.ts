@@ -9,6 +9,8 @@ export interface SiteArgs {
   outDir: string;
   /** Web URL of the documented repo (GitHub-style), or null to leave citations unlinked. */
   repoUrl: string | null;
+  /** False with `build --no-inflight`: the site and its export copy carry no work in flight. */
+  inflight: boolean;
 }
 
 export class UsageError extends Error {
@@ -16,15 +18,21 @@ export class UsageError extends Error {
 }
 
 export const USAGE =
-  "usage: site build --export <file|dir> [--out <dir>] [--repo-url <https-url>]\n" +
+  "usage: site build --export <file|dir> [--out <dir>] [--repo-url <https-url>] [--no-inflight]\n" +
   "       site preview (--export <file|dir> | --out <dir>)";
 
 const FLAGS = new Set(["--export", "--out", "--repo-url"]);
 
 /** Parses `build|preview` plus flags. The default --out is a `site` directory next to the export. */
 export function parseSiteArgs(argv: readonly string[]): SiteArgs {
-  const [command, ...rest] = argv;
+  const [command, ...given] = argv;
   if (command !== "build" && command !== "preview") throw new UsageError(USAGE);
+  // --no-inflight is the one flag without a value, and only build takes it.
+  const noInflight = given.filter((arg) => arg === "--no-inflight").length;
+  if (noInflight > 1) throw new UsageError(`--no-inflight was given more than once\n${USAGE}`);
+  if (noInflight > 0 && command !== "build")
+    throw new UsageError(`only build takes --no-inflight\n${USAGE}`);
+  const rest = given.filter((arg) => arg !== "--no-inflight");
   const flags = new Map<string, string>();
   for (let i = 0; i < rest.length; i += 2) {
     const flag = rest[i] ?? "";
@@ -42,8 +50,22 @@ export function parseSiteArgs(argv: readonly string[]): SiteArgs {
     throw new UsageError(`--export is required\n${USAGE}`);
   }
   const exportFile = exportFlag === undefined ? null : resolve(resolveExportFile(exportFlag));
-  const outDir = resolve(outFlag ?? resolve(dirname(exportFile ?? ""), "site"));
-  return { command, exportFile, outDir, repoUrl: parseRepoUrl(flags.get("--repo-url")) };
+  const defaultOut = resolve(dirname(exportFile ?? ""), "site");
+  const outDir = resolve(outFlag ?? defaultOut);
+  // <out>/site/ is the site wiki:serve rebuilds with the work in flight; a site to share without
+  // it goes elsewhere, so one directory never holds both (R18, C11).
+  if (noInflight > 0 && outDir === defaultOut) {
+    throw new UsageError(
+      `--no-inflight refuses ${defaultOut}, the site wiki:serve rebuilds with the work in flight; choose another --out\n${USAGE}`,
+    );
+  }
+  return {
+    command,
+    exportFile,
+    outDir,
+    repoUrl: parseRepoUrl(flags.get("--repo-url")),
+    inflight: noInflight === 0,
+  };
 }
 
 /**
