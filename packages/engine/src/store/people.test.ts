@@ -169,6 +169,17 @@ describe("person revisions", () => {
     expect(store.listPeopleRegistry().map((r) => r.id)).toEqual(["grace-hopper"]);
   });
 
+  it("forgets the redirects that point at a forgotten person, and keeps the others", () => {
+    store.putPeopleRegistry([
+      row(),
+      row({ id: "ada-old", order: 1, status: "redirect", to: "ada-lovelace", keys: [] }),
+      row({ id: "grace-hopper", order: 2, keys: [KEY("3")] }),
+      row({ id: "grace-old", order: 3, status: "redirect", to: "grace-hopper", keys: [] }),
+    ]);
+    store.forgetPerson("ada-lovelace");
+    expect(store.listPeopleRegistry().map((r) => r.id)).toEqual(["grace-hopper", "grace-old"]);
+  });
+
   it("resolves a login, a name or an email through the salted keys (spec v2 #6 §6)", () => {
     const key = (k: string) => saltedKey(store.getPeopleSalt(), k);
     expect(store.resolvePerson({ login: "ada" })).toBeNull();

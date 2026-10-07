@@ -40,8 +40,8 @@ export interface PeopleStore {
   /** Every revision of one person, oldest first. */
   listPersonHistory(personId: string): PersonRevision[];
   /**
-   * Deletes the person's revisions and registry row (wiki:people --forget); returns how many
-   * revisions went.
+   * Deletes the person's revisions, their registry row and every redirect row pointing at them
+   * (wiki:people --forget); returns how many revisions went.
    */
   forgetPerson(personId: string): number;
   /**
@@ -167,7 +167,12 @@ export function peopleStore(db: Database.Database): PeopleStore {
     forgetPerson(personId) {
       return db.transaction(() => {
         const gone = db.prepare("DELETE FROM person_revisions WHERE person_id = ?").run(personId);
-        db.prepare("DELETE FROM people_registry WHERE id = ?").run(personId);
+        // A redirect to a forgotten id would point nowhere: it goes with the person.
+        const dropped = people
+          .listPeopleRegistry()
+          .filter((r) => r.id === personId || r.to === personId);
+        const remove = db.prepare("DELETE FROM people_registry WHERE id = ?");
+        for (const r of dropped) remove.run(r.id);
         return gone.changes;
       })();
     },
