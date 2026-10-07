@@ -1542,6 +1542,203 @@
       "labels": ["v2", "type:task", "area:infra"],
       "parent": "F09",
       "body": "**Deliverable:** the fixes the whole-milestone review asks for, and the owner's runbook for spec v2 #4 section 12 posted on #13.\n\n**Done when:** the review's findings are fixed or ruled on, and the runbook is on #13. The scored run is the owner's. Plan: docs/superpowers/plans/2026-10-05-repowiki-m9-ask-sidebar.md Task 23."
+    },
+    {
+      "key": "M10-1",
+      "title": "[M10] tracker: M10 tickets and ADR-0005",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F23",
+      "closed": true,
+      "body": "**Deliverable:** M10 tickets M10-1..M10-28 in seed.json, under F23; docs/decisions/0005-github-through-gh.md (gh as the GitHub reader, spec v2 #9 R1).\n\n**Done when:** the seed creates M10-2..M10-28 under F23, and ADR-0005 is on main. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 1."
+    },
+    {
+      "key": "M10-2",
+      "title": "[M10] core: the GitHub snapshot schemas, neutralised GitHub text and the inflight role",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** core's inflight.ts, first half: the limits, GITHUB_LOGIN and GITHUB_NAME, inflightLine and inflightBody (the one neutralisation of GitHub text), GitHubRepo, Author, GitHubPull, GitHubIssue and GitHubSnapshot, githubUrl and githubBlobUrl; LlmRole and RunKind gain inflight; llm's DEFAULT_MODELS.inflight is claude-haiku-4-5; DEMO_REPO and makeGitHub* fixtures.\n\n**Done when:** tests pass, every M7-M9 ledger row and config still parses, and M7's, M8's and M9's cassettes replay unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 2."
+    },
+    {
+      "key": "M10-3",
+      "title": "[M10] core: the derived work-in-flight snapshot and WikiExport.inflight",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** core's inflight.ts, second half: InFlightClaim, InFlightSummary, InFlightFile, InFlightFeature, InFlightEffect, InFlightPull, IssueEvidence, InFlightIssue and InFlight with their cross-field checks, and inflightProblems; WikiExport.inflight (null by default, checked by inflightProblems in its superRefine); makeInFlightPull, makeInFlightIssue and makeInFlight fixtures.\n\n**Done when:** tests pass and every existing export fixture still parses. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 3."
+    },
+    {
+      "key": "M10-4",
+      "title": "[M10] store: migration 9 with the work-in-flight snapshots and summary cache",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** migration 9 (github_snapshot, inflight, inflight_summaries) appended to migrations.ts; Store's putGitHubSnapshot, getGitHubSnapshot, putInFlight, getInFlight, clearInFlight, getInFlightSummary, putInFlightSummary and pruneInFlightSummaries; buildExport carries the stored snapshot when inflightProblems finds nothing.\n\n**Done when:** tests pass, a store at schema 8 migrates without losing a row, and no shipped migration is edited. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 4."
+    },
+    {
+      "key": "M10-5",
+      "title": "[M10] github: the gh runner, the repository's GitHub identity, and token redaction",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's github/gh.ts (GhResult, GhRunner, ghEnv, spawnGh: argv only, no ANTHROPIC_*, a 60 s timeout, a 32 MiB cap) and github/identity.ts (parseGitHubFlag, parseGitHubRemote, readOriginUrl, resolveGitHubIdentity); describeError and problemLine redact GitHub token shapes (R25).\n\n**Done when:** tests pass with a fake gh on PATH and no network; token-shaped test strings are built at run time. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 5."
+    },
+    {
+      "key": "M10-6",
+      "title": "[M10] github: read open pull requests and issues into a normalised snapshot",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's github/source.ts (PULLS_QUERY, ISSUES_QUERY, normalisePull, normaliseIssue, ghSource: paged by hand to the caps, each node parsed on its own, the skip reasons of R3) and the hand-written GraphQL fixtures with hostile titles, labels, logins, paths and bodies.\n\n**Done when:** tests pass from the fixtures alone; no body text survives normalisation uncut. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 6."
+    },
+    {
+      "key": "M10-7",
+      "title": "[M10] index: diffTrees, readSources only, and git options on every read",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** GitOptions gains env, passed to scrubbedGitEnv by every index read (resolveCommit, listBlobs, streamBlobs, commitFiles, readHistory, readSources, indexRepo, isAncestor); readSources gains only; assertOid and diffTrees (any two tree-ish objects) share diffObjects with diffCommits.\n\n**Done when:** tests pass (GIT_TRACE shows the options reach git) and every existing index test passes unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 7."
+    },
+    {
+      "key": "M10-8",
+      "title": "[M10] inflight: keep pull-request heads in inflight.git and fetch them hardened",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/heads.ts (INFLIGHT_DIR, INFLIGHT_GIT_ENV, INFLIGHT_GIT, inflightGit, ensureInflightRepo with alternates, removeInflightRepo, githubFetchUrl, fetchHeads with its per-pull-request fallback and refetch, headStates, isMissingObject, pullRef); inflight/test-inflight.ts (inflightFixture, listing); freshness/index.ts exports builtWiki, inputAt and STORE_PY for other modules' tests.\n\n**Done when:** tests pass over the file protocol only; the documented repository's .git listing is unchanged; insteadOf and GIT_ALLOW_PROTOCOL controls hold. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 8."
+    },
+    {
+      "key": "M10-9",
+      "title": "[M10] inflight: map a pull request's changed files to features, with line counts and drift",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/impact.ts (ImpactContext, PullChanges, mergeBase, lineCounts, pullChanges: member, placed and fallback files, per-feature counts and drift, heaviest first; featuresFromPaths for a head inflight.git lacks).\n\n**Done when:** tests pass on the fixture remote, including a new directory, a rename and a deletion. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 9."
+    },
+    {
+      "key": "M10-10",
+      "title": "[M10] inflight: predict the claims a pull request would make stale from its merged tree",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/effects.ts (mergeTree, staleClaims, fileLevelEffects, pullImpact): a clean merge-tree remapped over the cited paths, may-change for conflicts and old gits, the R21 driver test, and the impact-equivalence test against a real merge and planUpdate.\n\n**Done when:** tests pass; the impact-equivalence test predicts exactly what the update marks stale; the evil driver never runs and its control does. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 10."
+    },
+    {
+      "key": "M10-11",
+      "title": "[M10] inflight: map open issues to features with the evidence for each",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/issues.ts (Suggest, ClosingPull, mapIssues with pull, path, name, label and search evidence, PULL_SHARE, BODY_EXCERPT_LENGTH, NAME_MIN_LENGTH, SEARCH_SCORE_FLOOR, SEARCH_MARGIN).\n\n**Done when:** tests pass for each evidence kind, the order, the 3-feature cap, the name and stop-word rules and the 2,000-character excerpt. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 11."
+    },
+    {
+      "key": "M10-12",
+      "title": "[M10] inflight: build a pull request's summary prompt from its numbered diff",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/summary-pack.ts (INFLIGHT_PROMPT_VERSION, INFLIGHT_PACK_BUDGET_TOKENS, INFLIGHT_MAX_OUTPUT_TOKENS, INFLIGHT_INSTRUCTIONS, inflightSystemPrompt, PackInput, summaryPack, summaryRequestKey); write/index.ts exports clean and clip.\n\n**Done when:** tests pass; the system prompt is under 4,096 estimated tokens; numbered lines match sourceLines. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 12."
+    },
+    {
+      "key": "M10-13",
+      "title": "[M10] inflight: verify and link summary claims, and send the summary calls in one batch",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/summary.ts (InFlightAnswer, SummaryRequest, summaryRequest, verifySummary, summarize): claims citing only shown head lines, linked over the manifest, all requests in one tick, failures per pull request.\n\n**Done when:** tests pass with a scripted provider. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 13."
+    },
+    {
+      "key": "M10-14",
+      "title": "[M10] inflight: the recorded summary cassette",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** packages/engine/src/inflight/summary.claude.test.ts and its cassette __cassettes__/inflight-summary.json: two unbatched summary calls on the fixture, one with a hostile description, asserting invariants only.\n\n**Done when:** the test replays in CI with no network, and the secret scan finds no key or auth header in the cassette. Recorded once live, about $0.02. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 14."
+    },
+    {
+      "key": "M10-15",
+      "title": "[M10] inflight: derive impacts, summary requests and issues from the stored snapshot",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/refresh.ts, first half: DeriveInput, DerivedPull, Derived and deriveInFlight (each fetched head's impact against the store's head and pages, the others from GitHub's file list, each summary request and its cached answer, the issues mapped; a lost object marks the store corrupt); isMissingObject also knows \"Not a valid commit name\".\n\n**Done when:** tests pass on the fixture remote. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 15."
+    },
+    {
+      "key": "M10-16",
+      "title": "[M10] inflight: estimate and budget the summaries, ask for the missing ones, and assemble the snapshot",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** engine's inflight/refresh.ts, second half: TYPICAL_SUMMARY_OUTPUT_TOKENS, misses, SummaryEstimate and estimateSummaries, withinBudget, SummaryStatus, CompleteOptions, Completed and completeInFlight (the round within --max-usd, the cache written and pruned, a kept summary for a head that did not move, the snapshot checked against the wiki).\n\n**Done when:** tests pass with a scripted provider: a second refresh makes no call. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 16."
+    },
+    {
+      "key": "M10-17",
+      "title": "[M10] query: rank page matches with their scores",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** query's SearchIndex.ranked(query, limit) and RankedMatch; search unchanged.\n\n**Done when:** tests pass and v1-tools.txt is unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 17."
+    },
+    {
+      "key": "M10-18",
+      "title": "[M10] scripts: wiki:inflight's arguments, estimate line, summary table and issue search",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** scripts/inflight-cli.ts (INFLIGHT_USAGE, DEFAULT_INFLIGHT_USD, parseInflightArgs, readLine, fetchLine, inflightEstimateLine, renderInflightTable, suggestFor); wiki-cli's deadlineMinutes exported; engine exports Suggest.\n\n**Done when:** tests pass; no usage error echoes a flag's value. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 18."
+    },
+    {
+      "key": "M10-19",
+      "title": "[M10] scripts: refresh work in flight online and offline, under --max-usd, and clear it",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** scripts/inflight-run.ts (RefreshContext, RefreshSources, RefreshResult, refreshOnline, refreshOffline, clearInFlightData); LazyClaudeOptions.run takes any RunKind and LiveCommand gains wiki:inflight; engine's ./test-inflight subpath.\n\n**Done when:** tests pass in process with a fake GitHub source, a file remote and a scripted provider. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 19."
+    },
+    {
+      "key": "M10-20",
+      "title": "[M10] scripts: pnpm wiki:inflight",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** scripts/wiki-inflight.ts and the wiki:inflight script; builtWiki takes a db path and inflightFixture({ onDisk }); process tests with a fake gh first on PATH, GIT_ALLOW_PROTOCOL=file, the body canary and the .git listing.\n\n**Done when:** tests pass as processes with no ANTHROPIC_*, GH_* or GITHUB_* variable and no network. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 20."
+    },
+    {
+      "key": "M10-21",
+      "title": "[M10] scripts: re-derive after wiki:update and wiki:replay, and compare the merged pull request's predictions",
+      "labels": ["v2", "type:task", "area:engine"],
+      "parent": "F23",
+      "body": "**Deliverable:** scripts/inflight-hook.ts (BeforeUpdate, beforeUpdate, mergedBetween, compareLine, HookContext, inflightAfterUpdate); wiki:update writes the Work in flight section into its summary (writeUpdateOutputs' extra); wiki:replay runs the hook once at the head it reached.\n\n**Done when:** tests pass: an update across a merged snapshot pull request drops it, re-derives the rest offline with a provider that throws, writes the comparison, and leaves the repository's .git unchanged; every existing wiki:update and wiki:replay test passes unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 21."
+    },
+    {
+      "key": "M10-22",
+      "title": "[M10] site: the work in flight's status line, banner and index view",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F23",
+      "body": "**Deliverable:** site's inflight.ts (STALE_AFTER_DAYS, FeatureRef, InflightStatus, inflightStatus, badges, evidenceText, IssueRow, InflightIndexView, inflightIndexView); urls' IN_PROGRESS_URL and pullUrl; test-inflight.ts (fixtureInFlight, inflightExport, HOSTILE_PULL_TITLE).\n\n**Done when:** tests pass; the banner reads only the export, never the clock. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 22."
+    },
+    {
+      "key": "M10-23",
+      "title": "[M10] site: what each open pull request would change, claim by claim",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F23",
+      "body": "**Deliverable:** site's pullView, PullView and pullFeatureAnchor: summary claims with references at the head, every feature it touches or whose page it affects, each effect quoted as plain text and linked to its claim.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 23."
+    },
+    {
+      "key": "M10-24",
+      "title": "[M10] site: the Work in progress pages and their nav link",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F23",
+      "body": "**Deliverable:** pages/special/in-progress/index.astro and pr/[n].astro (noindex, no data-pagefind-body); the nav link after About; wiki.css's wikitable, badge and inflight styles; the site test's in-flight build with two new snapshots.\n\n**Done when:** tests pass, the crawl test finds no broken link or anchor, and every existing snapshot is unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 24."
+    },
+    {
+      "key": "M10-25",
+      "title": "[M10] site: build a site to share with --no-inflight",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F23",
+      "body": "**Deliverable:** site's args (--no-inflight, refusing the export's own site/, build only), buildSite's inflight option (pages and the root export from a copy with inflight null), cli.ts passing it, and buildFixtureSite's outName.\n\n**Done when:** tests pass. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 25."
+    },
+    {
+      "key": "M10-26",
+      "title": "[M10] site: claim markers, the notice and each article's In progress section",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F23",
+      "body": "**Deliverable:** site's inflight-article.ts (MAX_CLAIM_MARKERS, IN_PROGRESS_ANCHOR, ArticleInflight, articleInflight); articleView's inflight argument (markers, the Contents entry, view.inflight); pageFor passes it for current articles; Article.astro's notice and InflightSection.astro; one new snapshot.\n\n**Done when:** tests pass, all additions carry data-pagefind-ignore, and every existing snapshot is unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 26."
+    },
+    {
+      "key": "M10-27",
+      "title": "[M10] site: the Main Page's In progress box",
+      "labels": ["v2", "type:task", "area:site"],
+      "parent": "F23",
+      "body": "**Deliverable:** MainPageView.inProgress and IN_PROGRESS_COUNT; the box on index.astro, outside search.\n\n**Done when:** tests pass and the existing Main Page snapshot is unchanged. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 27."
+    },
+    {
+      "key": "M10-28",
+      "title": "[M10] the live gate on RepoWiki, CLAUDE.md, and the owner's runbook",
+      "labels": ["v2", "type:task", "area:infra"],
+      "parent": "F23",
+      "body": "**Deliverable:** the whole-milestone review's fixes; the wiki:inflight line in CLAUDE.md; spec v2 #9 §12.1 and §12.4-6 checked live on RepoWiki itself; the owner's runbook for next-chief-of-staff posted on F23.\n\n**Done when:** the review's findings are fixed or ruled on, the gate's results are on F23, and the runbook is there. The scored criteria (§12.2-4 on next-chief-of-staff) are the owner's. Plan: docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md Task 28."
     }
   ]
 }
