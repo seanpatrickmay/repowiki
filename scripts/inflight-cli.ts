@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { GitHubSnapshot, InFlight, WikiExport } from "@repowiki/core";
+import type { GitHubSnapshot, InFlight, InFlightPull, WikiExport } from "@repowiki/core";
 import type { HeadState, Suggest, SummaryEstimate, SummaryStatus } from "@repowiki/engine";
 import type { LedgerTotals } from "@repowiki/llm";
 import { ABOUT_PAGE_ID, pageSearchIndex, WikiView } from "@repowiki/query";
@@ -150,8 +150,33 @@ export function inflightEstimateLine(
   estimate: SummaryEstimate,
   args: Pick<InflightArgs, "maxUsd" | "batch">,
 ): string {
-  const due = estimate.requests - estimate.cached;
+  const due = Math.max(0, estimate.requests - estimate.cached);
   return `${plural(estimate.requests, "pull-request summary", "pull-request summaries")} (${count(estimate.cached)} cached, ${count(due)} to request): about ${money(estimate.typicalUsd)}${args.batch ? " (batched)" : ""} assuming 700 output tokens each and no cache hits, at most ${money(estimate.ceilingUsd)} if every answer takes 1,500; no summary is requested beyond ${money(args.maxUsd)} (--max-usd)`;
+}
+
+/**
+ * The estimate line when the inflight model has no price and no call can happen this run
+ * (--offline, --no-llm, the update hook): what is due, and that it is not estimated or asked.
+ */
+export function unpricedEstimateLine(
+  estimate: { requests: number; cached: number },
+  model: string,
+): string {
+  const due = Math.max(0, estimate.requests - estimate.cached);
+  return `${plural(estimate.requests, "pull-request summary", "pull-request summaries")} (${count(estimate.cached)} cached, ${count(due)} to request): no estimate, since the inflight role's model ${model} has no known price; none is requested this run`;
+}
+
+/**
+ * wiki:build's line when the store holds a snapshot its new export leaves out (it disagrees with
+ * the rebuilt pages); null otherwise. The build stays as v1: it re-derives nothing.
+ */
+export function inflightLeftOutLine(
+  stored: InFlight | null,
+  wiki: Pick<WikiExport, "inflight">,
+): string | null {
+  return stored !== null && wiki.inflight === null
+    ? "work in flight left out: rebuilt at a new revision; run wiki:inflight --offline"
+    : null;
 }
 
 /** A pull request's predicted effect on the pages: certain stale claims, then the uncertain ones. */
@@ -179,23 +204,33 @@ export function renderInflightTable(
           : pull.features.map((f) => cell(f.featureId)).join(", ");
       return `| ${cell(`#${pull.number} ${pull.title}`)} | ${features} | ${effectCell(pull)} | ${status.get(pull.number) ?? "none"} |`;
     }),
-    ...inflight.pulls.flatMap((pull) =>
-      !pull.behind
-        ? []
-        : pull.baseSha === null
-          ? [
-              `#${pull.number}: its base was not read, so its effects only may change; run pnpm wiki:inflight again`,
-            ]
-          : [
-              `#${pull.number}: the wiki is behind this pull request's base (${pull.baseSha.slice(0, 7)}); run pnpm wiki:update for exact predictions`,
-            ],
-    ),
+    ...inflight.pulls.flatMap((pull) => {
+      const why = behindLine(pull);
+      return why === null ? [] : [`#${pull.number}: ${why}`];
+    }),
     ...[...failures].map(([n, why]) => `#${n}: no summary this run: ${problemLine(why)}`),
   ];
   return lines.join("\n");
 }
 
-/** How many pages issue search weighs: the best and the runner-up, after the About article. */
+/** R27's one line for why the wiki cannot predict a pull request exactly, or null. */
+function behindLine(pull: InFlightPull): string | null {
+  switch (pull.behind) {
+    case null:
+      return null;
+    case "stacked":
+      return `targets ${cell(pull.baseRef)}, which the wiki does not describe; its predictions are may-change until ${cell(pull.baseRef)} merges`;
+    case "base-unread":
+      return "its base could not be read this run; run pnpm wiki:inflight again";
+    case "wiki-behind":
+      return `the wiki is behind this pull request's base (${(pull.baseSha ?? "").slice(0, 7)}); run pnpm wiki:update for exact predictions`;
+  }
+}
+
+/**
+ * How many pages issue search asks for: three, so that with the About article left out the
+ * caller still has the best page and the runner-up to weigh.
+ */
 const SUGGEST_PAGES = 3;
 
 /**

@@ -307,7 +307,7 @@ export function makeInFlightPull(overrides: Partial<InFlightPull> = {}): InFligh
     headSha: SHA_C,
     mergeBase: SHA_A,
     baseSha: SHA_A,
-    behind: false,
+    behind: null,
     merge: "clean",
     mergeReason: null,
     files: [

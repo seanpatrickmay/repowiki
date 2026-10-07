@@ -1,3 +1,5 @@
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestRepo, type TestRepo } from "../index/index.ts";
 import {
@@ -71,6 +73,25 @@ describe("resolveGitHubIdentity", () => {
     expect(resolveGitHubIdentity(repo.dir, null)).toEqual({
       identity: { owner: "acme", name: "first" },
     });
+  });
+
+  it("says git found the repository unsafe rather than that it has no origin", () => {
+    const bin = join(repo.dir, "..", `fake-git-${process.pid}`);
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\necho "fatal: detected dubious ownership in repository at '${repo.dir}'" >&2\nexit 128\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    const saved = process.env.PATH;
+    process.env.PATH = `${bin}:${saved ?? ""}`;
+    try {
+      const skip = resolveGitHubIdentity(repo.dir, null);
+      expect("skip" in skip && skip.skip).toMatch(/^git treats the repository as unsafe/);
+    } finally {
+      process.env.PATH = saved;
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 
   it("skips with a hint when there is no origin, or origin is not on github.com", () => {

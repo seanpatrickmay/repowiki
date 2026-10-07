@@ -179,6 +179,66 @@ describe("mapIssues (R12)", () => {
     expect(asked).toBe(false);
   });
 
+  it("orders closing pull requests by number, whatever order they come in", () => {
+    const pulls = [
+      { number: 30, closes: [7], features: [feature("scheduler", 10)] },
+      { number: 12, closes: [7], features: [feature("signals", 10)] },
+    ];
+    expect(map({}, pulls)?.features.map((e) => [e.featureId, e.detail])).toEqual([
+      ["signals", "#12"],
+      ["scheduler", "#30"],
+    ]);
+  });
+
+  it("orders path, then name, then label evidence for three features", () => {
+    const issue = map({
+      title: "src/deliverables/crud.py fails in Scheduler",
+      labels: ["area:signals"],
+    });
+    expect(issue?.features.map((e) => [e.featureId, e.kind])).toEqual([
+      ["deliverables", "path"],
+      ["scheduler", "name"],
+      ["signals", "label"],
+    ]);
+  });
+
+  it("keeps a search hit at exactly the floor and at exactly 1.5 times the runner-up", () => {
+    const hits =
+      (...scores: [string, number][]): Suggest =>
+      () =>
+        scores.map(([featureId, score]) => ({ featureId, score }));
+    expect(map({}, [], hits(["scheduler", 3]))?.features).toHaveLength(1);
+    expect(map({}, [], hits(["scheduler", 6], ["signals", 4]))?.features).toHaveLength(1);
+    // Hits out of order, and a feature that is its own runner-up, do not hide the best one.
+    expect(map({}, [], hits(["signals", 2], ["scheduler", 8]))?.features[0]?.featureId).toBe(
+      "scheduler",
+    );
+    expect(map({}, [], hits(["scheduler", 8], ["scheduler", 7]))?.features[0]?.featureId).toBe(
+      "scheduler",
+    );
+  });
+
+  it("reads a basename as unique only across every member, and never maps a retired feature's file", () => {
+    const withRetired: Manifest = {
+      ...manifest,
+      membership: {
+        ...manifest.membership,
+        "src/exporter/cron.py": { featureId: "exporter", weight: 1 },
+        "src/exporter/csv.py": { featureId: "exporter", weight: 1 },
+      },
+    };
+    const one = (title: string) =>
+      mapIssues([makeGitHubIssue({ title, body: "", labels: [] })], [], withRetired)[0];
+    expect(one("cron.py crashes")?.features).toEqual([]);
+    expect(one("src/exporter/csv.py crashes")?.features).toEqual([]);
+  });
+
+  it("gives a label that maps as its evidence, as plain text", () => {
+    expect(map({ labels: ["!!signals!!"] })?.features).toEqual([
+      { featureId: "signals", kind: "label", detail: "!!signals!!" },
+    ]);
+  });
+
   it("keeps hostile text as plain evidence and lists an unmapped issue with none", () => {
     const issue = map({ title: "<script>alert(1)</script>", labels: ["<b>x</b>"] });
     expect(issue?.features).toEqual([]);

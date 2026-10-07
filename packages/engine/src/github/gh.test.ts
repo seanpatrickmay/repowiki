@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ghEnv, spawnGh } from "./gh.ts";
+import { GH_MAX_OUTPUT_BYTES, GH_TIMEOUT_MS, ghEnv, ghRunner, spawnGh } from "./gh.ts";
 
 describe("ghEnv (R25)", () => {
   it("removes every ANTHROPIC_* variable and turns off prompts, the notifier and colour", () => {
@@ -82,5 +82,18 @@ describe("spawnGh", () => {
   it("says gh is missing when no gh is on PATH", () => {
     process.env.PATH = dir;
     expect(spawnGh(["--version"])).toMatchObject({ failure: "missing", status: null });
+  });
+
+  it("stops a gh that runs too long, and one whose answer is too large", () => {
+    writeFileSync(
+      join(dir, "gh"),
+      '#!/bin/sh\ncase "$1" in slow) exec /bin/sleep 30;; esac\nhead -c 5000 /dev/zero\n',
+    );
+    chmodSync(join(dir, "gh"), 0o755);
+    process.env.PATH = `${dir}:${saved.path ?? ""}`;
+    const run = ghRunner({ timeoutMs: 300, maxBytes: 100 });
+    expect(run(["slow"])).toMatchObject({ failure: "timeout", status: null });
+    expect(run(["flood"])).toMatchObject({ failure: "overflow" });
+    expect([GH_TIMEOUT_MS, GH_MAX_OUTPUT_BYTES]).toEqual([60_000, 32 * 1024 * 1024]);
   });
 });

@@ -24,6 +24,7 @@ import {
   writeSystemPrompt,
 } from "@repowiki/engine";
 import { createLedger, type ModelConfig, totalsOf } from "@repowiki/llm";
+import { inflightLeftOutLine } from "./inflight-cli.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
@@ -164,7 +165,12 @@ async function runBuild(
       },
     );
     const exportPath = join(out, "export.json");
-    writeExport(store, exportPath, { repo: repoName, exportedAt: new Date().toISOString() });
+    const wiki = writeExport(store, exportPath, {
+      repo: repoName,
+      exportedAt: new Date().toISOString(),
+    });
+    const leftOut = inflightLeftOutLine(store.getInFlight(), wiki);
+    if (leftOut !== null) console.error(leftOut);
     if (build.written === null && build.architecture === null) {
       const article =
         build.architectureSkipped === "current" ? ", and so is the About article" : "";

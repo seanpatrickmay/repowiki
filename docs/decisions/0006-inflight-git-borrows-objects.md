@@ -39,9 +39,12 @@ documented repository.
 A test (`packages/engine/src/inflight/refresh.test.ts`, "the documented repository (ADR-0006)")
 fetches pull-request heads and bases into inflight.git and derives their impacts (merge-tree
 included, with one pull request whose merged tree the documented repository already holds), then
-checks that the documented repository's `objects/` file list and contents, its refs, its config
-and its index are byte-identical to before. It compares contents, not mtimes, because the
-freshening above is expected.
+checks that every file under the documented repository's `.git` (objects, refs, packed-refs, HEAD,
+config, index, logs, info and hooks) is still there, with the same bytes, and that no file was
+added. It compares paths and contents, not mtimes, because the freshening above is expected. It
+does not assert that a freshen happened: an mtime is only as fine as the filesystem's clock, so a
+test that two mtimes differ would pass or fail by timing, and the exception is what the test
+allows, not what it requires.
 
 ## Consequences
 

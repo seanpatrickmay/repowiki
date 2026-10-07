@@ -82,7 +82,7 @@ function bare(pull: GitHubPull, head: HeadState, manifest: Manifest): Omit<InFli
     ...common(pull),
     head,
     mergeBase: null,
-    behind: false,
+    behind: null,
     merge: "unknown",
     mergeReason: null,
     files: [],
@@ -95,7 +95,7 @@ function bare(pull: GitHubPull, head: HeadState, manifest: Manifest): Omit<InFli
 
 /**
  * A fetched pull request whose base was not read (R27: no base oid from GitHub, or its fetch
- * failed): behind, from GitHub's file list, every claim citing one of those files only may
+ * failed): behind for the reason `base-unread`, whatever its base branch, from GitHub's file list, every claim citing one of those files only may
  * change, and no summary this run (its own diff is unknown).
  */
 function baseUnread(
@@ -112,7 +112,7 @@ function baseUnread(
   }));
   return {
     ...bare(pull, "fetched", manifest),
-    behind: true,
+    behind: "base-unread",
     effects: fileLevelEffects(pages, listed),
   };
 }
@@ -220,7 +220,11 @@ export async function deriveInFlight(input: DeriveInput): Promise<Derived> {
             closes,
             head: "fetched",
             mergeBase: impact.mergeBase,
-            behind: impact.behind,
+            behind: !impact.behind
+              ? null
+              : pull.baseRef === snapshot.repo.defaultBranch
+                ? "wiki-behind"
+                : "stacked",
             merge: impact.merge,
             mergeReason: impact.mergeReason,
             files: impact.files,

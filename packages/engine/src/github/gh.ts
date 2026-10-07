@@ -1,11 +1,18 @@
 import { spawnSync } from "node:child_process";
 
-/** One `gh` run: its exit status and output, or why it never finished. */
+/**
+ * One `gh` run: its exit status and output, or why it never finished. `failure` null with a
+ * status means gh ran (0, or its own error code); null with a null status means a signal stopped
+ * it. Check `failure` before parsing: an overflow still holds the output read so far.
+ */
 export interface GhResult {
   status: number | null;
   stdout: string;
   stderr: string;
-  /** missing: no gh on PATH; timeout: past GH_TIMEOUT_MS; overflow: past GH_MAX_OUTPUT_BYTES. */
+  /**
+   * missing: no gh on PATH; timeout: past the time limit; overflow: past the output cap; failed:
+   * any other spawn error.
+   */
   failure: "missing" | "timeout" | "overflow" | "failed" | null;
 }
 
@@ -44,13 +51,21 @@ export function ghEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv 
   return env;
 }
 
+/** A runner of `gh` from PATH, argv only, stopped after `timeoutMs` and `maxBytes` of output. */
+export function ghRunner(limits: { timeoutMs?: number; maxBytes?: number } = {}): GhRunner {
+  return (args) =>
+    runGh(args, limits.timeoutMs ?? GH_TIMEOUT_MS, limits.maxBytes ?? GH_MAX_OUTPUT_BYTES);
+}
+
 /** The real runner: `gh` from PATH, argv only, 60 s and 32 MiB at most. */
-export const spawnGh: GhRunner = (args) => {
+export const spawnGh: GhRunner = ghRunner();
+
+function runGh(args: readonly string[], timeoutMs: number, maxBytes: number): GhResult {
   const out = spawnSync("gh", args, {
     env: ghEnv(),
     encoding: "utf8",
-    timeout: GH_TIMEOUT_MS,
-    maxBuffer: GH_MAX_OUTPUT_BYTES,
+    timeout: timeoutMs,
+    maxBuffer: maxBytes,
   });
   const code = (out.error as NodeJS.ErrnoException | undefined)?.code;
   const failure =
@@ -64,4 +79,4 @@ export const spawnGh: GhRunner = (args) => {
             ? "overflow"
             : "failed";
   return { status: out.status, stdout: out.stdout ?? "", stderr: out.stderr ?? "", failure };
-};
+}

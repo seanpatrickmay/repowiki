@@ -97,11 +97,12 @@ function writeAtomically(path: string, text: string): void {
 /**
  * Writes the export to `outPath` and the wiki's llms.txt beside it (spec §3 `export`), each
  * atomically, so a reader (or a site build) never sees half an export, and a failed write leaves
- * the previous files in place.
+ * the previous files in place. Returns the export it wrote.
  */
-export function writeExport(store: Store, outPath: string, options: ExportOptions): void {
+export function writeExport(store: Store, outPath: string, options: ExportOptions): WikiExport {
   const wiki = buildExport(store, options);
   mkdirSync(dirname(outPath), { recursive: true });
   writeAtomically(outPath, `${JSON.stringify(wiki, null, 2)}\n`);
   writeAtomically(join(dirname(outPath), LLMS_TXT_FILE), renderLlmsTxt(wiki, basename(outPath)));
+  return wiki;
 }

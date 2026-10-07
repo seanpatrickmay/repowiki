@@ -42,6 +42,23 @@ describe("inflightLine", () => {
     expect(inflightLine("abc   defg", 5)).toBe("abc…");
   });
 
+  it("blanks fillers that render as nothing, and makes a lone surrogate well formed", () => {
+    for (const filler of [
+      "\u034F",
+      "\u115F",
+      "\u1160",
+      "\u2800",
+      "\u3164",
+      "\uFFA0",
+      "\uFE0F",
+      "\uFFFC",
+    ])
+      expect(inflightLine(`a${filler}b`, 200), JSON.stringify(filler)).toBe("a b");
+    expect(inflightLine("\u3164\u3164", 200)).toBe("");
+    expect(inflightLine("a\uD800b", 200)).toBe("a\uFFFDb");
+    expect(inflightBody("a\uD800\u3164b")).toBe("a\uFFFD b");
+  });
+
   it("escapes nothing, and gives the same line again for its own output", () => {
     const hostile = "<script>alert(1)</script> [[signals]] `x` [a](javascript:x)";
     expect(inflightLine(hostile, 200)).toBe(hostile);
@@ -63,6 +80,12 @@ describe("GitHub URLs", () => {
   it("builds a pull request's and an issue's page from the repo and number alone", () => {
     expect(githubUrl(DEMO_REPO, "pull", 12)).toBe("https://github.com/acme/demo/pull/12");
     expect(githubUrl(DEMO_REPO, "issues", 7)).toBe("https://github.com/acme/demo/issues/7");
+  });
+
+  it("encodes the commit too, so no string can change a blob link's shape", () => {
+    expect(githubBlobUrl(DEMO_REPO, "a/../b?c", "a.py", 1, 1)).toBe(
+      "https://github.com/acme/demo/blob/a%2F..%2Fb%3Fc/a.py#L1",
+    );
   });
 
   it("links a file's lines at a commit with percent-encoded path segments", () => {
@@ -96,6 +119,65 @@ describe("InFlight", () => {
 
   it("accepts a deleted author as null", () => {
     expect(InFlightPull.safeParse(makeInFlightPull({ author: null })).success).toBe(true);
+  });
+
+  it("accepts a pull request at each bound: a 200-character title, ten labels, 50 pulls", () => {
+    const bounded = makeInFlightPull({
+      title: "x".repeat(200),
+      labels: Array.from({ length: 10 }, (_, i) => `l${i}`),
+    });
+    expect(InFlightPull.safeParse(bounded).success).toBe(true);
+    const fifty = makeInFlight({
+      pulls: Array.from({ length: 50 }, (_, i) => makeInFlightPull({ number: i + 1, closes: [] })),
+      issues: [],
+    });
+    expect(InFlight.safeParse(fifty).success).toBe(true);
+  });
+
+  it("carries why the wiki is behind a pull request: one reason, never on an unfetched head (R27)", () => {
+    const behind = (reason: unknown, overrides = {}) =>
+      InFlightPull.safeParse(
+        makeInFlightPull({
+          behind: reason as never,
+          effects: makeInFlightPull().effects.map((e) => ({ ...e, certain: false })),
+          merge: "unknown",
+          ...overrides,
+        }),
+      );
+    expect(behind("wiki-behind").success).toBe(true);
+    expect(behind("stacked").success).toBe(true);
+    expect(
+      behind("base-unread", { mergeBase: null, files: [], summary: null, baseSha: null }).success,
+    ).toBe(true);
+    expect(behind(null).success).toBe(true);
+    // The reason, not a flag: an old boolean is refused, and so is an unknown reason.
+    expect(behind(true).success).toBe(false);
+    expect(behind("behind").success).toBe(false);
+    // A stored body from before R27 has none.
+    const { behind: _, ...old } = makeInFlightPull();
+    expect(InFlightPull.parse(old).behind).toBeNull();
+    // A base read has a fork point; a base not read has none, and lists GitHub's files only.
+    expect(paths(behind("stacked", { mergeBase: null }))).toContain("mergeBase");
+    expect(paths(behind("base-unread"))).toEqual(
+      expect.arrayContaining(["mergeBase", "files", "summary"]),
+    );
+    expect(
+      paths(
+        InFlightPull.safeParse(
+          makeInFlightPull({
+            head: "moved",
+            files: [],
+            effects: [],
+            merge: "unknown",
+            summary: null,
+            behind: "stacked",
+          }),
+        ),
+      ),
+    ).toEqual(["behind"]);
+    expect(
+      paths(InFlightPull.safeParse(makeInFlightPull({ behind: "wiki-behind", merge: "unknown" }))),
+    ).toEqual(["effects"]);
   });
 
   it("lists no file, effect, merge or summary for a pull request whose head it lacks", () => {
@@ -144,6 +226,48 @@ describe("InFlight", () => {
     const pull = makeInFlightPull();
     const twice = makeInFlight({ pulls: [pull, pull] });
     expect(paths(InFlight.safeParse(twice))).toContain("pulls");
+    const issue = makeInFlightIssue();
+    const issues = makeInFlight({ issues: [issue, issue] });
+    expect(paths(InFlight.safeParse(issues))).toContain("issues");
+  });
+
+  it.each([
+    [
+      "a feature listed twice",
+      { features: [...makeInFlightPull().features, ...makeInFlightPull().features] },
+      "features",
+    ],
+    ["an issue closed twice", { closes: [7, 7] }, "closes"],
+    [
+      "one claim's effect twice",
+      { effects: [...makeInFlightPull().effects, makeInFlightPull().effects[0]] },
+      "effects",
+    ],
+  ])("refuses a pull request with %s", (_name, overrides, path) => {
+    expect(paths(InFlightPull.safeParse(makeInFlightPull(overrides as never)))).toContain(path);
+  });
+
+  it("refuses an issue listing one closing pull request twice", () => {
+    const issue = makeInFlightIssue({ pulls: [12, 12] });
+    expect(paths(InFlight.safeParse(makeInFlight({ issues: [issue] })))).toContain(
+      "issues.0.pulls",
+    );
+  });
+
+  it.each([
+    [
+      "51 pull requests",
+      {
+        pulls: Array.from({ length: 51 }, (_, i) =>
+          makeInFlightPull({ number: i + 1, closes: [] }),
+        ),
+        issues: [],
+      },
+    ],
+    ["a repository named .", { repo: { ...DEMO_REPO, name: "." } }],
+    ["an uppercase wiki head", { wikiHead: SHA_A.toUpperCase() }],
+  ])("refuses a snapshot with %s", (_name, overrides) => {
+    expect(InFlight.safeParse(makeInFlight(overrides as never)).success).toBe(false);
   });
 
   it("refuses a feature named twice by one issue", () => {
@@ -171,6 +295,65 @@ describe("InFlightFile", () => {
 describe("GitHubSnapshot", () => {
   it("accepts the fixture snapshot", () => {
     expect(GitHubSnapshot.parse(makeGitHubSnapshot())).toEqual(makeGitHubSnapshot());
+  });
+
+  it.each([
+    ["a 201-character title", { title: "x".repeat(201) }],
+    ["eleven labels", { labels: Array.from({ length: 11 }, (_, i) => `l${i}`) }],
+    ["a bidi override in its title", { title: "\u202Eexe.txt" }],
+    ["a bidi override in a label", { labels: ["area:\u2066signals"] }],
+    ["a login with an @", { author: { login: "a@b.c", bot: false } }],
+    ["a login of 40 characters", { author: { login: "a".repeat(40), bot: false } }],
+    ["an uppercase head", { headRefOid: SHA_C.toUpperCase() }],
+    ["a base oid that is not a sha", { baseRefOid: "main" }],
+  ])("refuses a pull request or an issue with %s", (_name, overrides) => {
+    const pull = makeGitHubSnapshot({ pulls: [makeGitHubPull(overrides as never)] });
+    expect(GitHubSnapshot.safeParse(pull).success).toBe(false);
+    if ("headRefOid" in overrides || "baseRefOid" in overrides) return;
+    const issue = makeGitHubSnapshot({ issues: [makeGitHubIssue(overrides as never)] });
+    expect(GitHubSnapshot.safeParse(issue).success).toBe(false);
+  });
+
+  it("accepts a pull request and an issue at each bound, and a deleted author as null", () => {
+    const bounds = {
+      title: "x".repeat(200),
+      labels: Array.from({ length: 10 }, (_, i) => `l${i}`),
+      author: null,
+    };
+    const snapshot = makeGitHubSnapshot({
+      pulls: [makeGitHubPull(bounds)],
+      issues: [makeGitHubIssue(bounds)],
+    });
+    expect(GitHubSnapshot.safeParse(snapshot).success).toBe(true);
+    const fifty = makeGitHubSnapshot({
+      pulls: Array.from({ length: 50 }, (_, i) => makeGitHubPull({ number: i + 1 })),
+      issues: [],
+    });
+    expect(GitHubSnapshot.safeParse(fifty).success).toBe(true);
+    const fiftyOne = makeGitHubSnapshot({
+      pulls: Array.from({ length: 51 }, (_, i) => makeGitHubPull({ number: i + 1 })),
+      issues: [],
+    });
+    expect(GitHubSnapshot.safeParse(fiftyOne).success).toBe(false);
+  });
+
+  it("refuses two pull requests or two issues with one number", () => {
+    const pull = makeGitHubPull();
+    expect(GitHubSnapshot.safeParse(makeGitHubSnapshot({ pulls: [pull, pull] })).success).toBe(
+      false,
+    );
+    const issue = makeGitHubIssue();
+    expect(GitHubSnapshot.safeParse(makeGitHubSnapshot({ issues: [issue, issue] })).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses a pull request listing one closed issue or one path twice", () => {
+    for (const pull of [
+      makeGitHubPull({ closes: [7, 7] }),
+      makeGitHubPull({ files: ["a.py", "a.py"] }),
+    ])
+      expect(GitHubSnapshot.safeParse(makeGitHubSnapshot({ pulls: [pull] })).success).toBe(false);
   });
 
   it("refuses a body that still holds a newline or a bidi control", () => {

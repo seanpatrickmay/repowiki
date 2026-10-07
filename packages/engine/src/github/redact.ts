@@ -1,8 +1,9 @@
 /**
  * The shapes of GitHub tokens (spec v2 #9 R25): classic and app tokens (`ghp_`, `gho_`, `ghu_`,
  * `ghs_`, `ghr_`) and fine-grained ones (`github_pat_`), which a `gh` or `git fetch` error can echo.
+ * Wherever they start, even glued to a word (`GH_TOKEN_ghp_...`): blanking a little more is safe.
  */
-export const GITHUB_TOKEN_SHAPE = /\bgh[pousr]_[A-Za-z0-9]+|\bgithub_pat_[A-Za-z0-9_]+/g;
+export const GITHUB_TOKEN_SHAPE = /gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+/g;
 
 /** The variables that hold a GitHub token gh or git may use, whatever its shape (R25). */
 export const GITHUB_TOKEN_VARIABLES = [

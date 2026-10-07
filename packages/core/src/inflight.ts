@@ -36,12 +36,23 @@ export const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
 export const GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 
 /**
+ * Characters INVISIBLE_CHARACTERS (the shared rule) lets through that still render as nothing: the
+ * combining grapheme joiner, the Hangul fillers, the braille blank, variation selectors and the
+ * object replacement character. inflightLine and inflightBody blank them too (R13).
+ */
+const INFLIGHT_FILLERS = /\u034F|[\u115F\u1160\u2800\u3164\uFFA0\uFFFC]|[\uFE00-\uFE0F]/g;
+
+/** `text` well formed (a lone surrogate becomes U+FFFD), every invisible character a space. */
+const blanked = (text: string): string =>
+  text.toWellFormed().replace(INVISIBLE_CHARACTERS, " ").replace(INFLIGHT_FILLERS, " ");
+
+/**
  * Untrusted GitHub text as one line (R13): every control or invisible character (newlines and tabs
  * included) becomes a space, runs of whitespace collapse, and the text is cut to `max` code points
  * with "…". Nothing is escaped: each medium escapes for itself (Astro, the terminal, a prompt).
  */
 export function inflightLine(text: string, max: number): string {
-  const chars = [...text.replace(INVISIBLE_CHARACTERS, " ").replace(/\s+/g, " ").trim()];
+  const chars = [...blanked(text).replace(/\s+/g, " ").trim()];
   if (chars.length <= max) return chars.join("");
   return `${chars
     .slice(0, max - 1)
@@ -55,10 +66,10 @@ export function inflightLine(text: string, max: number): string {
  * INFLIGHT_BODY_MAX_LENGTH code points. Never exported, rendered or printed.
  */
 export function inflightBody(text: string): string {
-  return [...text.replace(INVISIBLE_CHARACTERS, " ")].slice(0, INFLIGHT_BODY_MAX_LENGTH).join("");
+  return [...blanked(text)].slice(0, INFLIGHT_BODY_MAX_LENGTH).join("");
 }
 
-/** A string that inflightLine leaves as it is: one neutralised line of at most `max` code points. */
+/** A string inflightLine leaves as it is: one neutralised line of at most `max` code points. */
 const line = (max: number) =>
   z
     .string()
@@ -203,10 +214,12 @@ export const InFlightPull = z
     /** The base branch's tip GitHub reported (baseRefOid); null when GitHub gave none. */
     baseSha: GitSha.nullable().default(null),
     /**
-     * True when the wiki's head does not hold the fork point, or the base was not read (R27): every
-     * effect is then file-level "may change", and the pages say to run wiki:update.
+     * Why the wiki cannot predict it exactly (R27), else null; every effect is then file-level "may
+     * change". `wiki-behind`: the fork point is on the default branch but not yet in the wiki's head
+     * (wiki:update brings it in). `stacked`: its base is another branch, whose commits the wiki does
+     * not describe until that branch merges. `base-unread`: its base was not read this run.
      */
-    behind: z.boolean().default(false),
+    behind: z.enum(["wiki-behind", "stacked", "base-unread"]).nullable().default(null),
     merge: z.enum(["clean", "conflicts", "unknown"]),
     /** Why git could not merge it: a git older than 2.38, or a head with unrelated history. */
     mergeReason: z.enum(["old-git", "unrelated"]).nullable().default(null),
@@ -229,12 +242,25 @@ export const InFlightPull = z
         issue("a pull request without its head has no merge", ["merge"]);
       if (pull.summary !== null)
         issue("a pull request without its head has no summary", ["summary"]);
-      if (pull.behind) issue("only a fetched pull request is judged behind", ["behind"]);
+      if (pull.behind !== null) issue("only a fetched pull request is judged behind", ["behind"]);
     }
-    if (pull.behind && pull.effects.some((e) => e.certain))
+    if (pull.behind !== null && pull.effects.some((e) => e.certain))
       issue("a pull request the wiki is behind has no certain effect", ["effects"]);
+    if (pull.behind === "base-unread") {
+      if (pull.mergeBase !== null) issue("a base not read has no fork point", ["mergeBase"]);
+      if (pull.files.length > 0) issue("a base not read lists GitHub's files only", ["files"]);
+      if (pull.summary !== null) issue("a base not read has no summary", ["summary"]);
+    } else if (pull.behind !== null) {
+      if (pull.mergeBase === null) issue("a base that was read has a fork point", ["mergeBase"]);
+      if (pull.baseSha === null) issue("a base that was read has its oid", ["baseSha"]);
+    }
     const touched = new Set(pull.features.map((f) => f.featureId));
     if (touched.size !== pull.features.length) issue("a feature is listed twice", ["features"]);
+    if (new Set(pull.closes).size !== pull.closes.length)
+      issue("an issue is closed twice", ["closes"]);
+    const effects = new Set(pull.effects.map((e) => `${e.featureId}/${e.claimId}`));
+    if (effects.size !== pull.effects.length)
+      issue("a claim's effect is listed twice", ["effects"]);
     pull.summary?.claims.forEach((claim, c) => {
       claim.citations.forEach((citation, i) => {
         if (citation.sha !== pull.headSha)
@@ -286,7 +312,11 @@ export const InFlightIssue = z
       message: "a feature is named twice",
       path: ["features"],
     },
-  );
+  )
+  .refine((issue) => new Set(issue.pulls).size === issue.pulls.length, {
+    message: "a closing pull request is listed twice",
+    path: ["pulls"],
+  });
 export type InFlightIssue = z.infer<typeof InFlightIssue>;
 
 /** The derived work-in-flight snapshot the export carries (spec v2 #9 §5.1). */
@@ -340,10 +370,19 @@ export const GitHubPull = z.object({
   baseRefOid: GitSha.nullable().default(null),
   headRefOid: GitSha,
   labels,
-  /** Issues it closes, as GitHub lists them (open or not). */
-  closes: z.array(number).max(INFLIGHT_MAX_CLOSES),
-  /** GitHub's first INFLIGHT_API_FILES changed paths: the file list of a PR whose head is not fetched. */
-  files: z.array(InflightPath).max(INFLIGHT_API_FILES),
+  /** Issues it closes, as GitHub lists them (open or not), each once. */
+  closes: z
+    .array(number)
+    .max(INFLIGHT_MAX_CLOSES)
+    .refine((list) => new Set(list).size === list.length, "an issue is listed twice"),
+  /**
+   * GitHub's first INFLIGHT_API_FILES changed paths, each once: the file list of a pull request
+   * whose head or base is not read.
+   */
+  files: z
+    .array(InflightPath)
+    .max(INFLIGHT_API_FILES)
+    .refine((list) => new Set(list).size === list.length, "a path is listed twice"),
   filesTotal: count,
 });
 export type GitHubPull = z.infer<typeof GitHubPull>;
@@ -359,7 +398,7 @@ export const GitHubIssue = z.object({
 });
 export type GitHubIssue = z.infer<typeof GitHubIssue>;
 
-/** The normalised GitHub answer, kept in the store only: it holds bodies, so it is never exported. */
+/** The normalised GitHub answer, in the store only: it holds bodies, so it is never exported. */
 export const GitHubSnapshot = z
   .object({
     repo: GitHubRepo,
@@ -394,7 +433,7 @@ export function githubUrl(repo: GitHubRepo, kind: "pull" | "issues", n: number):
   return `https://github.com/${segment(repo.owner)}/${segment(repo.name)}/${kind}/${n}`;
 }
 
-/** A file's lines at a commit on GitHub: percent-encoded path segments, as the site's code links. */
+/** A file's lines at a commit on GitHub, every segment percent-encoded (as the site links code). */
 export function githubBlobUrl(
   repo: GitHubRepo,
   sha: string,
@@ -404,7 +443,8 @@ export function githubBlobUrl(
 ): string {
   const lines = end > start ? `L${start}-L${end}` : `L${start}`;
   const file = path.split("/").map(segment).join("/");
-  return `https://github.com/${segment(repo.owner)}/${segment(repo.name)}/blob/${sha}/${file}#${lines}`;
+  const at = segment(sha);
+  return `https://github.com/${segment(repo.owner)}/${segment(repo.name)}/blob/${at}/${file}#${lines}`;
 }
 
 /** Every feature id a snapshot names, with where. */

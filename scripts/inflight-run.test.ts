@@ -136,6 +136,11 @@ describe("refreshOnline (spec v2 #9 §4.1)", () => {
     expect(exported().inflight).toEqual(done.inflight);
     expect(done.inflight.pulls[0]?.effects.map((e) => e.claimId)).toEqual(["c1", "c2"]);
 
+    // A dry run on top changes nothing: the cache stands, and inflight.git is there.
+    expect(await refreshOnline(context("--dry-run"), sources(scripted().provider))).toEqual({
+      kind: "dry-run",
+    });
+    expect(existsSync(join(fx.out, INFLIGHT_DIR))).toBe(true);
     const second = scripted();
     const again = await refreshOnline(context(), sources(second.provider));
     expect(second.calls).toHaveLength(0);
@@ -164,6 +169,19 @@ describe("refreshOnline (spec v2 #9 §4.1)", () => {
     );
     expect(p.calls).toHaveLength(0);
     expect(fx.store.getInFlight()).toBeNull();
+    expect(fx.store.getGitHubSnapshot()).toBeNull();
+  });
+
+  it("needs no price when no call can happen: --no-llm states what it cannot estimate", async () => {
+    const unpriced = {
+      ...context("--no-llm"),
+      models: { ...DEFAULT_MODELS, inflight: "claude-unknown-1" },
+    };
+    const done = await refreshOnline(unpriced, sources(scripted().provider));
+    expect(done.kind).toBe("done");
+    expect(logged).toContain(
+      "2 pull-request summaries (0 cached, 2 to request): no estimate, since the inflight role's model claude-unknown-1 has no known price; none is requested this run",
+    );
   });
 
   it("skips with GitHub's reason and writes nothing (R3)", async () => {
@@ -182,6 +200,7 @@ describe("refreshOnline (spec v2 #9 §4.1)", () => {
       /^ANTHROPIC_API_KEY is not set: pnpm wiki:inflight /,
     );
     expect(fx.store.getInFlight()).toBeNull();
+    expect(fx.store.getGitHubSnapshot()).toBeNull();
     expect(existsSync(join(fx.out, "export.json"))).toBe(false);
   });
 
@@ -223,6 +242,10 @@ describe("refreshOffline and --clear (spec v2 #9 §4.2)", () => {
     expect(offline.kind === "done" && [...offline.status]).toEqual([[1, "cached"]]);
     expect(fx.store.getGitHubSnapshot()?.pulls.map((p) => p.number)).toEqual([1]);
     expect(exported().inflight?.pulls).toHaveLength(1);
+    // #2's cached summary went with it (R4): reading GitHub again asks for #2 alone.
+    const again = scripted();
+    await refreshOnline(context(), sources(again.provider));
+    expect(again.calls).toHaveLength(1);
   });
 
   it("skips when GitHub was never read", async () => {

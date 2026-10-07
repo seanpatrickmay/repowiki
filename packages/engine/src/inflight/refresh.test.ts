@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { GitHubSnapshot } from "@repowiki/core";
 import {
@@ -219,7 +219,7 @@ describe("deriveInFlight against each pull request's own base (R27)", () => {
       head: "fetched",
       mergeBase: main,
       baseSha: main,
-      behind: true,
+      behind: "wiki-behind",
       merge: "unknown",
     });
     expect(five?.pull.files.map((f) => f.path)).toEqual(["src/deliverables/crud.py"]);
@@ -243,11 +243,67 @@ describe("deriveInFlight against each pull request's own base (R27)", () => {
     });
     const { heads } = fetchHeads(dir, fx.url, withBase.pulls, { protocol: "file" });
     const [one] = (await derive(withBase, heads)).pulls;
-    expect(one?.pull).toMatchObject({ behind: false, merge: "clean", mergeBase: fx.first });
+    expect(one?.pull).toMatchObject({ behind: null, merge: "clean", mergeBase: fx.first });
     expect(one?.pull.effects.map((e) => `${e.claimId}/${e.certain}`)).toEqual([
       "c1/true",
       "c2/true",
     ]);
+  });
+
+  it("marks a stacked pull request, whose base is another pull request's branch, stacked", async () => {
+    // #5 forks from the wiki's head and edits ingest.py; #6 is stacked on #5's branch and edits
+    // crud.py. #6's fork point is #5's head, which no wiki:update can bring in until #5 merges.
+    const parent = fx.pushPull(5, fx.first, {
+      "src/signals/ingest.py": ingestWith(12, "    signals = list()"),
+    });
+    const child = fx.pushPull(6, parent, { "src/deliverables/crud.py": "x = 1\n" });
+    const snapshot = makeGitHubSnapshot({
+      pulls: [
+        makeGitHubPull({ number: 5, headRefOid: parent, baseRefOid: fx.first, closes: [] }),
+        makeGitHubPull({
+          number: 6,
+          headRefOid: child,
+          baseRef: "m10/parent",
+          baseRefOid: parent,
+          closes: [],
+        }),
+      ],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const [five, six] = (await derive(snapshot, heads)).pulls;
+    expect(five?.pull).toMatchObject({ behind: null, merge: "clean" });
+    expect(six?.pull).toMatchObject({
+      head: "fetched",
+      mergeBase: parent,
+      baseSha: parent,
+      behind: "stacked",
+      merge: "unknown",
+    });
+    // Its own changes only: none of its parent's.
+    expect(six?.pull.files.map((f) => f.path)).toEqual(["src/deliverables/crud.py"]);
+    expect(six?.pull.effects.every((e) => !e.certain)).toBe(true);
+    expect(six?.request?.user).not.toContain("ingest.py");
+  });
+
+  it("gives a stacked pull request whose base was not read one reason: base-unread", async () => {
+    const head = fx.pushPull(7, fx.first, { "src/deliverables/crud.py": "x = 1\n" });
+    const snapshot = makeGitHubSnapshot({
+      pulls: [
+        makeGitHubPull({
+          number: 7,
+          headRefOid: head,
+          baseRef: "m10/parent",
+          baseRefOid: null,
+          closes: [],
+          files: ["src/deliverables/crud.py"],
+        }),
+      ],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const [seven] = (await derive(snapshot, heads)).pulls;
+    expect(seven?.pull.behind).toBe("base-unread");
   });
 
   it("treats a pull request whose base was not read as behind: GitHub's files, no request", async () => {
@@ -269,7 +325,7 @@ describe("deriveInFlight against each pull request's own base (R27)", () => {
     expect(six?.pull).toMatchObject({
       head: "fetched",
       mergeBase: null,
-      behind: true,
+      behind: "base-unread",
       merge: "unknown",
       files: [],
     });
@@ -281,16 +337,13 @@ describe("deriveInFlight against each pull request's own base (R27)", () => {
 });
 
 describe("the documented repository (ADR-0006)", () => {
-  it("keeps its objects, refs, config and index byte-identical through the fetch and merge-tree", async () => {
-    const git = join(fx.repo.dir, ".git");
-    const state = () => ({
-      objects: fileHashes(join(git, "objects")),
-      refs: fileHashes(join(git, "refs")),
-      packedRefs: fileHashes(git).filter((line) => line.startsWith("packed-refs ")),
-      config: readFileSync(join(git, "config")),
-      index: readFileSync(join(git, "index")),
-    });
+  it("keeps every file under its .git, and each file's bytes, through the fetch and merge-tree", async () => {
+    // The whole .git: objects, refs, packed-refs, HEAD, config, index, logs, info and hooks. Each
+    // file's path and contents; mtimes are not compared (ADR-0006).
+    const state = () => fileHashes(join(fx.repo.dir, ".git"));
     const before = state();
+    expect(before.some((line) => line.startsWith("HEAD "))).toBe(true);
+    expect(before.some((line) => line.startsWith("objects/"))).toBe(true);
     // #1 edits cited lines (a clean merge); #2 is an empty commit, so merge-tree writes a tree the
     // documented repository already has (git freshens that object file's mtime through the
     // alternates); #3 adds a file (the head is indexed).
@@ -310,7 +363,8 @@ describe("the documented repository (ADR-0006)", () => {
       ["fetched", "clean"],
     ]);
     // Contents and paths only: git's freshen step may touch an object file's mtime, which ADR-0006
-    // records as the one accepted exception; no byte, path, ref, config or index entry changes.
+    // records as the one accepted exception. Whether it did is not asserted: mtimes are only as
+    // fine as the filesystem's clock, so such a check would be flaky (ADR-0006).
     expect(state()).toEqual(before);
   });
 });

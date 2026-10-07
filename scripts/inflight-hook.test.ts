@@ -10,6 +10,7 @@ import {
   type HookContext,
   inflightAfterUpdate,
   mergedBetween,
+  outsidePulls,
 } from "./inflight-hook.ts";
 import { refreshOnline } from "./inflight-run.ts";
 import { parseUpdateArgs } from "./update-cli.ts";
@@ -81,6 +82,10 @@ describe("mergedBetween", () => {
     const to = fx.repo.commit("Tidy up (#6)");
     expect(mergedBetween(fx.repo.dir, fx.first, to)).toEqual(new Set([5, 6]));
     expect(mergedBetween(fx.repo.dir, to, to)).toEqual(new Set());
+    expect(outsidePulls(fx.repo.dir, fx.first, to)).toBe(0);
+    fx.repo.write("a.txt", "c\n");
+    const direct = fx.repo.commit("fix a typo on main");
+    expect(outsidePulls(fx.repo.dir, fx.first, direct)).toBe(1);
   });
 });
 
@@ -116,14 +121,35 @@ describe("compareLine (R22)", () => {
     );
   });
 
+  it("does not compare a merge when the range holds commits outside any merged pull request", async () => {
+    await refreshed();
+    const before = beforeUpdate(fx.store);
+    if (before === null) throw new Error("the fixture has a wiki");
+    const to = merge(1);
+    expect(await compareLine(fx.repo.dir, before, to, new Set([1]), false, 2)).toBe(
+      "Predictions not comparable: 2 commits in this update came in outside any merged pull request, so their stale claims would count against #1.",
+    );
+  });
+
   it("does not compare a pull request predicted against a wiki behind its base (R27)", async () => {
     await refreshed();
     const before = beforeUpdate(fx.store);
     if (before?.inflight == null) throw new Error("the fixture has a snapshot");
-    const pulls = before.inflight.pulls.map((p) => (p.number === 1 ? { ...p, behind: true } : p));
-    const behind = { ...before, inflight: { ...before.inflight, pulls } };
-    expect(await compareLine(fx.repo.dir, behind, merge(1), new Set([1]), false)).toBe(
+    const line = async (reason: "wiki-behind" | "stacked" | "base-unread") => {
+      const pulls = before.inflight?.pulls.map((p) =>
+        p.number === 1 ? { ...p, behind: reason } : p,
+      );
+      const behind = { ...before, inflight: { ...before.inflight, pulls } } as typeof before;
+      return compareLine(fx.repo.dir, behind, merge(1), new Set([1]), false);
+    };
+    expect(await line("wiki-behind")).toBe(
       "Predictions not comparable: #1 was predicted against a wiki behind its base.",
+    );
+    expect(await line("stacked")).toBe(
+      "Predictions not comparable: #1 was predicted against a base branch the wiki does not describe.",
+    );
+    expect(await line("base-unread")).toBe(
+      "Predictions not comparable: #1 was predicted without reading its base.",
     );
   });
 });

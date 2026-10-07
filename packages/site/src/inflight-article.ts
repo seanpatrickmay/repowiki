@@ -37,7 +37,7 @@ export interface ArticleInflight {
     badges: string[];
     /** Plain text: how many of this page's claims it would change. */
     changes: string;
-    /** Plain text: R27's notice when the wiki is behind its base, else null. */
+    /** Plain text: R27's one notice for why the wiki cannot predict it exactly, else null. */
     behind: string | null;
     /** Trusted HTML: its summary claims that name this feature. */
     claims: string[];

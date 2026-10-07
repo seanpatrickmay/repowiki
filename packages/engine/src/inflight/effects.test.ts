@@ -109,6 +109,29 @@ describe("pullImpact (R7)", () => {
     expect(predicted).toEqual(["deliverables/c1", "deliverables/c2", "signals/c1", "signals/c2"]);
   });
 
+  it("matches the update too when the PR renames a cited file and edits a claim's lines", async () => {
+    const crud = fx.repo.git("show", `${fx.first}:src/deliverables/crud.py`);
+    const head = pull(8, {
+      "src/deliverables/crud.py": null,
+      "src/deliverables/items.py": crud,
+      "src/signals/ingest.py": ingestWith(12, "    signals = list()"),
+    });
+    const predicted = (await pullImpact(ctx, head, pages)).effects.map(
+      (e) => `${e.featureId}/${e.claimId}`,
+    );
+    fx.repo.git("fetch", "--quiet", ctx.dir, `${pullRef(8)}:refs/heads/pr-8`);
+    const merge = fx.repo.merge("pr-8", "Merge pull request #8 from contributor/pr-8");
+    const input = await inputAt(fx.repo, merge);
+    const plan = planUpdate(fx.store, input);
+    const manifest = fx.store.getLatestManifest();
+    if (manifest === null) throw new Error("the fixture stores a manifest");
+    const actual = planPages(plan, fx.store, input, manifest, new Set()).rewrites.flatMap((r) =>
+      r.claims.filter((c) => c.status === "stale").map((c) => `${r.featureId}/${c.claim.id}`),
+    );
+    expect(predicted.sort()).toEqual(actual.sort());
+    expect(predicted).toContain("signals/c2");
+  });
+
   it("never runs a merge driver a PR's .gitattributes names (R21)", async () => {
     const marker = join(fx.out, "pwned");
     // The user's global config defines the driver; inflight.git reads no global config, and no

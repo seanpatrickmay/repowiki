@@ -70,12 +70,14 @@ export function mapIssues(
 ): InFlightIssue[] {
   const active = manifest.features.filter((f) => f.status.kind === "active");
   const activeIds = new Set(active.map((f) => f.id));
+  // Active features' member files, and every member file by basename (a basename is unique only
+  // when one member file in the whole manifest has it, R12).
   const files = new Map<string, string>();
   const basenames = new Map<string, string[]>();
   for (const [member, { featureId }] of Object.entries(manifest.membership)) {
     const parsed = parseMemberId(member);
-    if (parsed === null || parsed.symbol !== null || !activeIds.has(featureId)) continue;
-    files.set(parsed.path, featureId);
+    if (parsed === null || parsed.symbol !== null) continue;
+    if (activeIds.has(featureId)) files.set(parsed.path, featureId);
     const base = parsed.path.slice(parsed.path.lastIndexOf("/") + 1);
     basenames.set(base, [...(basenames.get(base) ?? []), parsed.path]);
   }
@@ -104,7 +106,9 @@ export function mapIssues(
       if (evidence.some((e) => e.featureId === featureId)) return;
       evidence.push({ featureId, kind, detail: detail(text) });
     };
-    const closing = pulls.filter((p) => p.closes.includes(issue.number));
+    const closing = pulls
+      .filter((p) => p.closes.includes(issue.number))
+      .sort((a, b) => a.number - b.number);
     for (const pull of closing) {
       const lines = pull.features.reduce((n, f) => n + f.changedLines, 0);
       const count = pull.features.reduce((n, f) => n + f.files, 0);
@@ -122,7 +126,8 @@ export function mapIssues(
       const exact = files.get(token);
       const named = basenames.get(token);
       const path = exact !== undefined ? token : named?.length === 1 ? named[0] : undefined;
-      if (path !== undefined) add(files.get(path) as string, "path", path);
+      const featureId = path === undefined ? undefined : files.get(path);
+      if (path !== undefined && featureId !== undefined) add(featureId, "path", path);
     }
     const found = names
       .map((n) => ({ ...n, at: text.search(n.pattern) }))
@@ -134,7 +139,14 @@ export function mapIssues(
       if (featureId !== undefined) add(featureId, "label", label);
     }
     if (evidence.length === 0 && suggest !== undefined) {
-      const [top, second] = suggest(issue.title).filter((hit) => activeIds.has(hit.featureId));
+      // Best first and one hit per feature, whatever order suggest gives.
+      const best = new Map<string, number>();
+      for (const hit of suggest(issue.title))
+        if (activeIds.has(hit.featureId) && hit.score > (best.get(hit.featureId) ?? -1))
+          best.set(hit.featureId, hit.score);
+      const [top, second] = [...best]
+        .map(([featureId, score]) => ({ featureId, score }))
+        .sort((a, b) => b.score - a.score);
       if (
         top !== undefined &&
         top.score >= SEARCH_SCORE_FLOOR &&

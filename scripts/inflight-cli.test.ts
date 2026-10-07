@@ -1,3 +1,4 @@
+import type { WikiExport } from "@repowiki/core";
 import {
   makeGitHubSnapshot,
   makeInFlight,
@@ -13,6 +14,7 @@ import {
   fetchLine,
   INFLIGHT_USAGE,
   inflightEstimateLine,
+  inflightLeftOutLine,
   parseInflightArgs,
   readLine,
   renderInflightTable,
@@ -67,6 +69,11 @@ describe("parseInflightArgs (spec v2 #9 §6.1)", () => {
       verbose: true,
     });
     expect(parseInflightArgs(["repo", "--offline"]).offline).toBe(true);
+    expect(parseInflightArgs(["repo", "--max-usd", "100"]).maxUsd).toBe(100);
+    expect(parseInflightArgs(["repo", "--offline", "--no-llm"])).toMatchObject({
+      offline: true,
+      noLlm: true,
+    });
     expect(parseInflightArgs(["repo", "--clear", "--out", "o", "--verbose"]).clear).toBe(true);
   });
 
@@ -83,6 +90,12 @@ describe("parseInflightArgs (spec v2 #9 §6.1)", () => {
     [["repo", "--budget", "9"], "bad option --budget"],
     [["repo", "--offline", "--github", "a/b"], "--offline reads no GitHub"],
     [["repo", "--clear", "--offline"], "--clear takes only --out and --verbose, not --offline"],
+    [["repo", "--clear", "--no-batch"], "--clear takes only --out and --verbose, not --no-batch"],
+    [
+      ["repo", "--clear", "--max-usd", "1"],
+      "--clear takes only --out and --verbose, not --max-usd",
+    ],
+    [["repo", "--max-usd="], "--max-usd must not be empty"],
   ])("refuses %j", (argv, message) => {
     expect(() => parseInflightArgs(argv)).toThrow(CliError);
     expect(() => parseInflightArgs(argv)).toThrow(message);
@@ -143,6 +156,19 @@ describe("the lines it prints", () => {
     expect(inflightEstimateLine(estimate, { maxUsd: 1, batch: true })).toBe(
       "3 pull-request summaries (1 cached, 2 to request): about $0.0123 (batched) assuming 700 output tokens each and no cache hits, at most $0.0200 if every answer takes 1,500; no summary is requested beyond $1.0000 (--max-usd)",
     );
+    // Never a negative count, whatever the estimate says.
+    expect(inflightEstimateLine({ ...estimate, cached: 4 }, { maxUsd: 1, batch: false })).toMatch(
+      /^3 pull-request summaries \(4 cached, 0 to request\)/,
+    );
+  });
+
+  it("says when work in flight is left out of a rebuilt export", () => {
+    const wiki = { inflight: null } as Pick<WikiExport, "inflight">;
+    expect(inflightLeftOutLine(makeInFlight(), wiki)).toBe(
+      "work in flight left out: rebuilt at a new revision; run wiki:inflight --offline",
+    );
+    expect(inflightLeftOutLine(null, wiki)).toBeNull();
+    expect(inflightLeftOutLine(makeInFlight(), { inflight: makeInFlight() })).toBeNull();
   });
 
   it("tables every pull request through cell(), certain effects first, and lists failures", () => {
@@ -184,27 +210,44 @@ describe("the lines it prints", () => {
     );
   });
 
-  it("says under the table which pull requests the wiki is behind the base of (R27)", () => {
+  it("says under the table why the wiki is behind a pull request, one line for its one reason (R27)", () => {
     const pull = makeInFlightPull();
     const behind = makeInFlightPull({
       number: 14,
       closes: [],
       baseSha: "a".repeat(40),
-      behind: true,
+      behind: "wiki-behind",
       merge: "unknown",
       effects: pull.effects.map((e) => ({ ...e, certain: false })),
     });
-    const unread = makeInFlightPull({ ...behind, number: 15, baseSha: null, effects: [] });
+    const stacked = makeInFlightPull({
+      ...behind,
+      number: 16,
+      baseRef: "m10/parent",
+      behind: "stacked",
+    });
+    const unread = makeInFlightPull({
+      ...behind,
+      number: 15,
+      baseSha: null,
+      mergeBase: null,
+      files: [],
+      summary: null,
+      effects: [],
+      behind: "base-unread",
+    });
     const lines = renderInflightTable(
-      makeInFlight({ pulls: [behind, unread], issues: [] }),
+      makeInFlight({ pulls: [behind, stacked, unread], issues: [] }),
       new Map(),
       new Map(),
     ).split("\n");
     expect(lines.slice(2)).toEqual([
       "| `#14 Page through long chunks` | `signals` | 0 (+2 may change) | none |",
+      "| `#16 Page through long chunks` | `signals` | 0 (+2 may change) | none |",
       "| `#15 Page through long chunks` | `signals` | 0 | none |",
       "#14: the wiki is behind this pull request's base (aaaaaaa); run pnpm wiki:update for exact predictions",
-      "#15: its base was not read, so its effects only may change; run pnpm wiki:inflight again",
+      "#16: targets `m10/parent`, which the wiki does not describe; its predictions are may-change until `m10/parent` merges",
+      "#15: its base could not be read this run; run pnpm wiki:inflight again",
     ]);
   });
 });
