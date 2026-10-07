@@ -1,7 +1,14 @@
 import type { Manifest, PeopleSnapshot, PersonFacts } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthoredCommit } from "../index/index.ts";
-import { ancestorsOf, buildPersonPack, PERSON_BUDGET_TOKENS, packFor, packText } from "./pack.ts";
+import {
+  ancestorsOf,
+  buildPersonPack,
+  MAX_CHRONICLE_CLAIMS,
+  PERSON_BUDGET_TOKENS,
+  packFor,
+  packText,
+} from "./pack.ts";
 import type { Refreshed } from "./refresh.ts";
 import type { Landing } from "./snapshot.ts";
 import { type TeamFixture, teamFixture } from "./test-people.ts";
@@ -93,7 +100,12 @@ describe("packText", () => {
 });
 
 /** A synthetic pack input: Ada's commits as given, every landing hers. */
-function synthetic(commits: AuthoredCommit[], landings: Landing[] = [], budgetTokens?: number) {
+function synthetic(
+  commits: AuthoredCommit[],
+  landings: Landing[] = [],
+  budgetTokens?: number,
+  maxEpisodes?: number,
+) {
   const person = {
     id: "ada",
     name: "Ada",
@@ -113,6 +125,7 @@ function synthetic(commits: AuthoredCommit[], landings: Landing[] = [], budgetTo
     snapshot: { sha: "f".repeat(40), featureLines: {} } as unknown as PeopleSnapshot,
     manifest: { features: [] } as unknown as Manifest,
     ...(budgetTokens === undefined ? {} : { budgetTokens }),
+    ...(maxEpisodes === undefined ? {} : { maxEpisodes }),
   });
 }
 const hex = (n: number) => n.toString(16).padStart(40, "0");
@@ -188,7 +201,8 @@ describe("buildPersonPack against hostile and large histories", () => {
     expect(performance.now() - started).toBeLessThan(5_000);
     expect(p.tokens).toBe(Math.ceil(p.text.length / 2.5));
     expect(p.tokens).toBeLessThanOrEqual(PERSON_BUDGET_TOKENS);
-    expect(p.episodes.dropped).toBeGreaterThan(0);
+    expect(p.episodes.collapsed + p.episodes.dropped).toBeGreaterThan(0);
+    expect(p.text.split("\n").filter((l) => l.startsWith("### ")).length).toBeLessThanOrEqual(30);
   });
 });
 
@@ -204,5 +218,36 @@ describe("packText's bounds", () => {
     const cut = packText("\u{1F600}".repeat(150));
     expect(cut.isWellFormed()).toBe(true);
     expect(cut.endsWith("…")).toBe(true);
+  });
+});
+
+describe("buildPersonPack's chronicle cap (the Task 18 ruling)", () => {
+  // Forty months of one commit each: forty episodes.
+  const months = Array.from({ length: 40 }, (_, i) =>
+    commit(i + 1, new Date(Date.UTC(2020, i, 15)).toISOString(), `c ${i}`),
+  );
+
+  it("never shows more than 30 episodes: the oldest are grouped first", () => {
+    const p = synthetic(months);
+    const headings = p.text.split("\n").filter((l) => l.startsWith("### "));
+    expect(headings).toHaveLength(MAX_CHRONICLE_CLAIMS);
+    expect(headings.filter((h) => h.startsWith("### 2 episodes grouped"))).toHaveLength(10);
+    expect(headings[0]).toBe(
+      "### 2 episodes grouped, 2020-01-15 to 2020-02-15: Commits outside pull requests, 2020-01; Commits outside pull requests, 2020-02",
+    );
+    expect(headings[10]).toBe("### Commits outside pull requests, 2021-09");
+    expect(p.shas.size).toBe(40);
+    expect(p.episodes).toEqual({ full: 30, collapsed: 0, dropped: 0 });
+  });
+
+  it("groups to the room an append leaves, and collapses a group to one line", () => {
+    const p = synthetic(months, [], undefined, 3);
+    const headings = p.text.split("\n").filter((l) => l.startsWith("### "));
+    expect(headings).toHaveLength(3);
+    const whole = synthetic(months, [], undefined, 3);
+    const tight = synthetic(months, [], whole.tokens - 300, 3);
+    expect(tight.text).toContain(
+      `- 14 episodes grouped, 2020-01-15–2021-02-15, 14 commits: commit:${hex(1).slice(0, 12)} … commit:${hex(14).slice(0, 12)}`,
+    );
   });
 });

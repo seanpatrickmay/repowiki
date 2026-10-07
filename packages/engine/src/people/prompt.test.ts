@@ -12,6 +12,7 @@ import {
   personTurn,
   WRITE_NARRATIVE,
 } from "./prompt.ts";
+import { PEOPLE_BANNED_WORDS } from "./verify.ts";
 
 const pack = { text: "# Person: Ada Lovelace\n## Episodes, oldest first" } as PersonPack;
 
@@ -30,9 +31,9 @@ describe("peopleSystemPrompt (spec v2 #6 §8.3)", () => {
     expect(PEOPLE_INSTRUCTIONS).toContain("Never link a Wikipedia article.");
   });
 
-  it("carries the R16 voice and the banned words", () => {
-    for (const word of ["prolific", "single-handedly", "ninja", "robust"])
-      expect(PEOPLE_STYLE).toContain(`"${word}"`);
+  it("carries the R16 voice and every banned word verify enforces", () => {
+    expect(PEOPLE_BANNED_WORDS).toHaveLength(34);
+    for (const word of PEOPLE_BANNED_WORDS) expect(PEOPLE_STYLE).toContain(`"${word}"`);
     expect(PEOPLE_STYLE).toMatch(/never name another person/i);
   });
 });
@@ -44,6 +45,17 @@ describe("peopleCacheKey", () => {
     expect(peopleCacheKey("a".repeat(40), long, 2)).toMatch(/^people-a{40}-[0-9a-f]{12}$/);
     expect(peopleCacheKey("a".repeat(40), long, 1)).toBeNull();
     expect(peopleCacheKey("a".repeat(40), "short", 7)).toBeNull();
+  });
+
+  it("starts at exactly 4,096 estimated tokens, and changes with the prompt", () => {
+    const at = "x".repeat(MIN_CACHED_PREFIX_TOKENS * 2.5);
+    const under = at.slice(0, -3);
+    expect(estimateTokens(at)).toBe(MIN_CACHED_PREFIX_TOKENS);
+    expect(estimateTokens(under)).toBe(MIN_CACHED_PREFIX_TOKENS - 1);
+    expect(peopleCacheKey("a".repeat(40), under, 2)).toBeNull();
+    const key = peopleCacheKey("a".repeat(40), at, 2);
+    expect(key).not.toBeNull();
+    expect(peopleCacheKey("a".repeat(40), `${at}y`, 2)).not.toBe(key);
   });
 });
 
@@ -57,6 +69,18 @@ describe("personTurn", () => {
     expect(turn).toMatch(/^# Stored chronicle \(kept word for word; do not repeat it\)\n- c1: "/);
     expect(turn).toContain("ids that differ from the stored ones");
     expect(turn.endsWith(WRITE_NARRATIVE)).toBe(true);
+  });
+
+  it("puts the pack after the stored chronicle and before the engine's lines, one line a claim", () => {
+    const stored = makePersonRevision();
+    const chronicle = stored.sections.find((s) => s.key === "chronicle");
+    const hostile = 'She said "stop" and C:\\x\nlater.';
+    if (chronicle?.claims[0] !== undefined) chronicle.claims[0].text = hostile;
+    const turn = personTurn(pack, stored);
+    const at = turn.indexOf(pack.text);
+    expect(at).toBeGreaterThan(turn.indexOf("# Stored chronicle"));
+    expect(at).toBeLessThan(turn.lastIndexOf(WRITE_NARRATIVE));
+    expect(turn.split("\n")).toContain(`- c1: ${JSON.stringify(hostile)}`);
   });
 });
 

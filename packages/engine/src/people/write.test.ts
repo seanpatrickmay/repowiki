@@ -1,3 +1,5 @@
+import type { PersonRevision } from "@repowiki/core";
+import { makePersonRevision } from "@repowiki/core/test-fixtures";
 import type { GenerateRequest, Provider } from "@repowiki/llm";
 import { LlmOutputError } from "@repowiki/llm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -214,6 +216,26 @@ describe("writePeople (spec v2 #6 §8.4)", () => {
       new LlmOutputError("bad json", "{"),
     ]);
     expect(unusable.outcomes[0]).toMatchObject({ revision: null, callFailed: false });
+  });
+
+  it("writes an append whole when its stored chronicle leaves no room under the cap of 30", () => {
+    const parent = makePersonRevision({ basis: fx.pr6 });
+    const full = (n: number) =>
+      ({
+        ...parent,
+        sections: parent.sections.map((s) =>
+          s.key === "chronicle"
+            ? {
+                ...s,
+                claims: Array.from({ length: n }, (_, i) => ({ ...s.claims[0], id: `k${i}` })),
+              }
+            : s,
+        ),
+      }) as PersonRevision;
+    expect(request({ parent: full(29), append: true }).append).toBe(true);
+    const whole = request({ parent: full(30), append: true });
+    expect(whole.append).toBe(false);
+    expect(whole.pack.text).toContain("## Episodes, oldest first");
   });
 
   it("appends: keeps the stored chronicle word for word and asks only for new episodes (R25)", async () => {

@@ -9,12 +9,17 @@ import type { PersonPack } from "./pack.ts";
 /** The person narrative's voice (spec v2 #6 §8.1, R16): part of every People call's prompt. */
 export const PEOPLE_STYLE = readFileSync(new URL("./people-style.md", import.meta.url), "utf8");
 
-/** Longest narrative answer: a lead, one chronicle claim per shown episode and up to 6 areas. */
+/**
+ * Longest narrative answer: a lead, one chronicle claim per shown episode (at most
+ * MAX_CHRONICLE_CLAIMS, 30, at roughly 100 tokens each) and up to 6 areas.
+ */
 export const MAX_PERSON_OUTPUT_TOKENS = 6000;
 
 /**
- * The smallest system prompt worth a cache key (spec v2 #6 §8.3): Haiku 4.5 caches no prefix
- * shorter than 4,096 tokens, so a shorter one would only pay the cache-write premium.
+ * The smallest system prompt given a cache key (spec v2 #6 §8.3, C12): Haiku 4.5 caches no prefix
+ * shorter than 4,096 tokens (the API then caches nothing and charges no premium). The estimate
+ * (estimateTokens, 2.5 characters a token) runs high, so a prompt estimated at 4,096 may hold
+ * fewer real tokens and go uncached; the rule is the spec's, and costs nothing when it misses.
  */
 export const MIN_CACHED_PREFIX_TOKENS = 4096;
 
@@ -87,8 +92,8 @@ export function peopleSystemPrompt(repoName: string, manifest: Manifest): string
 
 /**
  * The cache key a round's People calls carry (spec v2 #6 §8.3): one only when the round has two
- * or more calls and the system prompt is estimated at MIN_CACHED_PREFIX_TOKENS or more, so a
- * cache write is never paid for nothing. Null otherwise.
+ * or more calls (so a cache write can be read back) and the system prompt is estimated at
+ * MIN_CACHED_PREFIX_TOKENS or more. Null otherwise.
  */
 export function peopleCacheKey(sha: string, system: string, calls: number): string | null {
   if (calls < 2 || estimateTokens(system) < MIN_CACHED_PREFIX_TOKENS) return null;
