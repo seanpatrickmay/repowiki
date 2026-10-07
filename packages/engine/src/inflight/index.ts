@@ -15,3 +15,11 @@ export {
   pullRef,
   removeInflightRepo,
 } from "./heads.ts";
+export {
+  featuresFromPaths,
+  type ImpactContext,
+  lineCounts,
+  mergeBase,
+  type PullChanges,
+  pullChanges,
+} from "./impact.ts";
