@@ -79,7 +79,12 @@ export function oldRevisionView(site: SiteModel, featureId: string, n: number): 
   if (revision === undefined) throw new Error(`no revision ${n} of ${featureId}`);
   const view = articleView(site, revision);
   const notice = oldRevisionNotice(site, revision);
-  return { ...view, notice: view.notice === null ? notice : `${notice}<br>${view.notice}` };
+  return {
+    ...view,
+    // Main contributors are today's people: a past view shows none (the Task 35 ruling).
+    infobox: view.infobox.filter((row) => row.label !== "Main contributors"),
+    notice: view.notice === null ? notice : `${notice}<br>${view.notice}`,
+  };
 }
 
 /** One diff page per revision after the first, for every feature that has a history page. */
