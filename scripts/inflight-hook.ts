@@ -63,14 +63,21 @@ export function outsidePulls(repo: string, from: string, to: string): number {
 
 const key = (c: { featureId: string; claimId: string }) => `${c.featureId}/${c.claimId}`;
 
+/** Why a pull request the wiki was behind (R27) has file-level effects only, for R22's line. */
+const NOT_COMPARABLE = {
+  "wiki-behind": "against a wiki behind its base",
+  stacked: "against a base branch the wiki does not describe",
+  "base-unread": "without reading its base",
+} as const;
+
 /**
  * R22's comparison for one update: the merged pull request's certain predicted stale claims,
  * from a snapshot derived against the update's starting head, against the claims the move from
  * `from` to `to` makes stale on the pages as they were (staleClaims). Only an update that merged
  * exactly one pull request, counting every merge in the range, snapshot or not, and holds no
  * commit outside a merged pull request (`outside`, outsidePulls), is comparable;
- * else "not comparable" with why, as for a pull request predicted against a wiki behind its base
- * (R27: its effects were file-level). "not compared" with why for a replay, a snapshot derived
+ * else "not comparable" with why, as for a pull request the wiki was behind for any of R27's
+ * reasons (its effects were file-level). "not compared" with why for a replay, a snapshot derived
  * elsewhere, or a merged pull request the snapshot does not hold or could not work out.
  */
 export async function compareLine(
@@ -101,8 +108,8 @@ export async function compareLine(
   if (pull === undefined) return `Predictions not compared: #${number} is not in the snapshot.`;
   if (pull.head !== "fetched")
     return `Predictions not compared: #${pull.number}'s impact was not computed.`;
-  if (pull.behind)
-    return `Predictions not comparable: #${pull.number} was predicted against a wiki behind its base.`;
+  if (pull.behind !== null)
+    return `Predictions not comparable: #${pull.number} was predicted ${NOT_COMPARABLE[pull.behind]}.`;
   const predicted = new Set(pull.effects.filter((e) => e.certain).map(key));
   const actual = new Set((await staleClaims(repo, before.from, to, before.pages)).map(key));
   const both = [...predicted].filter((k) => actual.has(k)).length;

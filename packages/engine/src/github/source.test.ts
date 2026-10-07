@@ -177,6 +177,30 @@ describe("ghSource", () => {
     expect(pull?.body).toHaveLength(INFLIGHT_BODY_MAX_LENGTH);
   });
 
+  it("reads one page of 50 pull requests and counts the rest as omitted", () => {
+    const pulls = fixture("pulls") as {
+      data: {
+        repository: {
+          pullRequests: {
+            totalCount: number;
+            pageInfo: { hasNextPage: boolean; endCursor: string | null };
+            nodes: Record<string, unknown>[];
+          };
+        };
+      };
+    };
+    const connection = pulls.data.repository.pullRequests;
+    const [first] = connection.nodes;
+    connection.nodes = Array.from({ length: 50 }, (_, i) => ({ ...first, number: 100 + i }));
+    connection.totalCount = 73;
+    connection.pageInfo = { hasNextPage: true, endCursor: "more" };
+    const { run, calls } = fakeGh(pulls);
+    const snapshot = read(run);
+    expect(calls.filter((c) => c.some((a) => a.includes("pullRequests")))).toHaveLength(1);
+    expect(snapshot.pulls).toHaveLength(50);
+    expect(snapshot.omitted.pulls).toBe(23);
+  });
+
   it("stops paging at the cap of 200 issues", () => {
     const calls: string[][] = [];
     const node = (n: number) => ({

@@ -227,30 +227,45 @@ describe("pullView", () => {
   });
 });
 
-describe("a pull request forked past the wiki's head (R27)", () => {
-  const BEHIND =
-    "The wiki is behind this pull's base (aaaaaaa); run wiki:update for exact predictions.";
-  const behind = () => {
+describe("a pull request the wiki is behind, with its one reason (R27)", () => {
+  const NOTICES = {
+    "wiki-behind":
+      "The wiki is behind this pull's base (aaaaaaa); run wiki:update for exact predictions.",
+    stacked:
+      "This pull targets m10/parent, which the wiki does not describe; its predictions are may-change until m10/parent merges.",
+    "base-unread": "This pull's base could not be read this run; run wiki:inflight again.",
+  } as const;
+  const behind = (reason: keyof typeof NOTICES) => {
     const pull = fixtureInFlight().pulls[0] as InFlight["pulls"][number];
     return {
       ...pull,
       closes: [],
+      baseRef: reason === "stacked" ? "m10/parent" : pull.baseRef,
       baseSha: "a".repeat(40),
-      behind: true,
+      behind: reason,
       merge: "unknown" as const,
       effects: pull.effects.map((e) => ({ ...e, certain: false })),
+      ...(reason === "base-unread" ? { mergeBase: null, files: [], summary: null } : {}),
     };
   };
 
-  it("says so on its page and in the article's In progress section, and only may change", () => {
-    const pull = behind();
-    const s = site({ pulls: [pull], issues: [] });
-    const view = pullView(s, inflightOf(s), pull);
-    expect(view.behind).toBe(BEHIND);
-    expect(view.merge).not.toMatch(/git 2\.38/);
-    expect(view.features[0]?.effects.every((e) => !e.certain)).toBe(true);
-    expect(articleInflight(s, "signals")?.pulls[0]?.behind).toBe(BEHIND);
-  });
+  it.each(Object.keys(NOTICES) as (keyof typeof NOTICES)[])(
+    "says %s's one sentence on its page and in the article's In progress section",
+    (reason) => {
+      const pull = behind(reason);
+      const s = site({ pulls: [pull], issues: [] });
+      const view = pullView(s, inflightOf(s), pull);
+      expect(view.behind).toBe(NOTICES[reason]);
+      expect(view.merge).toBe(
+        "It was not merged with the wiki's commit, so the claims below may change.",
+      );
+      expect(view.features[0]?.effects.every((e) => !e.certain)).toBe(true);
+      expect(articleInflight(s, "signals")?.pulls[0]?.behind).toBe(NOTICES[reason]);
+      // One reason, one sentence: never another reason's.
+      for (const other of Object.values(NOTICES).filter((n) => n !== NOTICES[reason]))
+        expect(JSON.stringify(view)).not.toContain(other);
+    },
+  );
 
   it("says nothing for a pull request the wiki's head already holds the base of", () => {
     const s = site();
@@ -291,14 +306,14 @@ describe("pullView's wording", () => {
       files: [],
       effects: [],
       summary: null,
-      behind: false,
+      behind: null,
     });
     expect(moved.merge).toBe(
       "Its head commit moved since GitHub was read, so its impact could not be computed.",
     );
     expect(moved.features[0]?.files).toBe("1 file, lines unknown");
     const unread = view({
-      behind: true,
+      behind: "base-unread",
       baseSha: null,
       mergeBase: null,
       merge: "unknown",
@@ -307,7 +322,8 @@ describe("pullView's wording", () => {
       summary: null,
     });
     expect(unread.features[0]?.files).toBe("1 file, lines unknown");
-    expect(unread.summaryNote).toBe("No summary this run: this pull's base was not read.");
+    // The notice says why once; the summary's place does not say it again.
+    expect(unread.summaryNote).toBe("No summary this run.");
   });
 
   it("quotes a claim as plain text, and words one no longer on the page", () => {

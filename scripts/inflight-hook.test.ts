@@ -135,10 +135,21 @@ describe("compareLine (R22)", () => {
     await refreshed();
     const before = beforeUpdate(fx.store);
     if (before?.inflight == null) throw new Error("the fixture has a snapshot");
-    const pulls = before.inflight.pulls.map((p) => (p.number === 1 ? { ...p, behind: true } : p));
-    const behind = { ...before, inflight: { ...before.inflight, pulls } };
-    expect(await compareLine(fx.repo.dir, behind, merge(1), new Set([1]), false)).toBe(
+    const line = async (reason: "wiki-behind" | "stacked" | "base-unread") => {
+      const pulls = before.inflight?.pulls.map((p) =>
+        p.number === 1 ? { ...p, behind: reason } : p,
+      );
+      const behind = { ...before, inflight: { ...before.inflight, pulls } } as typeof before;
+      return compareLine(fx.repo.dir, behind, merge(1), new Set([1]), false);
+    };
+    expect(await line("wiki-behind")).toBe(
       "Predictions not comparable: #1 was predicted against a wiki behind its base.",
+    );
+    expect(await line("stacked")).toBe(
+      "Predictions not comparable: #1 was predicted against a base branch the wiki does not describe.",
+    );
+    expect(await line("base-unread")).toBe(
+      "Predictions not comparable: #1 was predicted without reading its base.",
     );
   });
 });

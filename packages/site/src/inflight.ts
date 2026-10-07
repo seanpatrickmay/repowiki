@@ -191,7 +191,7 @@ export interface PullView {
   base: string;
   /** Plain text: how the pull request would merge, or why its impact is unknown. */
   merge: string;
-  /** Plain text: R27's notice when the wiki is behind its base, else null. */
+  /** Plain text: R27's one notice for why the wiki cannot predict it exactly, else null. */
   behind: string | null;
   /**
    * Null when there is no summary: the head was not fetched, its base was not read, it has nothing
@@ -226,14 +226,22 @@ function mergeWords(pull: InFlightPull): string {
 }
 
 /**
- * R27's notice for a pull request the wiki's head does not hold the fork point of, or whose base
- * was not read: its effects only may change until wiki:update. Null otherwise. Plain text.
+ * R27's notice for a pull request the wiki cannot predict exactly: one sentence for its one
+ * reason (the wiki is behind its fork point, it is stacked on another branch, or its base was not
+ * read). Null otherwise. Plain text.
  */
 export function behindNotice(pull: InFlightPull): string | null {
-  if (!pull.behind) return null;
-  return pull.baseSha === null
-    ? "This pull's base was not read, so its claims below only may change; run wiki:inflight again for exact predictions."
-    : `The wiki is behind this pull's base (${shortSha(pull.baseSha)}); run wiki:update for exact predictions.`;
+  switch (pull.behind) {
+    case null:
+      return null;
+    case "stacked":
+      return `This pull targets ${pull.baseRef}, which the wiki does not describe; its predictions are may-change until ${pull.baseRef} merges.`;
+    case "base-unread":
+      return "This pull's base could not be read this run; run wiki:inflight again.";
+    case "wiki-behind":
+      // The schema gives a base that was read its oid.
+      return `The wiki is behind this pull's base (${shortSha(pull.baseSha ?? "")}); run wiki:update for exact predictions.`;
+  }
 }
 
 /** The anchor of a feature's part of a pull request page, which article markers link to. */
@@ -243,7 +251,7 @@ export const pullFeatureAnchor = (featureId: string): string => `feature-${featu
 export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull): PullView {
   const fetched = pull.head === "fetched";
   // GitHub's file list has paths only: no lines for a head not fetched or a base not read.
-  const unread = fetched && pull.behind && pull.mergeBase === null;
+  const unread = fetched && pull.behind === "base-unread";
   const linesKnown = fetched && !unread;
   const titleOf = (id: string) => site.features.get(id)?.title ?? null;
   let n = 0;
@@ -269,13 +277,14 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
     base: pull.baseRef,
     merge: !fetched
       ? `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`
-      : pull.behind
+      : pull.behind !== null
         ? "It was not merged with the wiki's commit, so the claims below may change."
         : mergeWords(pull),
     behind: behindNotice(pull),
     summary,
+    // A base not read: the notice says why, once.
     summaryNote: unread
-      ? "No summary this run: this pull's base was not read."
+      ? "No summary this run."
       : fetched && pull.filesTruncated === 0 && !hasCitableLines(pull.files)
         ? "There is nothing to summarise: it adds or changes no lines of text."
         : "No summary of this pull request yet.",

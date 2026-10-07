@@ -1353,7 +1353,7 @@ function placedExport() {
     updatedAt: "2026-09-28T09:00:00Z",
     closes: [],
     baseSha: "a".repeat(40),
-    behind: true,
+    behind: "wiki-behind" as const,
     merge: "unknown" as const,
     files: [],
     features: [
@@ -1421,6 +1421,9 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
     expect(inflightSite.read("special/in-progress/pr/14/index.html")).toContain(notice);
     expect(inflightSite.read("wiki/deliverables/index.html")).toContain(notice);
     expect(inflightSite.read("special/in-progress/pr/12/index.html")).not.toContain(notice);
+    const page = inflightSite.read("special/in-progress/pr/14/index.html");
+    expect(page).not.toContain("which the wiki does not describe");
+    expect(page).not.toContain("could not be read this run");
   });
 
   it("marks an article's changing claims and adds its In progress section, all out of search", async () => {

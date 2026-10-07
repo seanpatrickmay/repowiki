@@ -210,27 +210,44 @@ describe("the lines it prints", () => {
     );
   });
 
-  it("says under the table which pull requests the wiki is behind the base of (R27)", () => {
+  it("says under the table why the wiki is behind a pull request, one line for its one reason (R27)", () => {
     const pull = makeInFlightPull();
     const behind = makeInFlightPull({
       number: 14,
       closes: [],
       baseSha: "a".repeat(40),
-      behind: true,
+      behind: "wiki-behind",
       merge: "unknown",
       effects: pull.effects.map((e) => ({ ...e, certain: false })),
     });
-    const unread = makeInFlightPull({ ...behind, number: 15, baseSha: null, effects: [] });
+    const stacked = makeInFlightPull({
+      ...behind,
+      number: 16,
+      baseRef: "m10/parent",
+      behind: "stacked",
+    });
+    const unread = makeInFlightPull({
+      ...behind,
+      number: 15,
+      baseSha: null,
+      mergeBase: null,
+      files: [],
+      summary: null,
+      effects: [],
+      behind: "base-unread",
+    });
     const lines = renderInflightTable(
-      makeInFlight({ pulls: [behind, unread], issues: [] }),
+      makeInFlight({ pulls: [behind, stacked, unread], issues: [] }),
       new Map(),
       new Map(),
     ).split("\n");
     expect(lines.slice(2)).toEqual([
       "| `#14 Page through long chunks` | `signals` | 0 (+2 may change) | none |",
+      "| `#16 Page through long chunks` | `signals` | 0 (+2 may change) | none |",
       "| `#15 Page through long chunks` | `signals` | 0 | none |",
       "#14: the wiki is behind this pull request's base (aaaaaaa); run pnpm wiki:update for exact predictions",
-      "#15: its base was not read, so its effects only may change; run pnpm wiki:inflight again",
+      "#16: targets `m10/parent`, which the wiki does not describe; its predictions are may-change until `m10/parent` merges",
+      "#15: its base could not be read this run; run pnpm wiki:inflight again",
     ]);
   });
 });

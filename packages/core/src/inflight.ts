@@ -36,11 +36,6 @@ export const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
 export const GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 
 /**
- * Untrusted GitHub text as one line (R13): every control or invisible character (newlines and tabs
- * included) becomes a space, runs of whitespace collapse, and the text is cut to `max` code points
- * with "…". Nothing is escaped: each medium escapes for itself (Astro, the terminal, a prompt).
- */
-/**
  * Characters INVISIBLE_CHARACTERS (the shared rule) lets through that still render as nothing: the
  * combining grapheme joiner, the Hangul fillers, the braille blank, variation selectors and the
  * object replacement character. inflightLine and inflightBody blank them too (R13).
@@ -51,6 +46,11 @@ const INFLIGHT_FILLERS = /\u034F|[\u115F\u1160\u2800\u3164\uFFA0\uFFFC]|[\uFE00-
 const blanked = (text: string): string =>
   text.toWellFormed().replace(INVISIBLE_CHARACTERS, " ").replace(INFLIGHT_FILLERS, " ");
 
+/**
+ * Untrusted GitHub text as one line (R13): every control or invisible character (newlines and tabs
+ * included) becomes a space, runs of whitespace collapse, and the text is cut to `max` code points
+ * with "…". Nothing is escaped: each medium escapes for itself (Astro, the terminal, a prompt).
+ */
 export function inflightLine(text: string, max: number): string {
   const chars = [...blanked(text).replace(/\s+/g, " ").trim()];
   if (chars.length <= max) return chars.join("");
@@ -214,10 +214,12 @@ export const InFlightPull = z
     /** The base branch's tip GitHub reported (baseRefOid); null when GitHub gave none. */
     baseSha: GitSha.nullable().default(null),
     /**
-     * True when the wiki's head does not hold the fork point, or the base was not read (R27): every
-     * effect is then file-level "may change", and the pages say to run wiki:update.
+     * Why the wiki cannot predict it exactly (R27), else null; every effect is then file-level "may
+     * change". `wiki-behind`: the fork point is on the default branch but not yet in the wiki's head
+     * (wiki:update brings it in). `stacked`: its base is another branch, whose commits the wiki does
+     * not describe until that branch merges. `base-unread`: its base was not read this run.
      */
-    behind: z.boolean().default(false),
+    behind: z.enum(["wiki-behind", "stacked", "base-unread"]).nullable().default(null),
     merge: z.enum(["clean", "conflicts", "unknown"]),
     /** Why git could not merge it: a git older than 2.38, or a head with unrelated history. */
     mergeReason: z.enum(["old-git", "unrelated"]).nullable().default(null),
@@ -240,10 +242,18 @@ export const InFlightPull = z
         issue("a pull request without its head has no merge", ["merge"]);
       if (pull.summary !== null)
         issue("a pull request without its head has no summary", ["summary"]);
-      if (pull.behind) issue("only a fetched pull request is judged behind", ["behind"]);
+      if (pull.behind !== null) issue("only a fetched pull request is judged behind", ["behind"]);
     }
-    if (pull.behind && pull.effects.some((e) => e.certain))
+    if (pull.behind !== null && pull.effects.some((e) => e.certain))
       issue("a pull request the wiki is behind has no certain effect", ["effects"]);
+    if (pull.behind === "base-unread") {
+      if (pull.mergeBase !== null) issue("a base not read has no fork point", ["mergeBase"]);
+      if (pull.files.length > 0) issue("a base not read lists GitHub's files only", ["files"]);
+      if (pull.summary !== null) issue("a base not read has no summary", ["summary"]);
+    } else if (pull.behind !== null) {
+      if (pull.mergeBase === null) issue("a base that was read has a fork point", ["mergeBase"]);
+      if (pull.baseSha === null) issue("a base that was read has its oid", ["baseSha"]);
+    }
     const touched = new Set(pull.features.map((f) => f.featureId));
     if (touched.size !== pull.features.length) issue("a feature is listed twice", ["features"]);
     if (new Set(pull.closes).size !== pull.closes.length)

@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { GitHubSnapshot, InFlight, WikiExport } from "@repowiki/core";
+import type { GitHubSnapshot, InFlight, InFlightPull, WikiExport } from "@repowiki/core";
 import type { HeadState, Suggest, SummaryEstimate, SummaryStatus } from "@repowiki/engine";
 import type { LedgerTotals } from "@repowiki/llm";
 import { ABOUT_PAGE_ID, pageSearchIndex, WikiView } from "@repowiki/query";
@@ -204,20 +204,27 @@ export function renderInflightTable(
           : pull.features.map((f) => cell(f.featureId)).join(", ");
       return `| ${cell(`#${pull.number} ${pull.title}`)} | ${features} | ${effectCell(pull)} | ${status.get(pull.number) ?? "none"} |`;
     }),
-    ...inflight.pulls.flatMap((pull) =>
-      !pull.behind
-        ? []
-        : pull.baseSha === null
-          ? [
-              `#${pull.number}: its base was not read, so its effects only may change; run pnpm wiki:inflight again`,
-            ]
-          : [
-              `#${pull.number}: the wiki is behind this pull request's base (${pull.baseSha.slice(0, 7)}); run pnpm wiki:update for exact predictions`,
-            ],
-    ),
+    ...inflight.pulls.flatMap((pull) => {
+      const why = behindLine(pull);
+      return why === null ? [] : [`#${pull.number}: ${why}`];
+    }),
     ...[...failures].map(([n, why]) => `#${n}: no summary this run: ${problemLine(why)}`),
   ];
   return lines.join("\n");
+}
+
+/** R27's one line for why the wiki cannot predict a pull request exactly, or null. */
+function behindLine(pull: InFlightPull): string | null {
+  switch (pull.behind) {
+    case null:
+      return null;
+    case "stacked":
+      return `targets ${cell(pull.baseRef)}, which the wiki does not describe; its predictions are may-change until ${cell(pull.baseRef)} merges`;
+    case "base-unread":
+      return "its base could not be read this run; run pnpm wiki:inflight again";
+    case "wiki-behind":
+      return `the wiki is behind this pull request's base (${(pull.baseSha ?? "").slice(0, 7)}); run pnpm wiki:update for exact predictions`;
+  }
 }
 
 /**
