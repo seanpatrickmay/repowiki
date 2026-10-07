@@ -59,14 +59,23 @@ export interface PersonPack {
   episodes: { full: number; collapsed: number; dropped: number };
 }
 
-/** Repository text as one line of the pack: no email, no break, nothing that forges structure. */
+/** How much of a repository string packText reads, in code points, before anything else. */
+const MAX_READ = 1000;
+
+/**
+ * Repository text as one line of the pack: no email, no break, nothing that forges structure. It
+ * cuts first (so a long unbroken token costs nothing), scrubs emails, makes one clean line, cuts
+ * to `max` UTF-16 units well formed, and scrubs again in case the cut made a new address.
+ */
 export const packText = (text: string, max = MAX_TEXT): string => {
+  const head =
+    text.length <= MAX_READ ? text : [...text.slice(0, 2 * MAX_READ)].slice(0, MAX_READ).join("");
   const line = clean(
-    withoutEmails(text)
+    withoutEmails(head)
       .replace(/[\s\u0085]+/g, " ")
       .trim(),
   );
-  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+  return withoutEmails(line.length <= max ? line : `${line.slice(0, max - 1).toWellFormed()}…`);
 };
 
 const day = (iso: string) => iso.slice(0, 10);
@@ -88,8 +97,10 @@ export function ancestorsOf(commits: readonly AuthoredCommit[], basis: string): 
 }
 
 interface Episode {
-  /** "PR #n …" or "Commits outside pull requests, yyyy-mm". */
-  heading: string;
+  /** `PR #n "title"` or "Commits outside pull requests, yyyy-mm": each part already packText. */
+  name: string;
+  /** A pull request's "merged yyyy-mm-dd" (with its citable merge), or null for a month. */
+  merged: string | null;
   /** The heading's own citable sha (an authored or merged PR's merge commit), or null. */
   landing: { sha: string; date: string } | null;
   /** Oldest first. */
@@ -119,7 +130,8 @@ export function buildPersonPack(input: PackInput): PersonPack {
   for (const commit of shown) {
     const landing = commit.pr === null ? undefined : input.landings.get(commit.pr);
     let key: string;
-    let heading: string;
+    let name: string;
+    let merged: string | null = null;
     let own: Episode["landing"] = null;
     if (landing !== undefined) {
       key = `pr-${landing.number}`;
@@ -127,29 +139,27 @@ export function buildPersonPack(input: PackInput): PersonPack {
         landing.sha !== commit.sha &&
         (input.prAuthors.get(landing.number) === input.group || landing.merger === input.group);
       if (citable) own = { sha: landing.sha, date: landing.mergedAt };
-      const title = landing.title === null ? "" : ` ${quoted(landing.title)}`;
-      heading = `PR #${landing.number}${title}`;
-      const merged = `merged ${day(landing.mergedAt)}${own === null ? "" : ` (commit:${sha12(own.sha)})`}`;
-      heading = `${heading}, {range}, ${merged}`;
+      name = `PR #${landing.number}${landing.title === null ? "" : ` ${quoted(landing.title)}`}`;
+      merged = `merged ${day(landing.mergedAt)}${own === null ? "" : ` (commit:${sha12(own.sha)})`}`;
     } else {
       key = `month-${commit.authorDate.slice(0, 7)}`;
-      heading = `Commits outside pull requests, ${commit.authorDate.slice(0, 7)}`;
+      name = `Commits outside pull requests, ${commit.authorDate.slice(0, 7)}`;
     }
-    const episode = byKey.get(key) ?? { heading, landing: own, commits: [] };
+    const episode = byKey.get(key) ?? { name, merged, landing: own, commits: [] };
     episode.commits.push(commit);
     byKey.set(key, episode);
   }
   const episodes = [...byKey.values()].sort(
     (a, b) =>
       Date.parse(a.commits[0]?.authorDate ?? "") - Date.parse(b.commits[0]?.authorDate ?? "") ||
-      (a.heading < b.heading ? -1 : 1),
+      (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
   );
 
   const commitLine = (c: AuthoredCommit) => {
     const features = input.commitFeatures.get(c.sha) ?? [];
-    const paths = c.files.map((f) => packText(f.path));
-    const more = paths.length > MAX_PATHS ? `, and ${paths.length - MAX_PATHS} more` : "";
-    return `- commit:${sha12(c.sha)} ${day(c.authorDate)} ${quoted(c.subject)} — features: ${features.length === 0 ? "none" : features.join(", ")} — files: ${paths.slice(0, MAX_PATHS).join(", ") || "none"}${more}`;
+    const paths = c.files.slice(0, MAX_PATHS).map((f) => packText(f.path));
+    const more = c.files.length > MAX_PATHS ? `, and ${c.files.length - MAX_PATHS} more` : "";
+    return `- commit:${sha12(c.sha)} ${day(c.authorDate)} ${quoted(c.subject)} — features: ${features.length === 0 ? "none" : features.join(", ")} — files: ${paths.join(", ") || "none"}${more}`;
   };
   const rangeOf = (e: Episode) => {
     const first = day(e.commits[0]?.authorDate ?? "");
@@ -157,20 +167,19 @@ export function buildPersonPack(input: PackInput): PersonPack {
     return first === last ? first : `${first} to ${last}`;
   };
   const full = (e: Episode) => [
-    `### ${e.heading.replace("{range}", rangeOf(e))}`,
+    `### ${e.name}${e.merged === null ? "" : `, ${rangeOf(e)}, ${e.merged}`}`,
     ...e.commits.map(commitLine),
   ];
   const collapsed = (e: Episode) => {
     const first = e.commits[0] as AuthoredCommit;
     const last = e.commits.at(-1) as AuthoredCommit;
-    const name = e.heading.replace(/, \{range\}.*$/, "");
     const ends =
       first === last
         ? `commit:${sha12(first.sha)}`
         : `commit:${sha12(first.sha)} … commit:${sha12(last.sha)}`;
     const merged = e.landing === null ? "" : ` (merged: commit:${sha12(e.landing.sha)})`;
     return [
-      `- ${name}, ${rangeOf(e).replace(" to ", "–")}, ${e.commits.length} ${e.commits.length === 1 ? "commit" : "commits"}: ${ends}${merged}`,
+      `- ${e.name}, ${rangeOf(e).replace(" to ", "–")}, ${e.commits.length} ${e.commits.length === 1 ? "commit" : "commits"}: ${ends}${merged}`,
     ];
   };
 
@@ -192,7 +201,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
   ];
   const mergedLandings = [...input.landings.values()]
     .filter((l) => l.merger === input.group && input.covered?.has(l.sha) !== true)
-    .sort((a, b) => a.number - b.number)
+    .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt) || a.number - b.number)
     .slice(-MAX_MERGED_LISTED);
   const merged =
     mergedLandings.length === 0
@@ -206,25 +215,40 @@ export function buildPersonPack(input: PackInput): PersonPack {
             .join(", ")}`,
         ];
 
-  // Trim: collapse the oldest episodes, then drop the oldest collapsed ones.
+  // Trim: collapse the oldest episodes, then drop the oldest collapsed ones. Each episode is
+  // rendered once both ways, and the text's length is kept as a running sum, so the loop is
+  // linear; estimateTokens of the joined text is exactly what this sum gives.
+  const fullLines = episodes.map(full);
+  const collapsedLines = episodes.map(collapsed);
+  const size = (lines: readonly string[]) => lines.reduce((n, l) => n + l.length + 1, 0);
+  const fullSize = fullLines.map(size);
+  const collapsedSize = collapsedLines.map(size);
+  const earlierLine = (n: number) => `- and ${n} earlier ${n === 1 ? "episode" : "episodes"}`;
+  const fixed = size(header) + size(merged);
+  let body = fullSize.reduce((a, b) => a + b, 0);
+  const tokensOf = (dropped: number) =>
+    Math.ceil(
+      Math.max(0, fixed + body + (dropped === 0 ? 0 : earlierLine(dropped).length + 1) - 1) / 2.5,
+    );
   let collapsedCount = 0;
   let dropped = 0;
-  const render = () => {
-    const kept = episodes.slice(dropped);
-    const body = kept.flatMap((e, i) => (i + dropped < collapsedCount ? collapsed(e) : full(e)));
-    const earlier =
-      dropped === 0 ? [] : [`- and ${dropped} earlier ${dropped === 1 ? "episode" : "episodes"}`];
-    return [...header, ...earlier, ...body, ...merged].join("\n");
-  };
-  let text = render();
-  while (estimateTokens(text) > budget && collapsedCount < episodes.length) {
+  while (tokensOf(0) > budget && collapsedCount < episodes.length) {
+    body += (collapsedSize[collapsedCount] ?? 0) - (fullSize[collapsedCount] ?? 0);
     collapsedCount++;
-    text = render();
   }
-  while (estimateTokens(text) > budget && dropped < episodes.length) {
+  while (tokensOf(dropped) > budget && dropped < episodes.length) {
+    body -= collapsedSize[dropped] ?? 0;
     dropped++;
-    text = render();
   }
+  const text = [
+    ...header,
+    ...(dropped === 0 ? [] : [earlierLine(dropped)]),
+    ...episodes.slice(dropped).flatMap((_, j) => {
+      const i = j + dropped;
+      return (i < collapsedCount ? collapsedLines[i] : fullLines[i]) ?? [];
+    }),
+    ...merged,
+  ].join("\n");
 
   // The citable set: exactly the shas the text shows.
   const shas = new Set<string>();
