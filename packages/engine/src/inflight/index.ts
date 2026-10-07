@@ -1,0 +1,17 @@
+export {
+  ensureInflightRepo,
+  FETCH_TIMEOUT_MS,
+  type FetchedHeads,
+  type FetchOptions,
+  fetchHeads,
+  githubFetchUrl,
+  type HeadState,
+  headStates,
+  INFLIGHT_DIR,
+  INFLIGHT_GIT,
+  INFLIGHT_GIT_ENV,
+  inflightGit,
+  isMissingObject,
+  pullRef,
+  removeInflightRepo,
+} from "./heads.ts";

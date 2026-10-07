@@ -28,6 +28,7 @@ export {
   type GitOptions,
   GitTimeoutError,
   gitFailureCause,
+  isSha,
   listBlobs,
   resolveCommit,
   scrubbedGitEnv,
