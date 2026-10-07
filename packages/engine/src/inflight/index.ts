@@ -31,3 +31,13 @@ export {
   type PullChanges,
   pullChanges,
 } from "./impact.ts";
+export {
+  BODY_EXCERPT_LENGTH,
+  type ClosingPull,
+  mapIssues,
+  NAME_MIN_LENGTH,
+  PULL_SHARE,
+  SEARCH_MARGIN,
+  SEARCH_SCORE_FLOOR,
+  type Suggest,
+} from "./issues.ts";
