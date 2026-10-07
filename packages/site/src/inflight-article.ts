@@ -98,11 +98,16 @@ export function articleInflight(site: SiteModel, featureId: string): ArticleInfl
     }),
   );
   const links = inlineOptions(site);
+  // A snapshot from an older head can name claims the page no longer has: they are not counted.
+  const onPage = new Set(
+    site.pages.get(featureId)?.sections.flatMap((s) => s.claims.map((c) => c.id)) ?? [],
+  );
+  const changing = [...byClaim.keys()].filter((id) => onPage.has(id)).length;
   return {
     notice:
-      byClaim.size === 0
+      changing === 0
         ? null
-        : `Open pull requests would change ${plural(byClaim.size, "claim", "claims")} on this page.`,
+        : `Open pull requests would change ${plural(changing, "claim", "claims")} on this page.`,
     markers,
     status: inflightStatus(site, inflight),
     pulls: pulls.map((pull) => {

@@ -334,6 +334,23 @@ describe("deriveInFlight's summary requests (R9, R14)", () => {
     expect(done.status.get(4)).toBe("none");
   });
 
+  it("asks for a pull whose first 300 files hold no line but whose later file does", async () => {
+    const edits: Record<string, string> = {};
+    for (let i = 0; i < 300; i++)
+      edits[`src/a/b${String(i).padStart(3, "0")}.bin`] = `\u0000${i}\u0000`;
+    edits["src/signals/ingest.py"] = ingestWith(12, "    signals = list()");
+    const head = fx.pushPull(4, fx.first, edits);
+    const snapshot = makeGitHubSnapshot({
+      pulls: [makeGitHubPull({ number: 4, headRefOid: head, baseRefOid: fx.first, closes: [] })],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const [four] = (await derive(snapshot, heads)).pulls;
+    expect(four?.pull.files).toHaveLength(300);
+    expect(four?.pull.files.every((f) => f.additions + f.deletions === 0)).toBe(true);
+    expect(four?.request?.user).toContain("ingest.py");
+  }, 120_000);
+
   it("gives each pull its own key, finds a stored answer by it, and derives the same twice", async () => {
     const { snapshot, heads } = snapshotWithPulls();
     const four = fx.pushPull(4, fx.first, {
@@ -444,6 +461,48 @@ describe("the summary round", () => {
     const offline = await complete(await derive(snapshot, heads), null, 1, done.inflight);
     expect(offline.status.get(1)).toBe("kept");
     expect(offline.inflight.pulls[0]?.summary).toEqual(done.inflight.pulls[0]?.summary);
+  });
+
+  it("drops a kept claim that no longer cites a changed line of the new diff", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const done = await complete(await derive(snapshot, heads), provider().provider);
+    fx.store.pruneInFlightSummaries([]);
+    // The stored summary cites line 12; say an older diff had made it cite line 20, unchanged now.
+    const summary = done.inflight.pulls[0]?.summary;
+    if (summary == null) throw new Error("pull request #1 was summarised");
+    const moved = {
+      ...summary,
+      claims: summary.claims.map((c) => ({
+        ...c,
+        citations: c.citations.map((x) =>
+          x.kind === "code" ? { ...x, startLine: 20, endLine: 20 } : x,
+        ),
+      })),
+    };
+    const previous = {
+      ...done.inflight,
+      pulls: done.inflight.pulls.map((p, i) => (i === 0 ? { ...p, summary: moved } : p)),
+    };
+    const offline = await complete(await derive(snapshot, heads), null, 1, previous);
+    expect(offline.inflight.pulls[0]?.summary).toBeNull();
+    expect(offline.status.get(1)).toBe("not asked");
+  });
+
+  it("keeps a cached summary whose pull could not be worked out this run, head unmoved", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const derived = await derive(snapshot, heads);
+    const key = derived.pulls[0]?.request?.key ?? "";
+    const done = await complete(derived, provider().provider);
+    fx.store.putInFlight(done.inflight);
+    // A transient failure: inflight.git loses its objects, so #1's impact is not computed.
+    for (const entry of readdirSync(join(dir, "objects"))) {
+      if (/^[0-9a-f]{2}$/.test(entry) || entry === "pack")
+        rmSync(join(dir, "objects", entry), { recursive: true });
+    }
+    const failed = await derive(snapshot, heads);
+    expect(failed.pulls[0]?.pull.head).toBe("missing");
+    await complete(failed, null, 1, done.inflight);
+    expect(fx.store.getInFlightSummary(key)).toEqual(done.inflight.pulls[0]?.summary);
   });
 });
 

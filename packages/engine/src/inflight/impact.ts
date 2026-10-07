@@ -1,4 +1,5 @@
 import {
+  hasCitableLines,
   INFLIGHT_MAX_FILES,
   type InFlightFeature,
   type InFlightFile,
@@ -50,6 +51,8 @@ export interface PullChanges {
   files: InFlightFile[];
   /** Files beyond those listed: past the cap, or dropped for an unsafe path. */
   filesTruncated: number;
+  /** Whether any of its files, listed or not, holds a line a summary could cite (hasCitableLines). */
+  citable: boolean;
   /** Heaviest first. */
   features: InFlightFeature[];
 }
@@ -320,6 +323,7 @@ export async function pullChanges(
     changes,
     files: files.slice(0, INFLIGHT_MAX_FILES),
     filesTruncated: Math.max(0, files.length - INFLIGHT_MAX_FILES) + dropped,
+    citable: hasCitableLines(all),
     features: featuresOf(all, churn, ctx.driftThreshold),
   };
 }

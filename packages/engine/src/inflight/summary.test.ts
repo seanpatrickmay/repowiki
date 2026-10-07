@@ -152,6 +152,17 @@ describe("verifySummary (R10)", () => {
     );
   });
 
+  it("counts each non-ASCII code point of the request as a token, so the budget holds for any text", () => {
+    const wide: PackInput = {
+      ...packInput(),
+      pull: makeGitHubPull({ number: 12, body: String.fromCodePoint(0x4fe1).repeat(3000) }),
+    };
+    const plain = request();
+    const r = summaryRequest(wide, "claude-haiku-4-5");
+    // 3,000 code points in place of a 61-character body: at least 2,975 more tokens.
+    expect(r.tokens - plain.tokens).toBeGreaterThanOrEqual(2975);
+  });
+
   it.each([
     ["only unchanged context lines", { cite: ["src/signals/ingest.py:9-11"] }],
     [

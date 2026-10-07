@@ -1,6 +1,6 @@
 import type { InFlight } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
-import { inflightIndexView, inflightStatus, pullView } from "./inflight.ts";
+import { badges, evidenceText, inflightIndexView, inflightStatus, pullView } from "./inflight.ts";
 import { articleInflight } from "./inflight-article.ts";
 import { buildSiteModel } from "./model.ts";
 import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
@@ -125,7 +125,7 @@ describe("pullView", () => {
     const view = pullView(s, inflightOf(s), gone);
     expect(view.features[0]?.effects).toEqual([
       {
-        text: "s-gone",
+        text: "a claim no longer on the page",
         href: "/wiki/signals/",
         reason: "src/signals/ingest.py:12-12 at bbbbbbb: the cited lines changed",
         certain: true,
@@ -257,5 +257,89 @@ describe("a pull request forked past the wiki's head (R27)", () => {
     const inflight = inflightOf(s);
     expect(pullView(s, inflight, inflight.pulls[0] as InFlight["pulls"][number]).behind).toBeNull();
     expect(articleInflight(s, "signals")?.pulls[0]?.behind).toBeNull();
+  });
+});
+
+describe("pullView's wording", () => {
+  const pull = () => fixtureInFlight().pulls[0] as InFlight["pulls"][number];
+  const view = (overrides: Partial<InFlight["pulls"][number]>) => {
+    const p = { ...pull(), closes: [], ...overrides };
+    const s = site({ pulls: [p], issues: [] });
+    return pullView(s, inflightOf(s), p);
+  };
+
+  it("says why git could not merge it, for an old git and for an unrelated history", () => {
+    const unknown = { merge: "unknown" as const, effects: [] };
+    expect(view({ ...unknown, mergeReason: "old-git" }).merge).toBe(
+      "Git could not merge it with the wiki's commit (that needs git 2.38 or later), so the claims below may change.",
+    );
+    expect(view({ ...unknown, mergeReason: "unrelated" }).merge).toBe(
+      "It shares no history with the wiki's commit, so the claims below may change.",
+    );
+    expect(view({ ...unknown, mergeReason: null }).merge).toBe(
+      "Git could not merge it with the wiki's commit, so the claims below may change.",
+    );
+    expect(view({ merge: "conflicts", effects: [] }).merge).toBe(
+      "It conflicts with the wiki's commit, so the claims below may change.",
+    );
+  });
+
+  it("says a moved head moved, and leaves out the line count it does not know", () => {
+    const moved = view({
+      head: "moved",
+      merge: "unknown",
+      files: [],
+      effects: [],
+      summary: null,
+      behind: false,
+    });
+    expect(moved.merge).toBe(
+      "Its head commit moved since GitHub was read, so its impact could not be computed.",
+    );
+    expect(moved.features[0]?.files).toBe("1 file, lines unknown");
+    const unread = view({
+      behind: true,
+      baseSha: null,
+      mergeBase: null,
+      merge: "unknown",
+      files: [],
+      effects: [],
+      summary: null,
+    });
+    expect(unread.features[0]?.files).toBe("1 file, lines unknown");
+    expect(unread.summaryNote).toBe("No summary this run: this pull's base was not read.");
+  });
+
+  it("quotes a claim as plain text, and words one no longer on the page", () => {
+    const [current] = view({}).features[0]?.effects ?? [];
+    expect(current?.text).toBe("Signals are created from ingested chunks by `ingest_chunk`.");
+    // A snapshot from an older head can name a claim the page has lost.
+    const effect = pull().effects[0] as InFlight["pulls"][number]["effects"][number];
+    const p = { ...pull(), closes: [], effects: [{ ...effect, claimId: "s-gone" }] };
+    const stale = site({ wikiHead: "b".repeat(40), pulls: [p], issues: [] });
+    const gone = pullView(stale, inflightOf(stale), p);
+    expect(gone.features[0]?.effects[0]?.text).toBe("a claim no longer on the page");
+  });
+});
+
+describe("inflightStatus and the index's wording", () => {
+  it("warns from just over seven days, measured exactly", () => {
+    const half = site({ fetchedAt: "2026-09-23T09:00:00Z" });
+    expect(inflightStatus(half, inflightOf(half)).stale).toBe(
+      "GitHub was read 7 days before this wiki was exported; run pnpm wiki:inflight to refresh it.",
+    );
+  });
+
+  it("badges no base that is the default branch, and words every kind of evidence", () => {
+    const s = site();
+    const inflight = inflightOf(s);
+    expect(badges(inflight, inflight.pulls[0] as InFlight["pulls"][number])).toEqual([]);
+    const words = (kind: "path" | "label" | "search", detail: string) =>
+      evidenceText(s, { featureId: "signals", kind, detail });
+    expect([
+      words("path", "src/signals/ingest.py"),
+      words("label", "area:signals"),
+      words("search", "score 6.0"),
+    ]).toEqual(["mentions src/signals/ingest.py", "label area:signals", "suggested by search"]);
   });
 });

@@ -154,10 +154,14 @@ describe("pullImpact (R7)", () => {
       const head = orphan.commit("an unrelated root");
       orphan.git("push", "--quiet", fx.url, `HEAD:refs/pull/7/head`);
       fetchHeads(ctx.dir, fx.url, [{ number: 7, headRefOid: head }], { protocol: "file" });
-      expect(mergeTree(ctx.dir, fx.first, head)).toEqual({ merge: "unknown", tree: null });
+      expect(mergeTree(ctx.dir, fx.first, head)).toEqual({
+        merge: "unknown",
+        tree: null,
+        reason: "unrelated",
+      });
       const impact = await pullImpact(ctx, head, pages);
       expect(impact.mergeBase).toBeNull();
-      expect(impact.merge).toBe("unknown");
+      expect([impact.merge, impact.mergeReason]).toEqual(["unknown", "unrelated"]);
       expect(impact.effects.length).toBeGreaterThan(0);
       expect(impact.effects.every((e) => !e.certain)).toBe(true);
     } finally {

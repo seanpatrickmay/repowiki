@@ -38,6 +38,20 @@ describe("articleInflight (spec v2 #9 §6.2)", () => {
     ]);
   });
 
+  it("counts in its notice only the claims on the page, for a snapshot from an older head", () => {
+    const base = fixtureInFlight().pulls[0] as InFlight["pulls"][number];
+    const gone = {
+      ...(base.effects[0] as InFlight["pulls"][number]["effects"][number]),
+      claimId: "s-gone",
+    };
+    const pull = { ...base, closes: [], effects: [...base.effects, gone] };
+    const view = articleInflight(
+      site({ wikiHead: "b".repeat(40), pulls: [pull], issues: [] }),
+      "signals",
+    );
+    expect(view?.notice).toBe("Open pull requests would change 2 claims on this page.");
+  });
+
   it("shows at most three pull requests on a claim, then one +k to the index", () => {
     const base = fixtureInFlight().pulls[0] as InFlight["pulls"][number];
     const pulls = [12, 14, 15, 16, 17].map((number) =>
@@ -71,7 +85,9 @@ describe("articleInflight (spec v2 #9 §6.2)", () => {
       page.view.toc.findIndex((e) => e.anchor === "see-also") - 1,
     );
     expect(page.view.sections.some((sec) => sec.html.includes("[changing in #12]"))).toBe(true);
-    const old = articleView(s, s.history.get("signals")?.[0] as never);
+    const first = s.history.get("signals")?.[0];
+    if (first === undefined) throw new Error("the fixture has a signals history");
+    const old = articleView(s, first);
     expect(old.inflight).toBeUndefined();
     expect(old.toc.map((e) => e.anchor)).not.toContain("in-progress");
   });

@@ -151,8 +151,11 @@ export interface Store {
    */
   getInFlightSummary(requestKey: string): InFlightSummary | null;
   putInFlightSummary(requestKey: string, summary: InFlightSummary, createdAt: string): void;
-  /** Drops every cached summary whose key is not in `keep`; returns how many were dropped. */
-  pruneInFlightSummaries(keep: readonly string[]): number;
+  /**
+   * Drops every cached summary whose key is not in `keep` and that cites none of `keepHeads` (a
+   * pull request's head commit); returns how many were dropped. One transaction.
+   */
+  pruneInFlightSummaries(keep: readonly string[], keepHeads?: readonly string[]): number;
 }
 
 /** The features an update must write whole again (Store.getPendingWhole). */
@@ -612,17 +615,29 @@ export function openStore(path: string): Store {
       ).run(key, JSON.stringify(body), IsoDateTime.parse(createdAt));
     },
 
-    pruneInFlightSummaries(keep) {
+    pruneInFlightSummaries(keep, keepHeads = []) {
       const kept = new Set(keep);
-      const keys = (
-        db.prepare("SELECT request_key AS key FROM inflight_summaries").all() as { key: string }[]
-      ).map((row) => row.key);
+      const heads = new Set(keepHeads);
+      const cites = (body: string) => {
+        try {
+          const parsed = InFlightSummary.safeParse(JSON.parse(body));
+          return (
+            parsed.success &&
+            parsed.data.claims.some((c) => c.citations.some((x) => heads.has(x.sha)))
+          );
+        } catch {
+          return false;
+        }
+      };
       const remove = db.prepare("DELETE FROM inflight_summaries WHERE request_key = ?");
-      const dropped = keys.filter((key) => !kept.has(key));
-      db.transaction(() => {
-        for (const key of dropped) remove.run(key);
+      return db.transaction(() => {
+        const rows = db
+          .prepare("SELECT request_key AS key, body FROM inflight_summaries")
+          .all() as { key: string; body: string }[];
+        const dropped = rows.filter((row) => !kept.has(row.key) && !cites(row.body));
+        for (const row of dropped) remove.run(row.key);
+        return dropped.length;
       })();
-      return dropped.length;
     },
   };
 }

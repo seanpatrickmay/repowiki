@@ -1,7 +1,6 @@
 import {
   type GitHubPull,
   type GitHubSnapshot,
-  hasCitableLines,
   InFlight,
   type InFlightPull,
   type InFlightSummary,
@@ -85,6 +84,7 @@ function bare(pull: GitHubPull, head: HeadState, manifest: Manifest): Omit<InFli
     mergeBase: null,
     behind: false,
     merge: "unknown",
+    mergeReason: null,
     files: [],
     filesTruncated: 0,
     features: featuresFromPaths(manifest, pull.files),
@@ -140,7 +140,7 @@ async function requestOf(
   manifest: Manifest,
   model: string,
 ): Promise<SummaryRequest | null> {
-  if (!hasCitableLines(impact.files)) return null;
+  if (!impact.citable) return null;
   const kept = impact.changes.flatMap((c) => (c.newPath === null ? [] : [c.newPath]));
   const old = new Set(impact.changes.flatMap((c) => (c.oldPath === null ? [] : [c.oldPath])));
   const read = (sha: string | null, only: Set<string>) =>
@@ -222,6 +222,7 @@ export async function deriveInFlight(input: DeriveInput): Promise<Derived> {
             mergeBase: impact.mergeBase,
             behind: impact.behind,
             merge: impact.merge,
+            mergeReason: impact.mergeReason,
             files: impact.files,
             filesTruncated: impact.filesTruncated,
             features: impact.features,
@@ -354,7 +355,9 @@ export interface Completed {
  * is used as it is; the misses within `maxUsd` are asked in one round when there is a provider,
  * and each verified answer is cached; a pull request with no answer this run keeps the previous
  * snapshot's summary when its head is the same (its features filtered to those it still touches),
- * else has none. The summary cache keeps only the keys this snapshot uses. Validated against the
+ * else has none; a kept claim must still cite a changed line of this run's diff. The summary cache
+ * keeps only the keys this snapshot uses, and the summaries of a pull with no request this run
+ * whose head did not move. Validated against the
  * store's head, manifest and pages before it is returned; the caller stores it.
  */
 export async function completeInFlight(
@@ -399,21 +402,34 @@ export async function completeInFlight(
       old?.summary != null &&
       old.headSha === pull.headSha
     ) {
+      // Each kept claim must still cite a changed line of this run's diff (spec v2 #9 §7.1).
       const touched = new Set(pull.features.map((f) => f.featureId));
-      summary = {
-        ...old.summary,
-        claims: old.summary.claims.map((c) => ({
-          ...c,
-          features: c.features.filter((f) => touched.has(f)),
-        })),
-      };
-      if (!status.has(pull.number)) status.set(pull.number, "kept");
+      const changed = request?.changed;
+      const claims = old.summary.claims
+        .filter((c) =>
+          c.citations.some((x) => {
+            const lines = changed?.get(x.path);
+            for (let n = x.startLine; n <= x.endLine; n++) if (lines?.has(n) === true) return true;
+            return false;
+          }),
+        )
+        .map((c) => ({ ...c, features: c.features.filter((f) => touched.has(f)) }));
+      if (claims.length > 0) {
+        summary = { ...old.summary, claims };
+        if (!status.has(pull.number)) status.set(pull.number, "kept");
+      }
     }
     if (!status.has(pull.number)) status.set(pull.number, request === null ? "none" : "not asked");
     return { ...pull, summary };
   });
+  // A pull with no request this run whose head did not move (its impact failed for now, or its
+  // base was not read) keeps the summaries cached for that head, so the next run need not pay again.
+  const unmoved = derived.pulls.flatMap(({ pull, request }) =>
+    request === null && before.get(pull.number)?.headSha === pull.headSha ? [pull.headSha] : [],
+  );
   store.pruneInFlightSummaries(
     derived.pulls.flatMap((p) => (p.request === null ? [] : [p.request.key])),
+    unmoved,
   );
   const inflight = InFlight.parse({
     repo: derived.snapshot.repo,

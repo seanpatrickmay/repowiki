@@ -45,10 +45,10 @@ export function inflightStatus(site: SiteModel, inflight: InFlight): InflightSta
       stale: `The wiki has moved on to commit ${shortSha(site.wiki.head)} since this was worked out; run pnpm wiki:inflight to refresh it.`,
     };
   }
-  const days = Math.floor(
-    (Date.parse(site.wiki.exportedAt) - Date.parse(inflight.fetchedAt)) / DAY_MS,
-  );
-  return days > STALE_AFTER_DAYS
+  const age = Date.parse(site.wiki.exportedAt) - Date.parse(inflight.fetchedAt);
+  const days = Math.floor(age / DAY_MS);
+  // "More than seven days" is measured exactly; the message gives the whole days.
+  return age > STALE_AFTER_DAYS * DAY_MS
     ? {
         line,
         stale: `GitHub was read ${formatNumber(days)} days before this wiki was exported; run pnpm wiki:inflight to refresh it.`,
@@ -193,7 +193,10 @@ export interface PullView {
   merge: string;
   /** Plain text: R27's notice when the wiki is behind its base, else null. */
   behind: string | null;
-  /** Null when the head was not fetched; the page says so. */
+  /**
+   * Null when there is no summary: the head was not fetched, its base was not read, it has nothing
+   * to summarise, or none was asked for or verified yet; `summaryNote` says which.
+   */
   summary: { html: string; refs: { n: number; label: string; href: string }[] }[] | null;
   /** Plain text the page shows in place of a null summary. */
   summaryNote: string;
@@ -210,11 +213,17 @@ export interface PullView {
   closes: { number: number; href: string }[];
 }
 
-const MERGE_WORDS: Record<InFlightPull["merge"], string> = {
-  clean: "It merges cleanly with the wiki's commit.",
-  conflicts: "It conflicts with the wiki's commit, so the claims below only may change.",
-  unknown: "Git could not merge it with the wiki's commit (that needs git 2.38 or later).",
-};
+/** How a fetched pull request merges with the wiki's commit, or why git could not say. */
+function mergeWords(pull: InFlightPull): string {
+  if (pull.merge === "clean") return "It merges cleanly with the wiki's commit.";
+  if (pull.merge === "conflicts")
+    return "It conflicts with the wiki's commit, so the claims below may change.";
+  if (pull.mergeReason === "unrelated")
+    return "It shares no history with the wiki's commit, so the claims below may change.";
+  return pull.mergeReason === "old-git"
+    ? "Git could not merge it with the wiki's commit (that needs git 2.38 or later), so the claims below may change."
+    : "Git could not merge it with the wiki's commit, so the claims below may change.";
+}
 
 /**
  * R27's notice for a pull request the wiki's head does not hold the fork point of, or whose base
@@ -233,6 +242,9 @@ export const pullFeatureAnchor = (featureId: string): string => `feature-${featu
 /** /special/in-progress/pr/<n>/. Every text field is plain except the summary claims' `html`. */
 export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull): PullView {
   const fetched = pull.head === "fetched";
+  // GitHub's file list has paths only: no lines for a head not fetched or a base not read.
+  const unread = fetched && pull.behind && pull.mergeBase === null;
+  const linesKnown = fetched && !unread;
   const titleOf = (id: string) => site.features.get(id)?.title ?? null;
   let n = 0;
   const summary =
@@ -258,12 +270,13 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
     merge: !fetched
       ? `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`
       : pull.behind
-        ? "It was not merged with the wiki's commit, so the claims below only may change."
-        : MERGE_WORDS[pull.merge],
+        ? "It was not merged with the wiki's commit, so the claims below may change."
+        : mergeWords(pull),
     behind: behindNotice(pull),
     summary,
-    summaryNote:
-      fetched && !hasCitableLines(pull.files)
+    summaryNote: unread
+      ? "No summary this run: this pull's base was not read."
+      : fetched && pull.filesTruncated === 0 && !hasCitableLines(pull.files)
         ? "There is nothing to summarise: it adds or changes no lines of text."
         : "No summary of this pull request yet.",
     // Every feature it touches, then any whose page cites a file it changes: each has an anchor
@@ -279,8 +292,8 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
               ? "None of its files, but its page cites files this changes"
               : [
                   counted(f.files, "file"),
-                  counted(f.changedLines, "line"),
-                  addedRemoved(f.added, f.removed),
+                  linesKnown ? counted(f.changedLines, "line") : "lines unknown",
+                  linesKnown ? addedRemoved(f.added, f.removed) : "",
                 ]
                   .filter((part) => part !== "")
                   .join(", "),
@@ -298,7 +311,10 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
               const anchor = claimAnchor(e.claimId);
               const article = featureLink(site, e.featureId)?.href ?? null;
               return {
-                text: claim === undefined ? e.claimId : plainClaimText(claim.text, titleOf),
+                text:
+                  claim === undefined
+                    ? "a claim no longer on the page"
+                    : plainClaimText(claim.text, titleOf),
                 // A claim no longer on the page (a stale snapshot) links to the article itself; one
                 // whose id cannot be an anchor, to its section's (C10), or the article for the lead.
                 href:

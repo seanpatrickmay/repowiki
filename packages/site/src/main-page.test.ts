@@ -273,4 +273,11 @@ describe("the Main Page's In progress box (spec v2 #9 §6.2)", () => {
     ]);
     expect(mainPageView(buildSiteModel(fixtureExport(), null)).inProgress).toBeNull();
   });
+
+  it("keeps an empty box for a snapshot with no open pull request, and titles as plain text", () => {
+    const empty = buildSiteModel(inflightExport({ pulls: [], issues: [] }), null);
+    expect(mainPageView(empty).inProgress?.pulls).toEqual([]);
+    const hostile = mainPageView(buildSiteModel(inflightExport(), null)).inProgress?.pulls;
+    expect(hostile?.find((p) => p.number === 13)?.title).toBe(fixtureInFlight().pulls[1]?.title);
+  });
 });

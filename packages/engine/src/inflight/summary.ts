@@ -13,7 +13,6 @@ import {
 import { LlmOutputError, type Provider } from "@repowiki/llm";
 import { z } from "zod";
 import { createPageLinker } from "../link/index.ts";
-import { estimateTokens } from "../manifest/index.ts";
 import {
   citedLines,
   claimTextProblems,
@@ -23,6 +22,7 @@ import {
 import {
   INFLIGHT_MAX_OUTPUT_TOKENS,
   inflightSystemPrompt,
+  inflightTokens,
   type PackInput,
   summaryPack,
   summaryRequestKey,
@@ -69,7 +69,7 @@ export function summaryRequest(input: PackInput, model: string): SummaryRequest 
     key: summaryRequestKey(model, system, pack.text),
     system,
     user: pack.text,
-    tokens: estimateTokens(system) + pack.tokens,
+    tokens: inflightTokens(system) + inflightTokens(pack.text),
     shown: pack.shown,
     changed: pack.changed,
     removed: pack.removed,
@@ -156,13 +156,16 @@ export function verifySummary(
       citations.length === resolved.citations.length &&
       citations.every((c) => lines(c).every((n) => request.shown.get(c.path)?.has(n) === true)) &&
       citations.some((c) => lines(c).some((n) => request.changed.get(c.path)?.has(n) === true)) &&
-      ungroundedCodeToken(groundOf(request, citations), text) === null &&
-      // A throwaway linker, so a claim dropped here takes no first-mention link.
-      linkedFeatures(createPageLinker(manifest, "", new Map())(text)).every((id) =>
-        touched.has(id),
-      );
-    const linked = ok ? link(text) : "";
-    if (!ok || linked === "" || linked.length > CLAIM_TEXT_MAX_LENGTH) {
+      ungroundedCodeToken(groundOf(request, citations), text) === null;
+    // A throwaway linker first, so a claim dropped here takes no first-mention link: it links every
+    // first mention, so its text is never shorter than the real linker's.
+    const preview = ok ? createPageLinker(manifest, "", new Map())(text) : "";
+    const fits =
+      preview !== "" &&
+      preview.length <= CLAIM_TEXT_MAX_LENGTH &&
+      linkedFeatures(preview).every((id) => touched.has(id));
+    const linked = fits ? link(text) : "";
+    if (!fits || linked === "" || linked.length > CLAIM_TEXT_MAX_LENGTH) {
       dropped++;
       continue;
     }
