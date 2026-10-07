@@ -23,6 +23,20 @@ const map = featureMapSource(site);
       <p set:html={view.architecture.leadHtml} />
       <p>(<a href={view.architecture.href}>Full article...</a>)</p>
     </section>
+  )}{view.inProgress !== null && (
+    <section class="mp-box mp-in-progress" aria-labelledby="mp-in-progress" data-pagefind-ignore="all">
+      <h2 id="mp-in-progress">In progress</h2>
+      {view.inProgress.pulls.length === 0 ? (
+        <p>No open pull requests.</p>
+      ) : (
+        <ul>
+          {view.inProgress.pulls.map((pull) => (
+            <li><a href={pull.href}>#{pull.number} {pull.title}</a> <span class="mp-date">{pull.date}</span></li>
+          ))}
+        </ul>
+      )}
+      <p>{view.inProgress.status} (<a href={view.inProgress.href}>All work in progress...</a>)</p>
+    </section>
   )}
   <div class="mp-columns">
     <section class="mp-box" aria-labelledby="mp-featured">

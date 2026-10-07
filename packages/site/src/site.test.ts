@@ -1385,8 +1385,14 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
     );
     expect(inflightSite.read("llms.txt")).toBe(renderLlmsTxt(inflightExport()));
     expect(inflightSite.read("llms.txt")).not.toMatch(/in-progress|pull request/i);
+    const box = /<section class="mp-box mp-in-progress"[\s\S]*?<\/section>/.exec(
+      inflightSite.read("index.html"),
+    )?.[0];
+    expect(box).toContain('data-pagefind-ignore="all"');
+    expect(box).toContain('<a href="/special/in-progress/pr/12/">#12 Page through long chunks</a>');
     // An export with no snapshot links no In progress page.
     expect(site.read("index.html")).not.toContain('href="/special/in-progress/"');
+    expect(site.read("index.html")).not.toContain("mp-in-progress");
   });
 });
 
