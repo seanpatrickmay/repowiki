@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
+import { RepoPath } from "@repowiki/core";
 import {
   type BlameRun,
   BlameSkippedError,
@@ -74,6 +75,8 @@ export interface BlameTreeOptions {
   maxFileBytes?: number;
   /** wiki:people --rebuild-blame: forget the cache first. */
   rebuild?: boolean;
+  /** The blame to run (default blameFile); tests replace it. */
+  blame?: typeof blameFile;
 }
 
 /** The fingerprint of an ignore list: a cached blame holds only under the same list. */
@@ -97,6 +100,12 @@ export async function blameTree(
   store: Store,
   options: BlameTreeOptions,
 ): Promise<Ownership> {
+  const concurrency = options.concurrency ?? 4;
+  if (!Number.isInteger(concurrency) || concurrency < 1)
+    throw new RangeError(
+      `blame concurrency must be a whole number of at least 1, not ${concurrency}`,
+    );
+  const blame = options.blame ?? blameFile;
   const ignore = fingerprint(options.ignoreRevs);
   if (options.rebuild === true || store.getPeopleMeta("blame-ignore") !== ignore) {
     store.clearBlameCache();
@@ -104,7 +113,10 @@ export async function blameTree(
   }
   const maxBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const blobs = listBlobs(repo, sha);
-  const wanted = blobs.filter((b) => !isLockfile(b.path) && b.size <= maxBytes);
+  // A path RepoPath refuses (a backslash, say) is left out, as the indexer leaves it out.
+  const wanted = blobs.filter(
+    (b) => RepoPath.safeParse(b.path).success && !isLockfile(b.path) && b.size <= maxBytes,
+  );
   let skipped = blobs.length - wanted.length;
   const files = new Map<string, BlameRun[]>();
   const todo: { path: string; oid: string }[] = [];
@@ -128,11 +140,14 @@ export async function blameTree(
   skipped += todo.length - text.length;
   const results = new Map<string, BlameRun[] | "timeout" | { cause: string }>();
   let cursor = 0;
+  // The first failure that is not a timeout or a skip stops every worker: no blame runs on in
+  // the background after blameTree has failed.
+  let failed = false;
   const worker = async () => {
-    while (cursor < text.length) {
+    while (!failed && cursor < text.length) {
       const blob = text[cursor++] as { path: string; oid: string };
       try {
-        const runs = await blameFile(repo, sha, blob.path, options.ignoreRevs, {
+        const runs = await blame(repo, sha, blob.path, options.ignoreRevs, {
           ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         });
         results.set(blob.path, runs);
@@ -140,11 +155,14 @@ export async function blameTree(
         if (error instanceof GitTimeoutError) results.set(blob.path, "timeout");
         else if (error instanceof BlameSkippedError)
           results.set(blob.path, { cause: error.message });
-        else throw error;
+        else {
+          failed = true;
+          throw error;
+        }
       }
     }
   };
-  await Promise.all(Array.from({ length: options.concurrency ?? 4 }, worker));
+  await Promise.all(Array.from({ length: concurrency }, worker));
   const timedOut: Ownership["timedOut"] = [];
   const unattributed: Ownership["unattributed"] = [];
   for (const blob of text) {
