@@ -7,9 +7,18 @@ import {
   makeGitHubPull,
   makeGitHubSnapshot,
 } from "@repowiki/core/test-fixtures";
+import type { GenerateRequest, Provider } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildExport } from "../store/index.ts";
 import { ensureInflightRepo, fetchHeads } from "./heads.ts";
-import { deriveInFlight } from "./refresh.ts";
+import {
+  completeInFlight,
+  type Derived,
+  deriveInFlight,
+  estimateSummaries,
+  withinBudget,
+} from "./refresh.ts";
+import type { InFlightAnswer } from "./summary.ts";
 import { type InflightFixture, inflightFixture } from "./test-inflight.ts";
 
 // Each test builds a fixture wiki, a remote and inflight.git: seconds on a loaded machine.
@@ -72,6 +81,49 @@ function snapshotWithPulls(): {
 
 const derive = (snapshot: GitHubSnapshot, heads: Map<number, "fetched" | "missing" | "moved">) =>
   deriveInFlight({ store: fx.store, dir, snapshot, heads, model: MODEL });
+
+/** A provider answering every summary request with one claim citing ingest.py's changed line. */
+function provider(): { provider: Provider; calls: GenerateRequest<unknown>[] } {
+  const calls: GenerateRequest<unknown>[] = [];
+  return {
+    calls,
+    provider: {
+      async generate<T>(req: GenerateRequest<T>) {
+        calls.push(req as GenerateRequest<unknown>);
+        const output: InFlightAnswer = {
+          claims: [
+            {
+              text: "It builds the list with `list()`.",
+              cite: ["src/signals/ingest.py:12-12"],
+              features: ["signals"],
+            },
+          ],
+        };
+        return {
+          output: output as T,
+          usage: { in: 4000, out: 200, cacheRead: 0, cacheWrite: 0 },
+          model: "claude-haiku-4-5-20251001",
+        };
+      },
+    },
+  };
+}
+
+const complete = (
+  derived: Derived,
+  p: Provider | null,
+  maxUsd = 1,
+  previous = null as Parameters<typeof completeInFlight>[2]["previous"],
+) =>
+  completeInFlight(fx.store, derived, {
+    provider: p,
+    model: MODEL,
+    batch: true,
+    maxUsd,
+    fetchedAt: "2026-10-03T09:30:00Z",
+    previous,
+    now: () => new Date("2026-10-04T12:00:00Z"),
+  });
 
 describe("deriveInFlight", () => {
   it("computes fetched heads' impacts, others from GitHub's file list, and maps the issues", async () => {
@@ -144,5 +196,63 @@ describe("deriveInFlight", () => {
     expect(derived.corrupt).toBe(true);
     expect(derived.pulls[0]?.pull.head).toBe("missing");
     expect(logged[0]).toMatch(/^#1: impact not computed: /);
+  });
+});
+
+describe("the summary round", () => {
+  it("estimates the misses before any call, at 700 output tokens and at the 1,500 cap", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const derived = await derive(snapshot, heads);
+    const estimate = estimateSummaries(derived, MODEL, true);
+    const tokens = derived.pulls[0]?.request?.tokens ?? 0;
+    expect(estimate).toEqual({
+      requests: 1,
+      cached: 0,
+      typicalUsd: ((tokens * 1 + 700 * 5) / 1e6) * 0.5,
+      ceilingUsd: ((tokens * 1 + 1500 * 5) / 1e6) * 0.5,
+    });
+    expect(estimateSummaries(derived, "claude-unknown-1", true)).toBeNull();
+    expect(withinBudget(derived, MODEL, true, 0.000001)).toEqual({
+      chosen: [],
+      over: [derived.pulls[0]?.request],
+    });
+  });
+
+  it("asks once, caches the verified summary, and makes no call on an immediate second refresh", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const first = provider();
+    const done = await complete(await derive(snapshot, heads), first.provider);
+    expect(first.calls).toHaveLength(1);
+    expect(done.status.get(1)).toBe("new");
+    expect(done.inflight.pulls[0]?.summary?.claims.map((c) => c.id)).toEqual(["p1-c1"]);
+    expect([done.status.get(2), done.status.get(3)]).toEqual(["none", "none"]);
+    fx.store.putInFlight(done.inflight);
+    expect(
+      buildExport(fx.store, { repo: "demo", exportedAt: "2026-10-04T12:00:00Z" }).inflight,
+    ).toEqual(done.inflight);
+
+    const second = provider();
+    const again = await complete(await derive(snapshot, heads), second.provider);
+    expect(second.calls).toHaveLength(0);
+    expect(again.status.get(1)).toBe("cached");
+    expect(again.inflight.pulls[0]?.summary).toEqual(done.inflight.pulls[0]?.summary);
+  });
+
+  it("asks nothing over budget, and nothing at all without a provider", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const derived = await derive(snapshot, heads);
+    const p = provider();
+    expect((await complete(derived, p.provider, 0.000001)).status.get(1)).toBe("over budget");
+    expect((await complete(derived, null)).status.get(1)).toBe("not asked");
+    expect(p.calls).toHaveLength(0);
+  });
+
+  it("keeps the previous summary of a head that did not move when its request is not cached", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const done = await complete(await derive(snapshot, heads), provider().provider);
+    fx.store.pruneInFlightSummaries([]);
+    const offline = await complete(await derive(snapshot, heads), null, 1, done.inflight);
+    expect(offline.status.get(1)).toBe("kept");
+    expect(offline.inflight.pulls[0]?.summary).toEqual(done.inflight.pulls[0]?.summary);
   });
 });

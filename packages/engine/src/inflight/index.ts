@@ -42,10 +42,19 @@ export {
   type Suggest,
 } from "./issues.ts";
 export {
+  type Completed,
+  type CompleteOptions,
+  completeInFlight,
   type Derived,
   type DerivedPull,
   type DeriveInput,
   deriveInFlight,
+  estimateSummaries,
+  misses,
+  type SummaryEstimate,
+  type SummaryStatus,
+  TYPICAL_SUMMARY_OUTPUT_TOKENS,
+  withinBudget,
 } from "./refresh.ts";
 export {
   InFlightAnswer,
