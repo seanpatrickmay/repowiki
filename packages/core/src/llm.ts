@@ -6,15 +6,25 @@ import { TokenUsage } from "./revision.ts";
 /**
  * What an LLM call is for. Each role has its own model id in config (spec §4). `ask` is the Ask
  * sidebar's (spec v2 #4 R13): its calls are ledgered in memory per serve session, never stored.
+ * `inflight` summarizes an open pull request (spec v2 #9 R20).
  */
-export const LlmRole = z.enum(["manifest", "write", "tieBreak", "evalAgent", "evalJudge", "ask"]);
+export const LlmRole = z.enum([
+  "manifest",
+  "write",
+  "tieBreak",
+  "evalAgent",
+  "evalJudge",
+  "ask",
+  "inflight",
+]);
 export type LlmRole = z.infer<typeof LlmRole>;
 
 /**
- * What a run did: a full build (manifest and pages) or an update (spec §6.4 compares the two).
- * Ledger rows written before M4 have no run kind.
+ * What a run did: a full build (manifest and pages) or an update (spec §6.4 compares the two), or
+ * a work-in-flight refresh (spec v2 #9 R20), which neither total counts. Ledger rows written
+ * before M4 have no run kind.
  */
-export const RunKind = z.enum(["build", "update"]);
+export const RunKind = z.enum(["build", "update", "inflight"]);
 export type RunKind = z.infer<typeof RunKind>;
 
 /** One provider call, as recorded in the TokenLedger and stored by the store. */

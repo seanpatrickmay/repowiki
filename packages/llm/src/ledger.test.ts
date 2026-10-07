@@ -61,7 +61,7 @@ describe("createLedger", () => {
 
 describe("resolveModels", () => {
   it("defaults every role to Haiku 4.5 and applies per-role overrides", () => {
-    expect(Object.values(DEFAULT_MODELS)).toEqual(Array(6).fill("claude-haiku-4-5"));
+    expect(Object.values(DEFAULT_MODELS)).toEqual(Array(7).fill("claude-haiku-4-5"));
     expect(resolveModels({ models: { write: "claude-sonnet-5-5" } })).toEqual({
       ...DEFAULT_MODELS,
       write: "claude-sonnet-5-5",

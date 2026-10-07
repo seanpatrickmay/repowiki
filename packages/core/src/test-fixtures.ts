@@ -4,6 +4,7 @@ import type { CodeCitation, CommitCitation } from "./citation.ts";
 import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
 import type { Feature } from "./feature.ts";
+import type { GitHubIssue, GitHubPull, GitHubSnapshot } from "./inflight.ts";
 import type { LedgerEntry } from "./llm.ts";
 import type { Manifest } from "./manifest.ts";
 import type { Revision } from "./revision.ts";
@@ -267,6 +268,61 @@ export function makeAskResponse(overrides: Partial<AskResponse> = {}): AskRespon
     cached: false,
     answeredAt: "2026-10-05T12:00:00.000Z",
     cost: { turns: 2, usd: 0.0098, model: "claude-haiku-4-5-20251001" },
+    ...overrides,
+  };
+}
+
+/** The repository the in-flight fixtures read: acme/demo on github.com, public. */
+export const DEMO_REPO = {
+  host: "github.com" as const,
+  owner: "acme",
+  name: "demo",
+  private: false,
+  defaultBranch: "main",
+};
+
+/** Pull request #12 as the GitHub snapshot stores it. */
+export function makeGitHubPull(overrides: Partial<GitHubPull> = {}): GitHubPull {
+  return {
+    number: 12,
+    title: "Page through long chunks",
+    body: "Long chunks were cut at MAX_SIGNALS; this pages through them.",
+    author: { login: "octo-dev", bot: false },
+    draft: false,
+    createdAt: "2026-10-01T09:00:00Z",
+    updatedAt: "2026-10-03T09:00:00Z",
+    baseRef: "main",
+    headRefOid: SHA_C,
+    labels: ["area:signals"],
+    closes: [7],
+    files: ["src/signals/ingest.py"],
+    filesTotal: 1,
+    ...overrides,
+  };
+}
+
+/** Issue #7 as the GitHub snapshot stores it. */
+export function makeGitHubIssue(overrides: Partial<GitHubIssue> = {}): GitHubIssue {
+  return {
+    number: 7,
+    title: "Long chunks lose signals",
+    body: "A chunk with more than 50 sentences loses the rest.",
+    author: { login: "reporter", bot: false },
+    labels: ["bug"],
+    createdAt: "2026-09-20T09:00:00Z",
+    updatedAt: "2026-10-02T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeGitHubSnapshot(overrides: Partial<GitHubSnapshot> = {}): GitHubSnapshot {
+  return {
+    repo: DEMO_REPO,
+    fetchedAt: "2026-10-03T09:30:00Z",
+    pulls: [makeGitHubPull()],
+    issues: [makeGitHubIssue()],
+    omitted: { pulls: 0, issues: 0 },
+    dropped: 0,
     ...overrides,
   };
 }
