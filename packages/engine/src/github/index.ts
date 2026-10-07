@@ -13,6 +13,7 @@ export {
   readOriginUrl,
   resolveGitHubIdentity,
 } from "./identity.ts";
+export { GITHUB_TOKEN_SHAPE, GITHUB_TOKEN_VARIABLES, redactGitHub } from "./redact.ts";
 export {
   type GitHubSource,
   ghSource,

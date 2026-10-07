@@ -1,5 +1,12 @@
-import { makeGitHubSnapshot, makeInFlight, makeInFlightPull } from "@repowiki/core/test-fixtures";
-import { sampleWiki } from "@repowiki/query/test-wiki";
+import {
+  makeGitHubSnapshot,
+  makeInFlight,
+  makeInFlightPull,
+  makeLedgerEntry,
+} from "@repowiki/core/test-fixtures";
+import { callCostUsd, totalsOf } from "@repowiki/llm";
+import { ABOUT_PAGE_ID, pageSearchIndex, WikiView } from "@repowiki/query";
+import { extendedWiki, sampleWiki } from "@repowiki/query/test-wiki";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_INFLIGHT_USD,
@@ -9,6 +16,7 @@ import {
   parseInflightArgs,
   readLine,
   renderInflightTable,
+  spendLine,
   suggestFor,
 } from "./inflight-cli.ts";
 import { CliError } from "./manifest-cli.ts";
@@ -95,6 +103,24 @@ describe("the lines it prints", () => {
     ).toBe(
       "acme/demo: 0 open pull requests, 1 open issue; 3 more pull requests and 0 more issues not read (the caps); 2 malformed entries dropped",
     );
+    expect(readLine(makeGitHubSnapshot({ droppedPaths: 1 }))).toBe(
+      "acme/demo: 1 open pull request, 1 open issue; 1 unsafe file path dropped",
+    );
+  });
+
+  it("totals the run's ledger rows for its spend, failed calls included", () => {
+    expect(spendLine(0, totalsOf([]))).toBe("0 new summaries, $0.0000");
+    // Two calls: one became a summary, one verified to nothing; both were paid for.
+    const rows = [
+      makeLedgerEntry({ purpose: "inflight", batch: true }),
+      makeLedgerEntry({
+        purpose: "inflight",
+        batch: true,
+        tokens: { in: 3000, out: 900, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ];
+    const usd = rows.reduce((n, r) => n + (callCostUsd(r.model, r.tokens, r.batch) ?? 0), 0);
+    expect(spendLine(1, totalsOf(rows))).toBe(`1 new summary, $${usd.toFixed(4)} for 2 calls`);
   });
 
   it("counts the heads, and gives the fetch's first line redacted", () => {
@@ -168,6 +194,22 @@ describe("suggestFor (C3)", () => {
       expect(found[0]?.score).toBeGreaterThan(0);
       expect(found.every((m) => m.featureId !== "special:about")).toBe(true);
       expect(suggestFor(sample.wiki)("kubernetes")).toEqual([]);
+    } finally {
+      sample.repo.remove();
+    }
+  });
+
+  it("leaves out the About article even when it is the best match", () => {
+    const sample = sampleWiki();
+    try {
+      const wiki = extendedWiki(sample);
+      const query = "demo is built from signals and deliverables";
+      // The search itself finds the About article, so the filter is what keeps it out.
+      const ranked = pageSearchIndex(new WikiView(wiki)).ranked(query, 3);
+      expect(ranked.map((m) => m.id)).toContain(ABOUT_PAGE_ID);
+      const found = suggestFor(wiki)(query);
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.map((m) => m.featureId)).not.toContain(ABOUT_PAGE_ID);
     } finally {
       sample.repo.remove();
     }

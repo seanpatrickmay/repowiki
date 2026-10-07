@@ -36,11 +36,12 @@ export function parseGitHubRemote(url: string): GitHubIdentity | null {
 }
 
 /**
- * The documented repository's `origin` URL, read with `git config --get` (never run, never
- * fetched), or null when it has none or git cannot say.
+ * The documented repository's `origin` URL as git itself would fetch from it (`git remote get-url
+ * origin`: the first of several, after any insteadOf), never run or fetched here, or null when it
+ * has none or git cannot say.
  */
 export function readOriginUrl(repo: string): string | null {
-  const out = spawnSync("git", ["-C", repo, "config", "--get", "remote.origin.url"], {
+  const out = spawnSync("git", ["-C", repo, "remote", "get-url", "origin"], {
     env: scrubbedGitEnv(),
     encoding: "utf8",
     timeout: 10_000,

@@ -125,8 +125,9 @@ export async function buildSite(
   const wiki = options.inflight === false ? { ...loaded, inflight: null } : loaded;
   const scratch = options.inflight === false ? mkdtempSync(join(tmpdir(), "repowiki-site-")) : null;
   const pages = scratch === null ? exportFile : join(scratch, "export.json");
-  if (scratch !== null) writeFileSync(pages, `${JSON.stringify(wiki)}\n`);
   try {
+    // Inside the try, so a failed write (a full disk) still removes the scratch directory.
+    if (scratch !== null) writeFileSync(pages, `${JSON.stringify(wiki)}\n`);
     return await render(pages, outDir, repoUrl, wiki);
   } finally {
     if (scratch !== null) rmSync(scratch, { recursive: true, force: true });

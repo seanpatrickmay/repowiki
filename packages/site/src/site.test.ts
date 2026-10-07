@@ -14,9 +14,10 @@ import { fileURLToPath } from "node:url";
 import { renderLlmsTxt } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
+import { escapeHtml } from "./inline.ts";
 import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
-import { HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
+import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -1319,15 +1320,46 @@ const inflightPages = (): string[] =>
 const ESCAPED_PULL_TITLE =
   "&lt;script&gt;alert(1)&lt;/script&gt; [[signals]] [x](javascript:alert(1)) &quot;q&quot; &amp; &#39;p&#39;";
 
+/** The fixture's snapshot with #12 also adding a file its feature is inferred for. */
+function placedExport() {
+  const [twelve, ...rest] = fixtureInFlight().pulls;
+  if (twelve === undefined) throw new Error("the fixture has #12");
+  const placed = {
+    ...twelve,
+    files: [
+      ...twelve.files,
+      {
+        path: "src/signals/page.py",
+        oldPath: null,
+        status: "added" as const,
+        additions: 5,
+        deletions: 0,
+        featureId: "signals",
+        placement: "inferred" as const,
+      },
+    ],
+    features: twelve.features.map((f) => ({
+      ...f,
+      files: f.files + 1,
+      changedLines: f.changedLines + 5,
+      added: f.added + 1,
+    })),
+  };
+  return inflightExport({ pulls: [placed, ...rest] });
+}
+
 describe("the work in progress pages (spec v2 #9 §6.2)", () => {
   beforeAll(() => {
-    inflightSite = buildFixtureSite([], inflightExport());
+    inflightSite = buildFixtureSite([], placedExport());
   }, 120_000);
   afterAll(() => inflightSite?.cleanup());
 
   it("renders a page per pull request", async () => {
     await expect(inflightNormalized("special/in-progress/pr/12/index.html")).toMatchFileSnapshot(
       "__snapshots__/special-in-progress-pr-12.html",
+    );
+    expect(inflightSite.read("special/in-progress/pr/12/index.html")).toContain(
+      "2 files, 13 lines, 1 file added. Its feature is inferred for 1 file the manifest does not list yet.",
     );
     const missing = inflightSite.read("special/in-progress/pr/13/index.html");
     expect(missing).toContain(`<h1 class="page-title">${ESCAPED_PULL_TITLE}</h1>`);
@@ -1368,6 +1400,17 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
       expect(html).not.toContain("data-pagefind-body");
       expect(html).toContain('<meta name="robots" content="noindex">');
     }
+    // The article most readers see: deliverables' In progress section holds #13's title and
+    // issue #8's, both as text and both out of search.
+    const article = inflightSite.read("wiki/deliverables/index.html");
+    const section =
+      /<section aria-labelledby="in-progress" data-pagefind-ignore="all">[\s\S]*?<\/section>/.exec(
+        article,
+      )?.[0] ?? "";
+    expect(section).toContain(`#13 ${ESCAPED_PULL_TITLE}`);
+    expect(section).toContain("#8 Deliverables &lt;em&gt;export&lt;/em&gt; fails");
+    for (const raw of ["<script>alert(1)", "<em>export</em>", 'href="javascript:'])
+      expect(article).not.toContain(raw);
     expect(brokenLinks(inflightSite.outDir).broken).toEqual([]);
     for (const page of htmlFiles(inflightSite.outDir))
       expect({ page, offsite: offsiteResources(inflightSite.read(page)) }).toEqual({
@@ -1383,7 +1426,7 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
     expect(nav.indexOf('href="/special/in-progress/"')).toBeGreaterThan(
       nav.indexOf('href="/special/about/"'),
     );
-    expect(inflightSite.read("llms.txt")).toBe(renderLlmsTxt(inflightExport()));
+    expect(inflightSite.read("llms.txt")).toBe(renderLlmsTxt(placedExport()));
     expect(inflightSite.read("llms.txt")).not.toMatch(/in-progress|pull request/i);
     const box = /<section class="mp-box mp-in-progress"[\s\S]*?<\/section>/.exec(
       inflightSite.read("index.html"),
@@ -1412,5 +1455,32 @@ describe("site build --no-inflight (R18, C11)", () => {
     );
     for (const page of htmlFiles(shared.outDir))
       expect(shared.read(page)).not.toContain("#12 Page");
+  });
+
+  it("leaks no pull request's or issue's title, author, branch or label into any text file", () => {
+    const inflight = inflightExport().inflight;
+    if (inflight === null) throw new Error("the fixture has a snapshot");
+    // Each string as written, as HTML escapes it and as JSON escapes it; words under five
+    // characters ("main", "bug") are left out, since a page says them for other reasons.
+    const needles = [
+      ...inflight.pulls.flatMap((p) => [p.title, p.author?.login ?? "", p.baseRef, ...p.labels]),
+      ...inflight.issues.flatMap((i) => [i.title, i.author?.login ?? "", ...i.labels]),
+    ]
+      .filter((text) => [...text].length >= 5)
+      .flatMap((text) => [text, escapeHtml(text), JSON.stringify(text).slice(1, -1)]);
+    expect(needles).toContain("Page through long chunks");
+    expect(needles).toContain("release/1.x");
+    const files = (readdirSync(shared.outDir, { recursive: true }) as string[])
+      .map((file) => file.split("\\").join("/"))
+      .filter((file) => /\.(html|json|txt)$/.test(file));
+    for (const file of ["llms.txt", "export.json"]) expect(files).toContain(file);
+    expect(files.some((file) => file.startsWith("api/"))).toBe(true);
+    for (const file of files) {
+      const text = shared.read(file);
+      expect({ file, leaked: needles.filter((needle) => text.includes(needle)) }).toEqual({
+        file,
+        leaked: [],
+      });
+    }
   });
 });

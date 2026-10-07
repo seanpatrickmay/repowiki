@@ -11,6 +11,7 @@ import {
   estimateTokens,
   markdownCodeSpan,
   type PageOutcome,
+  redactGitHub,
   StoreError,
   UpdateError,
   WikiBuildError,
@@ -617,14 +618,9 @@ const DASH = "(?:-|\\\\+u002[dD])";
 const KEY_SHAPE = new RegExp(`sk${DASH}ant${DASH}(?:[A-Za-z0-9_]|${DASH})*`, "g");
 
 /**
- * The shapes of GitHub tokens (spec v2 #9 R25): classic and app tokens (`ghp_`, `gho_`, `ghu_`,
- * `ghs_`, `ghr_`) and fine-grained ones (`github_pat_`), which a `gh` or `git fetch` error can echo.
- */
-const GITHUB_TOKEN_SHAPE = /\bgh[pousr]_[A-Za-z0-9]+|\bgithub_pat_[A-Za-z0-9_]+/g;
-
-/**
- * Every occurrence of the configured API key, and of anything key-shaped or GitHub-token-shaped,
- * replaced, also where JSON escaped its dashes (an error body quoting a request).
+ * Every occurrence of the configured API key and of the configured GitHub tokens' exact values,
+ * and of anything key-shaped or GitHub-token-shaped, replaced, also where JSON escaped the key's
+ * dashes (an error body quoting a request).
  */
 function redact(text: string): string {
   const key = process.env.ANTHROPIC_API_KEY;
@@ -632,7 +628,7 @@ function redact(text: string): string {
     ? new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/-/g, DASH), "g")
     : null;
   const plain = configured === null ? text : text.replace(configured, "[redacted]");
-  return plain.replace(KEY_SHAPE, "[redacted]").replace(GITHUB_TOKEN_SHAPE, "[redacted]");
+  return redactGitHub(plain.replace(KEY_SHAPE, "[redacted]"));
 }
 
 /** A value's text, never throwing: a null-prototype object has no toString to call. */

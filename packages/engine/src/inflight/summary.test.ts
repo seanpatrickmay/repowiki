@@ -1,6 +1,6 @@
 import { contentHash, type InFlightFeature } from "@repowiki/core";
 import { INGEST_PY, makeGitHubPull, makeManifest, SHA_C } from "@repowiki/core/test-fixtures";
-import type { GenerateRequest, Provider } from "@repowiki/llm";
+import { type GenerateRequest, LlmOutputError, type Provider } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import type { FileChange } from "../index/index.ts";
 import { citedLines } from "../verify/index.ts";
@@ -146,6 +146,51 @@ describe("verifySummary (R10)", () => {
       "p12-c5",
     ]);
     expect(dropped).toBe(2);
+    // A dropped claim takes no first-mention link: the first kept one links the feature.
+    expect(summary?.claims[0]?.text).toBe(
+      "The pull request builds the [[signals|Signal ingestion]] list with `list()`.",
+    );
+  });
+
+  it.each([
+    ["only unchanged context lines", { cite: ["src/signals/ingest.py:9-11"] }],
+    [
+      "an identifier its cited lines do not write",
+      { text: "It calls `delete_everything()` on the [[Signal ingestion]] list." },
+    ],
+    ["a constant its cited lines do not write", { text: "It raises `MAX_SIGNALS` to 80." }],
+    [
+      "a link to a feature the pull request does not touch",
+      { text: "It builds the list with `list()` and rewrites [[Deliverables]]." },
+    ],
+  ])("drops a claim that names or cites %s", (_name, overrides) => {
+    const verified = verifySummary(request(), { claims: [claim(overrides)] }, manifest, call, AT);
+    expect(verified).toEqual({ summary: null, dropped: 1 });
+  });
+
+  it("grounds a pure deletion in the removed lines shown beside the head lines it cites", () => {
+    // Head lines 19-21 of ingest.py removed: they sit between head lines 18 and 19.
+    const lines = INGEST_PY.split("\n");
+    const head = [...lines.slice(0, 18), ...lines.slice(21)].join("\n");
+    const deletion: PackInput = {
+      ...packInput(),
+      changes: [{ ...change, hunks: [{ oldStart: 19, oldCount: 3, newStart: 18, newCount: 0 }] }],
+      head: new Map([["src/signals/ingest.py", head]]),
+    };
+    const r = summaryRequest(deletion, "claude-haiku-4-5");
+    const removes = claim({
+      text: "It removes the `MAX_SIGNALS` check from `src/signals/ingest.py`.",
+      cite: ["src/signals/ingest.py:18-19"],
+    });
+    expect(
+      verifySummary(r, { claims: [removes] }, manifest, call, AT).summary?.claims,
+    ).toHaveLength(1);
+    // Lines 15-17 show as context only: no changed line, so nothing to ground it.
+    const context = claim({
+      text: "It skips blank sentences.",
+      cite: ["src/signals/ingest.py:15-17"],
+    });
+    expect(verifySummary(r, { claims: [context] }, manifest, call, AT).summary).toBeNull();
   });
 });
 
@@ -171,23 +216,40 @@ function scripted(answer: (request: GenerateRequest<unknown>) => InFlightAnswer 
 
 describe("summarize", () => {
   it("sends every request in one tick, batched, with no cache key, and verifies each answer", async () => {
-    const requests = [12, 13, 14].map((n) => summaryRequest(packInput(n), "claude-haiku-4-5"));
+    const requests = [12, 13, 14, 15].map((n) => summaryRequest(packInput(n), "claude-haiku-4-5"));
     const { provider, seen, maxPending } = scripted((req) => {
       const user = String(req.messages[0]?.content);
       if (user.includes("#13 ")) return new Error("batch item errored");
       if (user.includes("#14 ")) return { claims: [claim({ cite: [] })] };
+      if (user.includes("#15 "))
+        return new LlmOutputError("the answer is not JSON", "{", {
+          usage: call.usage,
+          model: call.model,
+        });
       return { claims: [claim()] };
     });
     const outcomes = await summarize(requests, manifest, provider, {
       batch: true,
       now: () => new Date(AT),
     });
-    expect(maxPending()).toBe(3);
+    expect(maxPending()).toBe(4);
     expect(seen.map((r) => [r.purpose, r.batch, r.cacheKey, r.maxTokens])).toEqual(
-      Array(3).fill(["inflight", true, undefined, 1500]),
+      Array(4).fill(["inflight", true, undefined, 1500]),
     );
     expect(outcomes.get(12)?.summary?.claims).toHaveLength(1);
     expect(outcomes.get(13)).toEqual({ summary: null, failure: "batch item errored" });
-    expect(outcomes.get(14)).toEqual({ summary: null, failure: "no claim verified (1 dropped)" });
+    // A paid call that verified to nothing, or answered unusably, carries its spend.
+    expect(outcomes.get(14)).toEqual({
+      summary: null,
+      failure: "no claim verified (1 dropped)",
+      usage: call.usage,
+      model: call.model,
+    });
+    expect(outcomes.get(15)).toEqual({
+      summary: null,
+      failure: "the answer is not JSON",
+      usage: call.usage,
+      model: call.model,
+    });
   });
 });

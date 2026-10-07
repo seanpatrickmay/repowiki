@@ -3,8 +3,12 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { LLMS_TXT_FILE } from "@repowiki/core";
 import { ghSource, openStore, WikiBuildError } from "@repowiki/engine";
-import { callCostUsd } from "@repowiki/llm";
-import { INFLIGHT_USAGE, parseInflightArgs, renderInflightTable } from "./inflight-cli.ts";
+import {
+  INFLIGHT_USAGE,
+  parseInflightArgs,
+  renderInflightTable,
+  spendLine,
+} from "./inflight-cli.ts";
 import {
   clearInFlightData,
   type RefreshContext,
@@ -61,11 +65,8 @@ async function main(): Promise<void> {
       }
       if (result.kind === "dry-run") return;
       console.log(renderInflightTable(result.inflight, result.status, result.failures));
-      const fresh = result.inflight.pulls.flatMap((p) =>
-        result.status.get(p.number) === "new" && p.summary !== null ? [p.summary] : [],
-      );
-      const usd = fresh.reduce((n, s) => n + (callCostUsd(s.model, s.tokens, args.batch) ?? 0), 0);
-      console.log(`${fresh.length} new summaries, $${usd.toFixed(4)}`);
+      const fresh = [...result.status.values()].filter((status) => status === "new").length;
+      console.log(spendLine(fresh, result.spent));
       console.log(`Wrote ${result.exportPath} and ${join(out, LLMS_TXT_FILE)}; store: ${db}`);
     } finally {
       store.close();

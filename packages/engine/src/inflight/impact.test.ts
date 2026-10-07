@@ -3,7 +3,13 @@ import { INGEST_PY } from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DRIFT_THRESHOLD, STORE_PY } from "../freshness/index.ts";
 import { ensureInflightRepo, fetchHeads } from "./heads.ts";
-import { featuresFromPaths, type ImpactContext, mergeBase, pullChanges } from "./impact.ts";
+import {
+  featuresFromPaths,
+  type ImpactContext,
+  lineCounts,
+  mergeBase,
+  pullChanges,
+} from "./impact.ts";
 import { type Edits, type InflightFixture, inflightFixture } from "./test-inflight.ts";
 
 // Each test builds a fixture wiki, a remote and inflight.git: seconds on a loaded machine.
@@ -117,6 +123,29 @@ describe("pullChanges: file to feature (R8)", () => {
       expect.objectContaining({ path: "docs/signals.md", featureId: null, placement: "none" }),
     ]);
     expect(features).toEqual([]);
+  });
+
+  it("drops and counts a hostile path, and never lets one forge another file's counts", async () => {
+    const head = pull(1, {
+      "docs/a": "a\n",
+      "docs/a\tb.md": "1\n2\n3\n",
+      "docs/two\nlines.md": "x\n",
+      "docs/back\\slash.md": "x\n",
+      "docs/\u202Edm.exe": "x\n",
+    });
+    const changes = await pullChanges(ctx, head);
+    expect(changes.files.map((f) => [f.path, f.additions, f.deletions])).toEqual([
+      ["docs/a", 1, 0],
+    ]);
+    expect(changes.changes.map((c) => c.newPath)).toEqual(["docs/a"]);
+    expect(changes.filesTruncated).toBe(4);
+  });
+
+  it("reads a tab in a path as part of the path, by NUL-separated fields", () => {
+    const head = pull(1, { "docs/a": "a\n", "docs/a\tb.md": "1\n2\n3\n" });
+    const counts = lineCounts(ctx.dir, fx.first, head);
+    expect(counts.get("docs/a")).toEqual({ additions: 1, deletions: 0 });
+    expect(counts.get("docs/a\tb.md")).toEqual({ additions: 3, deletions: 0 });
   });
 
   it("lists at most 300 files, by path, and counts the rest", async () => {

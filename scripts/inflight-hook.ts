@@ -51,8 +51,10 @@ const key = (c: { featureId: string; claimId: string }) => `${c.featureId}/${c.c
 /**
  * R22's comparison for one update: the merged pull request's certain predicted stale claims,
  * from a snapshot derived against the update's starting head, against the claims the move from
- * `from` to `to` makes stale on the pages as they were (staleClaims). "not compared" with why,
- * for a replay, a snapshot derived elsewhere, or no or several snapshot pull requests merged.
+ * `from` to `to` makes stale on the pages as they were (staleClaims). Only an update that merged
+ * exactly one pull request, counting every merge in the range, snapshot or not, is comparable;
+ * else "not comparable" with why. "not compared" with why for a replay, a snapshot derived
+ * elsewhere, or a merged pull request the snapshot does not hold or could not work out.
  */
 export async function compareLine(
   repo: string,
@@ -65,10 +67,18 @@ export async function compareLine(
   const snapshot = before.inflight;
   if (snapshot === null || snapshot.wikiHead !== before.from)
     return "Predictions not compared: no snapshot was derived against this update's starting head.";
-  const pulls = snapshot.pulls.filter((p) => merged.has(p.number));
-  if (pulls.length !== 1)
-    return `Predictions not compared: ${pulls.length} pull requests in the snapshot merged in this update.`;
-  const pull = pulls[0] as InFlight["pulls"][number];
+  if (merged.size === 0)
+    return "Predictions not comparable: no pull request merged in this update.";
+  if (merged.size > 1) {
+    const list = [...merged]
+      .sort((a, b) => a - b)
+      .map((n) => `#${n}`)
+      .join(", ");
+    return `Predictions not comparable: ${merged.size} pull requests merged in this update (${list}), so each one's stale claims would count against the others.`;
+  }
+  const [number] = [...merged];
+  const pull = snapshot.pulls.find((p) => p.number === number);
+  if (pull === undefined) return `Predictions not compared: #${number} is not in the snapshot.`;
   if (pull.head !== "fetched")
     return `Predictions not compared: #${pull.number}'s impact was not computed.`;
   const predicted = new Set(pull.effects.filter((e) => e.certain).map(key));
@@ -100,8 +110,8 @@ export async function inflightAfterUpdate(
   to: string,
   replay: boolean,
 ): Promise<string[]> {
-  if (ctx.store.getGitHubSnapshot() === null) return [];
   try {
+    if (ctx.store.getGitHubSnapshot() === null) return [];
     const merged = mergedBetween(ctx.repo, before.from, to);
     const compared = await compareLine(ctx.repo, before, to, merged, replay);
     const args = parseInflightArgs([ctx.repo, "--offline"]);

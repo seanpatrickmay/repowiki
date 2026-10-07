@@ -2,6 +2,7 @@ import {
   claimAnchor,
   githubBlobUrl,
   githubUrl,
+  hasCitableLines,
   type InFlight,
   type InFlightPull,
   type IssueEvidence,
@@ -57,6 +58,14 @@ export function inflightStatus(site: SiteModel, inflight: InFlight): InflightSta
 
 const counted = (n: number, one: string): string =>
   `${formatNumber(n)} ${one}${n === 1 ? "" : "s"}`;
+
+/** "N files added and M removed": file counts, worded so they never read as line counts. */
+function addedRemoved(added: number, removed: number): string {
+  if (added > 0 && removed > 0)
+    return `${counted(added, "file")} added and ${formatNumber(removed)} removed`;
+  if (added > 0) return `${counted(added, "file")} added`;
+  return removed > 0 ? `${counted(removed, "file")} removed` : "";
+}
 
 const featureRef = (site: SiteModel, id: string): FeatureRef => ({
   title: site.features.get(id)?.title ?? id,
@@ -184,10 +193,14 @@ export interface PullView {
   merge: string;
   /** Null when the head was not fetched; the page says so. */
   summary: { html: string; refs: { n: number; label: string; href: string }[] }[] | null;
+  /** Plain text the page shows in place of a null summary. */
+  summaryNote: string;
   features: {
     anchor: string;
     feature: FeatureRef;
     files: string;
+    /** How many of its files the pull request adds here by placement, not by the manifest. */
+    inferred: number;
     drifts: boolean;
     /** Each claim it would change, quoted as plain text and linked to it on the article. */
     effects: { text: string; href: string | null; reason: string; certain: boolean }[];
@@ -233,6 +246,10 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
       ? MERGE_WORDS[pull.merge]
       : `Its head commit ${pull.head === "moved" ? "moved since GitHub was read" : "could not be fetched"}, so its impact could not be computed.`,
     summary,
+    summaryNote:
+      fetched && !hasCitableLines(pull.files)
+        ? "There is nothing to summarise: it adds or changes no lines of text."
+        : "No summary of this pull request yet.",
     // Every feature it touches, then any whose page cites a file it changes: each has an anchor
     // the article's markers link to.
     features: [...new Set([...pull.features, ...pull.effects].map((f) => f.featureId))].map(
@@ -244,23 +261,38 @@ export function pullView(site: SiteModel, inflight: InFlight, pull: InFlightPull
           files:
             f === undefined
               ? "None of its files, but its page cites files this changes"
-              : `${counted(f.files, "file")}, ${counted(f.changedLines, "line")}${f.added + f.removed > 0 ? `, ${formatNumber(f.added)} added and ${formatNumber(f.removed)} removed` : ""}`,
+              : [
+                  counted(f.files, "file"),
+                  counted(f.changedLines, "line"),
+                  addedRemoved(f.added, f.removed),
+                ]
+                  .filter((part) => part !== "")
+                  .join(", "),
+          inferred: pull.files.filter(
+            (file) => file.featureId === featureId && file.placement === "inferred",
+          ).length,
           drifts: f?.drifts ?? false,
           effects: pull.effects
             .filter((e) => e.featureId === featureId)
             .map((e) => {
-              const claim = site.pages
+              const section = site.pages
                 .get(e.featureId)
-                ?.sections.flatMap((s) => s.claims)
-                .find((c) => c.id === e.claimId);
+                ?.sections.find((s) => s.claims.some((c) => c.id === e.claimId));
+              const claim = section?.claims.find((c) => c.id === e.claimId);
               const anchor = claimAnchor(e.claimId);
+              const article = featureLink(site, e.featureId)?.href ?? null;
               return {
                 text: claim === undefined ? e.claimId : plainClaimText(claim.text, titleOf),
-                // A claim no longer on the page (a stale snapshot) links to the article itself.
+                // A claim no longer on the page (a stale snapshot) links to the article itself; one
+                // whose id cannot be an anchor, to its section's (C10), or the article for the lead.
                 href:
-                  claim === undefined || anchor === null
-                    ? (featureLink(site, e.featureId)?.href ?? null)
-                    : `${articleUrl(e.featureId)}#${anchor}`,
+                  claim === undefined || section === undefined
+                    ? article
+                    : anchor !== null
+                      ? `${articleUrl(e.featureId)}#${anchor}`
+                      : section.key === "lead"
+                        ? article
+                        : `${articleUrl(e.featureId)}#${section.key}`,
                 reason: e.reason,
                 certain: e.certain,
               };

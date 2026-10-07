@@ -5,7 +5,7 @@ import type { Revision } from "@repowiki/core";
 import { INGEST_PY } from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DRIFT_THRESHOLD, inputAt, planPages, planUpdate } from "../freshness/index.ts";
-import { scrubbedGitEnv } from "../index/index.ts";
+import { createTestRepo, scrubbedGitEnv } from "../index/index.ts";
 import { fileLevelEffects, mergeTree, pullImpact, staleClaims } from "./effects.ts";
 import { ensureInflightRepo, fetchHeads, pullRef } from "./heads.ts";
 import type { ImpactContext } from "./impact.ts";
@@ -123,22 +123,46 @@ describe("pullImpact (R7)", () => {
     });
     const saved = process.env.GIT_CONFIG_GLOBAL;
     process.env.GIT_CONFIG_GLOBAL = global;
+    let merged: ReturnType<typeof mergeTree>;
     try {
-      expect(mergeTree(ctx.dir, second, head).merge).toBe("conflicts");
+      merged = mergeTree(ctx.dir, second, head);
+      // Asserted after the merge and outside any catch: a driver that ran fails the test.
       expect(existsSync(marker)).toBe(false);
       // Control: the same merge with the PR's attributes and the driver configured does run it.
-      execFileSync(
-        "git",
-        ["-C", ctx.dir, "-c", `attr.tree=${head}`, "merge-tree", "--write-tree", second, head],
-        { env: scrubbedGitEnv(), stdio: "ignore" },
-      );
-    } catch {
-      // merge-tree exits 1 on the conflict.
+      try {
+        execFileSync(
+          "git",
+          ["-C", ctx.dir, "-c", `attr.tree=${head}`, "merge-tree", "--write-tree", second, head],
+          { env: scrubbedGitEnv(), stdio: "ignore" },
+        );
+      } catch {
+        // merge-tree exits 1 on the conflict.
+      }
     } finally {
       if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
       else process.env.GIT_CONFIG_GLOBAL = saved;
     }
+    expect(merged.merge).toBe("conflicts");
     expect(existsSync(marker)).toBe(true);
+  });
+
+  it("falls back to may-change for a PR whose head shares no history with the wiki's head", async () => {
+    // A fork pushed with an unrelated history: merge-tree refuses it (exit 128).
+    const orphan = createTestRepo();
+    try {
+      orphan.write("src/signals/ingest.py", ingestWith(12, "    signals = [] # fork"));
+      const head = orphan.commit("an unrelated root");
+      orphan.git("push", "--quiet", fx.url, `HEAD:refs/pull/7/head`);
+      fetchHeads(ctx.dir, fx.url, [{ number: 7, headRefOid: head }], { protocol: "file" });
+      expect(mergeTree(ctx.dir, fx.first, head)).toEqual({ merge: "unknown", tree: null });
+      const impact = await pullImpact(ctx, head, pages);
+      expect(impact.mergeBase).toBeNull();
+      expect(impact.merge).toBe("unknown");
+      expect(impact.effects.length).toBeGreaterThan(0);
+      expect(impact.effects.every((e) => !e.certain)).toBe(true);
+    } finally {
+      orphan.remove();
+    }
   });
 });
 

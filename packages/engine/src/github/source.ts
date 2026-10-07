@@ -16,11 +16,12 @@ import {
   IsoDateTime,
   inflightBody,
   inflightLine,
-  RepoPath,
+  isInflightPath,
 } from "@repowiki/core";
 import { z } from "zod";
 import { GH_TIMEOUT_MS, type GhRunner, spawnGh } from "./gh.ts";
 import type { GitHubIdentity } from "./identity.ts";
+import { redactGitHub } from "./redact.ts";
 
 /** Open pull requests, most recently updated first (spec v2 #9 §5.3). */
 export const PULLS_QUERY = `query($owner: String!, $name: String!, $first: Int!, $after: String) {
@@ -128,14 +129,24 @@ function labelsOf(raw: z.infer<typeof RawLabels>): string[] {
   return [...new Set(names.filter((name) => name !== ""))].slice(0, INFLIGHT_MAX_LABELS);
 }
 
-/** A pull request as the snapshot stores it (R13, R19); invalid paths are dropped. */
-export function normalisePull(raw: z.infer<typeof RawPull>): GitHubPull {
+/**
+ * A pull request as the snapshot stores it (R13, R19). A path that fails isInflightPath (not
+ * repo-relative, over the cap, or holding a control, tab, line-break or bidi character) is dropped
+ * and counted through `onDroppedPath`; GitHub's total stands, so the page counts it as not shown.
+ */
+export function normalisePull(
+  raw: z.infer<typeof RawPull>,
+  onDroppedPath: () => void = () => {},
+): GitHubPull {
   const closes = (raw.closingIssuesReferences?.nodes ?? []).flatMap((n) =>
     n === null ? [] : [n.number],
   );
-  const files = (raw.files?.nodes ?? []).flatMap((n) =>
-    n !== null && RepoPath.safeParse(n.path).success ? [n.path] : [],
-  );
+  const files = (raw.files?.nodes ?? []).flatMap((n) => {
+    if (n === null) return [];
+    if (isInflightPath(n.path)) return [n.path];
+    onDroppedPath();
+    return [];
+  });
   return {
     number: raw.number,
     title: titleOf(raw.title),
@@ -169,10 +180,16 @@ export function normaliseIssue(raw: z.infer<typeof RawIssue>): GitHubIssue {
 const byActivity = (a: { updatedAt: string; number: number }, b: typeof a) =>
   Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.number - a.number;
 
-/** gh's stderr as a skip reason: its first line only, cut short (R25); the caller redacts it. */
+/**
+ * gh's stderr as a skip reason (R25): GitHub tokens redacted first, then its first non-blank line
+ * only, neutralised to one plain line (no control or bidi character) and cut to 200 code points.
+ */
 function firstLine(stderr: string): string {
-  const line = stderr.split("\n").find((l) => l.trim() !== "") ?? "";
-  return [...line.trim()].slice(0, 200).join("") || "no message";
+  const line =
+    redactGitHub(stderr)
+      .split("\n")
+      .find((l) => l.trim() !== "") ?? "";
+  return inflightLine(line, 200) || "no message";
 }
 
 class Skip extends Error {}
@@ -214,7 +231,11 @@ function graphql(
   }
 }
 
-/** Pages through one connection until `cap` nodes or the last page; `select` finds the page. */
+/**
+ * Pages through one connection until `cap` nodes or the last page, and never past
+ * ceil(cap / pageSize) + 1 pages (a cursor that keeps changing must not page for hours);
+ * `select` finds the page.
+ */
 function readConnection(
   run: GhRunner,
   query: string,
@@ -227,7 +248,8 @@ function readConnection(
   let after: string | null = null;
   let total = 0;
   let extra: unknown = null;
-  for (;;) {
+  const maxPages = Math.ceil(cap / pageSize) + 1;
+  for (let pages = 1; ; pages++) {
     const first = Math.min(pageSize, cap - nodes.length);
     const selected = select(graphql(run, query, identity, first, after));
     if (selected === null)
@@ -239,7 +261,8 @@ function readConnection(
     // An empty page or a cursor that did not move ends it too: paging never loops forever.
     const cursor = page.pageInfo.endCursor;
     const last = !page.pageInfo.hasNextPage || cursor === null || cursor === after;
-    if (nodes.length >= cap || last || page.nodes.length === 0) return { nodes, total, extra };
+    if (nodes.length >= cap || last || page.nodes.length === 0 || pages >= maxPages)
+      return { nodes, total, extra };
     after = cursor;
   }
 }
@@ -285,6 +308,7 @@ export function ghSource(options: { run?: GhRunner; now?: () => Date } = {}): Gi
           },
         );
         let dropped = 0;
+        let droppedPaths = 0;
         // A node that fails to parse is dropped and counted; one GitHub repeats (pages shift as
         // items are updated between calls) is kept once.
         const keep = <T, R extends { number: number }>(
@@ -314,13 +338,16 @@ export function ghSource(options: { run?: GhRunner; now?: () => Date } = {}): Gi
               inflightLine(extra.branch ?? "", INFLIGHT_BRANCH_MAX_LENGTH) || "(unknown)",
           },
           fetchedAt: now().toISOString(),
-          pulls: keep(pulls.nodes, RawPull, normalisePull).sort(byActivity),
+          pulls: keep(pulls.nodes, RawPull, (raw) => normalisePull(raw, () => droppedPaths++)).sort(
+            byActivity,
+          ),
           issues: keep(issues.nodes, RawIssue, normaliseIssue).sort(byActivity),
           omitted: {
             pulls: Math.max(0, pulls.total - pulls.nodes.length),
             issues: Math.max(0, issues.total - issues.nodes.length),
           },
           dropped,
+          droppedPaths,
         });
         return { snapshot };
       } catch (error) {

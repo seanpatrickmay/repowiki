@@ -92,7 +92,17 @@ describe("compareLine (R22)", () => {
       "Predictions not compared: a replay moves through several merges.",
     );
     expect(await compareLine(fx.repo.dir, before, to, new Set([1, 2]), false)).toBe(
-      "Predictions not compared: 2 pull requests in the snapshot merged in this update.",
+      "Predictions not comparable: 2 pull requests merged in this update (#1, #2), so each one's stale claims would count against the others.",
+    );
+    // A merge outside the snapshot counts too: its stale claims would land on #1's line.
+    expect(await compareLine(fx.repo.dir, before, to, new Set([99, 1]), false)).toBe(
+      "Predictions not comparable: 2 pull requests merged in this update (#1, #99), so each one's stale claims would count against the others.",
+    );
+    expect(await compareLine(fx.repo.dir, before, to, new Set(), false)).toBe(
+      "Predictions not comparable: no pull request merged in this update.",
+    );
+    expect(await compareLine(fx.repo.dir, before, to, new Set([99]), false)).toBe(
+      "Predictions not compared: #99 is not in the snapshot.",
     );
     expect(
       await compareLine(fx.repo.dir, { ...before, inflight: null }, to, new Set([1]), false),
@@ -155,5 +165,24 @@ describe("inflightAfterUpdate (R4, C14)", () => {
     );
     expect(section[2]).toMatch(/^Not re-derived: /);
     expect(warned[0]).toMatch(/^warning: work in flight not re-derived: /);
+  });
+
+  it("warns rather than fails when the store cannot even say whether GitHub was read", async () => {
+    await refreshed();
+    const before = beforeUpdate(fx.store);
+    if (before === null) throw new Error("the fixture has a wiki");
+    const store = Object.create(fx.store) as typeof fx.store;
+    store.getGitHubSnapshot = () => {
+      throw new Error("database is locked");
+    };
+    const warned: string[] = [];
+    const section = await inflightAfterUpdate(
+      { ...ctx, store, log: (line) => warned.push(line) },
+      before,
+      fx.first,
+      false,
+    );
+    expect(section).toEqual(["## Work in flight", "", "Not re-derived: database is locked", ""]);
+    expect(warned).toEqual(["warning: work in flight not re-derived: database is locked"]);
   });
 });

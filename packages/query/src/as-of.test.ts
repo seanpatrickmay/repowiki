@@ -1,4 +1,5 @@
 import type { WikiExport } from "@repowiki/core";
+import { makeInFlight } from "@repowiki/core/test-fixtures";
 import { isAncestor, resolveCommit } from "@repowiki/engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -116,6 +117,14 @@ describe("viewAt", () => {
     expect(page).toContain(
       "Page history, oldest first: 2026-01-02 commit d08c5a4 (build); 2026-01-03 commit 594d833 (update, pull request #7)",
     );
+  });
+
+  it("shows no work in flight: today's pull requests and issues are not the past's", () => {
+    const wiki = { ...h.wiki, inflight: makeInFlight() };
+    expect(viewAt(wiki, { kind: "date", date: "2026-01-03" }, ancestor).wiki.inflight).toBeNull();
+    expect(
+      viewAt(wiki, { kind: "commit", sha: h.commits.third }, ancestor).wiki.inflight,
+    ).toBeNull();
   });
 
   it("leaves out a feature with no page yet, and gives a renamed feature its old title", () => {

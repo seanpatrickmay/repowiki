@@ -23,7 +23,13 @@ import {
   withinBudget,
   writeExport,
 } from "@repowiki/engine";
-import { createLedger, type ModelConfig, type Provider } from "@repowiki/llm";
+import {
+  createLedger,
+  type LedgerTotals,
+  type ModelConfig,
+  type Provider,
+  type TokenLedger,
+} from "@repowiki/llm";
 import {
   fetchLine,
   type InflightArgs,
@@ -32,7 +38,7 @@ import {
   suggestFor,
 } from "./inflight-cli.ts";
 import { CliError } from "./manifest-cli.ts";
-import { lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
+import { describeError, lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
 
 /** What a refresh works on: the documented repository, its out dir and store, and the flags. */
 export interface RefreshContext {
@@ -58,7 +64,12 @@ export interface RefreshSources {
 export type RefreshResult =
   | { kind: "skipped"; reason: string }
   | { kind: "dry-run" }
-  | ({ kind: "done"; exportPath: string } & Completed);
+  | ({
+      kind: "done";
+      exportPath: string;
+      /** The run's ledger rows totalled: every call it made, failed ones included. */
+      spent: LedgerTotals;
+    } & Completed);
 
 const exportOptions = (ctx: RefreshContext) => ({
   repo: ctx.repoName,
@@ -79,6 +90,7 @@ function derive(
     model: ctx.models.inflight,
     suggest: suggestFor(buildExport(ctx.store, exportOptions(ctx))),
     log: ctx.log,
+    describeError: (error) => describeError(error, ctx.args.verbose),
   });
 }
 
@@ -91,6 +103,7 @@ async function settle(
   ctx: RefreshContext,
   derived: Derived,
   provider: (() => Provider) | null,
+  ledger: TokenLedger = createLedger(),
 ): Promise<RefreshResult> {
   const { store, args, models } = ctx;
   const estimate = estimateSummaries(derived, models.inflight, args.batch);
@@ -113,11 +126,14 @@ async function settle(
   store.putInFlight(completed.inflight);
   const exportPath = join(ctx.out, "export.json");
   writeExport(store, exportPath, exportOptions(ctx));
-  return { kind: "done", exportPath, ...completed };
+  return { kind: "done", exportPath, spent: ledger.totals(), ...completed };
 }
 
-/** The Claude provider for the summary round: one ledger run of kind "inflight" at the head. */
-function claude(ctx: RefreshContext, wikiHead: string): () => Provider {
+/**
+ * The Claude provider for the summary round: one ledger run of kind "inflight" at the head, its
+ * rows in `ledger` (and the store).
+ */
+function claude(ctx: RefreshContext, wikiHead: string, ledger: TokenLedger): () => Provider {
   return () => {
     // Calls are due: fail once, up front, rather than once per pull request.
     requireApiKey("wiki:inflight");
@@ -125,7 +141,7 @@ function claude(ctx: RefreshContext, wikiHead: string): () => Provider {
     return lazyClaudeProvider({
       command: "wiki:inflight",
       models: ctx.models,
-      ledger: createLedger((entry) => ctx.store.appendLedger(entry)),
+      ledger,
       runId,
       run: { kind: "inflight", sha: wikiHead },
       journal: buildJournal(ctx.store),
@@ -170,10 +186,12 @@ export async function refreshOnline(
   }
   const noCall = ctx.args.noLlm;
   const provider = sources.provider;
+  const ledger = createLedger((entry) => ctx.store.appendLedger(entry));
   return settle(
     ctx,
     derived,
-    noCall ? null : provider === undefined ? claude(ctx, derived.wikiHead) : () => provider,
+    noCall ? null : provider === undefined ? claude(ctx, derived.wikiHead, ledger) : () => provider,
+    ledger,
   );
 }
 

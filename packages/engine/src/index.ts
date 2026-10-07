@@ -45,6 +45,7 @@ export {
   parseGitHubFlag,
   parseGitHubRemote,
   readOriginUrl,
+  redactGitHub,
   resolveGitHubIdentity,
   spawnGh,
 } from "./github/index.ts";

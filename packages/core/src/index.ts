@@ -41,6 +41,7 @@ export {
 } from "./ask.ts";
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
 export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind } from "./claim.ts";
+export { codeTokens, ungroundedCodeToken, writesName } from "./code-tokens.ts";
 export { contentHash } from "./content-hash.ts";
 export {
   type ClaimChange,
@@ -69,6 +70,7 @@ export {
   GitHubSnapshot,
   githubBlobUrl,
   githubUrl,
+  hasCitableLines,
   INFLIGHT_API_FILES,
   INFLIGHT_BODY_MAX_LENGTH,
   INFLIGHT_BRANCH_MAX_LENGTH,
@@ -83,6 +85,7 @@ export {
   INFLIGHT_MAX_LABELS,
   INFLIGHT_MAX_PULLS,
   INFLIGHT_MAX_SUMMARY_CLAIMS,
+  INFLIGHT_PATH_MAX_LENGTH,
   INFLIGHT_REASON_MAX_LENGTH,
   INFLIGHT_TITLE_MAX_LENGTH,
   InFlight,
@@ -93,10 +96,12 @@ export {
   InFlightIssue,
   InFlightPull,
   InFlightSummary,
+  InflightPath,
   IssueEvidence,
   inflightBody,
   inflightLine,
   inflightProblems,
+  isInflightPath,
 } from "./inflight.ts";
 export { LedgerEntry, LlmConfigFile, LlmRole, RunKind } from "./llm.ts";
 export {

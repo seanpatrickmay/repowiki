@@ -7,7 +7,7 @@ import {
   makeGitHubPull,
   makeGitHubSnapshot,
 } from "@repowiki/core/test-fixtures";
-import type { GenerateRequest, Provider } from "@repowiki/llm";
+import { callCostUsd, type GenerateRequest, type Provider } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildExport } from "../store/index.ts";
 import { ensureInflightRepo, fetchHeads } from "./heads.ts";
@@ -18,7 +18,7 @@ import {
   estimateSummaries,
   withinBudget,
 } from "./refresh.ts";
-import type { InFlightAnswer } from "./summary.ts";
+import type { InFlightAnswer, SummaryRequest } from "./summary.ts";
 import { type InflightFixture, inflightFixture } from "./test-inflight.ts";
 
 // Each test builds a fixture wiki, a remote and inflight.git: seconds on a loaded machine.
@@ -199,6 +199,79 @@ describe("deriveInFlight", () => {
   });
 });
 
+describe("deriveInFlight's summary requests (R9, R14)", () => {
+  it("makes no request for a pull with no citable lines, so a refresh spends nothing on it", async () => {
+    const head = fx.pushPull(4, fx.first, { "src/deliverables/crud.py": null });
+    const snapshot = makeGitHubSnapshot({
+      pulls: [makeGitHubPull({ number: 4, headRefOid: head, closes: [] })],
+      issues: [],
+    });
+    const { heads } = fetchHeads(dir, fx.url, snapshot.pulls, { protocol: "file" });
+    const derived = await derive(snapshot, heads);
+    expect(derived.pulls[0]?.pull.files.map((f) => [f.path, f.status])).toEqual([
+      ["src/deliverables/crud.py", "deleted"],
+    ]);
+    expect(derived.pulls[0]?.request).toBeNull();
+    const p = provider();
+    const done = await complete(derived, p.provider);
+    expect(p.calls).toHaveLength(0);
+    expect(done.status.get(4)).toBe("none");
+  });
+
+  it("gives each pull its own key, finds a stored answer by it, and derives the same twice", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    const four = fx.pushPull(4, fx.first, {
+      "src/signals/ingest.py": ingestWith(13, "    # A blank sentence makes no signal."),
+    });
+    const both = {
+      ...snapshot,
+      pulls: [
+        ...snapshot.pulls,
+        makeGitHubPull({
+          number: 4,
+          headRefOid: four,
+          closes: [],
+          updatedAt: "2026-09-30T09:00:00Z",
+        }),
+      ],
+    };
+    const fetched = fetchHeads(dir, fx.url, both.pulls, { protocol: "file" }).heads;
+    const derived = await derive(both, fetched);
+    expect(await derive(both, fetched)).toEqual(derived);
+    const [one, , , other] = derived.pulls;
+    const key = one?.request?.key ?? "";
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(other?.request?.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(other?.request?.key).not.toBe(key);
+    expect(one?.cached).toBeNull();
+    const done = await complete(derived, provider().provider);
+    const summary = done.inflight.pulls[0]?.summary;
+    if (summary == null) throw new Error("pull request #1 was summarised");
+    const again = await derive(both, fetched);
+    expect(again.pulls[0]?.cached).toEqual(summary);
+    expect(again.pulls[3]?.cached).toEqual(done.inflight.pulls[3]?.summary ?? null);
+  });
+
+  it("logs a pull request's failure through the caller's describeError", async () => {
+    const { snapshot, heads } = snapshotWithPulls();
+    for (const entry of readdirSync(join(dir, "objects"))) {
+      if (/^[0-9a-f]{2}$/.test(entry) || entry === "pack")
+        rmSync(join(dir, "objects", entry), { recursive: true });
+    }
+    const logged: string[] = [];
+    await deriveInFlight({
+      store: fx.store,
+      dir,
+      snapshot,
+      heads,
+      model: MODEL,
+      log: (l) => logged.push(l),
+      describeError: (error) => `described: ${error instanceof Error ? error.name : "?"}`,
+    });
+    expect(logged[0]).toBe("#1: impact not computed: described: GitError");
+  });
+});
+
 describe("the summary round", () => {
   it("estimates the misses before any call, at 700 output tokens and at the 1,500 cap", async () => {
     const { snapshot, heads } = snapshotWithPulls();
@@ -254,5 +327,46 @@ describe("the summary round", () => {
     const offline = await complete(await derive(snapshot, heads), null, 1, done.inflight);
     expect(offline.status.get(1)).toBe("kept");
     expect(offline.inflight.pulls[0]?.summary).toEqual(done.inflight.pulls[0]?.summary);
+  });
+});
+
+describe("withinBudget across pull requests (R17)", () => {
+  /** A derived pull with a request of `tokens` input tokens and no cached answer. */
+  const due = (number: number, updatedAt: string, tokens: number) => ({
+    pull: { number },
+    request: { number, tokens } as SummaryRequest,
+    cached: null,
+    updatedAt,
+  });
+  const derived = {
+    pulls: [
+      due(1, "2026-10-01T00:00:00Z", 1000),
+      due(2, "2026-10-03T00:00:00Z", 9000),
+      due(3, "2026-10-02T00:00:00Z", 100),
+    ],
+  } as unknown as Derived;
+  const ceiling = (tokens: number) =>
+    callCostUsd(MODEL, { in: tokens, out: 1500, cacheRead: 0, cacheWrite: 0 }, true) as number;
+  const numbers = (r: { chosen: SummaryRequest[]; over: SummaryRequest[] }) => ({
+    chosen: r.chosen.map((q) => q.number),
+    over: r.over.map((q) => q.number),
+  });
+  const budget = (maxUsd: number) => numbers(withinBudget(derived, MODEL, true, maxUsd));
+
+  it("takes the newest activity first, each at its ceiling, up to an exact fit", () => {
+    // Newest first: #2 (9,000 tokens), #3 (100), #1 (1,000).
+    const all = ceiling(9000) + ceiling(100) + ceiling(1000);
+    expect(estimateSummaries(derived, MODEL, true)?.ceilingUsd).toBe(all);
+    expect(budget(all)).toEqual({ chosen: [2, 3, 1], over: [] });
+    expect(budget(ceiling(9000))).toEqual({ chosen: [2], over: [3, 1] });
+  });
+
+  it("stops at the first that does not fit: no later, cheaper one is taken", () => {
+    expect(budget(ceiling(9000) + ceiling(100) + ceiling(1000) - 1e-9)).toEqual({
+      chosen: [2, 3],
+      over: [1],
+    });
+    // #3 and #1 would fit alone, but #2 is newer and does not.
+    expect(budget(ceiling(9000) - 1e-9)).toEqual({ chosen: [], over: [2, 3, 1] });
   });
 });

@@ -30,7 +30,9 @@ export interface StaleClaim {
  * What `git merge-tree --write-tree` makes of the wiki's head and a pull request's head (R7), in
  * inflight.git, which reads attributes from no file or tree (R21): the tree the wiki would
  * describe if the pull request merged now, or "conflicts", or "unknown" for a git older than
- * 2.38, which has no --write-tree. Any other failure (a missing object among them) is a GitError.
+ * 2.38, which has no --write-tree, and for a head that shares no history with the wiki's head (a
+ * fork's unrelated root: exit 128, "refusing to merge unrelated histories"). Any other failure
+ * (a missing object among them) is a GitError.
  */
 export function mergeTree(
   dir: string,
@@ -51,6 +53,8 @@ export function mergeTree(
   if (out.status === 1 && isSha(tree) && out.stderr.trim() === "")
     return { merge: "conflicts", tree: null };
   if (out.status === 129) return { merge: "unknown", tree: null };
+  if (out.status === 128 && /refusing to merge unrelated histories/.test(out.stderr))
+    return { merge: "unknown", tree: null };
   throw new GitError(`git merge-tree failed in ${dir}: ${firstLine(out.stderr)}`);
 }
 

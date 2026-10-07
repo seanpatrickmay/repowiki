@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { GitError, type GitOptions, isSha, scrubbedGitEnv } from "../index/index.ts";
 
 /** The private bare repository under the out dir that holds fetched pull-request heads (R5). */
@@ -41,28 +41,67 @@ export type HeadState = "fetched" | "missing" | "moved";
 /** The longest fetch takes before it is stopped. */
 export const FETCH_TIMEOUT_MS = 10 * 60_000;
 
-/** The environment of a command in inflight.git; a fetch also drops every ANTHROPIC_* variable. */
-function inflightEnv(): NodeJS.ProcessEnv {
-  const env = scrubbedGitEnv({ ...INFLIGHT_GIT_ENV });
+/**
+ * The environment of a command in inflight.git `dir`, without any ANTHROPIC_* variable, and with
+ * GIT_CEILING_DIRECTORIES at the out dir's parent, so no git run for it ever finds a repository
+ * above the out dir.
+ */
+function inflightEnv(dir: string, extra: Readonly<Record<string, string>> = {}): NodeJS.ProcessEnv {
+  const env = scrubbedGitEnv({
+    ...INFLIGHT_GIT_ENV,
+    GIT_CEILING_DIRECTORIES: dirname(dirname(dir)),
+    ...extra,
+  });
   for (const name of Object.keys(env)) if (name.startsWith("ANTHROPIC_")) delete env[name];
   return env;
 }
 
-/** One git command in `dir` with inflight's environment; its status and output, never a throw. */
+/**
+ * What a fetch adds (R6): gh is the only credential source, so no askpass program of the user's
+ * runs (GIT_ASKPASS beats `core.askPass`, and an empty one stops git falling back to SSH_ASKPASS),
+ * and ssh never prompts either.
+ */
+export const FETCH_ENV: Readonly<Record<string, string>> = {
+  GIT_ASKPASS: "",
+  SSH_ASKPASS: "",
+  SSH_ASKPASS_REQUIRE: "never",
+  GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+};
+
+/**
+ * One git command in inflight.git `dir` with inflight's environment: its status and output, never
+ * a throw. It names the repository with `--git-dir` (never `-C`), so a broken inflight.git is an
+ * error, not a walk up to whatever repository encloses the out dir.
+ */
 export function inflightGit(
   dir: string,
   args: readonly string[],
-  timeoutMs?: number,
-): { status: number | null; stdout: string; stderr: string } {
-  const out = spawnSync("git", ["-C", dir, ...args], {
-    env: inflightEnv(),
+  options: { timeoutMs?: number; input?: string; env?: Readonly<Record<string, string>> } = {},
+): { status: number | null; stdout: string; stderr: string; timedOut: boolean } {
+  const out = spawnSync("git", [`--git-dir=${dir}`, ...args], {
+    env: inflightEnv(dir, options.env),
     encoding: "utf8",
     maxBuffer: 1 << 30,
-    timeout: timeoutMs,
+    timeout: options.timeoutMs,
+    input: options.input,
   });
-  if (out.error !== undefined)
-    return { status: null, stdout: "", stderr: `could not run git: ${out.error.message}` };
-  return { status: out.status, stdout: out.stdout, stderr: out.stderr };
+  if (out.error !== undefined) {
+    const timedOut = (out.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+    return {
+      status: null,
+      stdout: "",
+      stderr: `could not run git: ${out.error.message}`,
+      timedOut,
+    };
+  }
+  return { status: out.status, stdout: out.stdout, stderr: out.stderr, timedOut: false };
+}
+
+/** Whether `dir` is a bare repository git itself accepts, asked with `--git-dir`. */
+function isBareRepository(dir: string): boolean {
+  if (!existsSync(dir)) return false;
+  const out = inflightGit(dir, ["rev-parse", "--is-bare-repository"]);
+  return out.status === 0 && out.stdout.trim() === "true";
 }
 
 /** git's first message line, for one terminal line (the caller redacts it, R25). */
@@ -90,19 +129,19 @@ function objectDirectory(repo: string): string {
  * REPO_CONFIG, and an alternates file naming the documented repository's objects, so a fetch
  * downloads only the objects the pull requests add and the documented repository is only read.
  * An existing one gets its config and alternates set again (the documented repository may have
- * moved). Returns its path.
+ * moved); one git does not accept as a bare repository (a delete cut short) is made again.
+ * Returns its path.
  */
 export function ensureInflightRepo(out: string, repo: string): string {
   const dir = join(out, INFLIGHT_DIR);
-  if (existsSync(dir) && !existsSync(join(dir, "HEAD")))
-    rmSync(dir, { recursive: true, force: true });
+  if (existsSync(dir) && !isBareRepository(dir)) rmSync(dir, { recursive: true, force: true });
   if (!existsSync(dir)) {
     mkdirSync(out, { recursive: true });
     const init = spawnSync("git", ["init", "--bare", "--quiet", "--template=", dir], {
-      env: inflightEnv(),
+      env: inflightEnv(dir),
       encoding: "utf8",
     });
-    if (init.status !== 0)
+    if (init.status !== 0 || !isBareRepository(dir))
       throw new GitError(`cannot create ${dir}: ${firstLine(init.stderr ?? "")}`);
   }
   for (const [key, value] of REPO_CONFIG) {
@@ -133,15 +172,27 @@ function refSha(dir: string, n: number): string | null {
 export interface FetchOptions {
   /**
    * The one transport the fetch may use. "https" always, except fetch tests, which pass "file"
-   * for a fixture remote; the CLI never does (spec v2 #9 §9).
+   * for a fixture remote or "http" for a local server; the CLI never does (spec v2 #9 §9).
    */
-  protocol?: "https" | "file";
+  protocol?: "https" | "file" | "http";
   timeoutMs?: number;
 }
 
+/** Why a fetch failed, on one line, and whether it is a missing remote ref (a closed pull). */
+interface FetchFailure {
+  line: string;
+  missingRef: boolean;
+}
+
 /** One fetch of `refspecs` from `url` into inflight.git, hardened (R6); null, or why it failed. */
-function fetch(dir: string, url: string, refspecs: readonly string[], options: FetchOptions) {
+function fetch(
+  dir: string,
+  url: string,
+  refspecs: readonly string[],
+  options: FetchOptions,
+): FetchFailure | null {
   const protocol = options.protocol ?? "https";
+  const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
   const out = inflightGit(
     dir,
     [
@@ -165,9 +216,12 @@ function fetch(dir: string, url: string, refspecs: readonly string[], options: F
       url,
       ...refspecs,
     ],
-    options.timeoutMs ?? FETCH_TIMEOUT_MS,
+    { timeoutMs, env: FETCH_ENV },
   );
-  return out.status === 0 ? null : firstLine(out.stderr);
+  if (out.status === 0) return null;
+  if (out.timedOut)
+    return { line: `git fetch timed out after ${timeoutMs / 1000} s`, missingRef: false };
+  return { line: firstLine(out.stderr), missingRef: /couldn't find remote ref/i.test(out.stderr) };
 }
 
 /** What fetchHeads did: each pull request's head, and the first fetch error, if any. */
@@ -178,10 +232,11 @@ export interface FetchedHeads {
 
 /**
  * Fetches every pull request's `refs/pull/<n>/head` into `refs/repowiki/pull/<n>` in one call
- * (R6); when that call fails (a pull request closed since GitHub was read makes the whole fetch
- * fail), each is fetched on its own. A head whose fetched commit differs from `headRefOid` is
- * fetched once more, then `moved`; one that could not be fetched is `missing`. Refs of pull
- * requests no longer listed are deleted.
+ * (R6); when that call fails on a missing remote ref (a pull request closed since GitHub was read
+ * makes the whole fetch fail), each is fetched on its own. Any other failure (a timeout, an auth
+ * or network failure) ends the step with its one line: no fetch is retried. A head whose fetched
+ * commit differs from `headRefOid` is fetched once more, then `moved`; one that could not be
+ * fetched is `missing`. Refs of pull requests no longer listed are deleted.
  */
 export function fetchHeads(
   dir: string,
@@ -190,22 +245,24 @@ export function fetchHeads(
   options: FetchOptions = {},
 ): FetchedHeads {
   const spec = (n: number) => `+refs/pull/${n}/head:${pullRef(n)}`;
-  let problem: string | null = null;
-  if (pulls.length > 0) {
-    problem = fetch(
-      dir,
-      url,
-      pulls.map((p) => spec(p.number)),
-      options,
-    );
-    if (problem !== null) for (const p of pulls) fetch(dir, url, [spec(p.number)], options);
-  }
-  for (const p of pulls) {
-    const sha = refSha(dir, p.number);
-    if (sha !== null && sha !== p.headRefOid) fetch(dir, url, [spec(p.number)], options);
+  const failure =
+    pulls.length === 0
+      ? null
+      : fetch(
+          dir,
+          url,
+          pulls.map((p) => spec(p.number)),
+          options,
+        );
+  if (failure === null || failure.missingRef) {
+    if (failure !== null) for (const p of pulls) fetch(dir, url, [spec(p.number)], options);
+    for (const p of pulls) {
+      const sha = refSha(dir, p.number);
+      if (sha !== null && sha !== p.headRefOid) fetch(dir, url, [spec(p.number)], options);
+    }
   }
   pruneHeadRefs(dir, pulls);
-  return { heads: headStates(dir, pulls), problem };
+  return { heads: headStates(dir, pulls), problem: failure?.line ?? null };
 }
 
 /**
@@ -232,8 +289,7 @@ function pruneHeadRefs(dir: string, pulls: readonly { number: number }[]): void 
   const refs = inflightGit(dir, ["for-each-ref", "--format=%(refname)", "refs/repowiki/pull/"]);
   const stale = refs.stdout.split("\n").filter((ref) => ref !== "" && !keep.has(ref));
   if (stale.length === 0) return;
-  spawnSync("git", ["-C", dir, "update-ref", "--stdin"], {
-    env: inflightEnv(),
+  inflightGit(dir, ["update-ref", "--stdin"], {
     input: stale.map((ref) => `delete ${ref}\n`).join(""),
   });
 }

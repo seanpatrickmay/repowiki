@@ -8,12 +8,18 @@ import {
   InFlightSummary,
   type Manifest,
   type TokenUsage,
+  ungroundedCodeToken,
 } from "@repowiki/core";
-import type { Provider } from "@repowiki/llm";
+import { LlmOutputError, type Provider } from "@repowiki/llm";
 import { z } from "zod";
 import { createPageLinker } from "../link/index.ts";
 import { estimateTokens } from "../manifest/index.ts";
-import { claimTextProblems, resolveReference, type VerifyContext } from "../verify/index.ts";
+import {
+  citedLines,
+  claimTextProblems,
+  resolveCitations,
+  type VerifyContext,
+} from "../verify/index.ts";
 import {
   INFLIGHT_MAX_OUTPUT_TOKENS,
   inflightSystemPrompt,
@@ -42,6 +48,10 @@ export interface SummaryRequest {
   tokens: number;
   /** The head lines the pack shows, by path: the only lines a claim may cite. */
   shown: ReadonlyMap<string, ReadonlySet<number>>;
+  /** The shown lines each file's change touches (SummaryPack.changed). */
+  changed: ReadonlyMap<string, ReadonlySet<number>>;
+  /** Each file's removed lines as shown, by the head line they show before. */
+  removed: ReadonlyMap<string, ReadonlyMap<number, readonly string[]>>;
   /** Text at the head of every file the pull request changes and keeps. */
   sources: ReadonlyMap<string, string>;
   /** The features it touches. */
@@ -61,6 +71,8 @@ export function summaryRequest(input: PackInput, model: string): SummaryRequest 
     user: pack.text,
     tokens: estimateTokens(system) + pack.tokens,
     shown: pack.shown,
+    changed: pack.changed,
+    removed: pack.removed,
     sources: new Map([...input.head].filter(([path]) => kept.has(path))),
     touched: input.features.map((f) => f.featureId),
   };
@@ -72,12 +84,42 @@ export interface Verified {
   dropped: number;
 }
 
+/** The feature ids a linked claim text links to (`[[id]]` or `[[id|words]]`), Wikipedia aside. */
+function linkedFeatures(linked: string): string[] {
+  return [...linked.matchAll(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g)].flatMap((m) =>
+    m[1] === undefined || m[1].startsWith("wp:") ? [] : [m[1]],
+  );
+}
+
+/**
+ * What a claim citing `citations` may name (spec v2 #4 R6, as the Ask sidebar's sentences): each
+ * cited path, its cited head lines, and the removed lines the pack shows beside them (before any
+ * cited line, or just after the last).
+ */
+function groundOf(request: SummaryRequest, citations: readonly CodeCitation[]): string {
+  return citations
+    .flatMap((c) => {
+      const removed = request.removed.get(c.path);
+      const beside: string[] = [];
+      for (let n = c.startLine; n <= c.endLine + 1; n++) beside.push(...(removed?.get(n) ?? []));
+      return [
+        c.path,
+        citedLines(request.sources.get(c.path) ?? "", c.startLine, c.endLine),
+        ...beside,
+      ];
+    })
+    .join("\n");
+}
+
 /**
  * An answer's claims that hold (R10), in order, at most five: each is one paragraph of the claim
  * subset (claimTextProblems), cites 1-3 ranges of head lines the pack showed of files the pull
- * request changes (resolveReference, ≤ MAX_CITED_LINES, hashed at the head), names only touched
- * features (others are dropped, at most three kept), and is linked over the wiki's manifest. A
- * claim with any problem is dropped; there is no retry round. Ids are the engine's: p<n>-c<k>.
+ * request changes (resolveCitations, ≤ MAX_CITED_LINES, hashed at the head), at least one of
+ * them a changed line (spec v2 #9 §7.1), names no code-like token its cited lines do not write
+ * and links no feature the pull request does not touch, names only touched features (others are
+ * dropped, at most three kept), and is linked over the wiki's manifest once it is kept, so a
+ * dropped claim takes no first-mention link. A claim with any problem is dropped; there is no
+ * retry round. Ids are the engine's: p<n>-c<k>.
  */
 export function verifySummary(
   request: SummaryRequest,
@@ -102,28 +144,25 @@ export function verifySummary(
       continue;
     }
     const text = draft.text.trim();
-    const citations: CodeCitation[] = [];
-    let ok = claimTextProblems(text, ctx).length === 0;
-    ok &&= draft.cite.length >= 1 && draft.cite.length <= INFLIGHT_MAX_CLAIM_CITATIONS;
-    for (const ref of draft.cite) {
-      const resolved = resolveReference(ref, ctx);
-      if ("problem" in resolved || resolved.citation.kind !== "code") {
-        ok = false;
-        continue;
-      }
-      const c = resolved.citation;
-      const shown = request.shown.get(c.path);
-      for (let n = c.startLine; n <= c.endLine; n++) if (shown?.has(n) !== true) ok = false;
-      if (
-        !citations.some(
-          (x) => x.path === c.path && x.startLine === c.startLine && x.endLine === c.endLine,
-        )
-      )
-        citations.push(c);
-    }
-    const linked = link(text);
-    ok &&= linked !== "" && linked.length <= CLAIM_TEXT_MAX_LENGTH;
-    if (!ok) {
+    const resolved = resolveCitations(draft.cite, ctx);
+    const citations = resolved.citations.flatMap((c) => (c.kind === "code" ? [c] : []));
+    const lines = (c: CodeCitation) =>
+      Array.from({ length: c.endLine - c.startLine + 1 }, (_, i) => c.startLine + i);
+    const ok =
+      claimTextProblems(text, ctx).length === 0 &&
+      draft.cite.length >= 1 &&
+      draft.cite.length <= INFLIGHT_MAX_CLAIM_CITATIONS &&
+      !resolved.unresolved &&
+      citations.length === resolved.citations.length &&
+      citations.every((c) => lines(c).every((n) => request.shown.get(c.path)?.has(n) === true)) &&
+      citations.some((c) => lines(c).some((n) => request.changed.get(c.path)?.has(n) === true)) &&
+      ungroundedCodeToken(groundOf(request, citations), text) === null &&
+      // A throwaway linker, so a claim dropped here takes no first-mention link.
+      linkedFeatures(createPageLinker(manifest, "", new Map())(text)).every((id) =>
+        touched.has(id),
+      );
+    const linked = ok ? link(text) : "";
+    if (!ok || linked === "" || linked.length > CLAIM_TEXT_MAX_LENGTH) {
       dropped++;
       continue;
     }
@@ -144,10 +183,13 @@ export function verifySummary(
   };
 }
 
-/** One request's outcome: its verified summary, or why there is none this run. */
+/**
+ * One request's outcome: its verified summary, or why there is none this run, with what the call
+ * spent when it was answered (an answer that verified to nothing, or one that was not usable).
+ */
 export type SummaryOutcome =
   | { summary: InFlightSummary; dropped: number }
-  | { summary: null; failure: string };
+  | { summary: null; failure: string; usage?: TokenUsage; model?: string };
 
 /**
  * Sends every request at once (role `inflight`, no cacheKey, R11), so batched calls share one
@@ -180,7 +222,13 @@ export async function summarize(
     const request = requests[i] as SummaryRequest;
     if (result.status === "rejected") {
       const why = result.reason instanceof Error ? result.reason.message : "the call failed";
-      outcomes.set(request.number, { summary: null, failure: why });
+      const spent =
+        result.reason instanceof LlmOutputError &&
+        result.reason.usage !== undefined &&
+        result.reason.model !== undefined
+          ? { usage: result.reason.usage, model: result.reason.model }
+          : {};
+      outcomes.set(request.number, { summary: null, failure: why, ...spent });
       return;
     }
     const { output, usage, model } = result.value;
@@ -194,7 +242,12 @@ export async function summarize(
     outcomes.set(
       request.number,
       verified.summary === null
-        ? { summary: null, failure: `no claim verified (${verified.dropped} dropped)` }
+        ? {
+            summary: null,
+            failure: `no claim verified (${verified.dropped} dropped)`,
+            usage,
+            model,
+          }
         : { summary: verified.summary, dropped: verified.dropped },
     );
   });
