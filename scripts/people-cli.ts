@@ -405,15 +405,20 @@ export const PEOPLE_ESTIMATE_NOTE =
 
 /**
  * What wiki:people says when the people file excludes someone (spec v2 #6 R12, §12): repository
- * text naming them is not rewritten, and with exactly one excluded person the anonymous series
- * names them by elimination.
+ * text naming them is not rewritten, and with exactly one excluded person who has a non-merge
+ * commit (`contributing`, the only ones the series holds) the anonymous series names them by
+ * elimination.
  */
-export function exclusionNotes(excluded: number, othersShown: boolean): string[] {
+export function exclusionNotes(
+  excluded: number,
+  othersShown: boolean,
+  contributing = excluded,
+): string[] {
   if (excluded === 0) return [];
   const notes = [
     `${excluded} ${excluded === 1 ? "person is" : "people are"} excluded: no page, name or id of theirs is generated; repository text that names them (commit subjects, pull request titles) is not rewritten.`,
   ];
-  if (excluded === 1 && othersShown)
+  if (contributing === 1 && othersShown)
     notes.push(
       'With exactly one person excluded, the "other contributors" series is theirs by elimination; set othersMinPeople to 2 to leave it out.',
     );

@@ -157,8 +157,11 @@ function peopleRows(
 function peopleNotes(prepared: PreparedPeople): string[] {
   const { refreshed, revoked } = prepared;
   const excluded = refreshed.identities.groups.filter((g) => g.excluded).length;
+  const contributing = refreshed.identities.groups.filter(
+    (g) => g.excluded && g.commits > 0,
+  ).length;
   const notes = [
-    ...exclusionNotes(excluded, refreshed.snapshot.others.length > 0),
+    ...exclusionNotes(excluded, refreshed.snapshot.others.length > 0, contributing),
     ...attributesNotes(gitReadsAttributesAtSha()),
   ];
   if (revoked > 0)

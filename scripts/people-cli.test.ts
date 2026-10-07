@@ -296,6 +296,8 @@ describe("renderPeopleSummary", () => {
   it("says nothing of exclusion when nobody is excluded", () => {
     expect(exclusionNotes(0, false)).toEqual([]);
     expect(exclusionNotes(2, true)).toHaveLength(1);
+    // Two excluded, one of them merge-only: the series is still one person's.
+    expect(exclusionNotes(2, true, 1)).toHaveLength(2);
   });
 });
 

@@ -103,8 +103,9 @@ function manifests(head: string, old: string): Manifest[] {
   ];
 }
 
-async function compute(file: unknown = {}, shuffle = false) {
-  const fx = history();
+async function compute(file: unknown = {}, shuffle = false, grow?: () => string) {
+  const base = history();
+  const fx = grow === undefined ? base : { ...base, head: grow() };
   const config = PeopleConfig.parse(file);
   const commits = readAuthorship(repo.dir, fx.head);
   const identities = resolveIdentities({
@@ -177,6 +178,24 @@ describe("computeSnapshot (spec v2 #6 §7)", () => {
     const { snapshot } = await compute({ exclude: ["name:Kim Private"], othersMinPeople: 2 });
     expect(snapshot.others).toEqual([]);
     expect(snapshot.commits).toBe(6);
+  });
+
+  it("counts toward othersMinPeople only excluded people with a non-merge commit", async () => {
+    // Max only ever merges: excluding Kim and Max must not show Kim's activity alone.
+    const grow = () => {
+      repo.git("switch", "-q", "-c", "side");
+      repo.write("docs/side.md", "side\n");
+      repo.commit("docs: side", "+0000", ADA);
+      repo.git("switch", "-q", "main");
+      return repo.merge("side", "Merge branch 'side'", {
+        name: "Max Merger",
+        email: "max@example.com",
+      });
+    };
+    const file = { exclude: ["name:Kim Private", "name:Max Merger"], othersMinPeople: 2 };
+    const { snapshot } = await compute(file, false, grow);
+    expect(snapshot.others).toEqual([]);
+    expect(JSON.stringify(snapshot)).not.toContain("Max");
   });
 
   it("credits a pull request to the author of most of its commits, and a merge to its merger (R6)", async () => {
