@@ -1337,6 +1337,21 @@ describe("the work in progress pages (spec v2 #9 §6.2)", () => {
     expect(missing).toContain("No summary of this pull request yet.");
   });
 
+  it("marks an article's changing claims and adds its In progress section, all out of search", async () => {
+    await expect(inflightNormalized("wiki/signals/index.html")).toMatchFileSnapshot(
+      "__snapshots__/wiki-signals-inflight.html",
+    );
+    const html = inflightSite.read("wiki/signals/index.html");
+    expect(html.match(/<sup class="inflight-marker" data-pagefind-ignore="all">/g)).toHaveLength(2);
+    expect(html).toContain('<section aria-labelledby="in-progress" data-pagefind-ignore="all">');
+    expect(html).toContain(
+      '<div class="ambox ambox-inflight" role="note" data-pagefind-ignore="all">',
+    );
+    expect(html).toContain('<li><a href="#in-progress">In progress</a></li>');
+    for (const page of htmlFiles(inflightSite.outDir).filter((p) => p.includes("/history/")))
+      expect(inflightSite.read(page), page).not.toMatch(/inflight-marker|id="in-progress"/);
+  });
+
   it("renders the index of open pull requests and planned work", async () => {
     await expect(inflightNormalized("special/in-progress/index.html")).toMatchFileSnapshot(
       "__snapshots__/special-in-progress.html",
