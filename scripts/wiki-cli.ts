@@ -83,7 +83,8 @@ const positive = (flag: string, value: string | undefined, usage: string): numbe
   return n;
 };
 
-const deadlineMinutes = (value: string | undefined, usage: string): number | null => {
+/** `--deadline minutes`: above 0 and up to 24 hours, or null when the flag is absent. */
+export const deadlineMinutes = (value: string | undefined, usage: string): number | null => {
   if (value === undefined) return null;
   const n = Number(value);
   if (!/^\d+(\.\d+)?$/.test(value) || !(n > 0 && n <= MAX_DEADLINE_MINUTES))
