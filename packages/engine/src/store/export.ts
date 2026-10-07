@@ -64,10 +64,16 @@ function storedPeople(store: Store, manifest: { features: readonly { id: string 
  * Work in flight's authors joined to People (spec v2 #6 C8), at export time so a people-file
  * change applies at the next export: a login the registry resolves to a person with a page gains
  * `person`; one resolving to an excluded person becomes null ("unknown author"), so their login
- * never appears; a bot keeps its badge; anyone else stays plain text.
+ * never appears; a bot keeps its badge; anyone else stays plain text. With no People in the
+ * export (no snapshot, or a stale one), excluded logins are still dropped whenever the registry
+ * holds an excluded row (the Task 29 ruling), and nobody is linked.
  */
-function joinAuthors(store: Store, inflight: InFlight, people: PeopleExport): InFlight {
-  const pages = new Set(people.snapshot.people.filter((p) => p.kind === "human").map((p) => p.id));
+function joinAuthors(store: Store, inflight: InFlight, people: PeopleExport | null): InFlight {
+  if (people === null && !store.listPeopleRegistry().some((row) => row.status === "excluded"))
+    return inflight;
+  const pages = new Set(
+    (people?.snapshot.people ?? []).filter((p) => p.kind === "human").map((p) => p.id),
+  );
   const join = (author: Author): Author => {
     if (author === null) return null;
     const resolved = store.resolvePerson({ login: author.login });
@@ -112,7 +118,7 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     stored !== null && inflightProblems(stored, { head, manifest, pages }).length === 0
       ? stored
       : null;
-  const inflight = agreed === null || people === null ? agreed : joinAuthors(store, agreed, people);
+  const inflight = agreed === null ? agreed : joinAuthors(store, agreed, people);
   return WikiExport.parse({
     schemaVersion: SCHEMA_VERSION,
     repo: options.repo,

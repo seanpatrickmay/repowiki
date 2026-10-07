@@ -210,6 +210,15 @@ describe("person revisions", () => {
     expect(store.resolvePerson({ login: "stranger" })).toBeNull();
   });
 
+  it("resolves to the oldest row holding a key, whatever order the rows were stored in", () => {
+    const key = saltedKey(store.getPeopleSalt(), "login:shared");
+    store.putPeopleRegistry([
+      row({ id: "newer", order: 5, name: "Newer", keys: [key] }),
+      row({ id: "older", order: 1, name: "Older", keys: [key] }),
+    ]);
+    expect(store.resolvePerson({ login: "shared" })).toEqual({ kind: "person", id: "older" });
+  });
+
   it("forgets a narrative and keeps the registry row (a withdrawn consent)", () => {
     store.putPersonRevision(first);
     store.putPeopleRegistry([row()]);
