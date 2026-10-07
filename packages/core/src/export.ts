@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Architecture } from "./architecture.ts";
 import { FeatureId } from "./feature.ts";
+import { InFlight, inflightProblems } from "./inflight.ts";
 import { RunKind } from "./llm.ts";
 import { Manifest } from "./manifest.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
@@ -48,6 +49,11 @@ export const WikiExport = z
      * the last full build's). Added within schema version 3 with a default, like `architecture`.
      */
     runs: z.array(RunTotal).default([]),
+    /**
+     * Open pull requests and issues and what they would do to the wiki (spec v2 #9, F23), or null
+     * when the wiki has no snapshot. Added within schema version 3 with a default, like `runs`.
+     */
+    inflight: InFlight.nullable().default(null),
   })
   .superRefine((wiki, ctx) => {
     const known = new Set(wiki.manifest.features.map((f) => f.id));
@@ -138,6 +144,11 @@ export const WikiExport = z
         }
       });
     });
+    if (wiki.inflight !== null) {
+      for (const { message, path } of inflightProblems(wiki.inflight, wiki)) {
+        ctx.addIssue({ code: "custom", message, path: ["inflight", ...path] });
+      }
+    }
     current?.edges.forEach((edge, e) => {
       if (!seen.has(edge.from) || !seen.has(edge.to)) {
         ctx.addIssue({
