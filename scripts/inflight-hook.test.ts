@@ -10,6 +10,7 @@ import {
   type HookContext,
   inflightAfterUpdate,
   mergedBetween,
+  outsidePulls,
 } from "./inflight-hook.ts";
 import { refreshOnline } from "./inflight-run.ts";
 import { parseUpdateArgs } from "./update-cli.ts";
@@ -81,6 +82,10 @@ describe("mergedBetween", () => {
     const to = fx.repo.commit("Tidy up (#6)");
     expect(mergedBetween(fx.repo.dir, fx.first, to)).toEqual(new Set([5, 6]));
     expect(mergedBetween(fx.repo.dir, to, to)).toEqual(new Set());
+    expect(outsidePulls(fx.repo.dir, fx.first, to)).toBe(0);
+    fx.repo.write("a.txt", "c\n");
+    const direct = fx.repo.commit("fix a typo on main");
+    expect(outsidePulls(fx.repo.dir, fx.first, direct)).toBe(1);
   });
 });
 
@@ -113,6 +118,16 @@ describe("compareLine (R22)", () => {
       await compareLine(fx.repo.dir, { ...before, inflight: null }, to, new Set([1]), false),
     ).toBe(
       "Predictions not compared: no snapshot was derived against this update's starting head.",
+    );
+  });
+
+  it("does not compare a merge when the range holds commits outside any merged pull request", async () => {
+    await refreshed();
+    const before = beforeUpdate(fx.store);
+    if (before === null) throw new Error("the fixture has a wiki");
+    const to = merge(1);
+    expect(await compareLine(fx.repo.dir, before, to, new Set([1]), false, 2)).toBe(
+      "Predictions not comparable: 2 commits in this update came in outside any merged pull request, so their stale claims would count against #1.",
     );
   });
 

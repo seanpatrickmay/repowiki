@@ -36,6 +36,7 @@ import {
   inflightEstimateLine,
   readLine,
   suggestFor,
+  unpricedEstimateLine,
 } from "./inflight-cli.ts";
 import { CliError } from "./manifest-cli.ts";
 import { describeError, lazyClaudeProvider, requireApiKey } from "./wiki-cli.ts";
@@ -71,6 +72,11 @@ export type RefreshResult =
       spent: LedgerTotals;
     } & Completed);
 
+/** A provider for a round with nothing to ask: completeInFlight then only marks what is over budget. */
+const NO_CALL: Provider = {
+  generate: () => Promise.reject(new Error("no summary was due within --max-usd")),
+};
+
 const exportOptions = (ctx: RefreshContext) => ({
   repo: ctx.repoName,
   exportedAt: (ctx.now ?? (() => new Date()))().toISOString(),
@@ -95,27 +101,37 @@ function derive(
 }
 
 /**
- * Steps 7-8: the estimate (an unpriced model is a usage error before any call), the dry run's
- * stop, the key check when a call is due, the summary round under --max-usd, then the snapshot
- * stored and export.json and llms.txt rewritten. `provider` null makes no call.
+ * Steps 7-8: the estimate (an unpriced model is a usage error before any call, and only stated
+ * when no call can happen), the dry run's stop, the key check when a call is due, then the GitHub
+ * snapshot `read` stored (so a usage failure leaves the stored one as it was), the summary round
+ * under --max-usd, the snapshot stored and export.json and llms.txt rewritten. `provider` null
+ * makes no call.
  */
 async function settle(
   ctx: RefreshContext,
   derived: Derived,
   provider: (() => Provider) | null,
   ledger: TokenLedger = createLedger(),
+  read: GitHubSnapshot | null = null,
 ): Promise<RefreshResult> {
   const { store, args, models } = ctx;
   const estimate = estimateSummaries(derived, models.inflight, args.batch);
-  if (estimate === null)
-    throw new CliError(`the inflight role's model ${models.inflight} has no known price`);
-  ctx.log(inflightEstimateLine(estimate, args));
+  if (estimate === null) {
+    if (provider !== null)
+      throw new CliError(`the inflight role's model ${models.inflight} has no known price`);
+    const requests = derived.pulls.filter((p) => p.request !== null).length;
+    const cached = derived.pulls.filter((p) => p.request !== null && p.cached !== null).length;
+    ctx.log(unpricedEstimateLine({ requests, cached }, models.inflight));
+  } else ctx.log(inflightEstimateLine(estimate, args));
   if (args.dryRun) return { kind: "dry-run" };
   const asking =
     provider !== null &&
     withinBudget(derived, models.inflight, args.batch, args.maxUsd).chosen.length > 0;
+  // Over budget with calls allowed: no provider is built (no key needed), yet the table says so.
+  const chosen = provider === null ? null : asking ? provider() : NO_CALL;
+  if (read !== null) store.putGitHubSnapshot(read);
   const completed = await completeInFlight(store, derived, {
-    provider: asking ? provider() : null,
+    provider: chosen,
     model: models.inflight,
     batch: args.batch,
     maxUsd: args.maxUsd,
@@ -137,7 +153,7 @@ function claude(ctx: RefreshContext, wikiHead: string, ledger: TokenLedger): () 
   return () => {
     // Calls are due: fail once, up front, rather than once per pull request.
     requireApiKey("wiki:inflight");
-    const runId = `wiki-inflight-${wikiHead}-${new Date().toISOString()}`;
+    const runId = `wiki-inflight-${wikiHead}-${(ctx.now ?? (() => new Date()))().toISOString()}`;
     return lazyClaudeProvider({
       command: "wiki:inflight",
       models: ctx.models,
@@ -153,9 +169,10 @@ function claude(ctx: RefreshContext, wikiHead: string, ledger: TokenLedger): () 
 
 /**
  * pnpm wiki:inflight online (spec v2 #9 §4.1): resolve the identity and read GitHub (any skip
- * reason is returned and nothing is written, R3); store the snapshot (not on a dry run); fetch
- * every head into inflight.git; derive, rebuilding inflight.git once when it lost an object (R5);
- * then settle the summaries. The store must hold a wiki.
+ * reason is returned and nothing is written, R3); fetch every head and base into inflight.git;
+ * derive, rebuilding inflight.git once when it lost an object (R5); then settle the summaries,
+ * which stores the GitHub snapshot once the estimate and the key check pass (never on a dry
+ * run). The store must hold a wiki.
  */
 export async function refreshOnline(
   ctx: RefreshContext,
@@ -170,7 +187,6 @@ export async function refreshOnline(
   if ("skip" in read) return { kind: "skipped", reason: read.skip };
   const { snapshot } = read;
   ctx.log(readLine(snapshot));
-  if (!ctx.args.dryRun) ctx.store.putGitHubSnapshot(snapshot);
   const url = sources.fetch?.url ?? githubFetchUrl(resolved.identity);
   const fetchAll = () => {
     const dir = ensureInflightRepo(ctx.out, ctx.repo);
@@ -192,6 +208,7 @@ export async function refreshOnline(
     derived,
     noCall ? null : provider === undefined ? claude(ctx, derived.wikiHead, ledger) : () => provider,
     ledger,
+    snapshot,
   );
 }
 

@@ -46,13 +46,29 @@ export function mergedBetween(repo: string, from: string, to: string): Set<numbe
   );
 }
 
+/**
+ * Commits on `to`'s first-parent line after `from` that no pull request brought in: a direct
+ * commit, or a merge whose subject names no pull request (R22: such a range is not comparable).
+ */
+export function outsidePulls(repo: string, from: string, to: string): number {
+  const before = reachableCommits(repo, from);
+  const bySha = new Map(readHistory(repo, to).map((commit) => [commit.sha, commit]));
+  let outside = 0;
+  for (let c = bySha.get(to); c !== undefined && !before.has(c.sha); ) {
+    if (pullRequestOf(c.subject) === null) outside++;
+    c = bySha.get(c.parents[0] ?? "");
+  }
+  return outside;
+}
+
 const key = (c: { featureId: string; claimId: string }) => `${c.featureId}/${c.claimId}`;
 
 /**
  * R22's comparison for one update: the merged pull request's certain predicted stale claims,
  * from a snapshot derived against the update's starting head, against the claims the move from
  * `from` to `to` makes stale on the pages as they were (staleClaims). Only an update that merged
- * exactly one pull request, counting every merge in the range, snapshot or not, is comparable;
+ * exactly one pull request, counting every merge in the range, snapshot or not, and holds no
+ * commit outside a merged pull request (`outside`, outsidePulls), is comparable;
  * else "not comparable" with why, as for a pull request predicted against a wiki behind its base
  * (R27: its effects were file-level). "not compared" with why for a replay, a snapshot derived
  * elsewhere, or a merged pull request the snapshot does not hold or could not work out.
@@ -63,6 +79,7 @@ export async function compareLine(
   to: string,
   merged: ReadonlySet<number>,
   replay: boolean,
+  outside = 0,
 ): Promise<string> {
   if (replay) return "Predictions not compared: a replay moves through several merges.";
   const snapshot = before.inflight;
@@ -78,6 +95,8 @@ export async function compareLine(
     return `Predictions not comparable: ${merged.size} pull requests merged in this update (${list}), so each one's stale claims would count against the others.`;
   }
   const [number] = [...merged];
+  if (outside > 0)
+    return `Predictions not comparable: ${outside} ${outside === 1 ? "commit" : "commits"} in this update came in outside any merged pull request, so their stale claims would count against #${number}.`;
   const pull = snapshot.pulls.find((p) => p.number === number);
   if (pull === undefined) return `Predictions not compared: #${number} is not in the snapshot.`;
   if (pull.head !== "fetched")
@@ -116,7 +135,8 @@ export async function inflightAfterUpdate(
   try {
     if (ctx.store.getGitHubSnapshot() === null) return [];
     const merged = mergedBetween(ctx.repo, before.from, to);
-    const compared = await compareLine(ctx.repo, before, to, merged, replay);
+    const outside = replay ? 0 : outsidePulls(ctx.repo, before.from, to);
+    const compared = await compareLine(ctx.repo, before, to, merged, replay, outside);
     const args = parseInflightArgs([ctx.repo, "--offline"]);
     const result = await refreshOffline({ ...ctx, args, log: () => {} }, merged);
     if (result.kind !== "done") return [];

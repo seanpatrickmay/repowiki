@@ -101,9 +101,10 @@ function blobHunks(
  * so no path text can forge an entry. A symlink or submodule is not a file: one that became a
  * file is added, a file that became one is deleted. A copy that the caller's git config reports
  * counts as an added file. With `only`, just the changes whose first path is in it are returned
- * (the old path; a new file's path; a copy's source), and only they are diffed for hunks; renames are still paired over the whole
- * tree, so a cited file that moved is followed (the MCP server's per-claim marks, M8). With
- * `options.timeoutMs`, each git call it makes is stopped after that long (a GitTimeoutError).
+ * (the old path; a new file's path; a copy's source), and only they are diffed for hunks; renames
+ * are still paired over the whole tree, so a cited file that moved is followed (the MCP server's
+ * per-claim marks, M8). With `options.timeoutMs`, each git call it makes is stopped after that
+ * long (a GitTimeoutError); diffTrees takes any tree-ish object id, as merge-tree writes a tree.
  */
 export function diffCommits(
   repo: string,

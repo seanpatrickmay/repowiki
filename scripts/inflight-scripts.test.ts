@@ -29,7 +29,8 @@ const CANARY = "CANARY-BODY-7f3a";
 
 let fx: InflightFixture;
 let bin: string;
-let gitDir: string[];
+/** Every file of the documented repository, its .git and working tree: none may change. */
+let repoFiles: string[];
 beforeEach(async () => {
   fx = await inflightFixture({ onDisk: true });
   // A PATH with git and, when a test writes one, a fake gh: never the machine's own gh.
@@ -53,7 +54,7 @@ beforeEach(async () => {
     .replace("c".repeat(40), head)
     .replace("b".repeat(40), fx.first);
   writeFileSync(join(bin, "pulls.json"), pulls);
-  gitDir = listing(join(fx.repo.dir, ".git"));
+  repoFiles = listing(fx.repo.dir);
 });
 afterEach(() => fx.remove());
 
@@ -88,7 +89,7 @@ function run(...args: string[]) {
   });
   // Nothing the command prints carries a GitHub body, and it never writes in the repository.
   expect(`${result.stdout}${result.stderr}`).not.toContain(CANARY);
-  expect(listing(join(fx.repo.dir, ".git"))).toEqual(gitDir);
+  expect(listing(fx.repo.dir)).toEqual(repoFiles);
   return result;
 }
 const stored = () => {
@@ -177,6 +178,31 @@ describe("wiki-inflight.ts as a process (no network)", () => {
     expect(stored()).toEqual({ snapshot: null, inflight: null });
     expect(existsSync(join(fx.out, "inflight.git"))).toBe(false);
     expect(WikiExport.parse(JSON.parse(exportText())).inflight).toBeNull();
+  });
+
+  it("asks nothing and needs no key when --max-usd is below any summary, still stating the estimate", () => {
+    fakeGh();
+    const result = run("--github", "acme/demo", "--max-usd", "0.000001");
+    expect(result.status).toBe(0);
+    expect(result.stderr.split("\n")[2]).toMatch(
+      /^1 pull-request summary \(0 cached, 1 to request\): about \$/,
+    );
+    expect(result.stdout).toContain("| over budget |");
+    expect(result.stdout).toContain("0 new summaries, $0.0000");
+  });
+
+  it("refuses an --out inside the documented repository, exit 2, writing nothing", () => {
+    const inside = spawnSync(
+      process.execPath,
+      [SCRIPT, fx.repo.dir, "--out", join(fx.repo.dir, "wiki")],
+      {
+        encoding: "utf8",
+        env: { PATH: bin, HOME: join(fx.out, ".."), GIT_ALLOW_PROTOCOL: "file" },
+      },
+    );
+    expect(inside.status).toBe(2);
+    expect(inside.stderr).toMatch(/^refusing to write inside the documented repository/);
+    expect(listing(fx.repo.dir)).toEqual(repoFiles);
   });
 
   it("is a usage error, exit 2, for a bad flag, and never echoes its value", () => {
