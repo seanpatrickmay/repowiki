@@ -5,6 +5,7 @@ import {
   parseMatchKey,
   saltedKey,
   shownMatchKey,
+  withoutEmails,
 } from "@repowiki/core";
 import type { AuthoredCommit } from "../index/index.ts";
 import { applyMailmap, type Mailmap } from "./mailmap.ts";
@@ -37,6 +38,12 @@ export interface IdentityGroup {
   /** Every other cleaned name, sorted, without the display name or a derived login. */
   otherNames: string[];
   kind: "human" | "bot";
+  /**
+   * True for a human group some (not all) of whose identities look like bots (R11), with no
+   * bots: or humans: key deciding it: a group is a bot only when every identity looks like one,
+   * and people:suggest flags the mixed ones.
+   */
+  partlyBot: boolean;
   excluded: boolean;
   /** True when the group is the owner's (planner ruling R3). */
   owner: boolean;
@@ -100,8 +107,31 @@ export function noreplyLogin(email: string): string | null {
 /** A key as the store keeps it (R10): core's, re-exported for the people module. */
 export { saltedKey };
 
-const isoMin = (a: string, b: string) => (Date.parse(b) < Date.parse(a) ? b : a);
-const isoMax = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);
+/** The earlier (later) of two ISO times; of two at one instant, the smaller string, so order never matters. */
+const isoMin = (a: string, b: string) => {
+  const d = Date.parse(b) - Date.parse(a);
+  return d < 0 || (d === 0 && b < a) ? b : a;
+};
+const isoMax = (a: string, b: string) => {
+  const d = Date.parse(b) - Date.parse(a);
+  return d > 0 || (d === 0 && b < a) ? b : a;
+};
+
+/**
+ * Addresses strangers share (the fix-forward ruling): GitHub's no-reply address, the bare
+ * noreply form, and any `noreply@` or `no-reply@` address. Never joined on, and no login is read
+ * from one; still a key the people file can match.
+ */
+export const PLACEHOLDER_EMAILS: ReadonlySet<string> = new Set([
+  "noreply@github.com",
+  "noreply@users.noreply.github.com",
+]);
+
+/** Whether `email` is one strangers share, so the email and login rules never join on it. */
+export function isPlaceholderEmail(email: string): boolean {
+  const lower = email.trim().toLowerCase();
+  return PLACEHOLDER_EMAILS.has(lower) || /^no-?reply@/.test(lower);
+}
 
 /** A pair's identity keys, unsalted: `email:`, `name:` and `login:` forms of its raw and mapped values. */
 function keysOf(raw: { name: string; email: string }, mapped: { name: string; email: string }) {
@@ -111,7 +141,7 @@ function keysOf(raw: { name: string; email: string }, mapped: { name: string; em
     if (lower !== "") keys.add(`email:${lower}`);
     const normal = normalizeName(name);
     if (normal !== "") keys.add(`name:${normal}`);
-    const login = noreplyLogin(email);
+    const login = isPlaceholderEmail(email) ? null : noreplyLogin(email);
     if (login !== null) keys.add(`login:${login}`);
   }
   return keys;
@@ -269,18 +299,23 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
   });
   const union = new UnionFind(raws.length);
   const reasons = new Map<number, Set<JoinReason>>();
+  const fenced = (i: number) => entryOf[i] !== -1;
+  // A reason only between two distinct identities, neither of them fenced.
   const join = (a: number, b: number, why: JoinReason) => {
-    if (entryOf[a] !== -1 || entryOf[b] !== -1) return;
+    if (a === b || fenced(a) || fenced(b)) return;
     union.union(a, b);
     const at = Math.min(a, b);
     reasons.set(at, (reasons.get(at) ?? new Set()).add(why));
   };
-  // 4. The automatic joins (R7), each over the pairs no entry claims.
+  // 4. The automatic joins (R7), each over the pairs no entry claims: a fenced pair never holds
+  // a key, so the pairs after it that share the key still join among themselves.
   const byKey = (prefix: string, why: JoinReason) => {
     const first = new Map<string, number>();
     keys.forEach((set, i) => {
+      if (fenced(i)) return;
       for (const key of set) {
         if (!key.startsWith(prefix)) continue;
+        if (prefix === "email:" && isPlaceholderEmail(key.slice(prefix.length))) continue;
         const at = first.get(key);
         if (at === undefined) first.set(key, i);
         else join(at, i, why);
@@ -292,11 +327,12 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
   raws.forEach((raw, i) => {
     const name = normalizeName(raw.name);
     logins.forEach((list, j) => {
-      if (i !== j && list.includes(name)) join(i, j, "name is login");
+      if (list.includes(name)) join(i, j, "name is login");
     });
   });
   const byFullName = new Map<string, number>();
   raws.forEach((raw, i) => {
+    if (fenced(i)) return;
     for (const name of [raw.name, (mapped[i] as { name: string }).name]) {
       const full = fullName(name);
       if (full === null) continue;
@@ -338,10 +374,13 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       proper: (mapped[i] as { properName: boolean }).properName,
     }));
     const human = anyMatch(list, config.humans);
-    const bot =
-      !human &&
-      (anyMatch(list, config.bots) ||
-        list.some((i) => looksLikeBot((raws[i] as RawIdentity).name, logins[i] as string[])));
+    const botLike = list.filter(
+      (i) =>
+        looksLikeBot((raws[i] as RawIdentity).name, logins[i] as string[]) ||
+        looksLikeBot((mapped[i] as { name: string }).name, logins[i] as string[]),
+    ).length;
+    // A group is a bot by the file's bots: key, or when every identity in it looks like one.
+    const bot = !human && (anyMatch(list, config.bots) || botLike === list.length);
     const name = displayName(entry?.name, named);
     const allNames = new Set(
       named.flatMap((p) => [cleanPersonName(p.raw.name), cleanPersonName(p.mapped)]),
@@ -368,6 +407,7 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       name,
       otherNames,
       kind: bot ? "bot" : "human",
+      partlyBot: !human && !bot && botLike > 0,
       excluded: anyMatch(list, config.exclude),
       owner: anyMatch(list, ownerKeys),
       entry: entryIndex ?? null,
@@ -380,10 +420,13 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       lastCommit: ids.map((r) => r.last).reduce(isoMax),
     };
   });
+  // A total order: first commit, then the salted keys, then the earliest pair (unique per group).
+  const keyText = (g: { keys: string[] }) => g.keys.join(",");
   groups.sort(
     (a, b) =>
       Date.parse(a.firstCommit) - Date.parse(b.firstCommit) ||
-      ((a.keys[0] ?? "") < (b.keys[0] ?? "") ? -1 : 1),
+      (keyText(a) < keyText(b) ? -1 : keyText(a) > keyText(b) ? 1 : 0) ||
+      (a.at[0] ?? 0) - (b.at[0] ?? 0),
   );
   // A name that cleans to nothing becomes "Contributor <n>", n in order of first commit.
   for (const group of groups) if (group.name === "") group.name = `Contributor ${++unnamed}`;
@@ -397,7 +440,7 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
   return {
     groups: groups.map(({ at: _at, ...group }) => group),
     groupOf: (name, email) => groupIndex.get(`${name}\0${email}`) ?? -1,
-    warnings,
+    warnings: warnings.map(withoutEmails),
   };
 }
 

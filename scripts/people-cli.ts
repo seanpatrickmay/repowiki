@@ -155,7 +155,7 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
         ? "excluded"
         : g.kind === "bot"
           ? `${guarded(ids[i] ?? "")} (bot)`
-          : guarded(ids[i] ?? "");
+          : `${guarded(ids[i] ?? "")}${g.partlyBot ? " (mixed bot)" : ""}`;
       const emails = [...new Set(g.identities.map((p) => maskEmail(p.email.toLowerCase())))];
       return [
         "",
@@ -173,6 +173,11 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
         .trim();
     }),
   ];
+  if (groups.some((g) => !g.excluded && g.partlyBot))
+    lines.push(
+      "",
+      'A "(mixed bot)" person has identities that look like bots and others that do not: they stay human. Add a bots: or humans: key to the people file to decide.',
+    );
   const suggestions = suggestMerges(groups);
   lines.push("");
   if (suggestions.length === 0) lines.push("No suggested merges.");

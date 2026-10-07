@@ -252,4 +252,97 @@ describe("resolveIdentities (spec v2 #6 §6, R7)", () => {
     const shuffled = [...TEAM].reverse();
     expect(resolve(shuffled).groups).toEqual(resolve(TEAM).groups);
   });
+
+  it("lets no fenced identity hold a key for joining: the rest still join among themselves", () => {
+    const emails = (resolved: ResolvedIdentities) =>
+      resolved.groups.map((g) => g.identities.map((i) => i.email));
+    const sams = [by("Sam Lee", "sam@b.com", 1), by("Sam Lee", "sam@a.com", 2)];
+    expect(
+      emails(
+        resolve([...sams, by("Sam Lee", "sam@c.com", 3)], {
+          people: [{ match: ["email:sam@b.com"] }],
+        }),
+      ),
+    ).toEqual([["sam@b.com"], ["sam@a.com", "sam@c.com"]]);
+    const shared = [by("Alice", "x@e.com", 1), by("Bob", "x@e.com", 2), by("Bob B", "X@e.com", 3)];
+    expect(
+      resolve(shared, { people: [{ match: ["name:alice"] }] }).groups.map(
+        (g) => g.identities.length,
+      ),
+    ).toEqual([1, 2]);
+    const octos = [
+      by("Octo One", "1+octo@users.noreply.github.com", 1),
+      by("X", "2+octo@users.noreply.github.com", 2),
+      by("Y", "octo@users.noreply.github.com", 3),
+    ];
+    expect(
+      resolve(octos, { people: [{ match: ["name:octo one"] }] }).groups.map(
+        (g) => g.identities.length,
+      ),
+    ).toEqual([1, 2]);
+  });
+
+  it("gives a join reason only between two distinct identities", () => {
+    expect(resolve([by("Sam Lee", "s@e.com")]).groups[0]?.reasons).toEqual([]);
+    expect(resolve([by("GitHub Actions", "g@e.com")]).groups[0]?.reasons).toEqual([]);
+    const team = resolve(TEAM).groups;
+    expect(team.find((g) => g.name === "Wyatt Brown")?.reasons).toEqual([]);
+    expect(team.find((g) => g.name === "Alex Kim")?.reasons).toEqual([]);
+  });
+
+  it("never joins strangers by a shared placeholder address", () => {
+    for (const email of [
+      "noreply@github.com",
+      "noreply@users.noreply.github.com",
+      "no-reply@example.org",
+      "NoReply@Example.com",
+    ]) {
+      const resolved = resolve([by("Ann One", email, 1), by("Ben Two", email, 2)]);
+      expect(resolved.groups, email).toHaveLength(2);
+      expect(resolved.groups[0]?.logins, email).toEqual([]);
+    }
+    // A real address still joins.
+    expect(resolve([by("Ann One", "a@e.com", 1), by("Ben Two", "a@e.com", 2)]).groups).toHaveLength(
+      1,
+    );
+  });
+
+  it("makes a group a bot only when every identity in it looks like one", () => {
+    const mixed = resolve([by("Ada Lovelace", "a@e.com", 1), by("dependabot", "a@e.com", 2)]);
+    expect(mixed.groups.map((g) => [g.kind, g.partlyBot])).toEqual([["human", true]]);
+    const bots = resolve([by("dependabot[bot]", "b@e.com", 1), by("renovate", "b@e.com", 2)]);
+    expect(bots.groups.map((g) => [g.kind, g.partlyBot])).toEqual([["bot", false]]);
+    // The people file's bots: key still makes a whole group a bot.
+    const listed = resolve([by("Ada Lovelace", "a@e.com", 1), by("Runner", "a@e.com", 2)], {
+      bots: ["name:runner"],
+    });
+    expect(listed.groups[0]?.kind).toBe("bot");
+  });
+
+  it("orders groups and their dates totally, whatever the commits' order and time zones", () => {
+    const commits = [
+      by("Sam Lee", "a@e.com", 1),
+      { ...by("Sam Lee", "a@e.com", 1), authorDate: "2026-01-01T13:00:00+01:00" },
+      by("Sam Lee", "b@e.com", 1),
+    ];
+    const file = { people: [{ match: ["email:a@e.com"] }, { match: ["email:b@e.com"] }] };
+    const forward = resolve(commits, file).groups;
+    const backward = resolve([...commits].reverse(), file).groups;
+    expect(backward).toEqual(forward);
+    expect(forward.map((g) => g.firstCommit)).toEqual([
+      "2026-01-01T12:00:00+00:00",
+      "2026-01-01T12:00:00+00:00",
+    ]);
+  });
+
+  it("passes every warning through withoutEmails", () => {
+    const resolved = resolve([by("Ada", "a@e.com")], {
+      exclude: ["name:kim@hidden.example"],
+      humans: ["name:kim\uFF20hidden.example"],
+    });
+    expect(resolved.warnings).toEqual([
+      "people file: name:[email] matches no author",
+      "people file: name:[email] matches no author",
+    ]);
+  });
 });
