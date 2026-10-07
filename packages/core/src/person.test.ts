@@ -7,8 +7,8 @@ import {
   PersonFacts,
   PersonId,
   PersonName,
-  withoutEmails,
 } from "./person.ts";
+import { withoutEmails } from "./plain-text.ts";
 import { makePeopleSnapshot, makePersonFacts } from "./test-fixtures.ts";
 
 describe("PersonId", () => {
@@ -21,8 +21,40 @@ describe("PersonId", () => {
 
 describe("cleanPersonName (spec v2 #6 §6.1, R14)", () => {
   it("drops control, bidi and invisible characters and collapses whitespace", () => {
-    expect(cleanPersonName("  Ada\u202E \u200BLove\u0085lace\t ")).toBe("Ada Lovelace");
+    expect(cleanPersonName("  Ada\u202E \u200BLove\u00ADlace\t ")).toBe("Ada Lovelace");
     expect(cleanPersonName("Zo\u200Dë")).toBe("Zo\u200Dë");
+  });
+
+  it("makes every whitespace character a space, NEL and the line separators included", () => {
+    expect(cleanPersonName("ADA\tLovelace")).toBe("ADA Lovelace");
+    for (const space of ["\n", "\r\n", "\u0085", "\u2028", "\u2029", "\u00A0"])
+      expect(cleanPersonName(`Ada${space}Lovelace`), JSON.stringify(space)).toBe("Ada Lovelace");
+  });
+
+  it("makes a name holding an address in any disguise unusable", () => {
+    for (const name of [
+      "ada\uFF20example.com",
+      "ada\uFE6Bexample.com",
+      "ada@example\uFF0Ecom",
+      '"ada"@example.com',
+      "ada(work)@example.com",
+      "o'brien@example.com",
+      "ada\t@example.com",
+      "ada\u0085@example.com",
+      "Ada @ example.com",
+      "ada@exa\u00ADmple.com",
+    ])
+      expect(cleanPersonName(name), JSON.stringify(name)).toBe("");
+  });
+
+  it("makes a name with no visible character, or a lone surrogate's, safe", () => {
+    for (const blank of ["\u200D", "\u200C \u200D", "\u3164", "\u2800", "\u034F", "\uFE0F"])
+      expect(cleanPersonName(blank), JSON.stringify(blank)).toBe("");
+    for (const blank of ["\uFFFC", "\u0301", `${"\u0301".repeat(130)}a`])
+      expect(cleanPersonName(blank), JSON.stringify(blank)).toBe("");
+    expect(cleanPersonName("Ada\uD800")).toBe("Ada\uFFFD");
+    expect(PersonName.safeParse("Ada\uD800").success).toBe(false);
+    expect(PersonName.safeParse("\u200D").success).toBe(false);
   });
 
   it("cuts a long name to 120 code points, never splitting an astral character", () => {
@@ -66,6 +98,23 @@ describe("withoutEmails and cleanPullTitle (planner ruling R5)", () => {
     expect(cleanPullTitle("Fix\nthe\u202E parser  for a@b.io")).toBe("Fix the parser for [email]");
     expect([...(cleanPullTitle("t".repeat(300)) ?? "")]).toHaveLength(200);
     expect(cleanPullTitle(" \u0085 ")).toBeNull();
+  });
+
+  it("removes an address before blanking, so an invisible character cannot split it", () => {
+    expect(cleanPullTitle("Fix for ada\u200B@example.com")).toBe("Fix for [email]");
+    expect(cleanPullTitle("Fix for ada@exa\u00ADmple.com")).toBe("Fix for [email]");
+    expect(cleanPullTitle("Fix ada@example\u0085.com")).toBe("Fix [email]");
+    expect(cleanPullTitle("Fix ada\uFF20example\uFF0Ecom")).toBe("Fix [email]");
+    expect(cleanPullTitle("Fix\u2028the\u0085parser")).toBe("Fix the parser");
+  });
+
+  it("gives null for a title with nothing visible, and keeps a lone surrogate out", () => {
+    for (const blank of ["\u200D", "\u3164 \u2800", "\uFE0F\u034F", "\uFFFC", "\u0301"])
+      expect(cleanPullTitle(blank), JSON.stringify(blank)).toBeNull();
+    expect(cleanPullTitle("Fix \uD800")).toBe("Fix \uFFFD");
+    const long = cleanPullTitle(`${"t".repeat(198)}\u{1F600}\u{1F600}x`) ?? "";
+    expect(long.toWellFormed()).toBe(long);
+    expect(cleanPullTitle(long)).toBe(long);
   });
 });
 

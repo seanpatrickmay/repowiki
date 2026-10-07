@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { INVISIBLE_CHARACTERS } from "./alias.ts";
 import { PersonId, PersonName } from "./person.ts";
+import { normalizedText } from "./plain-text.ts";
 
 /** What a match key names: an author name, an author email, or a GitHub login (spec v2 #6 §5). */
 export type MatchKind = "name" | "email" | "login";
@@ -13,17 +13,12 @@ export interface ParsedMatchKey {
 }
 
 /**
- * A name as People compares names (spec v2 #6 §5): whitespace made spaces, other invisible
- * characters dropped, NFKC, lower case, whitespace collapsed and trimmed.
+ * A name as People compares names (spec v2 #6 §5): core's one normaliser (NFKC, every whitespace
+ * character a space as cleanPersonName makes it, invisible characters dropped, collapsed and
+ * trimmed), lower case.
  */
 export function normalizeName(text: string): string {
-  return text
-    .replace(/\s+/g, " ")
-    .replace(INVISIBLE_CHARACTERS, "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizedText(text).toLowerCase();
 }
 
 /** A GitHub login as a key holds it: GitHub's characters, with a bot's `[bot]` suffix allowed. */

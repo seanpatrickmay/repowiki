@@ -26,6 +26,14 @@ export const INVISIBLE_CHARACTERS = new RegExp(
 );
 
 /**
+ * Characters INVISIBLE_CHARACTERS (the shared rule) lets through that still render as nothing: the
+ * combining grapheme joiner, the Hangul fillers, the braille blank, variation selectors and the
+ * object replacement character. inflightLine and inflightBody blank them too (R13), and People's
+ * normalizedText drops them. Global, like INVISIBLE_CHARACTERS.
+ */
+export const INFLIGHT_FILLERS = /\u034F|[\u115F\u1160\u2800\u3164\uFFA0\uFFFC]|[\uFE00-\uFE0F]/g;
+
+/**
  * The URL slug the reader site gives an alias: accents stripped, ASCII lowercase kebab-case, at
  * most FEATURE_ID_MAX_LENGTH characters. Two names with one slug are one route, so the linker
  * compares code aliases in this form too.

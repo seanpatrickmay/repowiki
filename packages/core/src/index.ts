@@ -4,6 +4,7 @@ export {
   aliasSlug,
   CONTROL_CHARACTERS,
   controlCharacters,
+  INFLIGHT_FILLERS,
   INVISIBLE_CHARACTERS,
 } from "./alias.ts";
 export {
@@ -159,8 +160,8 @@ export {
   peopleProblems,
   personClaimViolations,
   RegistryRow,
-  withoutEmails,
 } from "./person.ts";
+export { hasVisibleText, holdsEmail, normalizedText, withoutEmails } from "./plain-text.ts";
 export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";
 export { Infobox, Revision, RevisionReason, TokenUsage } from "./revision.ts";
 export { claimRuleViolations, Section, SectionKey } from "./section.ts";

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { INVISIBLE_CHARACTERS } from "./alias.ts";
+import { INFLIGHT_FILLERS, INVISIBLE_CHARACTERS } from "./alias.ts";
 import { CodeCitation } from "./citation.ts";
 import { CLAIM_TEXT_MAX_LENGTH, ClaimId } from "./claim.ts";
 import { FeatureId } from "./feature.ts";
@@ -35,13 +35,6 @@ export const INFLIGHT_MAX_ISSUE_FEATURES = 3;
 /** A GitHub login and owner (a user or an organisation), and a repository name (R13, R24). */
 export const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
 export const GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
-
-/**
- * Characters INVISIBLE_CHARACTERS (the shared rule) lets through that still render as nothing: the
- * combining grapheme joiner, the Hangul fillers, the braille blank, variation selectors and the
- * object replacement character. inflightLine and inflightBody blank them too (R13).
- */
-const INFLIGHT_FILLERS = /\u034F|[\u115F\u1160\u2800\u3164\uFFA0\uFFFC]|[\uFE00-\uFE0F]/g;
 
 /** `text` well formed (a lone surrogate becomes U+FFFD), every invisible character a space. */
 const blanked = (text: string): string =>
