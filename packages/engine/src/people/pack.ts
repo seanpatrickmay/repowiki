@@ -63,6 +63,8 @@ export interface PersonPack {
   dates: Map<string, string>;
   /** The newest of the person's commits the narrative will cover: the revision's basis (R25). */
   basis: string;
+  /** The person's feature ids in the pack's order: what an areas section follows. */
+  features: string[];
   /** Episodes shown in full, collapsed to one line, and dropped (R8.2's trimming). */
   episodes: { full: number; collapsed: number; dropped: number };
 }
@@ -327,6 +329,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
   for (const l of mergedLandings) cite(l.sha, l.mergedAt);
   return {
     personId: person.id,
+    features: person.features.map((f) => f.featureId),
     text,
     tokens: estimateTokens(text),
     shas,
