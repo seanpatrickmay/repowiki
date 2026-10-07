@@ -389,6 +389,28 @@ describe("describeError", () => {
       });
     });
 
+    it("replaces GitHub token shapes, which a gh or git fetch error can echo (R25)", () => {
+      withKey(undefined, () => {
+        // Built at run time, so no token-shaped literal sits in the source.
+        const classic = `gh${"p"}_${"A1b2".repeat(9)}`;
+        const app = `gh${"s"}_${"Z9y8".repeat(9)}`;
+        const fine = `github${"_"}pat_11ABCDEFG_${"x".repeat(40)}`;
+        const err = new Error(`fetch failed: https://${classic}@github.com/acme/demo`, {
+          cause: new Error(`gh: Bad credentials ${app} and ${fine}`),
+        });
+        const text = describeError(err, true);
+        for (const leak of [classic, app, fine, "A1b2", "Z9y8", "11ABCDEFG"])
+          expect(text).not.toContain(leak);
+        expect(text.split("\n")).toEqual([
+          "fetch failed: https://[redacted]@github.com/acme/demo",
+          "caused by: Error: gh: Bad credentials [redacted] and [redacted]",
+        ]);
+        expect(problemLine(`git: ${classic}`)).toBe("git: [redacted]");
+        // A word that only starts like a token prefix stays.
+        expect(problemLine("the ghost_town and ghp test")).toBe("the ghost_town and ghp test");
+      });
+    });
+
     it("ignores an empty configured key", () => {
       withKey("", () => {
         expect(describeError(new Error("plain message"), true)).toBe("plain message");

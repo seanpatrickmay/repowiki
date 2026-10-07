@@ -36,6 +36,17 @@ export {
   type WikiUpdate,
 } from "./freshness/index.ts";
 export {
+  type GhResult,
+  type GhRunner,
+  type GitHubIdentity,
+  ghEnv,
+  parseGitHubFlag,
+  parseGitHubRemote,
+  readOriginUrl,
+  resolveGitHubIdentity,
+  spawnGh,
+} from "./github/index.ts";
+export {
   assertSha,
   type CallEdge,
   type CoChange,
