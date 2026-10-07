@@ -1,5 +1,5 @@
 import type { PeopleConfig, PersonRevision } from "@repowiki/core";
-import { wantsNarrative } from "./identities.ts";
+import { groupFingerprint, wantsNarrative } from "./identities.ts";
 import { ancestorsOf } from "./pack.ts";
 import type { Refreshed } from "./refresh.ts";
 
@@ -38,8 +38,10 @@ export interface NarrativePlan {
 /**
  * Which narratives are due (spec v2 #6 R15, R25): among the humans who want one (wantsNarrative),
  * ranked by commits, the first maxNarratives; each is due when it has no narrative, when its
- * identity group changed (written whole), or when the person has a non-merge commit its basis
- * does not reach (appended). A basis no longer in the history makes the narrative due whole.
+ * identity group changed since it was written (the registry's regroup, or a fingerprint other
+ * than the revision's; written whole), or when the person has a non-merge commit its basis (the
+ * head its round ran at) does not reach (appended). A basis no longer in the history makes the
+ * narrative due whole.
  */
 export function planNarratives(
   refreshed: Refreshed,
@@ -68,7 +70,15 @@ export function planNarratives(
     const parent = current.get(id) ?? null;
     let reason: DueReason | null;
     if (parent === null) reason = "missing";
-    else if (refreshed.assigned.regrouped.has(id) || !known.has(parent.basis)) reason = "regrouped";
+    else if (
+      refreshed.assigned.regrouped.has(id) ||
+      !known.has(parent.basis) ||
+      // Durable until the narrative is rewritten (the Task 21 ruling): the registry's regroup
+      // flag lasts one run, the fingerprint the revision stored lasts until it is replaced.
+      (parent.groupFingerprint !== null &&
+        parent.groupFingerprint !== groupFingerprint(groups[group] ?? { keys: [] }))
+    )
+      reason = "regrouped";
     else {
       const covered = ancestorsOf(refreshed.commits, parent.basis);
       const newer = refreshed.commits.some(

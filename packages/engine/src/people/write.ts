@@ -23,6 +23,7 @@ import {
   uniqueDraft,
   verifyClaims,
 } from "../write/index.ts";
+import { groupFingerprint } from "./identities.ts";
 import { ancestorsOf, MAX_CHRONICLE_CLAIMS, type PersonPack, packFor } from "./pack.ts";
 import {
   MAX_PERSON_OUTPUT_TOKENS,
@@ -46,6 +47,8 @@ export interface PersonRequest {
   parent: PersonRevision | null;
   /** True for an append (R25): the parent's chronicle is kept and only new episodes are asked. */
   append: boolean;
+  /** The person's identity group's fingerprint today (groupFingerprint), stored on the revision. */
+  fingerprint: string;
 }
 
 export interface WritePeopleInput {
@@ -431,6 +434,7 @@ function assemble(
     model: state.model ?? "unknown",
     tokens: state.tokens,
     basis: pack.basis,
+    groupFingerprint: state.request.fingerprint,
     sections,
   });
   if (!parsed.success)
@@ -469,11 +473,13 @@ export function personRequest(
   });
   if (pack === null) return null;
   const group = refreshed.assigned.ids.indexOf(personId);
+  const keys = refreshed.identities.groups[group]?.keys ?? [];
   return {
     personId,
     pack,
     ctx: personVerifyContext(refreshed, group, pack, manifest),
     parent: options.parent,
     append,
+    fingerprint: groupFingerprint({ keys }),
   };
 }
