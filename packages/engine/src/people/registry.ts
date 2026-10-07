@@ -39,13 +39,15 @@ function newId(name: string, taken: Set<string>): string {
 
 /**
  * Gives each identity group its permanent id against the stored registry (spec v2 #6 R13): a
- * stored person is matched by identity-key overlap, and stays with the group holding most of the
- * commits of its keys (a split: the other group gets a new id); a group that holds two stored
+ * stored person is matched by identity-key overlap, and stays with the group sharing the most of
+ * its email keys, then login keys, then name keys, then holding most of the commits of its keys
+ * (a split: the other group gets a new id); a group that holds two stored
  * people keeps the larger one's id (more of its commits, then more shared keys, then the oldest
  * row) and turns the other into a redirect (a merge). A people-file id replaces the group's id and leaves a redirect behind. New
  * ids come from the display name, in order of first commit. Excluded groups keep private rows
  * and no redirect points at them; nothing is ever deleted (wiki:people --forget does that).
- * Throws a StoreError when a people-file id is another person's.
+ * Throws a StoreError when a people-file id is held by a stored row the group did not win (another
+ * person's, an unmatched one's, or a retired id that redirects elsewhere).
  */
 export function assignIds(
   groups: readonly IdentityGroup[],
@@ -53,26 +55,39 @@ export function assignIds(
 ): Assigned {
   const rows = stored.filter((row) => row.status !== "redirect");
   const groupKeys = groups.map((group) => new Set(group.keys));
-  // Each stored person's commits in each group: the commits of the group's pairs sharing a key.
+  const emailKeys = groups.map((group) => new Set(group.emailKeys));
+  const loginKeys = groups.map((group) => new Set(group.loginKeys));
+  // Each stored person goes to the group sharing the most strong keys with it (spec v2 #6 R9's
+  // "most shared keys"): emails first, then logins; name keys only break a tie, then commits
+  // (the commits of the group's pairs sharing a key). So a group never takes a row it shares
+  // only a name with while another group shares an email or a login with it.
   const winner = new Map<string, number>();
   /** Each stored person's commits in the group that won them: "the larger one" of a merge. */
   const weight = new Map<string, number>();
   for (const row of rows) {
     let best = -1;
-    let bestCommits = -1;
+    let bestScore: number[] = [];
     groups.forEach((group, g) => {
-      if (shared(groupKeys[g] as Set<string>, row) === 0) return;
+      const all = shared(groupKeys[g] as Set<string>, row);
+      if (all === 0) return;
+      const emails = shared(emailKeys[g] as Set<string>, row);
+      const logins = shared(loginKeys[g] as Set<string>, row);
       const commits = group.identities
         .filter((pair) => shared(new Set(pair.keys), row) > 0)
         .reduce((n, pair) => n + pair.allCommits, 0);
-      if (commits > bestCommits) {
+      const score = [emails, logins, all - emails - logins, commits];
+      const better = score.findIndex((v, i) => v !== bestScore[i]);
+      if (
+        best === -1 ||
+        (better !== -1 && (score[better] as number) > (bestScore[better] as number))
+      ) {
         best = g;
-        bestCommits = commits;
+        bestScore = score;
       }
     });
     if (best !== -1) {
       winner.set(row.id, best);
-      weight.set(row.id, bestCommits);
+      weight.set(row.id, bestScore[3] as number);
     }
   }
   const won = groups.map((_, g) =>
@@ -90,12 +105,22 @@ export function assignIds(
   const redirectTo = new Map<string, string>();
   for (const row of stored)
     if (row.status === "redirect" && row.to !== null) redirectTo.set(row.id, row.to);
+  const storedRow = new Map(stored.map((row) => [row.id, row]));
   const ids = groups.map((group, g) => {
     let id = won[g]?.[0]?.id ?? null;
     if (group.id !== null && group.id !== id) {
-      const holder = rows.find((row) => row.id === group.id);
-      if (holder !== undefined && winner.has(holder.id) && winner.get(holder.id) !== g)
-        throw new StoreError(`people file: the id ${group.id} is already another person's`);
+      // A stored id is this group's to take only when it won that row, or the row is a retired
+      // id redirecting to a row it won (taking an old id back).
+      const holder = storedRow.get(group.id);
+      const mine = (rowId: string | null) => (won[g] as RegistryRow[]).some((r) => r.id === rowId);
+      if (
+        holder !== undefined &&
+        !mine(holder.id) &&
+        !(holder.status === "redirect" && mine(holder.to))
+      )
+        throw new StoreError(
+          `people file: the id ${group.id} is already another person's, or a retired id of one`,
+        );
       if (id !== null) redirectTo.set(id, group.id);
       id = group.id;
     }
@@ -121,14 +146,13 @@ export function assignIds(
     return active.has(at) ? at : null;
   };
 
-  const storedById = new Map(stored.map((row) => [row.id, row]));
   let order = stored.reduce((n, row) => Math.max(n, row.order + 1), 0);
   const registry: RegistryRow[] = [];
   groups.forEach((group, g) => {
     const id = ids[g] as string;
     registry.push({
       id,
-      order: storedById.get(id)?.order ?? order++,
+      order: storedRow.get(id)?.order ?? order++,
       name: group.name,
       kind: group.kind,
       status: group.excluded ? "excluded" : "active",
@@ -139,7 +163,7 @@ export function assignIds(
   for (const [from] of redirectTo) {
     const to = finalOf(from);
     if (to === null) continue;
-    const was = storedById.get(from);
+    const was = storedRow.get(from);
     registry.push({
       id: from,
       order: was?.order ?? order++,

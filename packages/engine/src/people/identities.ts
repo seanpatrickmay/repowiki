@@ -33,6 +33,9 @@ export interface IdentityGroup {
   identities: RawIdentity[];
   /** Salted SHA-256 keys of every name, email and login of the group, sorted (R10). */
   keys: string[];
+  /** The salted keys among `keys` of its emails and of its logins: the registry's strong evidence. */
+  emailKeys: string[];
+  loginKeys: string[];
   /** The display name (R14). */
   name: string;
   /** Every other cleaned name, sorted, without the display name or a derived login. */
@@ -393,17 +396,23 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
     const groupReasons = new Set<JoinReason>();
     for (const i of list) for (const why of reasons.get(i) ?? []) groupReasons.add(why);
     const ids = list.map((i) => raws[i] as RawIdentity);
+    const plain = [
+      ...new Set([
+        ...list.flatMap((i) => [...(keys[i] as Set<string>)]),
+        ...groupLogins.map((login) => `login:${login}`),
+      ]),
+    ];
+    const salted = (prefix: string) =>
+      plain
+        .filter((k) => k.startsWith(prefix))
+        .map((k) => saltedKey(input.salt, k))
+        .sort();
     return {
       at: list,
       identities: ids,
-      keys: [
-        ...new Set([
-          ...list.flatMap((i) => [...(keys[i] as Set<string>)]),
-          ...groupLogins.map((login) => `login:${login}`),
-        ]),
-      ]
-        .map((k) => saltedKey(input.salt, k))
-        .sort(),
+      keys: salted(""),
+      emailKeys: salted("email:"),
+      loginKeys: salted("login:"),
       name,
       otherNames,
       kind: bot ? "bot" : "human",

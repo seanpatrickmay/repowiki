@@ -167,4 +167,79 @@ describe("assignIds (spec v2 #6 R13)", () => {
     const commits = [by("Ada", "a@e.com", 1), by("Bo", "b@e.com", 2)];
     expect(assign(commits)).toEqual(assign(commits));
   });
+
+  it("keeps two people who share a name key on their own ids, run after run", () => {
+    const johns = [by("john", "j1@e.com", 1), by("john", "j2@e.com", 2), by("john", "j2@e.com", 3)];
+    const sams = [
+      by("Sam Lee", "a@e.com", 1),
+      by("Sam Lee", "b@e.com", 2),
+      by("Sam Lee", "b@e.com", 3),
+    ];
+    const fence = { people: [{ match: ["email:b@e.com"] }] };
+    for (const [commits, file] of [
+      [johns, {}],
+      [sams, fence],
+    ] as const) {
+      const first = assign([...commits], [], file);
+      let stored = first.registry;
+      for (let run = 2; run <= 3; run++) {
+        const next = assign([...commits], stored, file);
+        expect(next.ids, `run ${run}`).toEqual(first.ids);
+        expect(next.redirects).toEqual([]);
+        expect(next.regrouped.size).toBe(0);
+        expect(next.registry).toEqual(first.registry);
+        stored = next.registry;
+      }
+    }
+  });
+
+  it("gives a stored row to the group sharing its email before one sharing only its name", () => {
+    const first = assign([by("Kim Ng", "k1@e.com", 1)]);
+    // Kim's name now belongs to a busier stranger too, fenced apart; Kim keeps her id.
+    const commits = [
+      by("Kim Ng", "k1@e.com", 1),
+      by("Kim Ng", "k2@e.com", 2),
+      by("Kim Ng", "k2@e.com", 3),
+      by("Kim Ng", "k2@e.com", 4),
+    ];
+    const next = assign(commits, first.registry, { people: [{ match: ["email:k2@e.com"] }] });
+    expect(next.ids).toEqual(["kim-ng", "kim-ng-2"]);
+    expect(next.redirects).toEqual([]);
+  });
+
+  it("refuses a people-file id an unmatched stored row or a retired id holds", () => {
+    const orphan: RegistryRow = {
+      id: "gone",
+      order: 0,
+      name: "Gone",
+      kind: "human",
+      status: "active",
+      to: null,
+      keys: ["9".repeat(64)],
+    };
+    expect(() =>
+      assign([by("Ada", "a@e.com", 1)], [orphan], {
+        people: [{ id: "gone", match: ["name:ada"] }],
+      }),
+    ).toThrow(/the id gone is already/);
+    const commits = [by("Ada", "a@e.com", 1), by("Bo", "b@e.com", 2)];
+    const renamed = assign(commits, assign(commits).registry, {
+      people: [{ id: "countess", match: ["name:ada"] }],
+    });
+    // "ada" is now a retired id, redirecting to Ada's: Bo may not take it...
+    expect(() =>
+      assign(commits, renamed.registry, {
+        people: [
+          { id: "countess", match: ["name:ada"] },
+          { id: "ada", match: ["name:bo"] },
+        ],
+      }),
+    ).toThrow(StoreError);
+    // ...but Ada may take it back.
+    const back = assign(commits, renamed.registry, {
+      people: [{ id: "ada", match: ["name:ada"] }],
+    });
+    expect(back.ids).toEqual(["ada", "bo"]);
+    expect(back.redirects).toEqual([{ from: "countess", to: "ada" }]);
+  });
 });
