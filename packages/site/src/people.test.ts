@@ -13,7 +13,7 @@ import {
   personView,
 } from "./people.ts";
 import { fixtureExport } from "./test-fixtures.ts";
-import { fixturePeople, HOSTILE_PERSON_NAME, peopleExport } from "./test-people.ts";
+import { fixturePeople, HOSTILE_PERSON_NAME, peopleExport, QUOTED_ADDRESS } from "./test-people.ts";
 import { personUrl } from "./urls.ts";
 
 const site = buildSiteModel(peopleExport(), "https://github.com/acme/demo-repo");
@@ -41,9 +41,9 @@ describe("peopleIndexView", () => {
     expect(view.people.map((p) => [p.name, p.commits, p.share])).toEqual([
       ["Ada Lovelace", "4", "38%"],
       ["Grace Hopper", "3", "46%"],
-      [HOSTILE_PERSON_NAME, "1", "0.0%"],
+      [HOSTILE_PERSON_NAME, "1", "no current lines"],
     ]);
-    expect(view.bots).toEqual([{ name: "dependabot[bot]", commits: "1" }]);
+    expect(view.bots).toEqual([{ name: "dependabot[bot]", commits: "1 commit" }]);
     expect(view.byFeature.map((f) => [f.anchor, f.contributors])).toEqual([
       ["feature-deliverables", ['<a href="/people/ada-lovelace/">Ada Lovelace</a> (25%)']],
       [
@@ -281,5 +281,33 @@ describe("zoom links at period edges (the Task 32 and Task 34 rulings)", () => {
       (f) => f.anchor,
     );
     expect(anchors).toEqual([...anchors].sort());
+  });
+});
+
+describe("People pages' wording and privacy (the Task 33 ruling)", () => {
+  it("says a person with no current lines has none, rather than 0.0%", () => {
+    const view = personView(site, people, "hostile-name");
+    expect(view.infobox.find((r) => r.label === "Current lines")?.html).toBe("no current lines");
+    expect(view.areas.map((a) => a.share)).toEqual(["no current lines"]);
+  });
+
+  it("never shows an address a cited commit's subject quotes", () => {
+    const view = personView(site, people, "ada-lovelace");
+    expect(JSON.stringify(view)).not.toContain(QUOTED_ADDRESS);
+    expect(JSON.stringify(view)).toContain("cc [email]");
+  });
+
+  it("refuses an export whose person name is an address, before the site sees it", () => {
+    const base = fixturePeople();
+    const named = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        people: base.snapshot.people.map((p) =>
+          p.id === "grace-hopper" ? { ...p, name: QUOTED_ADDRESS } : p,
+        ),
+      },
+    };
+    expect(WikiExport.safeParse({ ...fixtureExport(), people: named }).success).toBe(false);
   });
 });

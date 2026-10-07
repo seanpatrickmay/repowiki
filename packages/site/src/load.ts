@@ -2,6 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { SCHEMA_VERSION, WikiExport } from "@repowiki/core";
 import { z } from "zod";
+import { withoutQuotedAddresses } from "./people.ts";
 
 /** The export could not be read or failed schema validation. The message is reader-facing. */
 export class ExportError extends Error {
@@ -40,5 +41,8 @@ export function loadExport(path: string): WikiExport {
   if (!result.success) {
     throw new ExportError(`invalid export ${file}:\n${z.prettifyError(result.error)}`);
   }
-  return result.data;
+  // With People on, no address a cited commit's subject quotes reaches any file (R38).
+  return result.data.people === null
+    ? result.data
+    : { ...result.data, people: withoutQuotedAddresses(result.data.people) };
 }
