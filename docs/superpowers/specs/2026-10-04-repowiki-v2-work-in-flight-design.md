@@ -700,3 +700,16 @@ Flagged, not changed:
 - `wiki:check` does not re-verify in-flight summary claims; they are verified when written and
   replaced at each refresh.
 - T4, T9, T10 and T13 are estimated at ~300 lines; the plan should split any that grows past it.
+
+## 15. M10 plan deltas (2026-10-05)
+
+The M10 plan (`docs/superpowers/plans/2026-10-05-repowiki-m10-work-in-flight.md`) changes this spec
+as follows; where a line above disagrees, this section wins.
+
+- **§10 (tasks).** Twenty-eight tasks instead of sixteen: T2 is split into the GitHub snapshot schemas with the role (Task 2) and the derived snapshot with `WikiExport.inflight` (3); T4 into the `gh` runner with identity and redaction (5) and the GraphQL source (6); T5 into the git options and `diffTrees` (7) and `heads.ts` (8); T9 into the pack (12), verification and the batched round (13) and the recording (14); T10 into deriving (15) and the summary round with assembly (16); T11 into the CLI pieces (18), the refresh (19) and the command (20); T13 into the view model (22, 23), the pages and nav link (24) and `--no-inflight` (25); T14 into the article additions (26) and the Main Page box (27); T15's `ranked` is Task 17 and its `suggest` builder lives in Task 18 with both callers; the corrupt-cache rebuild moved from T5 to the refresh (15, 19), where the missing object is found.
+- **§5.1.** `InFlightFile.featureId` is `FeatureId | null` and `placement` gains `"none"`, for a changed file no rule can place (no feature at all in the manifest); the two are null and "none" together. `InFlightFeature.churn` is `number | null`: null when the churn is infinite (a feature with no lines at the baseline gains some), with `drifts` true.
+- **§4.1 step 7 and §6.1.** `--dry-run` reads GitHub and fetches the heads into `inflight.git` (the estimate needs the packs) but stores nothing in `wiki.db` and writes no export. `--clear` takes only `--out` and `--verbose`, and also deletes the summary cache and `inflight.git`; `--offline` with `--github` is a usage error. A skip is printed on stdout.
+- **§6.2.** A pull request page lists, under Features touched, every feature with an effect even when the pull request changes none of its files (its page cites a changed file), so every article marker has an anchor to land on. An effect whose claim is no longer on the current page (a stale snapshot) links to the article itself.
+- **§7.2 and §9.** The recording is unbatched (two calls), so recording does not wait on a batch; the batched path is the same request through M7's batcher, covered by llm's own batch cassette.
+- **§3 R12.** `search` evidence is used only for an issue nothing else maps; a hit counts at a score of 3 or more and at least 1.5 times the runner-up's.
+- **§9.** The update-integration test lands the merged pull request as an empty squash commit, so the update makes no page call; the impact-equivalence test (Task 10) is the one that merges real edits.
