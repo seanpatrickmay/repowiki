@@ -13,3 +13,11 @@ export {
   readOriginUrl,
   resolveGitHubIdentity,
 } from "./identity.ts";
+export {
+  type GitHubSource,
+  ghSource,
+  ISSUES_QUERY,
+  normaliseIssue,
+  normalisePull,
+  PULLS_QUERY,
+} from "./source.ts";
