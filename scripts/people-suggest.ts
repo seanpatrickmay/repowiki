@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { configuredEmail, openStore, readPeople, WikiBuildError } from "@repowiki/engine";
 import { CliError } from "./manifest-cli.ts";
@@ -10,8 +10,9 @@ import {
   peopleFilePath,
   renderSuggest,
   SUGGEST_USAGE,
+  storeCopy,
 } from "./people-cli.ts";
-import { acquireBuildLock, exitWithError, problemLine } from "./wiki-cli.ts";
+import { exitWithError, problemLine } from "./wiki-cli.ts";
 
 /**
  * pnpm people:suggest <repo> [--out dir] [--people-file file] (spec v2 #6 §6 step 6, §10): who
@@ -33,17 +34,9 @@ function main(): void {
   const config = loadPeopleFile(peopleFilePath(repo, out, args.peopleFile));
   const db = join(out, "wiki.db");
   if (!existsSync(db)) throw new WikiBuildError(`no wiki at ${db}; run pnpm wiki:build first`);
-  const scratch = mkdtempSync(join(tmpdir(), "repowiki-suggest-"));
+  const copy = storeCopy(out);
   try {
-    const release = acquireBuildLock(out, (line) => console.error(line));
-    try {
-      for (const suffix of ["", "-wal", "-shm"])
-        if (existsSync(`${db}${suffix}`))
-          copyFileSync(`${db}${suffix}`, join(scratch, `wiki.db${suffix}`));
-    } finally {
-      release();
-    }
-    const store = openStore(join(scratch, "wiki.db"));
+    const store = openStore(copy.path);
     try {
       const sha = store.getHead();
       if (sha === null)
@@ -55,7 +48,7 @@ function main(): void {
       store.close();
     }
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    copy.remove();
   }
 }
 
