@@ -225,11 +225,19 @@ function stepNote(index: number, r: StepRecord): string | null {
     : `- Step ${r.position ?? index + 1} (${r.step.sha.slice(0, 7)}): ${parts.join("; ")}.`;
 }
 
+/** `lines` without the blank lines at their end. */
+const withoutTrailingBlanks = (lines: readonly string[]): string[] => {
+  const out = [...lines];
+  while (out.at(-1) === "") out.pop();
+  return out;
+};
+
 /**
  * The replay summary saved as replay-<from7>-<to7>.md after every step, so a killed replay
  * leaves its record: one row per step with spec §8's invariants (no problems after it, and fewer
  * tokens than the last full build), then the totals. `records` holds every run's steps, each
- * numbered by its `position` in the full list, and `stopped` says where a run stopped.
+ * numbered by its `position` in the full list, and `stopped` says where a run stopped. `people`
+ * is the People step's summary section, last; empty (and the summary v1's) when People is off.
  */
 export function renderReplaySummary(
   repoName: string,
@@ -239,6 +247,7 @@ export function renderReplaySummary(
   left: number,
   buildTokens: number | null,
   stopped: StoppedAt | null = null,
+  people: readonly string[] = [],
 ): string {
   // Spec §8's third invariant ("every update costs fewer tokens than the last full build") is
   // compared here, in `under` and `holds`, against `buildTokens`: the newest build run's own
@@ -282,5 +291,6 @@ export function renderReplaySummary(
     `Invariants: ${verdict}.`,
     "",
     `Cost: $${usd.toFixed(4)}.`,
+    ...(people.length === 0 ? [] : ["", ...withoutTrailingBlanks(people)]),
   ].join("\n")}\n`;
 }

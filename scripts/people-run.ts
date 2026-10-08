@@ -51,6 +51,8 @@ export interface PeopleStepInput {
   /** The round's provider and journal, built only when a narrative is sent. */
   connect: () => { provider: Provider; journal: BuildJournal };
   log: (line: string) => void;
+  /** Called once the refresh is stored, before any narrative is sent (a caller's progress mark). */
+  onRefreshed?: () => void;
 }
 
 export interface PeopleStep {
@@ -89,6 +91,7 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     narrative: input.narrative,
     only: input.only,
   });
+  input.onRefreshed?.();
   // Every line this step prints goes through problemLine (the Task 25 ruling).
   const say = (line: string) => log(problemLine(line));
   for (const warning of prepared.refreshed.warnings) say(warning);

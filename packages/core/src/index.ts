@@ -113,7 +113,7 @@ export {
   plainClaimText,
   renderLlmsTxt,
 } from "./llms-txt.ts";
-export { Manifest, MemberId, Membership } from "./manifest.ts";
+export { linkRoutes, Manifest, MemberId, Membership } from "./manifest.ts";
 export { memberId, parseMemberId } from "./member-id.ts";
 export {
   DEFAULT_MAX_NARRATIVES,

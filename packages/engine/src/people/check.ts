@@ -1,5 +1,6 @@
 import {
   featureLinkTargets,
+  linkRoutes,
   type Manifest,
   type PeopleSnapshot,
   type PersonRevision,
@@ -25,14 +26,18 @@ export interface PeopleCheckInput {
   manifests: readonly Manifest[];
   /** The manifest a revision was written against. */
   manifestAt: (sha: string) => Manifest;
+  /** The latest manifest and the features with a stored page: where a link must still route. */
+  latest: Manifest;
+  pages: ReadonlySet<string>;
 }
 
 /**
  * Re-verifies every current narrative of a person with a page (spec v2 #6 §9): each claim, as the
  * write round verified it, against the identity map as it stands, so a citation must still be
  * the person's own non-merge commit or a pull request landing they authored or merged (R17), and
- * the dates, names, words and statistics rules hold (R18); and every [[id]] link names a feature
- * of the manifest the revision was written against. One line per problem, naming the person by
+ * the dates, names, words and statistics rules hold (R18); every [[id]] link names a feature of
+ * the manifest the revision was written against, and one that was valid there still leads to a
+ * page today (storedLinkViolations' rule, the Task 28 ruling). One line per problem, naming the person by
  * id only. Narratives of people not in the snapshot are not exported, so they are not checked.
  */
 export function personRevisionProblems(input: PeopleCheckInput): string[] {
@@ -44,6 +49,7 @@ export function personRevisionProblems(input: PeopleCheckInput): string[] {
   const commitFeatures = commitFeaturesOf(commits, input.manifests);
   const humans = new Set(snapshot.people.filter((p) => p.kind === "human").map((p) => p.id));
   const problems: string[] = [];
+  const routes = linkRoutes(input.latest, input.pages);
   for (const revision of input.revisions) {
     if (!humans.has(revision.personId)) continue;
     const group = read.assigned.ids.indexOf(revision.personId);
@@ -66,7 +72,7 @@ export function personRevisionProblems(input: PeopleCheckInput): string[] {
       pack,
       manifest,
     );
-    const known = new Set(manifest.features.map((f) => f.id));
+    const ownKind = new Map(manifest.features.map((f) => [f.id, f.status.kind]));
     for (const section of revision.sections) {
       for (const claim of section.claims) {
         const draft = {
@@ -78,8 +84,12 @@ export function personRevisionProblems(input: PeopleCheckInput): string[] {
           supports: claim.supports,
         };
         const found = [...verifyPersonClaim(section.key, draft, ctx).problems];
-        for (const target of featureLinkTargets(claim.text))
-          if (!known.has(target.trim())) found.push(`links to nowhere: [[${target.trim()}]]`);
+        for (const target of new Set(featureLinkTargets(claim.text))) {
+          const kind = ownKind.get(target);
+          if (kind === undefined) found.push(`links to nowhere: [[${target}]]`);
+          else if ((kind === "active" || kind === "disambiguation") && !routes(target))
+            found.push(`a link to ${target} no longer leads to a page`);
+        }
         for (const problem of found) problems.push(`${where}: ${claim.id}: ${problem}`);
       }
     }

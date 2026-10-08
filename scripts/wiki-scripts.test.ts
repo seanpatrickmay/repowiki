@@ -977,6 +977,27 @@ describe("wiki-replay.ts as a process (no network)", () => {
     expect(again.stdout.split("\n").filter((line) => /^\| \d/.test(line))).toHaveLength(1);
   });
 
+  it("with People on and no key, prints the People ceiling first, refreshes it and exits 0", () => {
+    const { repo, out, first, quiet } = replayable();
+    expect(run("scripts/wiki-people.ts", repo, "--out", out, "--no-narrative").status).toBe(0);
+    const dry = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out, "--dry-run");
+    const ceiling =
+      "People is on: its due narratives are estimated after the refresh, capped at $0.5000 (--people-max-usd)";
+    expect(dry.status).toBe(0);
+    expect(dry.stderr).toContain(ceiling);
+    const result = run("scripts/wiki-replay.ts", repo, first, quiet, "--out", out);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr.split("\n")[0]).toBe(ceiling);
+    expect(result.stdout).toContain("## People");
+    expect(result.stdout).toContain(`Refreshed at ${quiet.slice(0, 7)} with no call`);
+    const summary = readFileSync(
+      join(out, `replay-${first.slice(0, 7)}-${quiet.slice(0, 7)}.md`),
+      "utf8",
+    );
+    expect(summary).toContain("## People");
+    // Three processes: more than the 5 s default on a loaded machine.
+  }, 60_000);
+
   it("prints a problem line as one printable line, however its quoted path is spelled", () => {
     // A claim whose citation no longer matches: the check's problem names its id, bidi included.
     const { repo, out, first, quiet } = replayable("c-\u202e1\u0007");

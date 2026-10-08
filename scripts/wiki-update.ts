@@ -11,10 +11,16 @@ import {
 import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { peopleAfterUpdate } from "./people-hook.ts";
+import { peopleAfterUpdate, peopleCeilingLine } from "./people-hook.ts";
 import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
 import { estimateFor, needsKey, readInput, runUpdate, writeUpdateOutputs } from "./update-run.ts";
-import { acquireBuildLock, BUILD_LOCK, exitWithError, requireApiKey } from "./wiki-cli.ts";
+import {
+  acquireBuildLock,
+  BUILD_LOCK,
+  exitWithError,
+  peoplePrintingFor,
+  requireApiKey,
+} from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:update <repo> <rev>: moves the wiki stored for <repo> from its head to <rev> (spec
@@ -41,14 +47,14 @@ async function main(): Promise<void> {
   const release = args.dryRun ? () => {} : acquireBuildLock(out, (line) => console.error(line));
   try {
     const store = openStore(db);
+    // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+    peoplePrintingFor(store);
     try {
       const input = await readInput(repo, sha);
       const estimate = estimateFor(store, input, args, models, repoName);
       console.error(estimateLine(estimate, args.batch));
-      if (store.getPeopleSnapshot() !== null)
-        console.error(
-          `People is on: its due narratives are estimated after the refresh, capped at $${args.peopleMaxUsd.toFixed(2)} (--people-max-usd)`,
-        );
+      const ceiling = peopleCeilingLine(store, args.peopleMaxUsd);
+      if (ceiling !== null) console.error(ceiling);
       if (args.dryRun) return;
       // Calls are certain, so fail once here rather than once per page; an update that makes
       // none (nothing cited changed, no article due) needs no key.

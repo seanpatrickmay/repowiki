@@ -23,6 +23,7 @@ import {
   estimateArchitecture,
   estimateBuild,
   parseWikiArgs,
+  printPeopleSafely,
   problemLine,
   renderBuildSummary,
 } from "./wiki-cli.ts";
@@ -297,11 +298,34 @@ describe("problemLine", () => {
     expect(problemLine("x".repeat(400))).toHaveLength(300);
   });
 
-  it("never prints an email address (spec v2 #6 R10)", () => {
-    expect(problemLine("fatal: bad author Ada <ada.q7@example.com>")).toBe(
-      "fatal: bad author Ada <[email]>",
-    );
-    expect(describeError(new Error("by kim@example.org"), false)).toBe("by [email]");
+  it("never prints an email address once People is on (spec v2 #6 R10)", () => {
+    printPeopleSafely(true);
+    try {
+      expect(problemLine("fatal: bad author Ada <ada.q7@example.com>")).toBe(
+        "fatal: bad author Ada <[email]>",
+      );
+      expect(describeError(new Error("by kim@example.org"), false)).toBe("by [email]");
+      // Fullwidth and small at signs and dots are read in their normalised form first.
+      for (const disguised of [
+        "ada.q7\uFF20example.com",
+        "ada.q7@example\uFF0Ecom",
+        "ada\uFE6Bexample.com",
+      ])
+        expect(problemLine(`by ${disguised}`), JSON.stringify(disguised)).toBe("by [email]");
+      expect(describeError(new Error("by kim\uFF20example.org"), false)).toBe("by [email]");
+    } finally {
+      printPeopleSafely(false);
+    }
+  });
+
+  it("prints every v1 line byte for byte while People is off (C4)", () => {
+    for (const line of [
+      "citation node_modules/@types/node/index.d.ts:1-4 does not match its hash",
+      "packages/ui/src/icons@2x.png:1-1",
+      "fatal: bad author Ada <ada.q7@example.com>",
+    ])
+      expect(problemLine(line)).toBe(line);
+    expect(problemLine("by ada\uFF20example.com")).toBe("by ada?example.com");
   });
 });
 

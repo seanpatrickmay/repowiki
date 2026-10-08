@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { type RunKind, withoutEmails } from "@repowiki/core";
+import { normalizedText, type RunKind, withoutEmails } from "@repowiki/core";
 import {
   type ArchitectureOutcome,
   type BuildJournal,
@@ -650,13 +650,39 @@ function textOf(value: unknown): string {
   }
 }
 
+/** Whether this process prints for an out dir with People on (printPeopleSafely). */
+let peopleOn = false;
+
+/**
+ * Sets whether printed lines are scrubbed of email addresses (spec v2 #6 R10, the Task 28 ruling):
+ * on for an out dir with People on (peoplePrintingFor), off otherwise, so every v1 line prints byte
+ * for byte as before (C4). wiki:people and people:suggest turn it on before anything else.
+ */
+export function printPeopleSafely(on: boolean): void {
+  peopleOn = on;
+}
+
+/**
+ * Turns printPeopleSafely on when the store has People on. A snapshot that cannot be read counts
+ * as on: a damaged People store is no reason to print an address.
+ */
+export function peoplePrintingFor(store: { getPeopleSnapshot(): unknown }): void {
+  try {
+    if (store.getPeopleSnapshot() !== null) peopleOn = true;
+  } catch {
+    peopleOn = true;
+  }
+}
+
 /**
  * One printable line: any API key redacted first (a cut or a character filter must never leave
- * part of one), then any email address (spec v2 #6 R10: a git error can quote an author), then
- * whitespace collapsed and everything but printable ASCII replaced.
+ * part of one); with People on, the text normalised (NFKC, invisible characters dropped) and any
+ * email address replaced (spec v2 #6 R10: a git error can quote an author); then whitespace
+ * collapsed and everything but printable ASCII replaced.
  */
 function printable(text: string): string {
-  return withoutEmails(redact(text))
+  const keyless = redact(text);
+  return (peopleOn ? redact(withoutEmails(normalizedText(keyless))) : keyless)
     .replace(/\s+/g, " ")
     .replace(/[^\x20-\x7e]/g, "?");
 }

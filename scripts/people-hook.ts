@@ -1,4 +1,4 @@
-import { type BuildJournal, buildJournal } from "@repowiki/engine";
+import { type BuildJournal, buildJournal, type Store } from "@repowiki/engine";
 import { createLedger, type Provider, totalsOf } from "@repowiki/llm";
 import type { HookContext } from "./inflight-hook.ts";
 import {
@@ -31,10 +31,14 @@ export interface PeopleHookContext extends HookContext {
  */
 export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[]> {
   const { store, log } = ctx;
-  if (store.getPeopleSnapshot() === null) return [];
+  let runId: string | null = null;
+  let refreshed = false;
   try {
+    // Inside the try: a snapshot that cannot be read is a warning, never a failed update.
+    if (store.getPeopleSnapshot() === null) return [];
     const sha = store.getHead() ?? "";
-    const runId = `${WIKI_PEOPLE_RUN_PREFIX}${sha}-${new Date().toISOString()}`;
+    const id = `${WIKI_PEOPLE_RUN_PREFIX}${sha}-${new Date().toISOString()}`;
+    runId = id;
     const ledger = createLedger((entry) => store.appendLedger(entry));
     const keyless = ctx.connect === undefined && !process.env.ANTHROPIC_API_KEY;
     const step = await runPeopleStep({
@@ -60,7 +64,7 @@ export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[
             command: ctx.command,
             models: ctx.models,
             ledger,
-            runId,
+            runId: id,
             run: { kind: "people", sha },
             journal,
             deadlineMinutes: null,
@@ -69,17 +73,20 @@ export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[
           return { provider, journal };
         }),
       log,
+      onRefreshed: () => {
+        refreshed = true;
+      },
     });
     const tally = (pick: (narrative: string) => boolean) =>
       step.rows.filter((r) => pick(r.narrative)).length;
-    const totals = totalsOf(store.listLedger(runId));
+    const totals = totalsOf(store.listLedger(id));
     const unsent = keyless ? step.taken.length : 0;
     return [
       "## People",
       "",
       `Refreshed at ${sha.slice(0, 7)} with no call: ${step.rows.length} people.`,
       "",
-      `Narratives: ${tally((n) => n === "written")} written, ${tally((n) => n === "appended")} appended, ${tally((n) => n === "carried")} carried, ${tally((n) => n.startsWith("failed"))} failed, ${step.over.length} over the $${ctx.maxUsd.toFixed(2)} ceiling${unsent === 0 ? "" : `, ${unsent} not written (ANTHROPIC_API_KEY is not set; they stay due)`}.`,
+      `Narratives: ${tally((n) => n === "written")} written, ${tally((n) => n === "appended")} appended, ${tally((n) => n === "carried")} carried, ${tally((n) => n.startsWith("failed"))} failed, ${step.over.length} over the $${ctx.maxUsd.toFixed(4)} ceiling${step.over.length === 0 ? "" : " (they stay due)"}${unsent === 0 ? "" : `, ${unsent} not written (ANTHROPIC_API_KEY is not set; they stay due)`}.`,
       "",
       `People cost: ${totals.calls} calls, $${totals.usd.toFixed(4)}.`,
       "",
@@ -87,7 +94,33 @@ export async function peopleAfterUpdate(ctx: PeopleHookContext): Promise<string[
     ];
   } catch (err) {
     const why = problemLine(err instanceof Error ? err.message : String(err));
+    if (refreshed && runId !== null) {
+      // The facts were refreshed; only the narrative round failed, and it may have spent money.
+      const totals = totalsOf(store.listLedger(runId));
+      log(`warning: People narratives not written: ${why}`);
+      return [
+        "## People",
+        "",
+        `Narratives not written: ${why}`,
+        "",
+        `People cost: ${totals.calls} calls, $${totals.usd.toFixed(4)}.`,
+        "",
+      ];
+    }
     log(`warning: People not refreshed: ${why}`);
     return ["## People", "", `Not refreshed: ${why}`, ""];
   }
+}
+
+/**
+ * The line wiki:update and wiki:replay print up front when People is on (R26's §19 delta), the
+ * dry run included; null when People is off, so v1 output is unchanged.
+ */
+export function peopleCeilingLine(
+  store: Pick<Store, "getPeopleSnapshot">,
+  maxUsd: number,
+): string | null {
+  return store.getPeopleSnapshot() === null
+    ? null
+    : `People is on: its due narratives are estimated after the refresh, capped at $${maxUsd.toFixed(4)} (--people-max-usd)`;
 }

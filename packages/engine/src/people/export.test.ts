@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PeopleConfig, WikiExport } from "@repowiki/core";
+import { PeopleConfig, saltedKey, WikiExport } from "@repowiki/core";
 import {
   makeInFlight,
   makeInFlightIssue,
@@ -128,6 +128,92 @@ describe("work in flight's authors (spec v2 #6 C8)", () => {
       { login: "dependabot", bot: true, person: null },
     ]);
     expect(joined?.issues[0]?.author).toEqual({ login: "stranger", bot: false, person: null });
+  });
+
+  it("links only a human with a page: a registry person without one, or a bot row, stays plain", async () => {
+    await refresh();
+    const key = (k: string) => saltedKey(fx.store.getPeopleSalt(), k);
+    const rows = fx.store.listPeopleRegistry();
+    fx.store.putPeopleRegistry([
+      ...rows,
+      {
+        id: "ghost",
+        order: rows.length,
+        name: "Ghost",
+        kind: "human",
+        status: "active",
+        to: null,
+        keys: [key("login:ghost")],
+      },
+      {
+        id: "robot",
+        order: rows.length + 1,
+        name: "Robot",
+        kind: "bot",
+        status: "active",
+        to: null,
+        keys: [key("login:robot")],
+      },
+    ]);
+    fx.store.putInFlight(
+      makeInFlight({
+        pulls: [
+          makeInFlightPull({ closes: [], author: { login: "ghost", bot: false, person: null } }),
+          makeInFlightPull({
+            number: 13,
+            closes: [],
+            author: { login: "robot", bot: false, person: null },
+          }),
+        ],
+        issues: [],
+      }),
+    );
+    expect(buildExport(fx.store, options).inflight?.pulls.map((p) => p.author)).toEqual([
+      { login: "ghost", bot: false, person: null },
+      { login: "robot", bot: false, person: null },
+    ]);
+  });
+
+  it("exports an excluded issue author as no author", async () => {
+    fx.store.putInFlight(
+      makeInFlight({
+        pulls: [],
+        issues: [
+          makeInFlightIssue({
+            pulls: [],
+            features: [],
+            author: { login: "bob-q7login", bot: false, person: null },
+          }),
+        ],
+      }),
+    );
+    await refresh({ exclude: ["login:bob-q7login"] });
+    const exported = buildExport(fx.store, options);
+    expect(exported.inflight?.issues[0]?.author).toBeNull();
+    expect(JSON.stringify(exported)).not.toContain("bob-q7login");
+  });
+
+  it("drops an excluded login even when the export carries no People (a stale snapshot)", () => {
+    const key = saltedKey(fx.store.getPeopleSalt(), "login:bob-q7login");
+    fx.store.putPeopleRegistry([
+      {
+        id: "bob",
+        order: 0,
+        name: "bob",
+        kind: "human",
+        status: "excluded",
+        to: null,
+        keys: [key],
+      },
+    ]);
+    fx.store.putInFlight(inflight());
+    const exported = buildExport(fx.store, options);
+    expect(exported.people).toBeNull();
+    expect(exported.inflight?.pulls[0]?.author).toBeNull();
+    expect(JSON.stringify(exported)).not.toContain("bob-q7login");
+    // Nobody excluded and no People: the stored work in flight is exported as it is.
+    fx.store.putPeopleRegistry([]);
+    expect(buildExport(fx.store, options).inflight).toEqual(inflight());
   });
 
   it("exports an excluded person's pull request with no author", async () => {

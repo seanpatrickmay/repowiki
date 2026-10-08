@@ -31,6 +31,7 @@ import {
   BUILD_LOCK,
   exitWithError,
   lazyClaudeProvider,
+  printPeopleSafely,
   requireApiKey,
 } from "./wiki-cli.ts";
 
@@ -42,6 +43,8 @@ import {
  * people-<sha7>.md. Never writes in <repo>.
  */
 async function main(): Promise<void> {
+  // People's own commands always print scrubbed of addresses (the Task 28 ruling).
+  printPeopleSafely(true);
   const args = parsePeopleArgs(process.argv.slice(2));
   const repo = resolve(args.repo);
   if (!existsSync(repo) || !statSync(repo).isDirectory())

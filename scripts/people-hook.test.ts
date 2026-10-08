@@ -5,7 +5,7 @@ import { buildJournal, configuredEmail, refreshPeople } from "@repowiki/engine";
 import { chronicleProvider, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
 import { DEFAULT_MODELS } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { peopleAfterUpdate } from "./people-hook.ts";
+import { peopleAfterUpdate, peopleCeilingLine } from "./people-hook.ts";
 import { parseReplayArgs, parseUpdateArgs } from "./update-cli.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -69,7 +69,7 @@ describe("peopleAfterUpdate (spec v2 #6 §9, R24)", () => {
     });
     expect(llm.requests).toHaveLength(1);
     expect(lines.join("\n")).toContain(
-      "Narratives: 1 written, 0 appended, 0 carried, 0 failed, 0 over the $0.50 ceiling.",
+      "Narratives: 1 written, 0 appended, 0 carried, 0 failed, 0 over the $0.5000 ceiling.",
     );
     expect(fx.store.getCurrentPersonRevision("ada-lovelace")).not.toBeNull();
   });
@@ -84,6 +84,54 @@ describe("peopleAfterUpdate (spec v2 #6 §9, R24)", () => {
       expect.stringMatching(/^Not refreshed: .*is not a JSON people file$/),
       "",
     ]);
+  });
+});
+
+describe("peopleAfterUpdate's ceiling and failures (the Task 27 ruling)", () => {
+  it("leaves a narrative over a low ceiling due, and says so", async () => {
+    await turnOn();
+    const llm = chronicleProvider();
+    const lines = await hook({
+      maxUsd: 0.0001,
+      connect: () => ({ provider: llm.provider, journal: buildJournal(fx.store) }),
+    });
+    expect(llm.requests).toHaveLength(0);
+    expect(lines.join("\n")).toContain(
+      "Narratives: 0 written, 0 appended, 0 carried, 0 failed, 1 over the $0.0001 ceiling (they stay due).",
+    );
+    expect(fx.store.getCurrentPersonRevision("ada-lovelace")).toBeNull();
+  });
+
+  it("warns, never throws, when the stored snapshot cannot be read", async () => {
+    await turnOn();
+    const broken = {
+      ...fx.store,
+      getPeopleSnapshot: () => {
+        throw new Error("a damaged snapshot");
+      },
+    } as typeof fx.store;
+    const lines = await hook({ store: broken });
+    expect(lines).toEqual(["## People", "", "Not refreshed: a damaged snapshot", ""]);
+  });
+
+  it("tells a failed narrative round from a failed refresh", async () => {
+    await turnOn();
+    const lines = await hook({
+      connect: () => {
+        throw new Error("the provider could not start");
+      },
+    });
+    expect(lines.join("\n")).toContain("Narratives not written: the provider could not start");
+    expect(lines.join("\n")).not.toContain("Not refreshed");
+    expect(lines.join("\n")).toContain("People cost: 0 calls, $0.0000.");
+  });
+
+  it("puts the ceiling line in one helper, only when People is on", async () => {
+    expect(peopleCeilingLine(fx.store, 0.5)).toBeNull();
+    await turnOn();
+    expect(peopleCeilingLine(fx.store, 0.0005)).toBe(
+      "People is on: its due narratives are estimated after the refresh, capped at $0.0005 (--people-max-usd)",
+    );
   });
 });
 

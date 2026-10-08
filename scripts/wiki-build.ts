@@ -34,6 +34,7 @@ import {
   exitWithError,
   lazyClaudeProvider,
   parseWikiArgs,
+  peoplePrintingFor,
   renderBuildSummary,
   WIKI_BUILD_RUN_PREFIX,
   type WikiArgs,
@@ -78,6 +79,8 @@ async function runBuild(
   const sources = await readSources(repo, index.sha, DEFAULT_MAX_FILE_BYTES);
   const graph = buildFileGraph(index);
   const store = openStore(join(out, "wiki.db"));
+  // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+  peoplePrintingFor(store);
   try {
     const stored = store.getManifest(index.sha);
     if (stored === null) {

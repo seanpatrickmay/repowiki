@@ -23,7 +23,7 @@ import { totalsOf } from "@repowiki/llm";
 import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { peopleAfterUpdate } from "./people-hook.ts";
+import { peopleAfterUpdate, peopleCeilingLine } from "./people-hook.ts";
 import {
   invariantsHold,
   newestBuildTokens,
@@ -48,6 +48,7 @@ import {
   BUILD_LOCK,
   describeError,
   exitWithError,
+  peoplePrintingFor,
   problemLine,
   requireApiKey,
   writeFileAtomic,
@@ -88,6 +89,8 @@ async function main(): Promise<void> {
   const release = args.dryRun ? () => {} : acquireBuildLock(out, (line) => console.error(line));
   try {
     const store = openStore(db);
+    // With People on, printed lines are scrubbed of addresses (the Task 28 ruling).
+    peoplePrintingFor(store);
     try {
       await replay(store, { ...args, from, to }, repo, out, models);
     } finally {
@@ -155,6 +158,9 @@ async function replay(
   const full = replaySteps(repo, args.from, args.to);
   const todo = args.limit === null ? steps : steps.slice(0, args.limit);
   const left = steps.length - todo.length;
+  // R26's §19 delta: the People ceiling up front, the dry run included; nothing when People is off.
+  const ceiling = peopleCeilingLine(store, args.peopleMaxUsd);
+  if (ceiling !== null) console.error(ceiling);
   if (args.dryRun) {
     if (todo.length === 0) {
       console.error(`the wiki is already at ${head}; nothing to replay`);
@@ -340,7 +346,19 @@ async function replay(
   });
   for (const line of people) if (line !== "" && !line.startsWith("#")) log(`people: ${line}`);
   writeExports();
-  console.log(renderReplaySummary(repoName, args.from, args.to, records, left, buildTokens));
+  // The summary carries the People lines too (the Task 27 ruling); none when People is off.
+  const summary = renderReplaySummary(
+    repoName,
+    args.from,
+    args.to,
+    records,
+    left,
+    buildTokens,
+    null,
+    people,
+  );
+  if (people.length > 0) writeFileAtomic(summaryPath, summary);
+  console.log(summary);
   console.log(`Wrote ${exportPath} and ${summaryPath}; store: ${join(out, "wiki.db")}`);
   if (!invariantsHold(records, buildTokens)) process.exitCode = 1;
 }

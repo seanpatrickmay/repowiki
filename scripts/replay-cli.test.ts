@@ -171,6 +171,20 @@ describe("projectStep and renderProjection", () => {
   });
 });
 
+describe("renderReplaySummary's People lines (the Task 27 ruling)", () => {
+  it("ends with the People section when People is on, and is unchanged when it is off", () => {
+    const off = renderReplaySummary("repo", SHA_A, SHA_C, [record()], 2, 500_000);
+    expect(renderReplaySummary("repo", SHA_A, SHA_C, [record()], 2, 500_000, null, [])).toBe(off);
+    const on = renderReplaySummary("repo", SHA_A, SHA_C, [record()], 2, 500_000, null, [
+      "## People",
+      "",
+      "Refreshed at abcdef0 with no call: 3 people.",
+      "",
+    ]);
+    expect(on).toBe(`${off}\n## People\n\nRefreshed at abcdef0 with no call: 3 people.\n`);
+  });
+});
+
 describe("renderReplaySummary", () => {
   it("records each step's invariants against the newest full build", () => {
     const summary = renderReplaySummary("repo", SHA_A, SHA_C, [record()], 2, 500_000);
