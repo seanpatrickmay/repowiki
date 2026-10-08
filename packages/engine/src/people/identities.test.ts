@@ -160,6 +160,20 @@ describe("resolveIdentities (spec v2 #6 §6, R7)", () => {
     expect(only.groups[0]?.firstCommit).toBe("2026-03-01T00:00:00+00:00");
   });
 
+  it("joins a tabbed name and a mixed-case noreply address as one person (Task 10's minors)", () => {
+    const tabbed = resolve([
+      by("ADA\tLovelace", "a1@e.com", 1),
+      by("Ada  Lovelace", "a2@e.com", 2),
+    ]);
+    expect(tabbed.groups).toHaveLength(1);
+    const noreply = resolve([
+      by("bob", " 4242+Bob-Q7@Users.NoReply.GitHub.com ", 1),
+      by("Bob Q", "4242+bob-q7@users.noreply.github.com", 2),
+    ]);
+    expect(noreply.groups).toHaveLength(1);
+    expect(noreply.groups[0]?.logins).toEqual(["bob-q7"]);
+  });
+
   it("numbers unnamed contributors among the people shown only (the final review's M1)", () => {
     const resolved = resolve([by("\u200B", "hidden@e.com", 1), by("\u200B", "shown@e.com", 2)], {
       exclude: ["email:hidden@e.com"],

@@ -37,7 +37,9 @@ afterEach(() => store.close());
 
 describe("migration 10 (spec v2 #6 R29, C2)", () => {
   it("is the tenth migration", () => {
-    expect(MIGRATIONS).toHaveLength(10);
+    // Not the count: a later milestone appends migrations (the Task 9 review's minor).
+    expect(MIGRATIONS.length).toBeGreaterThanOrEqual(10);
+    expect(String(MIGRATIONS[9])).toMatch(/CREATE TABLE people_registry/);
   });
 
   it("adds the four tables and a salt to a store at schema 9, keeping what it holds", () => {
@@ -61,7 +63,7 @@ describe("migration 10 (spec v2 #6 R29, C2)", () => {
       expect(again.getPeopleSalt()).toBe(salt);
       again.close();
       const after = new Database(path);
-      expect(after.pragma("user_version", { simple: true })).toBe(10);
+      expect(after.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
       const tables = after
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
         .all()
@@ -222,8 +224,15 @@ describe("person revisions", () => {
   it("forgets a narrative and keeps the registry row (a withdrawn consent)", () => {
     store.putPersonRevision(first);
     store.putPeopleRegistry([row()]);
+    // Another person's narrative survives it (the Task 21 review's minor).
+    const grace = makePersonRevision({
+      personId: "grace-hopper",
+      id: first.id.replace("ada-lovelace", "grace-hopper"),
+    });
+    store.putPersonRevision(grace);
     expect(store.forgetPersonNarrative("ada-lovelace")).toBe(1);
     expect(store.getCurrentPersonRevision("ada-lovelace")).toBeNull();
+    expect(store.getCurrentPersonRevision("grace-hopper")?.id).toBe(grace.id);
     expect(store.listPeopleRegistry().map((r) => r.id)).toEqual(["ada-lovelace"]);
   });
 });

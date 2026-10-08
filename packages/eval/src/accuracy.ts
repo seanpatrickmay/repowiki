@@ -1,6 +1,7 @@
 import {
   type Citation,
   CLAIM_TEXT_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
   type PersonSectionKey,
   plainClaimText,
   type WikiExport,
@@ -71,7 +72,11 @@ export function accuracySheet(
   for (const id of new Set(personIds)) {
     const narrative = narratives.get(id);
     if (narrative === undefined) continue;
-    lines.push("", `## Person: ${markdownText(facts.get(id)?.name ?? id, 120)} (people/${id})`, "");
+    lines.push(
+      "",
+      `## Person: ${markdownText(facts.get(id)?.name ?? id, PERSON_NAME_MAX_LENGTH)} (people/${id})`,
+      "",
+    );
     for (const section of narrative.sections) {
       for (const claim of section.claims) {
         const plain = plainClaimText(claim.text, (to) => features.get(to)?.title ?? null);

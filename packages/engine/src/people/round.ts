@@ -50,8 +50,10 @@ export async function preparePeople(input: PrepareInput): Promise<PreparedPeople
 
 /**
  * Stores a settled People round and flushes its journal rows in one transaction (spec v2 #6
- * §8.4, the M4 I1 ruling), as storeArticle does for the About article: a row is forgotten only
- * once its narrative is stored, or once the narrative failed. Returns how many were stored.
+ * §8.4, the M4 I1 ruling), as storeArticle does for the About article: a row is forgotten once
+ * its narrative is stored, or once the narrative failed. A refused revision rolls the whole round
+ * back and forgets every answered row, so a rerun pays for the round again (the Task 24 review's
+ * minor). Returns how many were stored.
  */
 export function storeNarratives(
   store: Store,
