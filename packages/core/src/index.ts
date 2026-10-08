@@ -117,12 +117,15 @@ export { memberId, parseMemberId } from "./member-id.ts";
 export {
   ActivityDay,
   CalendarDay,
+  type Contributor,
   cleanPersonName,
   cleanPullTitle,
+  contributorsOf,
   featureLinkTargets,
   MAX_OTHER_NAMES,
   PERSON_ID_MAX_LENGTH,
   PERSON_NAME_MAX_LENGTH,
+  PeopleExport,
   PeopleSnapshot,
   PersonFacts,
   PersonFeature,
@@ -136,6 +139,7 @@ export {
   PersonSectionKey,
   PR_TITLE_MAX_LENGTH,
   PullRequestRef,
+  peopleProblems,
   personClaimViolations,
   withoutEmails,
 } from "./person.ts";

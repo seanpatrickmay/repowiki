@@ -337,3 +337,94 @@ export const PersonRevision = z
     addUpdateParentIssue(revision, ctx);
   });
 export type PersonRevision = z.infer<typeof PersonRevision>;
+
+/**
+ * People in the export (spec v2 #6 §5, R28): the snapshot and each human's current narrative
+ * revision. The registry and older revisions stay in the store (R27, rule 5).
+ */
+export const PeopleExport = z
+  .object({ snapshot: PeopleSnapshot, pages: z.array(PersonRevision) })
+  .superRefine((people, ctx) => {
+    const humans = new Set(
+      people.snapshot.people.filter((p) => p.kind === "human").map((p) => p.id),
+    );
+    const seen = new Set<string>();
+    people.pages.forEach((page, index) => {
+      if (!humans.has(page.personId))
+        ctx.addIssue({
+          code: "custom",
+          message: `${page.personId} is not a person of the snapshot with a page`,
+          path: ["pages", index, "personId"],
+        });
+      if (seen.has(page.personId))
+        ctx.addIssue({
+          code: "custom",
+          message: `two pages for ${page.personId}`,
+          path: ["pages", index, "personId"],
+        });
+      seen.add(page.personId);
+    });
+  });
+export type PeopleExport = z.infer<typeof PeopleExport>;
+
+/**
+ * What makes People disagree with the export it rides in (spec v2 #6 §5 rule 2): a feature id
+ * the manifest lacks, in a person's features or the snapshot's feature lines. Paths are relative
+ * to `people`. buildExport leaves People out (null) rather than fail on one.
+ */
+export function peopleProblems(
+  people: PeopleExport,
+  wiki: { manifest: { features: readonly { id: string }[] } },
+): { message: string; path: (string | number)[] }[] {
+  const known = new Set(wiki.manifest.features.map((f) => f.id));
+  const problems: { message: string; path: (string | number)[] }[] = [];
+  people.snapshot.people.forEach((person, p) => {
+    person.features.forEach((feature, f) => {
+      if (!known.has(feature.featureId))
+        problems.push({
+          message: `${feature.featureId} is not in the manifest`,
+          path: ["snapshot", "people", p, "features", f, "featureId"],
+        });
+    });
+  });
+  for (const id of Object.keys(people.snapshot.featureLines)) {
+    if (!known.has(id))
+      problems.push({
+        message: `${id} is not in the manifest`,
+        path: ["snapshot", "featureLines", id],
+      });
+  }
+  return problems;
+}
+
+/** One row of a feature's Main contributors (R23). `share` is lines / the feature's lines. */
+export interface Contributor {
+  id: string;
+  name: string;
+  lines: number;
+  share: number;
+}
+
+/**
+ * A feature's main contributors (spec v2 #6 R23): the `limit` humans with the most current lines
+ * in its files, most first (ties by id), with each one's share, and how many more have lines
+ * there. Bots and excluded people have no page, so they are not listed. Empty when the feature
+ * has no blamed lines, or the export has no People.
+ */
+export function contributorsOf(
+  people: PeopleExport | null,
+  featureId: string,
+  limit = 5,
+): { contributors: Contributor[]; more: number } {
+  const total = people === null ? 0 : (people.snapshot.featureLines[featureId] ?? 0);
+  if (people === null || total === 0 || !Object.hasOwn(people.snapshot.featureLines, featureId))
+    return { contributors: [], more: 0 };
+  const all = people.snapshot.people.flatMap((person) => {
+    const lines = person.features.find((f) => f.featureId === featureId)?.currentLines ?? 0;
+    return person.kind === "human" && lines > 0
+      ? [{ id: person.id, name: person.name, lines, share: lines / total }]
+      : [];
+  });
+  all.sort((a, b) => b.lines - a.lines || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { contributors: all.slice(0, limit), more: Math.max(0, all.length - limit) };
+}

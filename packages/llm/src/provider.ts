@@ -99,6 +99,7 @@ export const DEFAULT_MODELS: ModelConfig = {
   evalJudge: "claude-haiku-4-5",
   ask: "claude-haiku-4-5",
   inflight: "claude-haiku-4-5",
+  people: "claude-haiku-4-5",
 };
 
 /** Merges a parsed config file over the defaults; throws a ZodError on an invalid file. */
