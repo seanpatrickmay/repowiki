@@ -304,7 +304,7 @@ export function commitFeatureLookup(
  * each commit touches.
  */
 export function personVerifyContext(
-  refreshed: Refreshed,
+  refreshed: Pick<Refreshed, "sha" | "commits" | "identities" | "commitFeatures">,
   group: number,
   pack: PersonPack,
   manifest: Manifest,

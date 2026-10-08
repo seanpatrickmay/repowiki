@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import type { RunKind } from "@repowiki/core";
+import { type RunKind, withoutEmails } from "@repowiki/core";
 import {
   type ArchitectureOutcome,
   type BuildJournal,
@@ -652,10 +652,11 @@ function textOf(value: unknown): string {
 
 /**
  * One printable line: any API key redacted first (a cut or a character filter must never leave
- * part of one), then whitespace collapsed and everything but printable ASCII replaced.
+ * part of one), then any email address (spec v2 #6 R10: a git error can quote an author), then
+ * whitespace collapsed and everything but printable ASCII replaced.
  */
 function printable(text: string): string {
-  return redact(text)
+  return withoutEmails(redact(text))
     .replace(/\s+/g, " ")
     .replace(/[^\x20-\x7e]/g, "?");
 }

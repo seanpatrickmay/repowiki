@@ -98,6 +98,32 @@ function featureLookup(manifests: readonly Manifest[]): (path: string) => string
   };
 }
 
+/**
+ * The features each non-merge commit touches (R19), sorted: each changed path followed through
+ * later renames to its path at the head (the commits come newest first, topologicalNewestFirst),
+ * then looked up in the stored manifests, newest first.
+ */
+export function commitFeaturesOf(
+  commits: readonly AuthoredCommit[],
+  manifests: readonly Manifest[],
+): Map<string, string[]> {
+  const featureOf = featureLookup(manifests);
+  const forward = new Map<string, string>();
+  const commitFeatures = new Map<string, string[]>();
+  for (const commit of commits) {
+    if (commit.parents.length > 1) continue;
+    const features = new Set<string>();
+    for (const file of commit.files) {
+      const at = forward.get(file.path) ?? file.path;
+      const feature = featureOf(at);
+      if (feature !== null) features.add(feature);
+      if (file.oldPath !== null) forward.set(file.oldPath, at);
+    }
+    commitFeatures.set(commit.sha, [...features].sort(byId));
+  }
+  return commitFeatures;
+}
+
 /** A pull request's merge commit or squash commit (R6). */
 export interface Landing {
   number: number;
@@ -187,23 +213,8 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
   const { groups } = input.identities;
   const commits = topologicalNewestFirst(input.commits);
   const groupOf = (c: AuthoredCommit) => input.identities.groupOf(c.authorName, c.authorEmail);
-  const featureOf = featureLookup(input.manifests);
   const head = input.manifests[0];
-
-  // R19: each change's path at the head, walking renames newest first.
-  const forward = new Map<string, string>();
-  const commitFeatures = new Map<string, string[]>();
-  for (const commit of commits) {
-    if (commit.parents.length > 1) continue;
-    const features = new Set<string>();
-    for (const file of commit.files) {
-      const at = forward.get(file.path) ?? file.path;
-      const feature = featureOf(at);
-      if (feature !== null) features.add(feature);
-      if (file.oldPath !== null) forward.set(file.oldPath, at);
-    }
-    commitFeatures.set(commit.sha, [...features].sort(byId));
-  }
+  const commitFeatures = commitFeaturesOf(commits, input.manifests);
 
   // Activity and lines per group.
   const activity = groups.map(() => new Map<string, ActivityDay>());

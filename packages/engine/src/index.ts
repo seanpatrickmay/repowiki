@@ -144,6 +144,7 @@ export {
   type PersonRequest,
   type PreparedPeople,
   peopleSystemPrompt,
+  personRevisionProblems,
   personTurn,
   preparePeople,
   type Refreshed,
