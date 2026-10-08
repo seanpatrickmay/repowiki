@@ -1,4 +1,7 @@
+import { makePersonFacts } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
+import { articleView } from "./article.ts";
+import { articleInflight } from "./inflight-article.ts";
 import { buildSiteModel } from "./model.ts";
 import {
   activityRoutes,
@@ -139,5 +142,43 @@ describe("the activity pages (R22)", () => {
     expect(month.up).toEqual({ label: "2026", href: "/special/activity/2026/" });
     expect(month.chart.split("</svg>")[0]).not.toContain("<a href=");
     expect(month.chart).toContain("10 Feb 2026: 1 commit");
+  });
+});
+
+describe("Main contributors (R23)", () => {
+  it("lists five people by current lines, then 'and N more' to the People index", () => {
+    const base = fixturePeople();
+    const many = Array.from({ length: 7 }, (_, i) =>
+      makePersonFacts({
+        id: `p-${i}`,
+        name: `Person ${i}`,
+        currentLines: 10 + i,
+        features: [{ featureId: "signals", commits: 1, currentLines: 10 + i }],
+      }),
+    );
+    const wiki = {
+      ...peopleExport(),
+      people: {
+        ...base,
+        snapshot: {
+          ...base.snapshot,
+          people: many,
+          redirects: [],
+          totalLines: 91 + base.snapshot.unattributedLines,
+          featureLines: { signals: 91 },
+        },
+        pages: [],
+      },
+    };
+    const s = buildSiteModel(wiki, null);
+    const page = s.pages.get("signals");
+    if (page === undefined) throw new Error("signals has a page");
+    const row = articleView(s, page, articleInflight(s, "signals")).infobox.find(
+      (r) => r.label === "Main contributors",
+    );
+    expect(row?.ignore).toBe(true);
+    expect(row?.html.match(/<a href="\/people\/p-/g)).toHaveLength(5);
+    expect(row?.html).toMatch(/^<a href="\/people\/p-6\/">Person 6<\/a> \(18%\)/);
+    expect(row?.html).toContain('<a href="/people/#feature-signals">and 2 more</a>');
   });
 });

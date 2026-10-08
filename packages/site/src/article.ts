@@ -1,10 +1,11 @@
-import { claimAnchor, type Revision, type SectionKey } from "@repowiki/core";
+import { claimAnchor, contributorsOf, type Revision, type SectionKey } from "@repowiki/core";
 import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { type ArticleInflight, IN_PROGRESS_ANCHOR } from "./inflight-article.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
+import { peopleFeatureUrl, personUrl } from "./urls.ts";
 
 export const SECTION_TITLES: Record<Exclude<SectionKey, "lead">, string> = {
   overview: "Overview",
@@ -53,7 +54,8 @@ export interface ArticleView {
   /** Trusted HTML in both `html` and `backlinks`. */
   references: { n: number; html: string; backlinks: string }[];
   /** `label` is plain text; `html` is trusted HTML. */
-  infobox: { label: string; html: string }[];
+  /** `ignore` keeps a computed row out of search (R23's Main contributors). */
+  infobox: { label: string; html: string; ignore?: boolean }[];
   /** Trusted HTML: "This page was last edited on <date>, at commit <sha link>." */
   lastEdited: string;
   /** The work in flight on a current active article (spec v2 #9 §6.2); absent otherwise. */
@@ -185,7 +187,27 @@ function infoboxRows(
     },
     { label: "First commit", html: formatDate(box.firstCommitDate) },
     { label: "Last commit", html: formatDate(box.lastCommitDate) },
+    ...mainContributors(site, revision.featureId),
     { label: "Revision", html: revisionHtml(site, revision) },
   ];
   return rows.filter((row) => row.html !== "");
+}
+
+/**
+ * R23's computed Main contributors row: the five people with the most current lines in the
+ * feature, with their shares, and "and N more" leading to the People index's part for it. None
+ * without People or with no blamed lines; kept out of search, so a name finds the person's page.
+ */
+function mainContributors(site: SiteModel, featureId: string): ArticleView["infobox"] {
+  const { contributors, more } = contributorsOf(site.wiki.people, featureId, 5);
+  if (contributors.length === 0) return [];
+  const links = contributors.map(
+    (c) =>
+      `<a href="${escapeHtml(personUrl(c.id))}">${escapeHtml(c.name)}</a> (${(c.share * 100).toFixed(c.share < 0.1 ? 1 : 0)}%)`,
+  );
+  if (more > 0)
+    links.push(
+      `<a href="${escapeHtml(peopleFeatureUrl(featureId))}">and ${formatNumber(more)} more</a>`,
+    );
+  return [{ label: "Main contributors", html: links.join(", "), ignore: true }];
 }

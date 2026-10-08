@@ -1609,6 +1609,17 @@ describe("the People pages (spec v2 #6 §11)", () => {
     expect(existsSync(join(site.outDir, "special", "activity"))).toBe(false);
   });
 
+  it("adds Main contributors to a feature's infobox, out of search, and only with People", () => {
+    const row =
+      /<tr data-pagefind-ignore="all">\s*<th scope="row">Main contributors<\/th>[\s\S]*?<\/tr>/.exec(
+        peopleSite.read("wiki/signals/index.html"),
+      )?.[0];
+    expect(row).toContain(
+      '<a href="/people/grace-hopper/">Grace Hopper</a> (55%), <a href="/people/ada-lovelace/">Ada Lovelace</a> (40%)',
+    );
+    expect(site.read("wiki/signals/index.html")).not.toContain("Main contributors");
+  });
+
   it("links People last in the nav, only when the export has People", () => {
     const nav =
       /<nav class="site-nav"[\s\S]*?<\/nav>/.exec(peopleSite.read("index.html"))?.[0] ?? "";

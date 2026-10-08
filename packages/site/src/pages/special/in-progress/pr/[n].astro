@@ -34,7 +34,7 @@ const status = inflightStatus(site, inflight);
     </p>
     {status.stale !== null && <div class="ambox ambox-stale" role="note">{status.stale}</div>}{view.behind !== null && <div class="ambox ambox-stale" role="note">{view.behind}</div>}
     <p>
-      By {view.author}; opened {view.created}, last updated {view.updated}; base branch
+      By {view.author.href === null ? view.author.name : <a href={view.author.href}>{view.author.name}</a>}; opened {view.created}, last updated {view.updated}; base branch
       <code>{view.base}</code>.
     </p>
     <p>{view.merge}</p>

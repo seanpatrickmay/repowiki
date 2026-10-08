@@ -46,7 +46,7 @@ describe("inflightIndexView", () => {
         title: "Page through long chunks",
         href: "/special/in-progress/pr/12/",
         badges: [],
-        author: "octo-dev",
+        author: { name: "octo-dev", href: null },
         updated: "3 October 2026",
         features: [{ title: "Signal ingestion", href: "/wiki/signals/" }],
         claims: "1 (+1 may change)",
@@ -56,7 +56,7 @@ describe("inflightIndexView", () => {
         title: HOSTILE_PULL_TITLE,
         href: "/special/in-progress/pr/13/",
         badges: ["Draft", "Bot", "targets release/1.x"],
-        author: "dependabot",
+        author: { name: "dependabot", href: null },
         updated: "29 September 2026",
         features: [{ title: "Deliverables", href: "/wiki/deliverables/" }],
         claims: "not computed",
@@ -357,5 +357,25 @@ describe("inflightStatus and the index's wording", () => {
       words("label", "area:signals"),
       words("search", "score 6.0"),
     ]).toEqual(["mentions src/signals/ingest.py", "label area:signals", "suggested by search"]);
+  });
+});
+
+describe("authors (spec v2 #6 C8)", () => {
+  it("links an author People resolved to their page, and names a null author unknown", () => {
+    const s = buildSiteModel(inflightExport(), null);
+    const inflight = inflightOf(s);
+    const [first, second] = inflight.pulls as [
+      InFlight["pulls"][number],
+      InFlight["pulls"][number],
+    ];
+    const linked = { ...first, author: { login: "octo-dev", bot: false, person: "ada-lovelace" } };
+    expect(pullView(s, inflight, linked).author).toEqual({
+      name: "octo-dev",
+      href: "/people/ada-lovelace/",
+    });
+    expect(pullView(s, inflight, { ...second, author: null }).author).toEqual({
+      name: "an unknown author",
+      href: null,
+    });
   });
 });

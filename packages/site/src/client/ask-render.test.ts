@@ -24,8 +24,8 @@ const render = (response: AskResponse) => {
 };
 
 describe("SAFE_HREF", () => {
-  it("is core's ASK_HREF itself, so the two cannot drift", () => {
-    expect(SAFE_HREF).toBe(ASK_HREF);
+  it("is built from core's ASK_HREF, so the two cannot drift", () => {
+    expect(SAFE_HREF.source.startsWith(`${ASK_HREF.source}|`)).toBe(true);
   });
 
   it("admits every link an answer may carry, as core's ASK_HREF does", () => {
@@ -38,6 +38,13 @@ describe("SAFE_HREF", () => {
     ]) {
       expect([href, SAFE_HREF.test(href), ASK_HREF.test(href)]).toEqual([href, true, true]);
     }
+  });
+
+  it("admits a person page, which Pagefind finds by name, while answers still cannot cite one", () => {
+    expect(SAFE_HREF.test("/people/ada-lovelace/")).toBe(true);
+    // Served answers are checked by core's ASK_HREF: person pages are not in the query index (C9).
+    expect(ASK_HREF.test("/people/ada-lovelace/")).toBe(false);
+    expect(SAFE_HREF.test("/people/ada-lovelace/history/")).toBe(false);
   });
 
   it.each([
