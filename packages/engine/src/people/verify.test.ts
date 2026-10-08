@@ -446,7 +446,7 @@ describe("personVerifyContext (R17)", () => {
 });
 
 describe("personVerifyContext and the mailmap (the I1 ruling)", () => {
-  it("lets no narrative use a name the mailmap replaced, the person's own included", () => {
+  it("lets no narrative use another person's replaced name; the person's own are theirs (round 2)", () => {
     const group = (name: string, replaced: string[]) =>
       ({
         name,
@@ -463,12 +463,25 @@ describe("personVerifyContext and the mailmap (the I1 ruling)", () => {
       commits: [],
       commitFeatures: new Map(),
       identities: {
-        groups: [group("Ada Lovelace", ["Old Deadname"]), group("Grace Hopper", ["Gracie Old"])],
+        groups: [
+          group("Ada Lovelace", ["Old Deadname", "Lovelace"]),
+          group("Grace Hopper", ["Gracie Old"]),
+        ],
         groupOf: () => 0,
       },
     } as unknown as Parameters<typeof personVerifyContext>[0];
     const ctx = personVerifyContext(refreshed, 0, pack, makeManifest());
-    expect([...ctx.otherNames].sort()).toEqual(["grace hopper", "gracie old", "old deadname"]);
+    expect([...ctx.otherNames].sort()).toEqual(["grace hopper", "gracie old"]);
+    // The re-review's probe-i1b: a surname-only identity mapped to the full name never refuses
+    // the person's own bold-name lead.
+    const lead = verifyPersonClaim(
+      "lead",
+      { id: "l1", text: "**Ada Lovelace** contributed to signals.", cite: [], supports: ["c1"] },
+      ctx,
+    );
+    expect(lead.problems).not.toContain(
+      "the claim names another person; name no one but the page's subject",
+    );
   });
 });
 

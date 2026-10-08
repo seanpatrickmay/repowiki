@@ -432,15 +432,17 @@ export function personVerifyContext(
       ...g.identities.map((p) => p.name),
       ...g.logins.filter((login) => login.length >= MIN_NAMED_LENGTH),
     ]);
-  // The person's own names are only those People shows: a name the mailmap replaced is no
-  // narrative's to use, theirs included (the I1 ruling).
+  // The person's own names, those the mailmap replaced included (the Task 37 residual ruling):
+  // only other people's names are refused, so "Lovelace" mapped to "Ada Lovelace" never refuses
+  // her own lead. Held here only; the replaced names reach no output.
   const own = new Set(
     self === undefined
       ? []
       : normal([
           self.name,
           ...self.otherNames,
-          ...self.identities.map((p) => p.shownName),
+          ...self.replacedNames,
+          ...self.identities.flatMap((p) => [p.shownName, p.name]),
           ...self.logins,
         ]),
   );

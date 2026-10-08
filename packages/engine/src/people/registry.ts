@@ -37,6 +37,8 @@ function newId(name: string, taken: Set<string>): string {
   }
 }
 
+const isExcludedId = (id: string) => /^excluded-\d+$/.test(id);
+
 /** A new excluded person's private id: excluded-<n>, the lowest free n. */
 function excludedId(taken: Set<string>): string {
   let n = 1;
@@ -117,8 +119,14 @@ export function assignIds(
   for (const row of stored)
     if (row.status === "redirect" && row.to !== null) redirectTo.set(row.id, row.to);
   const storedRow = new Map(stored.map((row) => [row.id, row]));
+  // A private excluded-<n> id a visible group won: it was never published, so the group gets a
+  // normal id in its place, with no redirect, and the private one goes (the round 2 ruling).
+  const lifted = new Map<string, string>();
   const ids = groups.map((group, g) => {
     let id = won[g]?.[0]?.id ?? null;
+    const unexcluded = id !== null && !group.excluded && group.id === null && isExcludedId(id);
+    const retired = unexcluded ? id : null;
+    if (unexcluded) id = null;
     if (group.id !== null && group.id !== id) {
       // A stored id is this group's to take only when it won that row, or the row is a retired
       // id redirecting to a row it won (taking an old id back).
@@ -139,6 +147,7 @@ export function assignIds(
     // (the final review's M1); a stored row keeps its id.
     id ??= group.excluded ? excludedId(taken) : newId(group.name, taken);
     taken.add(id);
+    if (retired !== null) lifted.set(id, retired);
     return id;
   });
   groups.forEach((_, g) => {
@@ -165,7 +174,7 @@ export function assignIds(
     const id = ids[g] as string;
     registry.push({
       id,
-      order: storedRow.get(id)?.order ?? order++,
+      order: storedRow.get(lifted.get(id) ?? id)?.order ?? order++,
       name: group.name,
       kind: group.kind,
       status: group.excluded ? "excluded" : "active",
@@ -188,7 +197,7 @@ export function assignIds(
     });
   }
   // A stored person no group matches now (their commits left the history) keeps their row.
-  const written = new Set(registry.map((row) => row.id));
+  const written = new Set([...registry.map((row) => row.id), ...lifted.values()]);
   for (const row of stored) if (!written.has(row.id)) registry.push(row);
   registry.sort((a, b) => a.order - b.order);
 

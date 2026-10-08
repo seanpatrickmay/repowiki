@@ -20979,7 +20979,7 @@ Check, and record each number in the PR body:
 - `wiki:check`: 0 People problems, its narratives re-verified and every file scanned with no author email (§15.2, §15.3).
 - The built site: `/people/`, the owner's page, `/special/activity/`, and a feature page's Main contributors row render with JavaScript disabled, and every chart bar links to a page the build wrote (§15.7).
 
-Then one merge forward: `git log --merges --format=%H --reverse dda0989..main | head -1` names the next merge; run `node $ENV scripts/wiki-update.ts . <that sha> --out "$GATE" --dry-run` and, if its estimate is $0.30 or less, the same without `--dry-run` and with `--people-max-usd 0.1`. Record the update's People section (refreshed with no call; at most 1 append, about $0.01). Delete `$GATE` when done; nothing under `~/.repowiki/` is written.
+Then one merge forward: `git log --merges --ancestry-path --format=%H --reverse <wikiHead>..main | head -1` names the next merge that descends from the wiki's head (`<wikiHead>` is the stored wiki's head, dda0989 here); run `node $ENV scripts/wiki-update.ts . <that sha> --out "$GATE" --dry-run` and, if its estimate is $0.30 or less, the same without `--dry-run` and with `--people-max-usd 0.1`. Record the update's People section (refreshed with no call; at most 1 append, about $0.01). Delete `$GATE` when done; nothing under `~/.repowiki/` is written.
 
 - [ ] **Step 5: Commit and ship**
 

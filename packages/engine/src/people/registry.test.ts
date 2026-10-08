@@ -48,6 +48,17 @@ describe("assignIds and excluded people (the final review's M1)", () => {
     });
     expect(ids).toEqual(["excluded-1", "alex-smith"]);
   });
+
+  it("gives a person whose exclusion is lifted a normal id, the private one gone (round 2)", () => {
+    const commits = [by("Kim Hidden", "kim@e.com", 1), by("Ada Lovelace", "ada@e.com", 2)];
+    const first = assign(commits, [], { exclude: ["email:kim@e.com"] });
+    expect(first.ids).toEqual(["excluded-1", "ada-lovelace"]);
+    const lifted = assign(commits, first.registry);
+    expect(lifted.ids).toEqual(["kim-hidden", "ada-lovelace"]);
+    expect(lifted.redirects).toEqual([]);
+    expect(lifted.registry.map((r) => r.id)).toEqual(["kim-hidden", "ada-lovelace"]);
+    expect(lifted.registry[0]?.order).toBe(first.registry[0]?.order);
+  });
 });
 
 describe("assignIds (spec v2 #6 R13)", () => {
