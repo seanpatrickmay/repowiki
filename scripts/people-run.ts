@@ -102,7 +102,8 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     const { provider, journal } = input.connect();
     outcomes = await writePeople(
       { requests: taken, manifest, sha, commitDate: prepared.refreshed.snapshot.commitDate },
-      { provider, repoName: input.repoName, batch: input.batch, log },
+      // Every line printed goes through problemLine (the Task 20 ruling).
+      { provider, repoName: input.repoName, batch: input.batch, log: (l) => log(problemLine(l)) },
     );
     storeNarratives(store, outcomes, journal);
   }

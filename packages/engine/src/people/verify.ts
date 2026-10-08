@@ -3,7 +3,9 @@ import {
   type Claim,
   cleanPersonName,
   featureLinkTargets,
+  holdsEmail,
   type Manifest,
+  normalizedText,
   normalizeName,
   type PersonSectionKey,
   personClaimViolations,
@@ -94,11 +96,25 @@ const MONTHS = [
   "november",
   "december",
 ];
-const MONTH = MONTHS.join("|");
-/** "14 March 2026", "March 14, 2026", "March 2026", "2026-03-14", "2026-03" or a lone "2026". */
+/** A month's name, written out or cut to three letters (four for "Sept"), with an optional dot. */
+const MONTH = `(?:${MONTHS.join("|")}|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec).?`;
+/** A day of the month, with an optional ordinal suffix ("15th"). */
+const DAY = "(\\d{1,2})(?:st|nd|rd|th)?";
+/**
+ * "14 March 2026", "15th Mar 2026", "March 14, 2026", "March 2026", "2026-03-14" (an ISO time
+ * after it allowed), "2026-03" or a lone "2026".
+ */
 const DATE = new RegExp(
-  `\\b(?:(\\d{1,2})\\s+(${MONTH})\\s+(\\d{4})|(${MONTH})\\s+(\\d{1,2}),?\\s+(\\d{4})|(${MONTH})\\s+(\\d{4})|(\\d{4})-(\\d{2})(?:-(\\d{2}))?|((?:19|20)\\d{2}))\\b`,
-  "gi",
+  `\\b(?:${DAY}\\s+(${MONTH})\\s+(\\d{4})|(${MONTH})\\s+${DAY},?\\s+(\\d{4})|(${MONTH})\\s+(\\d{4})|(\\d{4})-(\\d{2})(?:-(\\d{2})(?:T[\\d:.]+(?:Z|[+-]\\d{2}:?\\d{2})?)?)?|((?:19|20)\\d{2}))(?![\\p{L}\\p{N}])`,
+  "giu",
+);
+/**
+ * A range whose first month has no year of its own: "between January and March 2026", "from
+ * January to March 2026". The first month takes the year that closes the range (R17's §19 delta).
+ */
+const MONTH_RANGE = new RegExp(
+  `\\b(?:between|from)\\s+(${MONTH})\\s+(?:and|to|until|through)\\s+(${MONTH})\\s+(\\d{4})(?![\\p{L}\\p{N}])`,
+  "giu",
 );
 
 /** A date a claim states, as the inclusive range of calendar days it names. */
@@ -112,45 +128,87 @@ export interface StatedDate {
 const pad = (n: number) => String(n).padStart(2, "0");
 const lastDay = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
 
+/** A month's number, 1 to 12, from its name or abbreviation; 0 for none. */
+const monthOf = (name: string | undefined): number =>
+  name === undefined
+    ? 0
+    : MONTHS.findIndex((m) => m.startsWith(name.toLowerCase().replace(".", "").slice(0, 3))) + 1;
+
 /**
  * The dates a claim states (R18), each at the granularity it is written: a day, a month or a year.
- * A month without a year ("Between January and February 2026") is read only where the year
- * follows it; the bare "January" there is not a date (planner ruling R25).
+ * A month without a year counts only where a range joins it to the year that closes it
+ * ("between January and March 2026" states January 2026 and March 2026); any other bare month is
+ * not a date. A day or month that does not exist (31 February, month 00, day 0) is refused.
  */
 export function statedDates(text: string): StatedDate[] {
   const out: StatedDate[] = [];
-  for (const m of text.matchAll(DATE)) {
-    const month = (name: string | undefined) => MONTHS.indexOf((name ?? "").toLowerCase()) + 1;
-    let year: number;
-    let mon = 0;
-    let day = 0;
-    if (m[1] !== undefined) [day, mon, year] = [Number(m[1]), month(m[2]), Number(m[3])];
-    else if (m[4] !== undefined) [mon, day, year] = [month(m[4]), Number(m[5]), Number(m[6])];
-    else if (m[7] !== undefined) [mon, year] = [month(m[7]), Number(m[8])];
-    else if (m[9] !== undefined) {
-      [year, mon] = [Number(m[9]), Number(m[10])];
-      day = m[11] === undefined ? 0 : Number(m[11]);
-    } else year = Number(m[12]);
-    if (mon > 12 || (mon > 0 && (day > lastDay(year, mon) || (m[9] !== undefined && mon === 0)))) {
-      out.push({ text: m[0], from: "", to: "" });
-      continue;
+  const add = (match: string, year: number, mon: number, day: number, bad: boolean) => {
+    if (bad || mon > 12 || (mon > 0 && day > lastDay(year, mon))) {
+      out.push({ text: match, from: "", to: "" });
+      return;
     }
     const from = `${year}-${pad(mon || 1)}-${pad(day || 1)}`;
     const to = `${year}-${pad(mon || 12)}-${pad(day || (mon === 0 ? 31 : lastDay(year, mon)))}`;
-    out.push({ text: m[0], from, to });
+    out.push({ text: match, from, to });
+  };
+  for (const m of text.matchAll(MONTH_RANGE))
+    add(m[1] ?? "", Number(m[3]), monthOf(m[1]), 0, false);
+  for (const m of text.matchAll(DATE)) {
+    if (m[1] !== undefined)
+      add(m[0], Number(m[3]), monthOf(m[2]), Number(m[1]), Number(m[1]) === 0);
+    else if (m[4] !== undefined)
+      add(m[0], Number(m[6]), monthOf(m[4]), Number(m[5]), Number(m[5]) === 0);
+    else if (m[7] !== undefined) add(m[0], Number(m[8]), monthOf(m[7]), 0, false);
+    else if (m[9] !== undefined) {
+      const mon = Number(m[10]);
+      const day = m[11] === undefined ? 0 : Number(m[11]);
+      add(m[0], Number(m[9]), mon, day, mon === 0 || (m[11] !== undefined && day === 0));
+    } else add(m[0], Number(m[12]), 0, 0, false);
   }
   return out;
 }
 
-/** "a number followed by commits, lines, files, pull requests, PRs or %" (R18). */
-const STATISTIC =
-  /\b\d[\d,.]*\s*(?:%|percent\b|commits?\b|lines?\b|files?\b|pull requests?\b|PRs?\b)/i;
-/** Text the word checks skip: code spans and link targets (a feature id is not prose). */
+/** Number words a count may be written in (R18): one to twenty, the tens, and the large ones. */
+const NUMBER_WORDS =
+  "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|dozen|dozens|hundred|hundreds|thousand|thousands|half";
+/** A digit run that ends on a digit, so a year's comma never joins what follows it. */
+const DIGITS = "\\d(?:[\\d,.]*\\d)?";
+/** What a statistic counts (R18). */
+const COUNTED = "(?:commits?|lines?|files?|pull[\\s-]requests?|PRs?)";
+/** Words that may not stand between a number and what it counts: "In 2026 the files moved". */
+const NOT_ADJECTIVE =
+  "the|a|an|and|or|but|to|in|on|at|by|for|from|with|her|his|their|its|this|that|these|those|which|who|were|was|is|are|of";
+/**
+ * "a number followed by commits, lines, files, pull requests, PRs or %" (R18), the number in
+ * digits or words, as "12 commits", "three commits", "a dozen commits", "3 new files", "12 of
+ * the commits", "forty percent" or "40%". A four-digit year is a count only right before the
+ * noun ("2026 commits"), never across another word.
+ */
+const STATISTIC = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:(?:${DIGITS}|${NUMBER_WORDS})\\s*(?:%|percent\\b)|\\p{L}+\\s+percent\\b|${DIGITS}\\s*${COUNTED}\\b|(?!(?:19|20)\\d\\d(?![\\d,.]))(?:${DIGITS}|${NUMBER_WORDS})\\s+(?:of\\s+the\\s+|(?!(?:${NOT_ADJECTIVE})\\s)[\\p{L}-]+\\s+)${COUNTED}\\b|(?:${NUMBER_WORDS})\\s+${COUNTED}\\b)`,
+  "iu",
+);
+/** Text the banned-word check skips: code spans and link targets (a feature id is not prose). */
 const NOT_PROSE = /`[^`]+`|\[\[[^\]|]+\|([^\]]+)\]\]|\[\[[^\]]+\]\]/g;
 const prose = (text: string) => text.replace(NOT_PROSE, (_, label?: string) => ` ${label ?? ""} `);
 const escaped = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wholeWord = (word: string) =>
   new RegExp(`(?<![\\p{L}\\p{N}-])${escaped(word)}(?![\\p{L}\\p{N}-])`, "iu");
+/**
+ * The text the name check reads (I2): emphasis markers dropped, then normalizeName's form (NFKC,
+ * every whitespace one space, invisible characters dropped, lower case), as the names are.
+ */
+const nameForm = (text: string) => normalizeName(text.replace(/[*_]+/g, ""));
+/** Each context's other names as whole-word patterns, compiled once per context. */
+const namePatterns = new WeakMap<readonly string[], RegExp[]>();
+const patternsOf = (names: readonly string[]): RegExp[] => {
+  let patterns = namePatterns.get(names);
+  if (patterns === undefined) {
+    patterns = names.filter((n) => n.length >= MIN_NAMED_LENGTH).map(wholeWord);
+    namePatterns.set(names, patterns);
+  }
+  return patterns;
+};
 const BANNED = PEOPLE_BANNED_WORDS.map((w) => ({ word: w, pattern: wholeWord(w) }));
 
 /** R18's mechanical checks, for a claim whose citations resolved to `cited`. */
@@ -161,8 +219,10 @@ function factProblems(
   ctx: PersonVerifyContext,
 ): string[] {
   const problems: string[] = [];
+  // Only the banned words skip code spans and link targets (I1): a name, a count or a date
+  // there still shows on the page.
   const words = prose(text);
-  const dates = statedDates(words);
+  const dates = statedDates(text);
   const days = cited.flatMap((c) => {
     const date = c.kind === "commit" ? ctx.pack.dates.get(c.sha) : undefined;
     return date === undefined ? [] : [date.slice(0, 10)];
@@ -187,11 +247,11 @@ function factProblems(
   }
   if (key === "chronicle" && dates.length === 0)
     problems.push('a chronicle claim opens with its date, such as "In March 2026,"');
-  if (withoutEmails(text) !== text)
-    problems.push("the claim holds an email address; never write one");
-  if (STATISTIC.test(words))
+  if (holdsEmail(text)) problems.push("the claim holds an email address; never write one");
+  if (STATISTIC.test(normalizedText(text)))
     problems.push("the claim states a statistic; the infobox has the numbers, so leave them out");
-  if (ctx.otherNames.some((name) => name.length >= MIN_NAMED_LENGTH && wholeWord(name).test(words)))
+  const named = nameForm(text);
+  if (patternsOf(ctx.otherNames).some((pattern) => pattern.test(named)))
     problems.push("the claim names another person; name no one but the page's subject");
   const banned = BANNED.filter((b) => b.pattern.test(words)).map((b) => quote(b.word));
   if (banned.length > 0)

@@ -3,6 +3,7 @@ import {
   featureLinkTargets,
   IsoDateTime,
   type Manifest,
+  normalizedText,
   PersonRevision,
   PersonSectionKey,
   type TokenUsage,
@@ -93,6 +94,11 @@ interface State {
   callFailed: boolean;
   /** The parent's chronicle claims, kept word for word in an append. */
   kept: Claim[];
+  /**
+   * The parent's areas claims in an append: each is kept, word for word, for a feature the new
+   * areas section does not cover (the Task 22 ruling). Their ids are reserved, never verified.
+   */
+  keptAreas: Claim[];
   verified: Map<string, { key: PersonSectionKey; claim: Claim }>;
   failing: Map<string, { key: PersonSectionKey; claim: PersonDraftClaim; problems: string[] }>;
   tokens: TokenUsage;
@@ -107,10 +113,11 @@ interface State {
 function claimsOf(
   draft: PersonDraft,
   kept: readonly Claim[],
+  keptAreas: readonly Claim[] = [],
 ): { draft: PersonDraft; claims: Keyed[] } {
   const held = {
     key: "chronicle" as const,
-    claims: kept.map((c) => ({ id: c.id, text: "", cite: [], supports: [] })),
+    claims: [...kept, ...keptAreas].map((c) => ({ id: c.id, text: "", cite: [], supports: [] })),
   };
   const [, ...sections] = uniqueDraft({ sections: [held, ...draft.sections] }).sections;
   const unique = { sections };
@@ -159,9 +166,9 @@ export async function writePeople(
       }),
     );
   const states: State[] = input.requests.map((request) => {
-    const kept = request.append
-      ? (request.parent?.sections.find((s) => s.key === "chronicle")?.claims ?? [])
-      : [];
+    const stored = (key: PersonSectionKey) =>
+      request.append ? (request.parent?.sections.find((s) => s.key === key)?.claims ?? []) : [];
+    const kept = stored("chronicle");
     return {
       request,
       pack: { text: personTurn(request.pack, request.append ? request.parent : null) },
@@ -170,6 +177,7 @@ export async function writePeople(
       failure: null,
       callFailed: false,
       kept,
+      keptAreas: stored("areas"),
       verified: new Map(kept.map((claim) => [claim.id, { key: "chronicle" as const, claim }])),
       failing: new Map(),
       tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
@@ -195,7 +203,7 @@ export async function writePeople(
     const state = states[i] as State;
     recordCall(state, outcome);
     if ("result" in outcome) {
-      const { draft, claims } = claimsOf(outcome.result.output, state.kept);
+      const { draft, claims } = claimsOf(outcome.result.output, state.kept, state.keptAreas);
       const body = claims.some((c) => c.key !== "lead") || state.kept.length > 0;
       if (!claims.some((c) => c.key === "lead") || !body) {
         const reason = "the answer needs at least one lead claim and one body claim";
@@ -248,7 +256,11 @@ export async function writePeople(
     }
     try {
       if (answer.kind === "whole") {
-        const { draft, claims } = claimsOf(answer.outcome.result.output as PersonDraft, state.kept);
+        const { draft, claims } = claimsOf(
+          answer.outcome.result.output as PersonDraft,
+          state.kept,
+          state.keptAreas,
+        );
         state.draft = draft;
         verify(state, claims);
         return;
@@ -274,7 +286,9 @@ export async function writePeople(
       problems,
     }));
     for (const d of dropped)
-      log(`${personId}: dropped a ${d.section} claim: ${d.problems.join("; ")}`);
+      log(
+        `${personId}: dropped ${d.section === "areas" ? "an" : "a"} ${d.section} claim: ${d.problems.join("; ")}`,
+      );
     const done = (revision: PersonRevision | null, failure: string | null): PersonOutcome => {
       if (failure !== null) log(`${personId}: narrative not written: ${failure}`);
       return {
@@ -297,6 +311,44 @@ export async function writePeople(
   });
 }
 
+/** The most areas claims a narrative has (spec v2 #6 §8.3). */
+const MAX_AREAS = 6;
+
+/**
+ * An append's stored areas claims for the features its new areas claims do not cover, word for
+ * word, each re-checked against today: its feature is still active and every commit it cites is
+ * still in the history and touches that feature. With the new claims, at most MAX_AREAS, kept
+ * before the stored ones when the cap bites; the caller sorts them in the pack's feature order.
+ */
+function keptAreasFor(state: State, fresh: readonly Claim[]): Claim[] {
+  const { ctx, pack } = state.request;
+  const covered = new Set(fresh.flatMap((c) => featureLinkTargets(c.text).slice(0, 1)));
+  const known = new Set(ctx.verify.commits.map((c) => c.sha));
+  const kept = state.keptAreas.filter((claim) => {
+    const [target] = featureLinkTargets(claim.text);
+    return (
+      target !== undefined &&
+      !covered.has(target) &&
+      ctx.features.has(target) &&
+      claim.citations.length > 0 &&
+      claim.citations.every(
+        (c) => c.kind === "commit" && known.has(c.sha) && ctx.featuresOf(c.sha).includes(target),
+      )
+    );
+  });
+  const rank = featureRank(pack.features);
+  const room = Math.max(0, MAX_AREAS - fresh.length);
+  return kept.sort((a, b) => rank(a) - rank(b)).slice(0, room);
+}
+
+/** An areas claim's place in the pack's feature order; a feature the pack lacks goes last. */
+const featureRank =
+  (features: readonly string[]) =>
+  (claim: Claim): number => {
+    const i = features.indexOf(featureLinkTargets(claim.text)[0] ?? "");
+    return i === -1 ? features.length : i;
+  };
+
 /** The verified claims as a revision: linked, ordered and renumbered, then schema-checked. */
 function assemble(
   state: State,
@@ -316,13 +368,30 @@ function assemble(
       .filter((v) => v.key === key && !kept.has(v.claim))
       .sort((a, b) => (place.get(a.claim.id) ?? 0) - (place.get(b.claim.id) ?? 0));
   const page = createClaimLinker(manifest, "", new Map());
-  const lead = fresh("lead").map((v) => page(v.claim));
-  const chronicle = [...state.kept, ...fresh("chronicle").map((v) => page(v.claim))];
+  // An append drops a new chronicle claim that repeats a kept one (normalised text), and a lead
+  // that supported it supports the kept claim instead (the Task 22 ruling).
+  const sameText = (text: string) => normalizedText(text).toLowerCase();
+  const keptByText = new Map(state.kept.map((c) => [sameText(c.text), c.id]));
+  const repeated = new Map<string, string>();
+  const newChronicle = fresh("chronicle").filter(({ claim }) => {
+    const id = keptByText.get(sameText(claim.text));
+    if (id !== undefined) repeated.set(claim.id, id);
+    return id === undefined;
+  });
+  const lead = fresh("lead").map((v) =>
+    page({
+      ...v.claim,
+      supports: [...new Set(v.claim.supports.map((id) => repeated.get(id) ?? id))],
+    }),
+  );
+  const chronicle = [...state.kept, ...newChronicle.map((v) => page(v.claim))];
   // Each areas claim is linked alone; one the linker changed past its single link keeps its text.
-  const areas = fresh("areas").map(({ claim }) => {
+  const newAreas = fresh("areas").map(({ claim }) => {
     const linked = createClaimLinker(manifest, "", new Map())(claim);
     return featureLinkTargets(linked.text).length === 1 ? linked : claim;
   });
+  const rank = featureRank(state.request.pack.features);
+  const areas = [...newAreas, ...keptAreasFor(state, newAreas)].sort((a, b) => rank(a) - rank(b));
   const bySection = new Map<PersonSectionKey, Claim[]>([
     ["lead", lead.filter((c) => c.text.trim() !== "")],
     ["chronicle", chronicle.filter((c) => c.text.trim() !== "")],
@@ -371,7 +440,10 @@ export function personRequest(
   // the narrative is written whole, its episodes grouped to fit (the Task 18 ruling).
   const stored = options.parent?.sections.find((s) => s.key === "chronicle")?.claims.length ?? 0;
   const room = MAX_CHRONICLE_CLAIMS - stored;
-  const append = options.append && options.parent !== null && room >= 1;
+  // An append also needs its basis in today's history (R19): one that left it is written whole.
+  const known = new Set(refreshed.commits.map((c) => c.sha));
+  const append =
+    options.append && options.parent !== null && room >= 1 && known.has(options.parent.basis);
   const covered =
     append && options.parent !== null ? ancestorsOf(refreshed.commits, options.parent.basis) : null;
   const pack = packFor(refreshed, personId, manifest, {

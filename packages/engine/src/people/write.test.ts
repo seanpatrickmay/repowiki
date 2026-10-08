@@ -305,3 +305,129 @@ describe("writePeople (spec v2 #6 §8.4)", () => {
     expect(turn).not.toContain("PR #3");
   });
 });
+
+describe("writePeople's append and outcome rules (the Task 20 and Task 22 rulings)", () => {
+  /** Ada's built narrative, as the parent of an append from the PR #6 merge. */
+  const parentOf = async (keep = 2) => {
+    const built = (await write([draft()])).outcomes[0]?.revision ?? null;
+    if (built === null) throw new Error("built");
+    return {
+      ...built,
+      basis: fx.pr6,
+      sections: built.sections.map((s) =>
+        s.key === "chronicle" ? { ...s, claims: s.claims.slice(0, keep) } : s,
+      ),
+    };
+  };
+  const answer = (chronicle: string, areas: string[]): PersonDraft => ({
+    sections: [
+      {
+        key: "lead",
+        claims: [
+          {
+            id: "l1",
+            text: "**Ada Lovelace** contributed in 2026.",
+            cite: [],
+            supports: ["n1"],
+          },
+        ],
+      },
+      {
+        key: "chronicle",
+        claims: [{ id: "n1", text: chronicle, cite: [c(fx.feb)], supports: [] }],
+      },
+      {
+        key: "areas",
+        claims: areas.map((text, i) => ({
+          id: `m${i}`,
+          text,
+          cite: [c(fx.feb)],
+          supports: [],
+        })),
+      },
+    ],
+  });
+
+  it("drops a new chronicle claim that repeats a kept one, and moves the lead's support to it", async () => {
+    // The stored chronicle already tells February's episode (as Task 22's recording did).
+    const parent = await parentOf(3);
+    const kept = parent.sections.find((s) => s.key === "chronicle")?.claims ?? [];
+    const repeat = `${(kept[2]?.text ?? "").replace(" ", "  ")} `;
+    const { outcomes } = await write(
+      [answer(repeat, ["[[signals]]: a commit fixed an edge."])],
+      [request({ parent, append: true })],
+    );
+    const revision = outcomes[0]?.revision;
+    expect(outcomes[0]?.failure).toBeNull();
+    const chronicle = revision?.sections.find((s) => s.key === "chronicle")?.claims ?? [];
+    expect(chronicle.map((x) => x.text)).toEqual(kept.map((x) => x.text));
+    const lead = revision?.sections.find((s) => s.key === "lead")?.claims[0];
+    expect(lead?.supports).toEqual([chronicle[2]?.id]);
+  });
+
+  it("keeps the stored areas claims for the features the new areas section leaves out", async () => {
+    const parent = await parentOf();
+    const storedAreas = parent.sections.find((s) => s.key === "areas")?.claims ?? [];
+    const { outcomes } = await write(
+      [
+        answer("On 7 February 2026, a signals edge was fixed.", [
+          "[[signals]]: a commit fixed an edge.",
+        ]),
+      ],
+      [request({ parent, append: true })],
+    );
+    const areas = outcomes[0]?.revision?.sections.find((s) => s.key === "areas")?.claims ?? [];
+    expect(areas.map((x) => x.text)).toEqual([
+      "[[signals]]: a commit fixed an edge.",
+      storedAreas.find((x) => x.text.startsWith("[[deliverables]]"))?.text,
+    ]);
+    // A stored claim whose feature the new section covers is replaced, not repeated.
+    expect(areas.filter((x) => x.text.includes("[[signals"))).toHaveLength(1);
+  });
+
+  it("records the tokens of an outcome that writes no revision", async () => {
+    const lonely: PersonDraft = {
+      sections: [
+        {
+          key: "lead",
+          claims: [
+            { id: "l1", text: "**Ada Lovelace** contributed in 2026.", cite: [], supports: ["c1"] },
+          ],
+        },
+        {
+          key: "chronicle",
+          claims: [
+            { id: "c1", text: "In 2025, 12 commits landed.", cite: [c(fx.feb)], supports: [] },
+          ],
+        },
+      ],
+    };
+    const giveUp: PersonFixes = { claims: [{ id: "c1", text: "-", cite: [], supports: [] }] };
+    const { outcomes, log } = await write([lonely, giveUp]);
+    expect(outcomes[0]).toMatchObject({
+      revision: null,
+      failure: "no lead or no body claim survived verification",
+      calls: 2,
+      tokens: { in: 200, out: 20, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(log).toContain(
+      "ada-lovelace: narrative not written: no lead or no body claim survived verification",
+    );
+  });
+
+  it("writes whole an append whose basis left the history (R19)", () => {
+    const gone = request({ parent: makePersonRevision({ basis: "f".repeat(40) }), append: true });
+    expect(gone.append).toBe(false);
+    expect(gone.pack.text).toContain("## Episodes, oldest first");
+    expect(gone.pack.text).toContain("PR #3");
+  });
+
+  it("logs an areas claim with its article", async () => {
+    const bad = draft();
+    const areas = bad.sections[2];
+    if (areas?.claims[1] !== undefined) areas.claims[1].cite = [c(fx.feb)];
+    const giveUp: PersonFixes = { claims: [{ id: "a2", text: "-", cite: [], supports: [] }] };
+    const { log } = await write([bad, giveUp]);
+    expect(log.some((l) => l.startsWith("ada-lovelace: dropped an areas claim: "))).toBe(true);
+  });
+});
