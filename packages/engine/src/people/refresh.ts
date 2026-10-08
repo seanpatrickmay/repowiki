@@ -43,6 +43,16 @@ export interface ReadInput {
 }
 
 /**
+ * The note for commits whose author date People could not use (the I3 ruling), or null.
+ */
+export function undatedNote(commits: readonly AuthoredCommit[]): string | null {
+  const n = commits.filter((c) => c.undated === true).length;
+  return n === 0
+    ? null
+    : `${n} ${n === 1 ? "commit with an unreadable author date" : "commits with unreadable author dates"}: counted, but left out of activity and first and last dates`;
+}
+
+/**
  * Reads who wrote the history at `sha` (spec v2 #6 §4 steps 1-3): the log, the committed
  * mailmap and ignore-revs blobs (never the work tree), the identity groups and their ids against
  * the stored registry. Writes nothing; people:suggest stops here.
@@ -68,6 +78,8 @@ export function readPeople(input: ReadInput): PeopleRead {
     : [];
   const warnings = [...identities.warnings];
   if (mailmap.skipped > 0) warnings.push(`.mailmap: ${mailmap.skipped} malformed lines skipped`);
+  const undated = undatedNote(commits);
+  if (undated !== null) warnings.push(undated);
   return { sha, commits, mailmap, identities, assigned, ignoreRevs, warnings };
 }
 

@@ -12,6 +12,7 @@ import {
   preparePeople,
   type Store,
   storeNarratives,
+  undatedNote,
   WikiBuildError,
   wantsNarrative,
   writePeople,
@@ -192,6 +193,8 @@ function peopleNotes(prepared: PreparedPeople): string[] {
     ...exclusionNotes(excluded, refreshed.snapshot.others.length > 0, contributing),
     ...attributesNotes(gitReadsAttributesAtSha()),
   ];
+  const undated = undatedNote(refreshed.commits);
+  if (undated !== null) notes.push(`${undated}.`);
   if (revoked > 0)
     notes.push(
       `${revoked} narrative ${revoked === 1 ? "revision was" : "revisions were"} deleted: consent withdrawn in the people file.`,

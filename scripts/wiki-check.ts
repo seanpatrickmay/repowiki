@@ -90,7 +90,7 @@ try {
       // People (spec v2 #6 §9): the narratives re-verified, the outputs scanned for an email.
       const people = checkPeopleStored(store, repo, dirname(db));
       for (const problem of people.problems) console.error(problemLine(problem));
-      if (store.getPeopleSnapshot() !== null)
+      if (people.on)
         console.log(
           `${people.narratives} person narratives re-verified and ${people.scanned} files scanned for an author's email; ${people.problems.length === 0 ? "no problems" : `${people.problems.length} problems`}`,
         );

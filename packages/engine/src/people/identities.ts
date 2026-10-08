@@ -265,10 +265,14 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
   const { config } = input;
   // 1. Distinct raw pairs, in order of their earliest commit.
   const pairs = new Map<string, RawIdentity>();
+  // Pairs with a dated commit: an undated one (I3) sets first and last only when none is dated.
+  const dated = new Set<string>();
   for (const commit of input.commits) {
     const key = `${commit.authorName}\0${commit.authorEmail}`;
     const merge = commit.parents.length > 1;
     const was = pairs.get(key);
+    const firstDated = commit.undated !== true && !dated.has(key);
+    if (commit.undated !== true) dated.add(key);
     if (was === undefined) {
       pairs.set(key, {
         name: commit.authorName,
@@ -283,8 +287,13 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
     } else {
       was.commits += merge ? 0 : 1;
       was.allCommits += 1;
-      was.first = isoMin(was.first, commit.authorDate);
-      was.last = isoMax(was.last, commit.authorDate);
+      if (firstDated) {
+        was.first = commit.authorDate;
+        was.last = commit.authorDate;
+      } else if (commit.undated !== true || !dated.has(key)) {
+        was.first = isoMin(was.first, commit.authorDate);
+        was.last = isoMax(was.last, commit.authorDate);
+      }
     }
   }
   const raws = [...pairs.values()].sort(
@@ -429,6 +438,9 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
     const groupReasons = new Set<JoinReason>();
     for (const i of list) for (const why of reasons.get(i) ?? []) groupReasons.add(why);
     const ids = list.map((i) => raws[i] as RawIdentity);
+    // First and last from the dated pairs, unless none is (the I3 ruling).
+    const datedIds = ids.filter((r) => dated.has(`${r.name}\0${r.email}`));
+    const spans = datedIds.length > 0 ? datedIds : ids;
     const plain = [
       ...new Set([
         ...list.flatMap((i) => [...(keys[i] as Set<string>)]),
@@ -463,8 +475,8 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       reasons: [...groupReasons].sort(),
       logins: groupLogins,
       commits: ids.reduce((n, r) => n + r.commits, 0),
-      firstCommit: ids.map((r) => r.first).reduce(isoMin),
-      lastCommit: ids.map((r) => r.last).reduce(isoMax),
+      firstCommit: spans.map((r) => r.first).reduce(isoMin),
+      lastCommit: spans.map((r) => r.last).reduce(isoMax),
     };
   });
   // A total order: first commit, then the salted keys, then the earliest pair (unique per group).

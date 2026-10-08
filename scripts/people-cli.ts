@@ -19,7 +19,6 @@ import {
 import {
   configuredEmail,
   GitError,
-  MAX_FIX_OUTPUT_TOKENS,
   MAX_PERSON_OUTPUT_TOKENS,
   markdownCodeSpan,
   maskEmail,
@@ -375,15 +374,16 @@ export function parsePeopleArgs(argv: readonly string[]): PeopleArgs {
   return args;
 }
 
-/** The draft a retry resends is counted at this many tokens (spec v2 #6 §8.5's figure). */
+/** The first call's allowance beyond its system prompt and turn (spec v2 #6 §8.5's figure). */
 export const ASSUMED_PERSON_OUTPUT_TOKENS = 2500;
 
 /**
- * One narrative's ceiling (R26, C12, the Task 23 ruling): its call and a retry, each sending the
- * system prompt, the turn and a draft of ASSUMED_PERSON_OUTPUT_TOKENS, so (system + turn + 2,500)
- * input twice; output at the calls' own caps, MAX_PERSON_OUTPUT_TOKENS and MAX_FIX_OUTPUT_TOKENS;
- * plus, when the round's calls carry a cache key (`cached`), the premium of writing the system
- * prompt to the cache; all at the model's rates, halved when batched; no cache hit.
+ * One narrative's ceiling (R26, C12, the Task 23 and wave B rulings): its call, sending the system
+ * prompt, the turn and ASSUMED_PERSON_OUTPUT_TOKENS, and a retry resending them with the whole
+ * draft at its cap (MAX_PERSON_OUTPUT_TOKENS), so (system + turn + 2,500) + (system + turn +
+ * 6,000) input; output 6,000 + 6,000, since a whole retry can write as much as the call; plus,
+ * when the round's calls carry a cache key (`cached`), the premium of writing the system prompt to
+ * the cache; all at the model's rates, halved when batched; no cache hit.
  */
 export function narrativeCeilingUsd(
   turnTokens: number,
@@ -392,8 +392,9 @@ export function narrativeCeilingUsd(
   batch: boolean,
   cached = false,
 ): number {
-  const input = 2 * (systemTokens + turnTokens + ASSUMED_PERSON_OUTPUT_TOKENS);
-  const usd = priced(model, input, MAX_PERSON_OUTPUT_TOKENS + MAX_FIX_OUTPUT_TOKENS, batch);
+  const sent = systemTokens + turnTokens;
+  const input = sent + ASSUMED_PERSON_OUTPUT_TOKENS + sent + MAX_PERSON_OUTPUT_TOKENS;
+  const usd = priced(model, input, 2 * MAX_PERSON_OUTPUT_TOKENS, batch);
   const price = priceFor(model);
   if (!cached || price === null) return usd;
   const premium = (systemTokens * (price.cacheWrite - price.input)) / 1_000_000;

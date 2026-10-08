@@ -146,6 +146,27 @@ describe("computeSnapshot (spec v2 #6 §7)", () => {
     expect(snapshot.commits).toBe(6);
   });
 
+  it("counts a commit with an unusable author date, but leaves it out of activity and dates (I3)", async () => {
+    // Ada's crafted commit on the head: a year-10000 author date.
+    const grow = () => {
+      repo.write("src/signals/late.py", "late = 1\n");
+      const head = repo.commit("feat: late", "+0000", ADA);
+      const body = repo
+        .git("cat-file", "commit", head)
+        .replace(/^(author .*>) \d+ [+-]\d{4}$/m, "$1 253402300800 +0000");
+      repo.write(".git/crafted", `${body}\n`);
+      const crafted = repo.git("hash-object", "--literally", "-t", "commit", "-w", ".git/crafted");
+      repo.git("update-ref", "refs/heads/main", crafted);
+      return crafted;
+    };
+    const { snapshot } = await compute({}, false, grow);
+    const ada = snapshot.people.find((p) => p.id === "ada-lovelace");
+    expect(ada?.commits).toBe(3);
+    expect(ada?.activity.map((d) => d.day)).toEqual(["2026-01-02", "2026-01-08"]);
+    expect(ada?.lastCommit.slice(0, 10)).toBe("2026-01-08");
+    expect(snapshot.commits).toBe(7);
+  });
+
   it("maps commits to features through renames, older manifests and redirects (R19)", async () => {
     const { snapshot, commitFeatures, fx } = await compute();
     expect(commitFeatures.get(fx.first)).toEqual(["deliverables", "signals"]);

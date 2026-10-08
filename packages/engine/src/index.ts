@@ -159,6 +159,7 @@ export {
   storeNarratives,
   suggestionSnippet,
   suggestMerges,
+  undatedNote,
   wantsNarrative,
   writePeople,
 } from "./people/index.ts";

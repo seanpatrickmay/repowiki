@@ -234,15 +234,18 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
       added += file.added;
       deleted += file.deleted;
     }
-    const day = commit.authorDate.slice(0, 10);
-    const days = activity[g] as Map<string, ActivityDay>;
-    const was = days.get(day) ?? { day, commits: 0, added: 0, deleted: 0 };
-    days.set(day, {
-      day,
-      commits: was.commits + 1,
-      added: was.added + added,
-      deleted: was.deleted + deleted,
-    });
+    // An undated commit (I3) counts in the totals but has no day in the activity.
+    if (commit.undated !== true) {
+      const day = commit.authorDate.slice(0, 10);
+      const days = activity[g] as Map<string, ActivityDay>;
+      const was = days.get(day) ?? { day, commits: 0, added: 0, deleted: 0 };
+      days.set(day, {
+        day,
+        commits: was.commits + 1,
+        added: was.added + added,
+        deleted: was.deleted + deleted,
+      });
+    }
     const total = totals[g] as { commits: number; added: number; deleted: number };
     total.commits++;
     total.added += added;

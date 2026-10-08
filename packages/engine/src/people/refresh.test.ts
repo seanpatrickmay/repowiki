@@ -81,6 +81,19 @@ describe("readPeople (spec v2 #6 §4 steps 1-3)", () => {
   });
 });
 
+describe("readPeople and unusable author dates (the I3 ruling)", () => {
+  it("counts the commits whose author date it could not use, in one warning", () => {
+    const body = repo
+      .git("cat-file", "commit", head)
+      .replace(/^(author .*>) \d+ [+-]\d{4}$/m, "$1 253402300800 +0000");
+    repo.write(".git/crafted", `${body}\n`);
+    head = repo.git("hash-object", "--literally", "-t", "commit", "-w", ".git/crafted");
+    expect(readPeople(input()).warnings).toEqual([
+      "1 commit with an unreadable author date: counted, but left out of activity and first and last dates",
+    ]);
+  });
+});
+
 describe("refreshPeople (spec v2 #6 §4 steps 4-5)", () => {
   it("stores the snapshot and the registry together, honouring the ignore list", async () => {
     const refreshed = await refreshPeople(input());

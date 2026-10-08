@@ -145,6 +145,21 @@ describe("resolveIdentities (spec v2 #6 §6, R7)", () => {
     expect(ada?.replacedNames).toEqual(["Old Deadname"]);
   });
 
+  it("takes first and last dates from dated commits only, unless none is (the I3 ruling)", () => {
+    const undated = (c: AuthoredCommit): AuthoredCommit => ({
+      ...c,
+      authorDate: "2026-03-01T00:00:00+00:00",
+      undated: true,
+    });
+    const both = resolve([by("Ada", "ada@e.com", 5), undated(by("Ada", "ada@e.com", 1))]);
+    expect([both.groups[0]?.firstCommit, both.groups[0]?.lastCommit]).toEqual([
+      "2026-01-05T12:00:00+00:00",
+      "2026-01-05T12:00:00+00:00",
+    ]);
+    const only = resolve([undated(by("Bob", "bob@e.com", 1))]);
+    expect(only.groups[0]?.firstCommit).toBe("2026-03-01T00:00:00+00:00");
+  });
+
   it("fences an explicit group from the automatic rules, so a group splits a wrong merge", () => {
     const commits = [by("Sam Lee", "sam@a.com", 1), by("Sam Lee", "sam@b.com", 2)];
     expect(resolve(commits).groups).toHaveLength(1);

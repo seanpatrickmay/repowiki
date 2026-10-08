@@ -17,6 +17,7 @@ import {
 import { runTotals } from "@repowiki/llm";
 import { wikipediaTitlesIn } from "../link/index.ts";
 import { EmptyStoreError } from "./errors.ts";
+import { withoutCitedEmails } from "./people.ts";
 import type { Store } from "./store.ts";
 
 export interface ExportOptions {
@@ -55,7 +56,7 @@ function storedPeople(store: Store, manifest: { features: readonly { id: string 
     pages: store
       .listCurrentPersonRevisions()
       .filter((page) => humans.has(page.personId))
-      .map((page) => ({ ...page, groupFingerprint: null })),
+      .map((page) => ({ ...withoutCitedEmails(page), groupFingerprint: null })),
   };
   return peopleProblems(people, { manifest }).length === 0 ? people : null;
 }
