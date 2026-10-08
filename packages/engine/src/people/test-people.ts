@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Manifest, PeopleConfig } from "@repowiki/core";
 import { makeFeature } from "@repowiki/core/test-fixtures";
+import type { GenerateRequest, Provider } from "@repowiki/llm";
 import { builtWiki, CRUD_PY } from "../freshness/index.ts";
 import { createTestRepo, type TestAuthor, type TestRepo } from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
@@ -190,4 +191,61 @@ export async function teamFixture(): Promise<TeamFixture> {
       repo.remove();
     },
   };
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/**
+ * A provider that answers every People call with a narrative that verifies: a lead naming the
+ * pack's person and one dated chronicle claim per commit line of the pack (up to six), and
+ * records each request. Test-only.
+ */
+export function chronicleProvider(): { provider: Provider; requests: GenerateRequest<unknown>[] } {
+  const requests: GenerateRequest<unknown>[] = [];
+  const provider: Provider = {
+    async generate<T>(request: GenerateRequest<T>) {
+      requests.push(request as GenerateRequest<unknown>);
+      const turn = request.messages.at(-1)?.content ?? "";
+      const name = /^# Person: (.+?)(?: \(other names:.*)?$/m.exec(turn)?.[1] ?? "Someone";
+      const commits = [...turn.matchAll(/^- commit:([0-9a-f]{12}) (\d{4})-(\d{2})-(\d{2}) /gm)];
+      const chronicle = commits.slice(0, 6).map((m, i) => ({
+        id: `c${i + 1}`,
+        text: `On ${Number(m[4])} ${MONTH_NAMES[Number(m[3]) - 1]} ${m[2]}, a change was made.`,
+        cite: [`commit:${m[1]}`],
+        supports: [],
+      }));
+      const output = {
+        sections: [
+          {
+            key: "lead",
+            claims: [
+              {
+                id: "l1",
+                text: `**${name}** contributed to the repository.`,
+                cite: [],
+                supports: chronicle.map((c) => c.id),
+              },
+            ],
+          },
+          { key: "chronicle", claims: chronicle },
+        ],
+      };
+      const usage = { in: 1000, out: 200, cacheRead: 0, cacheWrite: 0 };
+      return { output: request.schema.parse(output), usage, model: "claude-haiku-4-5-20251001" };
+    },
+  };
+  return { provider, requests };
 }
