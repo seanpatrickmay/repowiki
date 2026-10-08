@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLAIM_TEXT_MAX_LENGTH, Claim } from "./claim.ts";
+import { CLAIM_TEXT_MAX_LENGTH, Claim, claimAnchor } from "./claim.ts";
 import { bodyClaim } from "./test-fixtures.ts";
 
 describe("Claim", () => {
@@ -26,5 +26,15 @@ describe("Claim", () => {
 
   it("rejects a malformed staleSince sha", () => {
     expect(Claim.safeParse(bodyClaim({ staleSince: "HEAD" })).success).toBe(false);
+  });
+});
+
+describe("claimAnchor", () => {
+  it.each(["c3", "s-1", "a_B9", "x".repeat(64)])("anchors %s", (id) => {
+    expect(claimAnchor(id)).toBe(`claim-${id}`);
+  });
+
+  it.each(["", "c 3", "c.3", "c#3", "<b>", "x".repeat(65), "c\u00e9"])("refuses %j", (id) => {
+    expect(claimAnchor(id)).toBeNull();
   });
 });

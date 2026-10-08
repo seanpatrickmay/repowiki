@@ -5,21 +5,10 @@ import {
   AskRequest,
   AskResponse,
   AskStatus,
-  claimAnchor,
   NOT_FOUND_SENTENCE,
 } from "./ask.ts";
 import { LedgerEntry, LlmConfigFile, LlmRole } from "./llm.ts";
 import { makeAskResponse, makeLedgerEntry, SHA_A } from "./test-fixtures.ts";
-
-describe("claimAnchor", () => {
-  it.each(["c3", "s-1", "a_B9", "x".repeat(64)])("anchors %s", (id) => {
-    expect(claimAnchor(id)).toBe(`claim-${id}`);
-  });
-
-  it.each(["", "c 3", "c.3", "c#3", "<b>", "x".repeat(65), "c\u00e9"])("refuses %j", (id) => {
-    expect(claimAnchor(id)).toBeNull();
-  });
-});
 
 describe("ASK_HREF", () => {
   it.each([

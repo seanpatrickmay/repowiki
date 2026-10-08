@@ -30,3 +30,13 @@ export const Claim = z.object({
   hook: z.boolean(),
 });
 export type Claim = z.infer<typeof Claim>;
+
+const ANCHORED_CLAIM_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * The id of a claim's anchor on the site (`claim-<id>`, spec v2 #4 R17), or null when the id is
+ * not one an HTML id and a URL fragment can carry as written; such a claim links to its section.
+ */
+export function claimAnchor(claimId: string): string | null {
+  return ANCHORED_CLAIM_ID.test(claimId) ? `claim-${claimId}` : null;
+}
