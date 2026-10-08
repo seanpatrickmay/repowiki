@@ -35,6 +35,11 @@ export interface PeopleStore {
    * revisions went.
    */
   forgetPerson(personId: string): number;
+  /**
+   * Deletes the person's narrative revisions and keeps their registry row (a withdrawn consent,
+   * planner ruling R18); returns how many went.
+   */
+  forgetPersonNarrative(personId: string): number;
   /** A file's cached blame by path and blob, or null; a row that does not parse is a miss. */
   getBlameRuns(path: string, oid: string): [string, number][] | null;
   putBlameRuns(path: string, oid: string, runs: readonly (readonly [string, number])[]): void;
@@ -150,6 +155,10 @@ export function peopleStore(db: Database.Database): PeopleStore {
         db.prepare("DELETE FROM people_registry WHERE id = ?").run(personId);
         return gone.changes;
       })();
+    },
+
+    forgetPersonNarrative(personId) {
+      return db.prepare("DELETE FROM person_revisions WHERE person_id = ?").run(personId).changes;
     },
 
     getBlameRuns(path, oid) {
