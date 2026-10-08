@@ -84,6 +84,13 @@ export async function refreshPeople(input: RefreshInput): Promise<Refreshed> {
     read.warnings.push(
       `blame timed out for ${JSON.stringify(path.slice(0, 200))}; its lines are unattributed`,
     );
+  // One warning per cause, however many files it left unattributed (never naming a person).
+  const causes = new Map<string, number>();
+  for (const { cause } of ownership.unattributed) causes.set(cause, (causes.get(cause) ?? 0) + 1);
+  for (const [cause, files] of causes)
+    read.warnings.push(
+      `blame could not run for ${files} ${files === 1 ? "file" : "files"}, whose lines are unattributed: ${cause}`,
+    );
   const computed = computeSnapshot({
     sha: input.sha,
     commits: read.commits,

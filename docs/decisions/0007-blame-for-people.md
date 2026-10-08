@@ -19,8 +19,12 @@ People runs `git blame --incremental -C -C -M` once at the wiki's head over ever
 never per claim or per historical revision (spec v2 #6 R1). It is hermetic and read-only (C13):
 `scrubbedGitEnv()`, `--literal-pathspecs`, `-c core.fsmonitor=false`, `-c
 blame.markIgnoredLines=false`, `-c blame.markUnblamableLines=false`, `-c diff.algorithm=myers`,
-`--ignore-revs-file=` (which clears any configured ignore file), `--diff-algorithm=myers`,
-`--no-textconv`, then the sha and `-- <path>`. The repository's committed
+`-c blame.ignoreRevsFile=`, `--ignore-revs-file=` (which clears the configured ignore files from
+the list), `--diff-algorithm=myers`, `--indent-heuristic`, `--no-textconv`, then the sha and
+`-- <path>`. git still opens every ignore file the repository's config names before it clears
+the list, so a configured file git cannot read fails the blame; that failure, and any cause
+`gitFailureCause` names or output past the cap, leaves the file's lines unattributed with one
+warning naming the cause, and never stops People. The repository's committed
 `.git-blame-ignore-revs`, read as a blob at the sha and capped at 1,000 shas, is passed as
 `--ignore-rev` (R4). Results are cached in the store by `(path, blob oid)` as run-length
 `[commit sha, lines]` lists, so an update blames only changed and new paths (R3). Lockfiles,

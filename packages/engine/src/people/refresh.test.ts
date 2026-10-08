@@ -85,6 +85,17 @@ describe("refreshPeople (spec v2 #6 §4 steps 4-5)", () => {
     expect([second.ownership.blamed, second.ownership.cached]).toEqual([0, 3]);
   });
 
+  it("counts lines unattributed, with one warning naming the cause, when config breaks blame", async () => {
+    repo.git("config", "blame.ignoreRevsFile", "no-such-file");
+    const refreshed = await refreshPeople(input());
+    expect(refreshed.snapshot.unattributedLines).toBe(refreshed.snapshot.totalLines);
+    expect(refreshed.snapshot.totalLines).toBeGreaterThan(0);
+    const warnings = refreshed.warnings.filter((w) => w.includes("blame"));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^blame could not run for 3 files, whose lines are unattributed: /);
+    expect(warnings[0]).toMatch(/blame\.ignoreRevsFile/);
+  });
+
   it("refuses a store with no manifest", async () => {
     const empty = openStore(":memory:");
     try {
