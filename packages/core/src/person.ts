@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { INVISIBLE_CHARACTERS } from "./alias.ts";
+import { Claim } from "./claim.ts";
 import { FeatureId } from "./feature.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
+import { TokenUsage } from "./revision.ts";
+import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rules.ts";
 
 /** Person ids become URL path segments (`/people/<id>/`), so they are capped like feature ids. */
 export const PERSON_ID_MAX_LENGTH = 64;
@@ -232,3 +235,105 @@ export const PeopleSnapshot = z
       issue("people's lines and unattributed lines add up to the total", ["totalLines"]);
   });
 export type PeopleSnapshot = z.infer<typeof PeopleSnapshot>;
+
+/** The sections of a person page's narrative, in page order (spec v2 #6 §8.1). */
+export const PersonSectionKey = z.enum(["lead", "chronicle", "areas"]);
+export type PersonSectionKey = z.infer<typeof PersonSectionKey>;
+
+/** "build" writes the narrative whole; "update" appends to the stored chronicle (R25). */
+export const PersonRevisionReason = z.enum(["build", "update"]);
+export type PersonRevisionReason = z.infer<typeof PersonRevisionReason>;
+
+/** The reader's tokens: a code span is held aside before a [[link]] token is read. */
+const READER_TOKEN = /`[^`]+`|\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+
+/** The targets of a claim's feature link tokens, in order: `[[id]]` and `[[id|words]]`, not wp:. */
+export function featureLinkTargets(text: string): string[] {
+  const targets: string[] = [];
+  for (const match of text.matchAll(READER_TOKEN)) {
+    const target = match[1]?.trim();
+    if (target !== undefined && !target.startsWith("wp:")) targets.push(target);
+  }
+  return targets;
+}
+
+/**
+ * Every rule a person claim breaks in a section (spec v2 #6 §5 rule 1): a lead claim cites
+ * nothing and supports a body claim; a chronicle claim is a history claim citing a commit; an
+ * areas claim is a fact citing a commit and linking exactly one feature. No person claim cites
+ * code or is a hook, so people never reach "Did you know…".
+ */
+export function personClaimViolations(key: PersonSectionKey, claim: Claim): string[] {
+  const violations: string[] = [];
+  const kind = key === "chronicle" ? "history" : "fact";
+  if (claim.kind !== kind) violations.push(`${key} claims must be ${kind} claims`);
+  if (claim.hook) violations.push("person claims are never Main Page hooks");
+  if (claim.citations.some((c) => c.kind !== "commit"))
+    violations.push("person claims cite commits only, never code");
+  if (key === "lead") {
+    if (claim.citations.length > 0)
+      violations.push("lead claims carry no citations; list the body claims they support");
+    if (claim.supports.length === 0)
+      violations.push("lead claims must support at least one body claim");
+    return violations;
+  }
+  if (claim.supports.length > 0) violations.push("only lead claims may support other claims");
+  if (claim.citations.length === 0) violations.push(`${key} claims need a commit citation`);
+  if (key === "areas" && featureLinkTargets(claim.text).length !== 1)
+    violations.push("an areas claim links exactly one feature");
+  return violations;
+}
+
+export const PersonSection = z
+  .object({ key: PersonSectionKey, claims: z.array(Claim).min(1) })
+  .superRefine((section, ctx) => {
+    section.claims.forEach((claim, index) => {
+      for (const message of personClaimViolations(section.key, claim))
+        ctx.addIssue({ code: "custom", message, path: ["claims", index] });
+    });
+  });
+export type PersonSection = z.infer<typeof PersonSection>;
+
+const REVISION_ID = /^person-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{12}-[1-9][0-9]*$/;
+const SECTION_ORDER = PersonSectionKey.options;
+
+/**
+ * One revision of a person's narrative (spec v2 #6 §5, R27): a chain like the Architecture
+ * article's, stored whole; the export carries only the current one. `basis` is the newest of the
+ * person's commits it covers, so a newer one makes the narrative due (R25).
+ */
+export const PersonRevision = z
+  .object({
+    /** `person-<personId>-<sha12>-<n>`: n is the revision's 1-based place in the person's chain. */
+    id: z.string().regex(REVISION_ID, "expected an id like person-<id>-<sha12>-<n>"),
+    personId: PersonId,
+    sha: GitSha,
+    commitDate: IsoDateTime,
+    generatedAt: IsoDateTime,
+    parentId: z.string().min(1).nullable(),
+    reason: PersonRevisionReason,
+    model: z.string().min(1),
+    tokens: TokenUsage,
+    basis: GitSha,
+    sections: z.array(PersonSection).min(1),
+  })
+  .superRefine((revision, ctx) => {
+    if (!revision.id.startsWith(`person-${revision.personId}-${revision.sha.slice(0, 12)}-`)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "the id must carry the person id and the first 12 characters of the sha",
+        path: ["id"],
+      });
+    }
+    addSectionStructureIssues(revision.sections, ctx);
+    const order = revision.sections.map((s) => SECTION_ORDER.indexOf(s.key));
+    if (!order.every((n, i) => i === 0 || (order[i - 1] ?? 0) < n)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "sections are lead, chronicle, areas, in that order",
+        path: ["sections"],
+      });
+    }
+    addUpdateParentIssue(revision, ctx);
+  });
+export type PersonRevision = z.infer<typeof PersonRevision>;

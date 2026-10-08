@@ -14,7 +14,7 @@ import type {
 } from "./inflight.ts";
 import type { LedgerEntry } from "./llm.ts";
 import type { Manifest } from "./manifest.ts";
-import type { PeopleSnapshot, PersonFacts } from "./person.ts";
+import type { PeopleSnapshot, PersonFacts, PersonRevision } from "./person.ts";
 import type { Revision } from "./revision.ts";
 
 export const SHA_A = "a".repeat(40);
@@ -526,6 +526,60 @@ export function makePeopleSnapshot(overrides: Partial<PeopleSnapshot> = {}): Peo
     featureLines: { deliverables: 40, signals: 200 },
     totalLines: 240,
     unattributedLines: 40,
+    ...overrides,
+  };
+}
+
+/**
+ * Ada Lovelace's narrative at SHA_A: a lead over one chronicle claim and one areas claim, each
+ * citing her commit SHA_B.
+ */
+export function makePersonRevision(overrides: Partial<PersonRevision> = {}): PersonRevision {
+  const cite = commitCitation({ sha: SHA_B, subject: "feat: add signal ingestion", pr: 3 });
+  return {
+    id: "person-ada-lovelace-aaaaaaaaaaaa-1",
+    personId: "ada-lovelace",
+    sha: SHA_A,
+    commitDate: "2026-03-14T16:30:00+01:00",
+    generatedAt: "2026-10-06T12:00:00Z",
+    parentId: null,
+    reason: "build",
+    model: "claude-haiku-4-5",
+    tokens: { in: 5000, out: 900, cacheRead: 0, cacheWrite: 0 },
+    basis: SHA_B,
+    sections: [
+      {
+        key: "lead",
+        claims: [
+          leadClaim({
+            id: "l1",
+            text: "**Ada Lovelace** contributed between January and March 2026, to [[signals]].",
+            supports: ["c1", "a1"],
+          }),
+        ],
+      },
+      {
+        key: "chronicle",
+        claims: [
+          bodyClaim({
+            id: "c1",
+            kind: "history",
+            text: "On 5 January 2026, she added signal ingestion.",
+            citations: [cite],
+          }),
+        ],
+      },
+      {
+        key: "areas",
+        claims: [
+          bodyClaim({
+            id: "a1",
+            text: "[[signals]]: her commits added the ingestion loop.",
+            citations: [cite],
+          }),
+        ],
+      },
+    ],
     ...overrides,
   };
 }
