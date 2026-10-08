@@ -1,4 +1,4 @@
-import { type ActivityDay, INVISIBLE_CHARACTERS } from "@repowiki/core";
+import { type ActivityDay, INVISIBLE_CHARACTERS, type PeopleSnapshot } from "@repowiki/core";
 import { formatNumber } from "./format.ts";
 import { escapeHtml } from "./inline.ts";
 
@@ -214,6 +214,61 @@ function chartTable(
   return `<table class="visually-hidden"><caption>${htmlText(options.label)}</caption><thead><tr><th scope="col">Period</th>${head}<th scope="col">Lines added</th><th scope="col">Lines removed</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
+const CELL = 12;
+const GAP = 2;
+/** A heatmap cell's colour level by commits that day: 0, 1, 2-3, 4-6, 7 or more. */
+export const heatLevel = (commits: number): number =>
+  commits === 0 ? 0 : commits === 1 ? 1 : commits <= 3 ? 2 : commits <= 6 ? 3 : 4;
+
+/**
+ * One year's weekday-by-week calendar heatmap (R21): a column per ISO week from the week holding
+ * 1 January, a row per weekday from Monday, a cell per day of the year with its `<title>`; then
+ * the visually hidden table of the days with activity. Returns trusted HTML.
+ */
+export function heatmap(year: number, activity: readonly ActivityDay[], label: string): string {
+  const byDay = new Map(activity.map((d) => [d.day, d]));
+  const first = `${year}-01-01`;
+  const origin = toMs(bucketStart(first, "week"));
+  const cells: string[] = [];
+  let weeks = 0;
+  for (let ms = toMs(first); toDay(ms) <= `${year}-12-31`; ms += DAY_MS) {
+    const day = toDay(ms);
+    const week = Math.floor((ms - origin) / (7 * DAY_MS));
+    const weekday = (new Date(ms).getUTCDay() + 6) % 7;
+    weeks = Math.max(weeks, week + 1);
+    const d = byDay.get(day);
+    const bar = { commits: d?.commits ?? 0, added: d?.added ?? 0, deleted: d?.deleted ?? 0 };
+    cells.push(
+      `<rect class="heat-${heatLevel(bar.commits)}" x="${week * (CELL + GAP)}" y="${weekday * (CELL + GAP)}" width="${CELL}" height="${CELL}"><title>${xmlText(barTitle(bucketLabel(day, "day"), bar))}</title></rect>`,
+    );
+  }
+  const svg = `<svg class="activity-heatmap" viewBox="0 0 ${weeks * (CELL + GAP)} ${7 * (CELL + GAP)}" role="img" aria-label="${xmlText(label)}">${cells.join("")}</svg>`;
+  const rows = activity
+    .filter((d) => d.day.startsWith(`${year}-`))
+    .map(
+      (d) =>
+        `<tr><th scope="row">${escapeHtml(bucketLabel(d.day, "day"))}</th><td>${formatNumber(d.commits)}</td><td>${formatNumber(d.added)}</td><td>${formatNumber(d.deleted)}</td></tr>`,
+    );
+  const table = `<table class="visually-hidden"><caption>${htmlText(label)}</caption><thead><tr><th scope="col">Day</th><th scope="col">Commits</th><th scope="col">Lines added</th><th scope="col">Lines removed</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  return `<figure class="activity">${svg}${table}</figure>`;
+}
+
+/** A row's decorative sparkline: monthly commits over the given range, hidden from readers. */
+export function sparkline(activity: readonly ActivityDay[], from: string, to: string): string {
+  const starts = bucketStarts(from, to, bucketFor(from, to));
+  const bars = barsOf(activity, starts, bucketFor(from, to));
+  const max = Math.max(1, ...bars.map((b) => b.commits));
+  const w = 100 / Math.max(1, bars.length);
+  const rects = bars
+    .filter((b) => b.commits > 0)
+    .map((b) => {
+      const i = starts.indexOf(b.start);
+      const h = (b.commits / max) * 20;
+      return `<rect x="${(i * w).toFixed(2)}" y="${(20 - h).toFixed(2)}" width="${Math.max(0.5, w).toFixed(2)}" height="${h.toFixed(2)}"/>`;
+    });
+  return `<svg class="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">${rects.join("")}</svg>`;
+}
+
 /** The days a year's or a month's page covers: `2026` or `2026-03`. */
 export function periodDays(period: string): { from: string; to: string } {
   const [y, m] = period.split("-").map(Number) as [number, number | undefined];
@@ -222,4 +277,57 @@ export function periodDays(period: string): { from: string; to: string } {
     from: `${y}-${pad(m)}-01`,
     to: `${y}-${pad(m)}-${pad(new Date(Date.UTC(y, m, 0)).getUTCDate())}`,
   };
+}
+
+/** The people a repository chart names, each with their own colour (spec v2 #6 §11). */
+export const MAX_NAMED_SERIES = 8;
+
+/**
+ * A repository chart's series over `from`..`to` (spec v2 #6 §11): the MAX_NAMED_SERIES humans
+ * with the most commits in the range (ties by id), each linked to their page; then "Others" (every
+ * other human and the anonymous series of excluded people); then "Bots". A series with no commit
+ * in the range is left out.
+ */
+export function repositorySeries(
+  snapshot: PeopleSnapshot,
+  from: string,
+  to: string,
+  hrefOf: (personId: string) => string,
+): Series[] {
+  const inRange = (activity: readonly ActivityDay[]) =>
+    activity.filter((d) => d.day >= from && d.day <= to);
+  const commits = (activity: readonly ActivityDay[]) =>
+    inRange(activity).reduce((n, d) => n + d.commits, 0);
+  const humans = snapshot.people
+    .filter((p) => p.kind === "human" && commits(p.activity) > 0)
+    .sort((a, b) => commits(b.activity) - commits(a.activity) || (a.id < b.id ? -1 : 1));
+  const named = humans.slice(0, MAX_NAMED_SERIES);
+  const rest = [...humans.slice(MAX_NAMED_SERIES).map((p) => p.activity), snapshot.others];
+  const bots = snapshot.people.filter((p) => p.kind === "bot").map((p) => p.activity);
+  const merged = (lists: readonly (readonly ActivityDay[])[]): ActivityDay[] => {
+    const days = new Map<string, ActivityDay>();
+    for (const day of lists.flat().filter((d) => d.day >= from && d.day <= to)) {
+      const was = days.get(day.day) ?? { day: day.day, commits: 0, added: 0, deleted: 0 };
+      days.set(day.day, {
+        day: day.day,
+        commits: was.commits + day.commits,
+        added: was.added + day.added,
+        deleted: was.deleted + day.deleted,
+      });
+    }
+    return [...days.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
+  };
+  const series: Series[] = named.map((p, i) => ({
+    label: p.name,
+    href: hrefOf(p.id),
+    cls: `series-${i + 1}`,
+    activity: inRange(p.activity),
+  }));
+  const others = merged(rest);
+  if (others.length > 0)
+    series.push({ label: "Others", href: null, cls: "others", activity: others });
+  const automated = merged(bots);
+  if (automated.length > 0)
+    series.push({ label: "Bots", href: null, cls: "bots", activity: automated });
+  return series;
 }

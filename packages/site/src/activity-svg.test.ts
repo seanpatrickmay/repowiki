@@ -1,4 +1,4 @@
-import { makePersonFacts } from "@repowiki/core/test-fixtures";
+import { makePeopleSnapshot, makePersonFacts } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   barChart,
@@ -7,8 +7,12 @@ import {
   bucketLabel,
   bucketStart,
   bucketStarts,
+  heatLevel,
+  heatmap,
   MAX_BARS,
   periodDays,
+  repositorySeries,
+  sparkline,
   xmlText,
 } from "./activity-svg.ts";
 
@@ -109,5 +113,61 @@ describe("barChart (R21)", () => {
     expect(html).toContain(
       '<ul class="chart-legend"><li><span class="swatch series-1" aria-hidden="true"></span><a href="/people/ada-lovelace/">',
     );
+  });
+});
+
+describe("repositorySeries", () => {
+  it("names people by commits in range, then others, then bots", () => {
+    const snapshot = makePeopleSnapshot();
+    const s = repositorySeries(snapshot, "2026-01-01", "2026-12-31", (id) => `/people/${id}/`);
+    expect(s.map((x) => [x.label, x.cls, x.href])).toEqual([
+      ["Ada Lovelace", "series-1", "/people/ada-lovelace/"],
+      ["Grace Hopper", "series-2", "/people/grace-hopper/"],
+      ["Others", "others", null],
+      ["Bots", "bots", null],
+    ]);
+    const march = repositorySeries(snapshot, "2026-03-01", "2026-03-31", (id) => id);
+    expect(march.map((x) => x.label)).toEqual(["Ada Lovelace"]);
+  });
+
+  it("folds people past the eighth into Others", () => {
+    const people = Array.from({ length: 10 }, (_, i) =>
+      makePersonFacts({ id: `p-${i}`, name: `Person ${i}` }),
+    );
+    const s = repositorySeries(
+      { ...makePeopleSnapshot(), people, others: [] },
+      "2026-01-01",
+      "2026-12-31",
+      (id) => id,
+    );
+    expect(s.map((x) => x.cls)).toEqual([
+      ...Array.from({ length: 8 }, (_, i) => `series-${i + 1}`),
+      "others",
+    ]);
+    expect(s.at(-1)?.activity.reduce((n, d) => n + d.commits, 0)).toBe(8);
+  });
+});
+
+describe("heatmap and sparkline", () => {
+  it("draws every day of the year in weekday rows, levelled by commits", () => {
+    const html = heatmap(2026, ada.activity, "Ada Lovelace's commits in 2026");
+    expect(html.match(/<rect /g)).toHaveLength(365);
+    // 1 January 2026 is a Thursday: row 3 of the first week.
+    expect(html).toContain(
+      '<rect class="heat-0" x="0" y="42" width="12" height="12"><title>1 Jan 2026: 0 commits, +0 −0 lines</title></rect>',
+    );
+    expect(html).toContain('class="heat-2"');
+    expect(html).toContain(
+      '<tr><th scope="row">5 Jan 2026</th><td>2</td><td>80</td><td>0</td></tr>',
+    );
+    expect([0, 1, 3, 6, 7].map(heatLevel)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("draws a decorative sparkline", () => {
+    const svg = sparkline(ada.activity, "2026-01-01", "2026-03-31");
+    expect(svg).toMatch(
+      /^<svg class="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">/,
+    );
+    expect(svg.match(/<rect /g)).toHaveLength(3);
   });
 });
