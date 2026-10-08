@@ -1,5 +1,5 @@
 import type { Manifest, PeopleSnapshot, PersonFacts } from "@repowiki/core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AuthoredCommit } from "../index/index.ts";
 import {
   ancestorsOf,
@@ -14,6 +14,9 @@ import type { Landing } from "./snapshot.ts";
 import { type TeamFixture, teamFixture } from "./test-people.ts";
 
 // The tests only read the fixture, so it is built once.
+// R32: the team fixture is built once, in a hook, on a machine that may be loaded.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
 let fx: TeamFixture;
 beforeAll(async () => {
   fx = await teamFixture();

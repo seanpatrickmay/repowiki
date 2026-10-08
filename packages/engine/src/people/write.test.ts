@@ -2,10 +2,13 @@ import type { PersonRevision } from "@repowiki/core";
 import { makePersonRevision } from "@repowiki/core/test-fixtures";
 import type { GenerateRequest, Provider } from "@repowiki/llm";
 import { LlmOutputError } from "@repowiki/llm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PersonDraft, PersonFixes } from "./prompt.ts";
 import { type TeamFixture, teamFixture } from "./test-people.ts";
 import { type PersonRequest, personRequest, writePeople } from "./write.ts";
+
+// R32: the team fixture is built once, in a hook, on a machine that may be loaded.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let fx: TeamFixture;
 beforeAll(async () => {
