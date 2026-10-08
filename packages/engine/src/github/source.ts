@@ -119,7 +119,7 @@ const RawIssue = z.object({
 /** A login as the export may hold it: validated, else null (R13, C8). */
 function authorOf(raw: z.infer<typeof RawAuthor>): Author {
   if (raw === null || !GITHUB_LOGIN.test(raw.login)) return null;
-  return { login: raw.login, bot: raw.__typename === "Bot" };
+  return { login: raw.login, bot: raw.__typename === "Bot", person: null };
 }
 
 const titleOf = (title: string): string =>

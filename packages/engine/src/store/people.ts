@@ -1,4 +1,13 @@
-import { GitSha, PeopleSnapshot, PersonRevision, RegistryRow, RepoPath } from "@repowiki/core";
+import {
+  GitSha,
+  PeopleSnapshot,
+  PersonRevision,
+  queryKeys,
+  RegistryRow,
+  RepoPath,
+  type ResolvedPerson,
+  saltedKey,
+} from "@repowiki/core";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import { DuplicateRevisionError, StalePersonParentError, StoreError } from "./errors.ts";
@@ -46,6 +55,12 @@ export interface PeopleStore {
   /** Drops every cached blame whose (path, oid) is not in `keep`; returns how many went. */
   pruneBlameCache(keep: readonly { path: string; oid: string }[]): number;
   clearBlameCache(): void;
+  /**
+   * What a login, name or email resolves to through the registry's salted keys (spec v2 #6 §6):
+   * the oldest row holding one of its keys, as a person, a bot or an excluded person; null for
+   * nobody. Work in flight's authors are joined to person pages through it (C8).
+   */
+  resolvePerson(query: { login?: string; name?: string; email?: string }): ResolvedPerson | null;
   /** A People value kept in the store's meta table under `people.<key>`, or null. */
   getPeopleMeta(key: string): string | null;
   setPeopleMeta(key: string, value: string): void;
@@ -71,7 +86,7 @@ export function peopleStore(db: Database.Database): PeopleStore {
       | undefined;
     return row?.value ?? null;
   };
-  return {
+  const people: PeopleStore = {
     getPeopleSalt() {
       const salt = meta("people.salt");
       if (salt === null || !/^[0-9a-f]{64}$/.test(salt))
@@ -161,6 +176,17 @@ export function peopleStore(db: Database.Database): PeopleStore {
       return db.prepare("DELETE FROM person_revisions WHERE person_id = ?").run(personId).changes;
     },
 
+    resolvePerson(query) {
+      const rows = people.listPeopleRegistry();
+      if (rows.length === 0) return null;
+      const salt = people.getPeopleSalt();
+      const keys = new Set(queryKeys(query).map((k) => saltedKey(salt, k)));
+      const row = rows.find((r) => r.keys.some((k) => keys.has(k)));
+      if (row === undefined) return null;
+      if (row.status === "excluded") return { kind: "excluded" };
+      return row.kind === "bot" ? { kind: "bot" } : { kind: "person", id: row.id };
+    },
+
     getBlameRuns(path, oid) {
       const row = db
         .prepare("SELECT body FROM blame_cache WHERE path = ? AND oid = ?")
@@ -211,4 +237,5 @@ export function peopleStore(db: Database.Database): PeopleStore {
       ).run(`people.${key}`, value);
     },
   };
+  return people;
 }

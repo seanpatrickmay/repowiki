@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PeopleConfig, WikiExport } from "@repowiki/core";
-import { makePersonRevision } from "@repowiki/core/test-fixtures";
+import {
+  makeInFlight,
+  makeInFlightIssue,
+  makeInFlightPull,
+  makePersonRevision,
+} from "@repowiki/core/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configuredEmail } from "../index/index.ts";
 import { buildExport, writeExport } from "../store/index.ts";
@@ -76,5 +81,40 @@ describe("the export's privacy (spec v2 #6 §13)", () => {
       expect(text).not.toContain("Kim Hidden");
       expect(text).not.toContain("kim-hidden");
     }
+  });
+});
+
+describe("work in flight's authors (spec v2 #6 C8)", () => {
+  const inflight = () =>
+    makeInFlight({
+      pulls: [
+        makeInFlightPull({ author: { login: "bob-q7login", bot: false, person: null } }),
+        makeInFlightPull({
+          number: 13,
+          closes: [],
+          author: { login: "dependabot", bot: true, person: null },
+        }),
+      ],
+      issues: [makeInFlightIssue({ author: { login: "stranger", bot: false, person: null } })],
+    });
+
+  it("links a login that resolves to a person, and leaves a bot and a stranger as they are", async () => {
+    fx.store.putInFlight(inflight());
+    expect(buildExport(fx.store, options).inflight?.pulls[0]?.author?.person).toBeNull();
+    await refresh();
+    const joined = buildExport(fx.store, options).inflight;
+    expect(joined?.pulls.map((p) => p.author)).toEqual([
+      { login: "bob-q7login", bot: false, person: "bob" },
+      { login: "dependabot", bot: true, person: null },
+    ]);
+    expect(joined?.issues[0]?.author).toEqual({ login: "stranger", bot: false, person: null });
+  });
+
+  it("exports an excluded person's pull request with no author", async () => {
+    fx.store.putInFlight(inflight());
+    await refresh({ exclude: ["login:bob-q7login"] });
+    const exported = buildExport(fx.store, options);
+    expect(exported.inflight?.pulls[0]?.author).toBeNull();
+    expect(JSON.stringify(exported)).not.toContain("bob-q7login");
   });
 });

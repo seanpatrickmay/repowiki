@@ -2,6 +2,8 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   type Architecture,
+  type Author,
+  type InFlight,
   inflightProblems,
   LLMS_TXT_FILE,
   type PeopleExport,
@@ -55,6 +57,28 @@ function storedPeople(store: Store, manifest: { features: readonly { id: string 
 }
 
 /**
+ * Work in flight's authors joined to People (spec v2 #6 C8), at export time so a people-file
+ * change applies at the next export: a login the registry resolves to a person with a page gains
+ * `person`; one resolving to an excluded person becomes null ("unknown author"), so their login
+ * never appears; a bot keeps its badge; anyone else stays plain text.
+ */
+function joinAuthors(store: Store, inflight: InFlight, people: PeopleExport): InFlight {
+  const pages = new Set(people.snapshot.people.filter((p) => p.kind === "human").map((p) => p.id));
+  const join = (author: Author): Author => {
+    if (author === null) return null;
+    const resolved = store.resolvePerson({ login: author.login });
+    if (resolved?.kind === "excluded") return null;
+    const id = resolved?.kind === "person" && pages.has(resolved.id) ? resolved.id : null;
+    return { ...author, person: id };
+  };
+  return {
+    ...inflight,
+    pulls: inflight.pulls.map((p) => ({ ...p, author: join(p.author) })),
+    issues: inflight.issues.map((i) => ({ ...i, author: join(i.author) })),
+  };
+}
+
+/**
  * Assembles and validates the export consumed by the reader site and by agents. The stored
  * work-in-flight snapshot rides along only while it agrees with the export (inflightProblems): a
  * snapshot that names a claim the current pages no longer hold is left out (null) rather than
@@ -79,10 +103,12 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     if (summary) wikipedia[title] = summary;
   }
   const stored = store.getInFlight();
-  const inflight =
+  const people = storedPeople(store, manifest);
+  const agreed =
     stored !== null && inflightProblems(stored, { head, manifest, pages }).length === 0
       ? stored
       : null;
+  const inflight = agreed === null || people === null ? agreed : joinAuthors(store, agreed, people);
   return WikiExport.parse({
     schemaVersion: SCHEMA_VERSION,
     repo: options.repo,
@@ -95,7 +121,7 @@ export function buildExport(store: Store, options: ExportOptions): WikiExport {
     architecture,
     runs: runTotals(store.listLedger()),
     inflight,
-    people: storedPeople(store, manifest),
+    people,
   });
 }
 

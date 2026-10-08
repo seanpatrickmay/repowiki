@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { INVISIBLE_CHARACTERS } from "./alias.ts";
 import { PersonId, PersonName } from "./person.ts";
@@ -198,4 +199,28 @@ export function shownMatchKey(key: string): string {
   const parsed = parseMatchKey(key);
   if (parsed === null) return "a malformed key";
   return parsed.kind === "email" ? "an email: key" : `${parsed.kind}:${parsed.value}`;
+}
+
+/** A key as the store keeps it: SHA-256 of the store's salt and the key (spec v2 #6 R10). */
+export function saltedKey(salt: string, key: string): string {
+  return createHash("sha256").update(`${salt}\0${key}`).digest("hex");
+}
+
+/** What a login, name or email resolves to in the People registry (spec v2 #6 §6). */
+export type ResolvedPerson =
+  | { kind: "person"; id: string }
+  | { kind: "bot" }
+  | { kind: "excluded" };
+
+/**
+ * The identity keys a query names, as resolveIdentities forms them: `login:` lowercased, `name:`
+ * normalized, `email:` trimmed and lowercased. Unusable parts give no key.
+ */
+export function queryKeys(query: { login?: string; name?: string; email?: string }): string[] {
+  const keys = [
+    query.login === undefined ? null : parseMatchKey(`login:${query.login.toLowerCase()}`),
+    query.name === undefined ? null : parseMatchKey(`name:${query.name}`),
+    query.email === undefined ? null : parseMatchKey(`email:${query.email}`),
+  ];
+  return keys.flatMap((k) => (k === null ? [] : [`${k.kind}:${k.value}`]));
 }

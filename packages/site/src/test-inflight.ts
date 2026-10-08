@@ -62,7 +62,7 @@ export function fixtureInFlight(overrides: Partial<InFlight> = {}): InFlight {
       makeInFlightPull({
         number: 13,
         title: HOSTILE_PULL_TITLE,
-        author: { login: "dependabot", bot: true },
+        author: { login: "dependabot", bot: true, person: null },
         draft: true,
         updatedAt: "2026-09-29T09:00:00Z",
         baseRef: "release/1.x",
