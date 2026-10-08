@@ -1,0 +1,241 @@
+import {
+  type Claim,
+  contributorsOf,
+  type PeopleExport,
+  type PersonFacts,
+  type PersonRevision,
+} from "@repowiki/core";
+import {
+  barChart,
+  bucketFor,
+  bucketStarts,
+  heatmap,
+  repositorySeries,
+  sparkline,
+} from "./activity-svg.ts";
+import { formatDate, formatNumber, shortSha } from "./format.ts";
+import { escapeHtml, renderInline } from "./inline.ts";
+import { featureLink, type SiteModel } from "./model.ts";
+import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
+import { personUrl } from "./urls.ts";
+
+/** Every /people/<path>/ page: the index, a person, or a merged-away id's redirect. */
+export type PeopleRoute =
+  | { path: undefined; kind: "index" }
+  | { path: string; kind: "person"; personId: string }
+  | { path: string; kind: "redirect"; to: string };
+
+/** The People pages (spec v2 #6 §11), only when the export has People: none otherwise. */
+export function peopleRoutes(site: SiteModel): PeopleRoute[] {
+  const people = site.wiki.people;
+  if (people === null) return [];
+  return [
+    { path: undefined, kind: "index" },
+    ...humans(people).map((p) => ({ path: p.id, kind: "person" as const, personId: p.id })),
+    ...people.snapshot.redirects.map((r) => ({
+      path: r.from,
+      kind: "redirect" as const,
+      to: r.to,
+    })),
+  ];
+}
+
+const humans = (people: PeopleExport): PersonFacts[] =>
+  people.snapshot.people.filter((p) => p.kind === "human");
+const byCommits = (a: PersonFacts, b: PersonFacts) =>
+  b.commits - a.commits || (a.id < b.id ? -1 : 1);
+const percent = (share: number) => `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
+const range = (p: PersonFacts) => `${formatDate(p.firstCommit)} – ${formatDate(p.lastCommit)}`;
+const counted = (n: number, one: string) => `${formatNumber(n)} ${one}${n === 1 ? "" : "s"}`;
+
+/** A feature as trusted HTML: its link when it has a page, else its title as text. */
+function featureHtml(site: SiteModel, id: string): string {
+  const link = featureLink(site, id);
+  const title = site.features.get(id)?.title ?? id;
+  return link === null
+    ? escapeHtml(title)
+    : `<a class="wikilink" href="${escapeHtml(link.href)}">${escapeHtml(link.title)}</a>`;
+}
+
+export interface PeopleIndexView {
+  /** Trusted HTML: the repository's all-time stacked chart. */
+  chart: string;
+  /** Plain text except `sparkline` (trusted HTML). */
+  people: {
+    name: string;
+    href: string;
+    active: string;
+    commits: string;
+    share: string;
+    sparkline: string;
+  }[];
+  bots: { name: string; commits: string }[];
+  /** Trusted HTML in `feature` and each contributor's `html`. */
+  byFeature: { anchor: string; feature: string; contributors: string[] }[];
+}
+
+/**
+ * /people/: the repository's activity, every person with a page by commits, the bots, and each
+ * feature's contributors by current lines (R23's "and N more" lands here).
+ */
+export function peopleIndexView(
+  site: SiteModel,
+  people: PeopleExport,
+  activityHref: (year: string) => string | null = () => null,
+): PeopleIndexView {
+  const { snapshot } = people;
+  const days = [...snapshot.people.flatMap((p) => p.activity), ...snapshot.others].map(
+    (d) => d.day,
+  );
+  const from = days.reduce((a, b) => (b < a ? b : a), days[0] ?? snapshot.commitDate.slice(0, 10));
+  const to = days.reduce((a, b) => (b > a ? b : a), from);
+  const bucket = bucketFor(from, to);
+  const chart = barChart(repositorySeries(snapshot, from, to, personUrl), {
+    label: `Commits to ${site.wiki.repo} by ${bucket}`,
+    bucket,
+    starts: bucketStarts(from, to, bucket),
+    hrefOf: (start) => activityHref(start.slice(0, 4)),
+  });
+  const total = Math.max(1, snapshot.totalLines);
+  return {
+    chart,
+    people: humans(people)
+      .sort(byCommits)
+      .map((p) => ({
+        name: p.name,
+        href: personUrl(p.id),
+        active: range(p),
+        commits: formatNumber(p.commits),
+        share: percent(p.currentLines / total),
+        sparkline: sparkline(p.activity, from, to),
+      })),
+    bots: snapshot.people
+      .filter((p) => p.kind === "bot")
+      .sort(byCommits)
+      .map((p) => ({ name: p.name, commits: formatNumber(p.commits) })),
+    byFeature: site.wiki.manifest.features
+      .filter((f) => f.status.kind === "active" && (snapshot.featureLines[f.id] ?? 0) > 0)
+      .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
+      .map((f) => ({
+        anchor: `feature-${f.id}`,
+        feature: featureHtml(site, f.id),
+        contributors: contributorsOf(people, f.id, Number.POSITIVE_INFINITY).contributors.map(
+          (c) =>
+            `<a href="${escapeHtml(personUrl(c.id))}">${escapeHtml(c.name)}</a> (${percent(c.share)})`,
+        ),
+      })),
+  };
+}
+
+export interface PersonView {
+  /** Plain text. */
+  name: string;
+  /** Plain text label, trusted HTML value. */
+  infobox: { label: string; html: string }[];
+  /** Trusted HTML. */
+  leadHtml: string;
+  /** Trusted HTML: the all-time chart, then one heatmap per active year. */
+  chart: string;
+  years: { anchor: string; year: string; html: string }[];
+  /** Trusted HTML, one entry per chronicle claim; empty with no narrative. */
+  chronicle: string[];
+  /** Trusted HTML: the narrative's areas claims. */
+  areasHtml: string | null;
+  /** The computed areas table; `feature` is trusted HTML. */
+  areas: { feature: string; commits: string; lines: string; share: string }[];
+  /** Plain text title; `href` null without --repo-url. */
+  pulls: { number: number; title: string; merged: string; href: string | null }[];
+  references: { n: number; html: string; backlinks: string }[];
+  /** Plain text: "Narrative as of …", or why there is none; and the due line, or null. */
+  asOf: string;
+  due: string | null;
+}
+
+/** The lead a person without a narrative gets (R15): trusted HTML. */
+export const computedLead = (p: PersonFacts): string =>
+  `<b>${escapeHtml(p.name)}</b> made ${counted(p.commits, "commit")} between ${formatDate(p.firstCommit)} and ${formatDate(p.lastCommit)}.`;
+
+/**
+ * /people/<id>/ (spec v2 #6 §11): the infobox of computed facts, the narrative's lead (or the
+ * computed one), the activity charts, the chronicle, the areas of work (claims, then the table),
+ * the pull requests and the commit references. Person claims link features only, never Wikipedia.
+ */
+export function personView(site: SiteModel, people: PeopleExport, personId: string): PersonView {
+  const { snapshot } = people;
+  const p = snapshot.people.find((x) => x.id === personId && x.kind === "human");
+  if (p === undefined) throw new Error(`no person ${personId}`);
+  const narrative: PersonRevision | null = people.pages.find((r) => r.personId === p.id) ?? null;
+  const refs = narrative === null ? null : collectReferences(narrative);
+  const links = { link: (id: string) => featureLink(site, id) };
+  const claimHtml = (c: Claim) =>
+    renderInline(c.text, links) + markersHtml(refs?.markers.get(c.id) ?? []);
+  const claims = (key: string) => narrative?.sections.find((s) => s.key === key)?.claims ?? [];
+  const total = Math.max(1, snapshot.totalLines);
+  const days = p.activity.map((d) => d.day);
+  const from = days[0] ?? p.firstCommit.slice(0, 10);
+  const to = days.at(-1) ?? from;
+  const bucket = bucketFor(from, to);
+  const years = [...new Set(days.map((d) => d.slice(0, 4)))];
+  const newer =
+    narrative === null
+      ? 0
+      : p.activity
+          .filter((d) => d.day > narrative.commitDate.slice(0, 10))
+          .reduce((n, d) => n + d.commits, 0);
+  const main = p.features.slice(0, 3).map((f) => featureHtml(site, f.featureId));
+  const row = (label: string, html: string) => ({ label, html });
+  return {
+    name: p.name,
+    infobox: [
+      ...(p.otherNames.length > 0 ? [row("Other names", escapeHtml(p.otherNames.join(", ")))] : []),
+      row("Active", escapeHtml(range(p))),
+      row("Commits", formatNumber(p.commits)),
+      row("Lines", `+${formatNumber(p.added)} −${formatNumber(p.deleted)}`),
+      row("Current lines", `${formatNumber(p.currentLines)} (${percent(p.currentLines / total)})`),
+      row(
+        "Pull requests",
+        `${formatNumber(p.prsAuthored.length)} authored, ${formatNumber(p.prsMerged.length)} merged`,
+      ),
+      ...(main.length > 0 ? [row("Main features", main.join(", "))] : []),
+    ],
+    leadHtml: claims("lead").length > 0 ? claims("lead").map(claimHtml).join(" ") : computedLead(p),
+    chart: barChart([{ label: p.name, href: null, cls: "series-1", activity: p.activity }], {
+      label: `${p.name}'s commits by ${bucket}`,
+      bucket,
+      starts: bucketStarts(from, to, bucket),
+      hrefOf: (start) => `#activity-${start.slice(0, 4)}`,
+    }),
+    years: years.map((year) => ({
+      anchor: `activity-${year}`,
+      year,
+      html: heatmap(Number(year), p.activity, `${p.name}'s commits in ${year}`),
+    })),
+    chronicle: claims("chronicle").map(claimHtml),
+    areasHtml: claims("areas").length > 0 ? claims("areas").map(claimHtml).join(" ") : null,
+    areas: p.features.map((f) => ({
+      feature: featureHtml(site, f.featureId),
+      commits: formatNumber(f.commits),
+      lines: formatNumber(f.currentLines),
+      share: percent(f.currentLines / Math.max(1, snapshot.featureLines[f.featureId] ?? 0)),
+    })),
+    pulls: p.prsAuthored.map((pr) => ({
+      number: pr.number,
+      title: pr.title ?? `Pull request #${pr.number}`,
+      merged: formatDate(pr.mergedAt),
+      href: site.repoUrl === null ? null : `${site.repoUrl}/pull/${pr.number}`,
+    })),
+    references: (refs?.notes ?? []).map((note) => ({
+      n: note.n,
+      html: citationHtml(note.citation, site.repoUrl),
+      backlinks: backlinksHtml(note),
+    })),
+    asOf:
+      narrative === null
+        ? "No narrative: the facts above are computed from the repository's history."
+        : `Narrative as of ${formatDate(narrative.commitDate)} (${shortSha(narrative.sha)}).`,
+    due:
+      newer === 0
+        ? null
+        : `${counted(newer, "newer commit")} ${newer === 1 ? "is" : "are"} not yet in the narrative.`,
+  };
+}
