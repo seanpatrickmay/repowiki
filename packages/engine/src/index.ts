@@ -64,6 +64,7 @@ export {
   type GitOptions,
   GitTimeoutError,
   gitFailureCause,
+  gitReadsAttributesAtSha,
   type Hunk,
   type ImportEdge,
   type IndexedFile,

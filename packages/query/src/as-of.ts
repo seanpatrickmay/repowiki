@@ -116,8 +116,9 @@ function featureAt(feature: Feature, point: string | null, isAncestor: IsAncesto
  * The wiki as it was at `asOf` (spec v2 #5 §5, `WikiView.at`): each feature's page is its
  * revisionAt (a feature with none is absent), its history ends there, the About article is
  * architectureAt, and each feature has the title and status it had then. The manifest's
- * membership is the export's. It carries no work in flight: the snapshot is today's open pull
- * requests and issues, not the past's. No git runs here: `isAncestor` is the caller's.
+ * membership is the export's. It carries no work in flight and no People: those snapshots are
+ * today's open pull requests and issues and today's people, not the past's. No git runs here:
+ * `isAncestor` is the caller's.
  */
 export function viewAt(wiki: WikiExport, asOf: AsOf, isAncestor: IsAncestor): WikiView {
   const point = pointAt(wiki, asOf);
@@ -141,6 +142,7 @@ export function viewAt(wiki: WikiExport, asOf: AsOf, isAncestor: IsAncestor): Wi
     architecture:
       article === null ? [] : wiki.architecture.slice(0, wiki.architecture.indexOf(article) + 1),
     inflight: null,
+    people: null,
   };
   return new WikiView(then);
 }

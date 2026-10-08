@@ -27,6 +27,16 @@ blame.markIgnoredLines=false`, `-c blame.markUnblamableLines=false`, `-c diff.al
 binaries and files over `DEFAULT_MAX_FILE_BYTES` are skipped; a file whose blame takes over 120 s
 counts as unattributed.
 
+The commit log People counts from (`readAuthorship`) is pinned the same way, so its counts follow
+the sha and not the repository's config, replace refs or work tree: `git --no-replace-objects
+--attr-source=<sha> -c core.fsmonitor=false -c core.attributesFile=/dev/null -c
+core.bigFileThreshold=512m -c i18n.logOutputEncoding=UTF-8 -c diff.renames=true -c
+diff.renameLimit=1000 log -z -M --root --numstat --diff-merges=off --diff-algorithm=myers
+--no-show-signature --no-color --no-ext-diff --no-textconv`, then the format and the sha.
+`--attr-source` needs git 2.40; with an older git (detected once) the log runs without it and
+the People summary notes that attributes from the work tree may apply. The log stops after 10
+minutes, or past 256 MiB of output, with a GitError.
+
 ## Consequences
 
 ADR-0003 is superseded. The first People run on a repository costs about half a minute of blame;

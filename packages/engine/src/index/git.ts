@@ -14,6 +14,8 @@ export class GitTimeoutError extends GitError {}
 export interface GitOptions {
   /** Stop git after this many milliseconds, with a GitTimeoutError; no limit when absent. */
   timeoutMs?: number;
+  /** Stop git once its output passes this many bytes, with a GitError; 1 GiB when absent. */
+  maxBytes?: number;
   /**
    * Variables to set on top of scrubbedGitEnv(), e.g. work in flight's GIT_CONFIG_GLOBAL=/dev/null
    * for every command in its own object store (C13).
@@ -104,9 +106,15 @@ export function scrubbedGitEnv(extra: Record<string, string> = {}): NodeJS.Proce
   return env;
 }
 
-/** git never ran to completion; an output overflow gets its own, actionable message. */
-function spawnError(error: NodeJS.ErrnoException): GitError {
-  if (error.code === "ENOBUFS" || /maxBuffer/i.test(error.message)) {
+/**
+ * git never ran to completion; an output overflow gets its own, actionable message, naming the
+ * caller's GitOptions.maxBytes when it gave one.
+ */
+function spawnError(error: NodeJS.ErrnoException, maxBytes?: number): GitError {
+  const overflow = error.code === "ENOBUFS" || /maxBuffer/i.test(error.message);
+  if (overflow && maxBytes !== undefined)
+    return new GitError(`git output passed its ${maxBytes}-byte limit`);
+  if (overflow) {
     return new GitError(
       "the repository's tracked content is too large to index in one pass " +
         "(git output exceeded the 1 GiB read buffer)",
@@ -183,12 +191,15 @@ function isPartialClone(repo: string, options: GitOptions = {}): boolean {
  */
 export function git(repo: string, args: readonly string[], options: GitOptions = {}): Buffer {
   const result = spawnSync("git", [...repoArgs(repo, options), ...args], {
-    maxBuffer: 1 << 30,
+    maxBuffer: options.maxBytes ?? 1 << 30,
     env: gitEnv(options),
     timeout: options.timeoutMs,
   });
   if (result.error) {
-    throw timeoutError(result.error, repo, args, options.timeoutMs) ?? spawnError(result.error);
+    throw (
+      timeoutError(result.error, repo, args, options.timeoutMs) ??
+      spawnError(result.error, options.maxBytes)
+    );
   }
   if (result.status !== 0) {
     const stderr = result.stderr.toString("utf8").trim();

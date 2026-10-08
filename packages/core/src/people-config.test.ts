@@ -38,6 +38,9 @@ describe("match keys (spec v2 #6 §5)", () => {
   it("shows a key in a message without an email's value", () => {
     expect(shownMatchKey("email:ada@example.com")).toBe("an email: key");
     expect(shownMatchKey("name:Ada Lovelace")).toBe("name:ada lovelace");
+    // A name key can hold an address, as an author's name can: its value is redacted too.
+    expect(shownMatchKey("name:Ada@Example.com")).toBe("name:[email]");
+    expect(shownMatchKey("name:Ada\uFF20example.com")).toBe("name:[email]");
     expect(shownMatchKey("nope")).toBe("a malformed key");
   });
 });
@@ -75,6 +78,11 @@ describe("PeopleConfig (spec v2 #6 R9)", () => {
     expect(parsed.people[0]?.narrative).toBe(true);
     expect(parsed.owner).toEqual(["email:owner@example.com"]);
     expect(parsed.minCommits).toBe(5);
+  });
+
+  it("keeps owner: [] apart from no owner key: an explicit empty list names no owner", () => {
+    expect(PeopleConfig.parse({ owner: [] }).owner).toEqual([]);
+    expect(PeopleConfig.parse({}).owner).toBeUndefined();
   });
 
   it("says where a bad file is wrong without repeating an email or an odd key", () => {

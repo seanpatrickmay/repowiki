@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { PersonId, PersonName } from "./person.ts";
-import { normalizedText } from "./plain-text.ts";
+import { normalizedText, withoutEmails } from "./plain-text.ts";
 
 /** What a match key names: an author name, an author email, or a GitHub login (spec v2 #6 §5). */
 export type MatchKind = "name" | "email" | "login";
@@ -115,7 +115,11 @@ export const PeopleConfig = z
     exclude: keys,
     bots: keys,
     humans: keys,
-    /** The owner's identities: their narrative is on unless their entry says `narrative: false`. */
+    /**
+     * The owner's identities: their narrative is on unless their entry says `narrative: false`.
+     * Absent, the owner is the documented repository's configured user.email; `[]` says there is
+     * no owner, with no fallback, so nobody gets a narrative by default.
+     */
     owner: z.array(MatchKey).optional(),
     minCommits: z.int().min(1).max(1_000_000).default(DEFAULT_MIN_COMMITS),
     maxNarratives: z.int().min(0).max(1000).default(DEFAULT_MAX_NARRATIVES),
@@ -187,13 +191,16 @@ export function parsePeopleConfig(
 }
 
 /**
- * A key as a message may show it (a key that matched nobody, say): a name or login key whole,
- * an email key as its kind only, since its value is personal data.
+ * A key as a message may show it (a key that matched nobody, say): a name or login key whole but
+ * for any address in it (a name key can hold one, as an author's name can: R10), an email key as
+ * its kind only, since its value is personal data.
  */
 export function shownMatchKey(key: string): string {
   const parsed = parseMatchKey(key);
   if (parsed === null) return "a malformed key";
-  return parsed.kind === "email" ? "an email: key" : `${parsed.kind}:${parsed.value}`;
+  return parsed.kind === "email"
+    ? "an email: key"
+    : `${parsed.kind}:${withoutEmails(parsed.value)}`;
 }
 
 /** A key as the store keeps it: SHA-256 of the store's salt and the key (spec v2 #6 R10). */

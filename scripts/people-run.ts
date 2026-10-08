@@ -2,6 +2,7 @@ import type { PeopleConfig } from "@repowiki/core";
 import {
   type BuildJournal,
   estimateTokens,
+  gitReadsAttributesAtSha,
   type PersonOutcome,
   type PersonRequest,
   type PreparedPeople,
@@ -15,7 +16,13 @@ import {
   writePeople,
 } from "@repowiki/engine";
 import type { ModelConfig, Provider } from "@repowiki/llm";
-import { exclusionNotes, narrativeCeilingUsd, type PeopleRow, withinBudget } from "./people-cli.ts";
+import {
+  attributesNotes,
+  exclusionNotes,
+  narrativeCeilingUsd,
+  type PeopleRow,
+  withinBudget,
+} from "./people-cli.ts";
 import { cell, problemLine } from "./wiki-cli.ts";
 
 export interface PeopleStepInput {
@@ -150,7 +157,10 @@ function peopleRows(
 function peopleNotes(prepared: PreparedPeople): string[] {
   const { refreshed, revoked } = prepared;
   const excluded = refreshed.identities.groups.filter((g) => g.excluded).length;
-  const notes = exclusionNotes(excluded, refreshed.snapshot.others.length > 0);
+  const notes = [
+    ...exclusionNotes(excluded, refreshed.snapshot.others.length > 0),
+    ...attributesNotes(gitReadsAttributesAtSha()),
+  ];
   if (revoked > 0)
     notes.push(
       `${revoked} narrative ${revoked === 1 ? "revision was" : "revisions were"} deleted: consent withdrawn in the people file.`,
