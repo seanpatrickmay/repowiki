@@ -36,6 +36,11 @@ export interface IdentityGroup {
   /** The salted keys among `keys` of its emails and of its logins: the registry's strong evidence. */
   emailKeys: string[];
   loginKeys: string[];
+  /**
+   * The salted keys among `keys` of shared placeholder addresses (isPlaceholderEmail): never
+   * evidence of who a stored row is, as they never join (T10's rule).
+   */
+  placeholderKeys: string[];
   /** The display name (R14). */
   name: string;
   /** Every other cleaned name, sorted, without the display name or a derived login. */
@@ -402,17 +407,21 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
         ...groupLogins.map((login) => `login:${login}`),
       ]),
     ];
-    const salted = (prefix: string) =>
+    const placeholder = (k: string) =>
+      k.startsWith("email:") && isPlaceholderEmail(k.slice("email:".length));
+    const salted = (prefix: string, which: "all" | "strong" | "placeholder" = "all") =>
       plain
         .filter((k) => k.startsWith(prefix))
+        .filter((k) => which === "all" || placeholder(k) === (which === "placeholder"))
         .map((k) => saltedKey(input.salt, k))
         .sort();
     return {
       at: list,
       identities: ids,
       keys: salted(""),
-      emailKeys: salted("email:"),
+      emailKeys: salted("email:", "strong"),
       loginKeys: salted("login:"),
+      placeholderKeys: salted("email:", "placeholder"),
       name,
       otherNames,
       kind: bot ? "bot" : "human",

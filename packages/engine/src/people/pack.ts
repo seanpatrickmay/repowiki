@@ -18,6 +18,12 @@ import {
 /** The pack's estimated token budget (spec v2 #6 §8.2). */
 export const PERSON_BUDGET_TOKENS = 20_000;
 
+/**
+ * The most chronicle claims a narrative has, and so the most episodes a pack shows (the Task 18
+ * ruling): past it, the oldest episodes are grouped (R15's collapse order), one claim a group.
+ */
+export const MAX_CHRONICLE_CLAIMS = 30;
+
 /** Paths a commit line shows before "and N more". */
 const MAX_PATHS = 5;
 /** Merged pull requests the pack lists, newest kept (planner ruling R21). */
@@ -43,6 +49,8 @@ export interface PackInput {
   /** For an append (R25): the shas the stored narrative covers; only newer episodes are shown. */
   covered?: ReadonlySet<string> | null;
   budgetTokens?: number;
+  /** The most episodes shown (MAX_CHRONICLE_CLAIMS; an append's room after its stored claims). */
+  maxEpisodes?: number;
 }
 
 export interface PersonPack {
@@ -59,14 +67,23 @@ export interface PersonPack {
   episodes: { full: number; collapsed: number; dropped: number };
 }
 
-/** Repository text as one line of the pack: no email, no break, nothing that forges structure. */
+/** How much of a repository string packText reads, in code points, before anything else. */
+const MAX_READ = 1000;
+
+/**
+ * Repository text as one line of the pack: no email, no break, nothing that forges structure. It
+ * cuts first (so a long unbroken token costs nothing), scrubs emails, makes one clean line, cuts
+ * to `max` UTF-16 units well formed, and scrubs again in case the cut made a new address.
+ */
 export const packText = (text: string, max = MAX_TEXT): string => {
+  const head =
+    text.length <= MAX_READ ? text : [...text.slice(0, 2 * MAX_READ)].slice(0, MAX_READ).join("");
   const line = clean(
-    withoutEmails(text)
+    withoutEmails(head)
       .replace(/[\s\u0085]+/g, " ")
       .trim(),
   );
-  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+  return withoutEmails(line.length <= max ? line : `${line.slice(0, max - 1).toWellFormed()}…`);
 };
 
 const day = (iso: string) => iso.slice(0, 10);
@@ -88,12 +105,46 @@ export function ancestorsOf(commits: readonly AuthoredCommit[], basis: string): 
 }
 
 interface Episode {
-  /** "PR #n …" or "Commits outside pull requests, yyyy-mm". */
-  heading: string;
-  /** The heading's own citable sha (an authored or merged PR's merge commit), or null. */
-  landing: { sha: string; date: string } | null;
+  /** `PR #n "title"` or "Commits outside pull requests, yyyy-mm": each part already packText. */
+  name: string;
+  /** A pull request's "merged yyyy-mm-dd" (with its citable merge), or null for a month. */
+  merged: string | null;
+  /** The heading's own citable shas (an authored or merged PR's merge commit): none, or one each. */
+  landings: { sha: string; date: string }[];
   /** Oldest first. */
   commits: AuthoredCommit[];
+  /** For a group of episodes, each member's name (and merge); null for one episode. */
+  parts: string[] | null;
+}
+
+/** Episodes as one: their commits oldest first, their landings, and each one's name. */
+function groupOf(members: readonly Episode[]): Episode {
+  if (members.length === 1) return members[0] as Episode;
+  return {
+    name: `${members.length} episodes grouped`,
+    merged: null,
+    landings: members.flatMap((m) => m.landings),
+    commits: members
+      .flatMap((m) => m.commits)
+      .sort((a, b) => Date.parse(a.authorDate) - Date.parse(b.authorDate)),
+    parts: members.map((m) => (m.merged === null ? m.name : `${m.name}, ${m.merged}`)),
+  };
+}
+
+/**
+ * At most `limit` episodes, oldest first: past it, the oldest are grouped into runs of equal
+ * size (R15's collapse order) until the count fits, so the newest stay apart longest.
+ */
+function capped(episodes: readonly Episode[], limit: number): Episode[] {
+  if (episodes.length <= limit) return [...episodes];
+  const size = Math.ceil(episodes.length / limit);
+  const out: Episode[] = [];
+  let i = 0;
+  while (out.length + (episodes.length - i) > limit) {
+    out.push(groupOf(episodes.slice(i, i + size)));
+    i += size;
+  }
+  return [...out, ...episodes.slice(i)];
 }
 
 /**
@@ -119,58 +170,69 @@ export function buildPersonPack(input: PackInput): PersonPack {
   for (const commit of shown) {
     const landing = commit.pr === null ? undefined : input.landings.get(commit.pr);
     let key: string;
-    let heading: string;
-    let own: Episode["landing"] = null;
+    let name: string;
+    let merged: string | null = null;
+    let own: { sha: string; date: string } | null = null;
     if (landing !== undefined) {
       key = `pr-${landing.number}`;
       const citable =
         landing.sha !== commit.sha &&
         (input.prAuthors.get(landing.number) === input.group || landing.merger === input.group);
       if (citable) own = { sha: landing.sha, date: landing.mergedAt };
-      const title = landing.title === null ? "" : ` ${quoted(landing.title)}`;
-      heading = `PR #${landing.number}${title}`;
-      const merged = `merged ${day(landing.mergedAt)}${own === null ? "" : ` (commit:${sha12(own.sha)})`}`;
-      heading = `${heading}, {range}, ${merged}`;
+      name = `PR #${landing.number}${landing.title === null ? "" : ` ${quoted(landing.title)}`}`;
+      merged = `merged ${day(landing.mergedAt)}${own === null ? "" : ` (commit:${sha12(own.sha)})`}`;
     } else {
       key = `month-${commit.authorDate.slice(0, 7)}`;
-      heading = `Commits outside pull requests, ${commit.authorDate.slice(0, 7)}`;
+      name = `Commits outside pull requests, ${commit.authorDate.slice(0, 7)}`;
     }
-    const episode = byKey.get(key) ?? { heading, landing: own, commits: [] };
+    const episode: Episode = byKey.get(key) ?? {
+      name,
+      merged,
+      landings: own === null ? [] : [own],
+      commits: [],
+      parts: null,
+    };
     episode.commits.push(commit);
     byKey.set(key, episode);
   }
-  const episodes = [...byKey.values()].sort(
-    (a, b) =>
-      Date.parse(a.commits[0]?.authorDate ?? "") - Date.parse(b.commits[0]?.authorDate ?? "") ||
-      (a.heading < b.heading ? -1 : 1),
+  const episodes = capped(
+    [...byKey.values()].sort(
+      (a, b) =>
+        Date.parse(a.commits[0]?.authorDate ?? "") - Date.parse(b.commits[0]?.authorDate ?? "") ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    ),
+    Math.max(1, Math.floor(input.maxEpisodes ?? MAX_CHRONICLE_CLAIMS)),
   );
 
   const commitLine = (c: AuthoredCommit) => {
     const features = input.commitFeatures.get(c.sha) ?? [];
-    const paths = c.files.map((f) => packText(f.path));
-    const more = paths.length > MAX_PATHS ? `, and ${paths.length - MAX_PATHS} more` : "";
-    return `- commit:${sha12(c.sha)} ${day(c.authorDate)} ${quoted(c.subject)} — features: ${features.length === 0 ? "none" : features.join(", ")} — files: ${paths.slice(0, MAX_PATHS).join(", ") || "none"}${more}`;
+    const paths = c.files.slice(0, MAX_PATHS).map((f) => packText(f.path));
+    const more = c.files.length > MAX_PATHS ? `, and ${c.files.length - MAX_PATHS} more` : "";
+    return `- commit:${sha12(c.sha)} ${day(c.authorDate)} ${quoted(c.subject)} — features: ${features.length === 0 ? "none" : features.join(", ")} — files: ${paths.join(", ") || "none"}${more}`;
   };
   const rangeOf = (e: Episode) => {
     const first = day(e.commits[0]?.authorDate ?? "");
     const last = day(e.commits.at(-1)?.authorDate ?? "");
     return first === last ? first : `${first} to ${last}`;
   };
-  const full = (e: Episode) => [
-    `### ${e.heading.replace("{range}", rangeOf(e))}`,
-    ...e.commits.map(commitLine),
-  ];
+  const heading = (e: Episode) =>
+    e.parts !== null
+      ? `${e.name}, ${rangeOf(e)}: ${e.parts.join("; ")}`
+      : `${e.name}${e.merged === null ? "" : `, ${rangeOf(e)}, ${e.merged}`}`;
+  const full = (e: Episode) => [`### ${heading(e)}`, ...e.commits.map(commitLine)];
   const collapsed = (e: Episode) => {
     const first = e.commits[0] as AuthoredCommit;
     const last = e.commits.at(-1) as AuthoredCommit;
-    const name = e.heading.replace(/, \{range\}.*$/, "");
     const ends =
       first === last
         ? `commit:${sha12(first.sha)}`
         : `commit:${sha12(first.sha)} … commit:${sha12(last.sha)}`;
-    const merged = e.landing === null ? "" : ` (merged: commit:${sha12(e.landing.sha)})`;
+    const merged =
+      e.landings.length === 0
+        ? ""
+        : ` (merged: ${e.landings.map((l) => `commit:${sha12(l.sha)}`).join(", ")})`;
     return [
-      `- ${name}, ${rangeOf(e).replace(" to ", "–")}, ${e.commits.length} ${e.commits.length === 1 ? "commit" : "commits"}: ${ends}${merged}`,
+      `- ${e.name}, ${rangeOf(e).replace(" to ", "–")}, ${e.commits.length} ${e.commits.length === 1 ? "commit" : "commits"}: ${ends}${merged}`,
     ];
   };
 
@@ -192,7 +254,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
   ];
   const mergedLandings = [...input.landings.values()]
     .filter((l) => l.merger === input.group && input.covered?.has(l.sha) !== true)
-    .sort((a, b) => a.number - b.number)
+    .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt) || a.number - b.number)
     .slice(-MAX_MERGED_LISTED);
   const merged =
     mergedLandings.length === 0
@@ -206,25 +268,46 @@ export function buildPersonPack(input: PackInput): PersonPack {
             .join(", ")}`,
         ];
 
-  // Trim: collapse the oldest episodes, then drop the oldest collapsed ones.
+  // Trim: collapse the oldest episodes, then drop the oldest collapsed ones. Each episode is
+  // rendered once both ways, and the text's length is kept as a running sum, so the loop is
+  // linear; estimateTokens of the joined text is exactly what this sum gives.
+  const fullLines = episodes.map(full);
+  const collapsedLines = episodes.map(collapsed);
+  const size = (lines: readonly string[]) => lines.reduce((n, l) => n + l.length + 1, 0);
+  const fullSize = fullLines.map(size);
+  const collapsedSize = collapsedLines.map(size);
+  const earlierLine = (n: number) => `- and ${n} earlier ${n === 1 ? "episode" : "episodes"}`;
+  const fixed = size(header) + size(merged);
+  let body = fullSize.reduce((a, b) => a + b, 0);
+  /** The episodes the first `n` shown units hold: a group counts each of its members. */
+  const members = (n: number) =>
+    episodes.slice(0, n).reduce((sum, e) => sum + (e.parts?.length ?? 1), 0);
+  const tokensOf = (dropped: number) =>
+    Math.ceil(
+      Math.max(
+        0,
+        fixed + body + (dropped === 0 ? 0 : earlierLine(members(dropped)).length + 1) - 1,
+      ) / 2.5,
+    );
   let collapsedCount = 0;
   let dropped = 0;
-  const render = () => {
-    const kept = episodes.slice(dropped);
-    const body = kept.flatMap((e, i) => (i + dropped < collapsedCount ? collapsed(e) : full(e)));
-    const earlier =
-      dropped === 0 ? [] : [`- and ${dropped} earlier ${dropped === 1 ? "episode" : "episodes"}`];
-    return [...header, ...earlier, ...body, ...merged].join("\n");
-  };
-  let text = render();
-  while (estimateTokens(text) > budget && collapsedCount < episodes.length) {
+  while (tokensOf(0) > budget && collapsedCount < episodes.length) {
+    body += (collapsedSize[collapsedCount] ?? 0) - (fullSize[collapsedCount] ?? 0);
     collapsedCount++;
-    text = render();
   }
-  while (estimateTokens(text) > budget && dropped < episodes.length) {
+  while (tokensOf(dropped) > budget && dropped < episodes.length) {
+    body -= collapsedSize[dropped] ?? 0;
     dropped++;
-    text = render();
   }
+  const text = [
+    ...header,
+    ...(dropped === 0 ? [] : [earlierLine(members(dropped))]),
+    ...episodes.slice(dropped).flatMap((_, j) => {
+      const i = j + dropped;
+      return (i < collapsedCount ? collapsedLines[i] : fullLines[i]) ?? [];
+    }),
+    ...merged,
+  ].join("\n");
 
   // The citable set: exactly the shas the text shows.
   const shas = new Set<string>();
@@ -239,7 +322,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
         ? [e.commits[0] as AuthoredCommit, e.commits.at(-1) as AuthoredCommit]
         : e.commits;
     for (const c of commits) cite(c.sha, c.authorDate);
-    if (e.landing !== null) cite(e.landing.sha, e.landing.date);
+    for (const l of e.landings) cite(l.sha, l.date);
   });
   for (const l of mergedLandings) cite(l.sha, l.mergedAt);
   return {
@@ -259,13 +342,18 @@ export function buildPersonPack(input: PackInput): PersonPack {
 
 /**
  * The pack of the person `personId` from a refresh (refreshPeople's result), or null when the
- * snapshot has no such human. `covered` and `budgetTokens` as buildPersonPack takes them.
+ * snapshot has no such human. `covered`, `budgetTokens` and `maxEpisodes` as buildPersonPack
+ * takes them.
  */
 export function packFor(
   refreshed: Refreshed,
   personId: string,
   manifest: Manifest,
-  options: { covered?: ReadonlySet<string> | null; budgetTokens?: number } = {},
+  options: {
+    covered?: ReadonlySet<string> | null;
+    budgetTokens?: number;
+    maxEpisodes?: number;
+  } = {},
 ): PersonPack | null {
   const person = refreshed.snapshot.people.find((p) => p.id === personId && p.kind === "human");
   const group = refreshed.assigned.ids.indexOf(personId);

@@ -53,8 +53,11 @@ const EMAIL_TEST = new RegExp(EMAIL_TOKEN.source, "u");
 const replaced = (text: string): string =>
   text.replace(EMAIL_TOKEN, (_match, lead: string | undefined) => `${lead ?? ""}[email]`);
 
-/** Line separators other than ASCII whitespace can sit inside an address: the check drops them. */
-const SEPARATORS = /[\u0085\u2028\u2029]/g;
+/**
+ * Characters that can sit inside an address and that the check drops: line separators other than
+ * ASCII whitespace, and the zero-width joiner and non-joiner, which normalizedText keeps for names.
+ */
+const SEPARATORS = /[\u0085\u2028\u2029\u200C\u200D]/g;
 
 /** The copy the email check reads: normalized, with U+3002 (the ideographic full stop) a dot. */
 const checkedCopy = (text: string): string =>

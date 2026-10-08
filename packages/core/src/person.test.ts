@@ -43,6 +43,9 @@ describe("cleanPersonName (spec v2 #6 §6.1, R14)", () => {
       "ada\u0085@example.com",
       "Ada @ example.com",
       "ada@exa\u00ADmple.com",
+      "kim.q7hidden\u200D@example.com",
+      "kim.q7hidden@\u200Cexample.com",
+      "kim.q7hidden@example\u200D.com",
     ])
       expect(cleanPersonName(name), JSON.stringify(name)).toBe("");
   });
@@ -98,6 +101,8 @@ describe("withoutEmails and cleanPullTitle (planner ruling R5)", () => {
     expect(cleanPullTitle("Fix\nthe\u202E parser  for a@b.io")).toBe("Fix the parser for [email]");
     expect([...(cleanPullTitle("t".repeat(300)) ?? "")]).toHaveLength(200);
     expect(cleanPullTitle(" \u0085 ")).toBeNull();
+    for (const joined of ["kim.q7hidden\u200D@example.com", "kim.q7hidden@example\u200C.com"])
+      expect(cleanPullTitle(`Fix for ${joined}`), JSON.stringify(joined)).toBe("Fix for [email]");
   });
 
   it("removes an address before blanking, so an invisible character cannot split it", () => {

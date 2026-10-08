@@ -22,7 +22,7 @@ import {
   uniqueDraft,
   verifyClaims,
 } from "../write/index.ts";
-import { ancestorsOf, type PersonPack, packFor } from "./pack.ts";
+import { ancestorsOf, MAX_CHRONICLE_CLAIMS, type PersonPack, packFor } from "./pack.ts";
 import {
   MAX_PERSON_OUTPUT_TOKENS,
   PEOPLE_GIVE_UP,
@@ -367,11 +367,16 @@ export function personRequest(
   manifest: Manifest,
   options: { parent: PersonRevision | null; append: boolean; budgetTokens?: number },
 ): PersonRequest | null {
-  const append = options.append && options.parent !== null;
+  // An append adds at most the room its stored chronicle leaves under the cap; with none left,
+  // the narrative is written whole, its episodes grouped to fit (the Task 18 ruling).
+  const stored = options.parent?.sections.find((s) => s.key === "chronicle")?.claims.length ?? 0;
+  const room = MAX_CHRONICLE_CLAIMS - stored;
+  const append = options.append && options.parent !== null && room >= 1;
   const covered =
     append && options.parent !== null ? ancestorsOf(refreshed.commits, options.parent.basis) : null;
   const pack = packFor(refreshed, personId, manifest, {
     covered,
+    maxEpisodes: append ? room : MAX_CHRONICLE_CLAIMS,
     ...(options.budgetTokens === undefined ? {} : { budgetTokens: options.budgetTokens }),
   });
   if (pack === null) return null;

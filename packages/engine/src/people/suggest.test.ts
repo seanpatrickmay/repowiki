@@ -46,6 +46,8 @@ describe("maskEmail (spec v2 #6 R10)", () => {
     expect(maskEmail("\u001b[31mve@ex\u202Eample.com\u0085")).toBe("[…@example.com");
     expect(maskEmail("\u200Beve@ex\u00ADample.com")).toBe("e…@example.com");
     expect(maskEmail("eve@\u001b]8;;x\u0007.com")).toBe("e…@]8;;x.com");
+    // Blank fillers (Hangul, braille, variation selectors) cannot pad the column either.
+    expect(maskEmail("\u3164\u2800eve@ex\u3164\u115Fample\uFE0F.com")).toBe("e…@example.com");
   });
 });
 

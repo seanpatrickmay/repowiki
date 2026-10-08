@@ -1,8 +1,14 @@
-import { cleanPersonName, INVISIBLE_CHARACTERS, normalizeName } from "@repowiki/core";
+import {
+  cleanPersonName,
+  INFLIGHT_FILLERS,
+  INVISIBLE_CHARACTERS,
+  normalizeName,
+} from "@repowiki/core";
 import type { IdentityGroup } from "./identities.ts";
 
-/** The parts of an address a reader can see: no control, bidi or invisible character. */
-const seen = (text: string): string => text.toWellFormed().replace(INVISIBLE_CHARACTERS, "");
+/** The parts of an address a reader can see: no control, bidi, invisible or blank filler. */
+const seen = (text: string): string =>
+  text.toWellFormed().replace(INVISIBLE_CHARACTERS, "").replace(INFLIGHT_FILLERS, "");
 
 /**
  * An email as people:suggest may show it (spec v2 #6 R10): at most the first character of the

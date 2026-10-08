@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PeopleConfig } from "@repowiki/core";
 import { makeFeature } from "@repowiki/core/test-fixtures";
@@ -129,11 +129,16 @@ describe("refreshPeople (spec v2 #6 §4 steps 4-5)", () => {
 
   it("asserts the caller holds the out dir's build lock", async () => {
     const lock = join(repo.dir, "..", `lock-${process.pid}-${Date.now()}`);
-    await expect(refreshPeople({ ...input(), lock })).rejects.toThrow(/build lock/);
-    writeFileSync(lock, "pid 1 since 2026-01-01T00:00:00.000Z id x\n");
-    await expect(refreshPeople({ ...input(), lock })).rejects.toThrow(/build lock/);
-    writeFileSync(lock, `pid ${process.pid} since 2026-01-01T00:00:00.000Z id x\n`);
-    await expect(refreshPeople({ ...input(), lock })).resolves.toBeDefined();
+    try {
+      await expect(refreshPeople({ ...input(), lock })).rejects.toThrow(/build lock/);
+      writeFileSync(lock, "pid 1 since 2026-01-01T00:00:00.000Z id x\n");
+      await expect(refreshPeople({ ...input(), lock })).rejects.toThrow(/build lock/);
+      writeFileSync(lock, `pid ${process.pid} since 2026-01-01T00:00:00.000Z id x\n`);
+      await expect(refreshPeople({ ...input(), lock })).resolves.toBeDefined();
+    } finally {
+      rmSync(lock, { force: true });
+    }
+    expect(existsSync(lock)).toBe(false);
   });
 
   it("refuses a store with no manifest", async () => {
