@@ -25,3 +25,6 @@ export const PEOPLE_URL = "/people/";
 export const personUrl = (id: string): string => `${PEOPLE_URL}${id}/`;
 /** The People index's part for one feature. */
 export const peopleFeatureUrl = (featureId: string): string => `${PEOPLE_URL}#feature-${featureId}`;
+/** The repository's activity: all time, a year (`2026`) or a month (`2026-03`). */
+export const activityUrl = (period?: string): string =>
+  `/special/activity/${period === undefined ? "" : `${period}/`}`;
