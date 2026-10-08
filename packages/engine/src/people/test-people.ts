@@ -173,6 +173,7 @@ export async function teamFixture(): Promise<TeamFixture> {
     store,
     config: PeopleConfig.parse({}),
     ownerEmail: null,
+    lock: null,
   });
   return {
     repo,

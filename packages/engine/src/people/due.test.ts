@@ -25,6 +25,7 @@ const refresh = (file: unknown) =>
     store: fx.store,
     config: PeopleConfig.parse(file),
     ownerEmail: null,
+    lock: null,
   });
 const revision = (personId: string, basis: string): PersonRevision =>
   makePersonRevision({ personId, basis, id: `person-${personId}-${fx.feb.slice(0, 12)}-1` });

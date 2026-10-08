@@ -45,6 +45,7 @@ import {
 import { articleDueAsStored, estimateFor, needsKey, readInput, runUpdate } from "./update-run.ts";
 import {
   acquireBuildLock,
+  BUILD_LOCK,
   describeError,
   exitWithError,
   problemLine,
@@ -333,6 +334,7 @@ async function replay(
     models,
     log,
     command: "wiki:replay",
+    lock: join(out, BUILD_LOCK),
     batch: args.batch,
     maxUsd: args.peopleMaxUsd,
   });

@@ -32,6 +32,8 @@ export interface PeopleStepInput {
   config: PeopleConfig;
   /** The documented repository's configured user.email (planner ruling R3), or null. */
   ownerEmail: string | null;
+  /** The out dir's build lock the caller holds, or null for a throwaway store (RefreshInput). */
+  lock: string | null;
   narrative: boolean;
   only: ReadonlySet<string> | null;
   rebuildBlame: boolean;
@@ -76,6 +78,7 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     store,
     config: input.config,
     ownerEmail: input.ownerEmail,
+    lock: input.lock,
     rebuildBlame: input.rebuildBlame,
     manifest,
     narrative: input.narrative,

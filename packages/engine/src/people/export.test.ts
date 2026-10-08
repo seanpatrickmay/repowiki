@@ -28,6 +28,7 @@ const refresh = (file: unknown = {}) =>
     store: fx.store,
     config: PeopleConfig.parse(file),
     ownerEmail: configuredEmail(fx.repo.dir),
+    lock: null,
   });
 const options = { repo: "demo", exportedAt: "2026-10-06T12:00:00Z" };
 
@@ -68,16 +69,27 @@ describe("buildExport's People (spec v2 #6 §5, R28)", () => {
 });
 
 describe("the export's privacy (spec v2 #6 §13)", () => {
-  it("writes no author email or local part to export.json or llms.txt, and nothing of an excluded person", async () => {
+  it("writes no author email, local part, salt or salted key to export.json or llms.txt, and nothing of an excluded person", async () => {
     await refresh({ exclude: ["name:Kim Hidden"] });
+    // A stored narrative, so the pages half of the export is scanned too.
+    fx.store.putPersonRevision(
+      makePersonRevision({ sha: fx.head, id: `person-ada-lovelace-${fx.head.slice(0, 12)}-1` }),
+    );
     const path = join(fx.out, "export.json");
     writeExport(fx.store, path, options);
     const json = readFileSync(path, "utf8");
     const llms = readFileSync(join(fx.out, "llms.txt"), "utf8");
     expect(WikiExport.parse(JSON.parse(json)).people?.snapshot.people.length).toBeGreaterThan(0);
     expect(llms).toContain("(people/ada-lovelace/)");
+    expect(WikiExport.parse(JSON.parse(json)).people?.pages).toHaveLength(1);
+    // Neither the store's salt nor any salted key of the registry leaves the store (R10).
+    const hashes = [
+      fx.store.getPeopleSalt(),
+      ...fx.store.listPeopleRegistry().flatMap((row) => row.keys),
+    ];
+    expect(hashes.length).toBeGreaterThan(1);
     for (const text of [json, llms]) {
-      for (const secret of PEOPLE_SECRETS) expect(text).not.toContain(secret);
+      for (const secret of [...PEOPLE_SECRETS, ...hashes]) expect(text).not.toContain(secret);
       expect(text).not.toContain("Kim Hidden");
       expect(text).not.toContain("kim-hidden");
     }

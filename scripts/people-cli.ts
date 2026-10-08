@@ -17,6 +17,8 @@ import {
   withoutEmails,
 } from "@repowiki/core";
 import {
+  configuredEmail,
+  GitError,
   markdownCodeSpan,
   maskEmail,
   type PeopleRead,
@@ -27,7 +29,16 @@ import {
 import type { LedgerTotals } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
-import { acquireBuildLock, badOption, cell, costLines, count, once, priced } from "./wiki-cli.ts";
+import {
+  acquireBuildLock,
+  badOption,
+  cell,
+  costLines,
+  count,
+  once,
+  priced,
+  problemLine,
+} from "./wiki-cli.ts";
 
 export const SUGGEST_USAGE =
   "usage: pnpm people:suggest <repo-path> [--out dir] [--people-file file]";
@@ -427,6 +438,21 @@ export function exclusionNotes(
 
 /** The prefix of a throwaway store copy's directory in the out dir. */
 export const PEOPLE_SCRATCH_PREFIX = ".people-scratch-";
+
+/**
+ * The owner's address for People (planner ruling R3): the documented repository's configured
+ * user.email, or null. A git failure reading it is one note through `log` ("owner not found:
+ * <cause>", printable), never a silent "no owner".
+ */
+export function ownerEmailOf(repo: string, log: (line: string) => void): string | null {
+  try {
+    return configuredEmail(repo);
+  } catch (err) {
+    if (!(err instanceof GitError)) throw err;
+    log(problemLine(`owner not found: ${err.message}`));
+    return null;
+  }
+}
 
 /**
  * What the People summary says when git cannot read attributes at the sha (`--attr-source` needs

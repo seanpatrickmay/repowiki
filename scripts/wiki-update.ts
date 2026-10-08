@@ -14,7 +14,7 @@ import { resolveOutDir } from "./out-dir.ts";
 import { peopleAfterUpdate } from "./people-hook.ts";
 import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
 import { estimateFor, needsKey, readInput, runUpdate, writeUpdateOutputs } from "./update-run.ts";
-import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
+import { acquireBuildLock, BUILD_LOCK, exitWithError, requireApiKey } from "./wiki-cli.ts";
 
 /**
  * pnpm wiki:update <repo> <rev>: moves the wiki stored for <repo> from its head to <rev> (spec
@@ -75,6 +75,7 @@ async function main(): Promise<void> {
         models,
         log,
         command: "wiki:update",
+        lock: join(out, BUILD_LOCK),
         batch: args.batch,
         maxUsd: args.peopleMaxUsd,
       });

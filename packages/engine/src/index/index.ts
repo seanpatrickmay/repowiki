@@ -56,4 +56,4 @@ export type { SourceLanguage } from "./languages.ts";
 export type { SymbolDef, SymbolKind } from "./symbols.ts";
 /** Test-only: scripted git repositories (spec §8's fixture repo builder), for other modules' tests. */
 export { createTestRepo, type TestAuthor, type TestRepo } from "./test-repo.ts";
-export { configuredEmail } from "./user-email.ts";
+export { configuredEmail, PEOPLE_READ_TIMEOUT_MS } from "./user-email.ts";

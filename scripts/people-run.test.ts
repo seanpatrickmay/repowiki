@@ -22,6 +22,7 @@ const step = (overrides: Partial<Parameters<typeof runPeopleStep>[0]> = {}) => {
     store: fx.store,
     config: PeopleConfig.parse({}),
     ownerEmail: configuredEmail(fx.repo.dir),
+    lock: null,
     narrative: true,
     only: null,
     rebuildBlame: false,

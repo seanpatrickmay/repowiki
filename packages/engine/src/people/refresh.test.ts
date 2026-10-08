@@ -1,7 +1,15 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { PeopleConfig } from "@repowiki/core";
 import { makeFeature } from "@repowiki/core/test-fixtures";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { configuredEmail, createTestRepo, type TestRepo } from "../index/index.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  configuredEmail,
+  createTestRepo,
+  GitError,
+  GitTimeoutError,
+  type TestRepo,
+} from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
 import { readPeople, refreshPeople } from "./refresh.ts";
 
@@ -48,6 +56,7 @@ const input = (file: unknown = {}) => ({
   store,
   config: PeopleConfig.parse(file),
   ownerEmail: null,
+  lock: null,
 });
 
 describe("readPeople (spec v2 #6 §4 steps 1-3)", () => {
@@ -59,6 +68,11 @@ describe("readPeople (spec v2 #6 §4 steps 1-3)", () => {
     expect(readPeople(input({ ignoreRevs: false })).ignoreRevs).toEqual([]);
     expect(store.listPeopleRegistry()).toEqual([]);
     expect(store.getPeopleSnapshot()).toBeNull();
+  });
+
+  it("stops every git read at its time limit", () => {
+    expect(() => readPeople({ ...input(), timeouts: { logMs: 1 } })).toThrow(GitTimeoutError);
+    expect(() => readPeople({ ...input(), timeouts: { readMs: 1 } })).toThrow(GitTimeoutError);
   });
 
   it("warns of a malformed mailmap line and an unmatched key, naming no email", () => {
@@ -96,6 +110,32 @@ describe("refreshPeople (spec v2 #6 §4 steps 4-5)", () => {
     expect(warnings[0]).toMatch(/blame\.ignoreRevsFile/);
   });
 
+  it("keeps the stored registry and snapshot byte for byte on a second run", async () => {
+    await refreshPeople(input());
+    const registry = JSON.stringify(store.listPeopleRegistry());
+    const snapshot = JSON.stringify(store.getPeopleSnapshot());
+    await refreshPeople(input());
+    expect(JSON.stringify(store.listPeopleRegistry())).toBe(registry);
+    expect(JSON.stringify(store.getPeopleSnapshot())).toBe(snapshot);
+  });
+
+  it("stores the registry and the snapshot together, or neither", async () => {
+    vi.spyOn(store, "putPeopleSnapshot").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+    await expect(refreshPeople(input())).rejects.toThrow(/disk full/);
+    expect(store.listPeopleRegistry()).toEqual([]);
+  });
+
+  it("asserts the caller holds the out dir's build lock", async () => {
+    const lock = join(repo.dir, "..", `lock-${process.pid}-${Date.now()}`);
+    await expect(refreshPeople({ ...input(), lock })).rejects.toThrow(/build lock/);
+    writeFileSync(lock, "pid 1 since 2026-01-01T00:00:00.000Z id x\n");
+    await expect(refreshPeople({ ...input(), lock })).rejects.toThrow(/build lock/);
+    writeFileSync(lock, `pid ${process.pid} since 2026-01-01T00:00:00.000Z id x\n`);
+    await expect(refreshPeople({ ...input(), lock })).resolves.toBeDefined();
+  });
+
   it("refuses a store with no manifest", async () => {
     const empty = openStore(":memory:");
     try {
@@ -118,6 +158,9 @@ describe("configuredEmail (planner ruling R3)", () => {
       expect(configuredEmail(repo.dir)).toBeNull();
       repo.git("config", "user.email", "Owner@Example.com");
       expect(configuredEmail(repo.dir)).toBe("Owner@Example.com");
+      // Any other failure is an error, never a silent "no owner".
+      expect(() => configuredEmail(repo.dir, { timeoutMs: 1 })).toThrow(GitTimeoutError);
+      expect(() => configuredEmail(join(repo.dir, "no-such-dir"))).toThrow(GitError);
     } finally {
       if (saved.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
       else process.env.GIT_CONFIG_GLOBAL = saved.global;
