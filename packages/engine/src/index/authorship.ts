@@ -21,8 +21,16 @@ export interface AuthoredCommit {
   /** The author as git stored it: never the mailmap's %aN (R5); untrusted text. */
   authorName: string;
   authorEmail: string;
-  /** The author date, ISO 8601 in the author's own offset (R5). */
+  /**
+   * The author date, ISO 8601 in the author's own offset (R5); an invalid offset is read as
+   * +00:00, and an undated commit holds its commit date here (the I3 ruling).
+   */
   authorDate: string;
+  /**
+   * True when git's author date has a year outside 1970-9999: the commit counts in totals but
+   * stays out of activity and first and last dates (the I3 ruling). Absent otherwise.
+   */
+  undated?: true;
   /** The committer date, as readHistory gives it. */
   commitDate: string;
   subject: string;
@@ -35,6 +43,22 @@ export interface AuthoredCommit {
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/;
+/** An author date as git can print it: any year's length, any two-digit offset. */
+const AUTHOR_DATE = /^(\d{4,})(-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(Z|[+-](\d{2}):(\d{2}))$/;
+
+/**
+ * An author date People can use (the I3 ruling), or null: a year outside 1970-9999, or a date
+ * that does not parse, gives null; an offset past +-23:59 is read as +00:00, the clock time kept.
+ */
+export function usableAuthorDate(raw: string): string | null {
+  const m = AUTHOR_DATE.exec(raw);
+  if (m === null) return null;
+  const [, year = "", rest = "", offset = "", hours = "", minutes = ""] = m;
+  if (year.length !== 4 || year < "1970") return null;
+  const valid = offset === "Z" || (Number(hours) <= 23 && Number(minutes) <= 59);
+  const date = `${year}${rest}${valid ? offset : "+00:00"}`;
+  return Number.isFinite(Date.parse(date)) ? date : null;
+}
 const NUMSTAT = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/;
 /** The format's fields after its leading NUL: one token each, NUL-separated. */
 const FIELDS = 8;
@@ -145,7 +169,6 @@ export function readAuthorship(
     if (
       !isSha(hash) ||
       !parentShas.every(isSha) ||
-      !ISO_DATE.test(authorDate) ||
       !ISO_DATE.test(commitDate) ||
       name === undefined ||
       email === undefined ||
@@ -177,12 +200,14 @@ export function readAuthorship(
     }
     const merge = parentShas.length > 1;
     const titleLine = body.split("\n").find((line) => line.trim() !== "");
+    const usable = usableAuthorDate(authorDate);
     commits.push({
       sha: hash,
       parents: parentShas,
       authorName: name,
       authorEmail: email,
-      authorDate,
+      authorDate: usable ?? commitDate,
+      ...(usable === null ? { undated: true as const } : {}),
       commitDate,
       subject,
       mergeTitle: merge && titleLine !== undefined ? titleLine.trim() : null,

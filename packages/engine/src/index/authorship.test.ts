@@ -244,6 +244,31 @@ describe("readAuthorship (spec v2 #6 R5, R6, R20)", () => {
     expect(attrSourceSupported("not git")).toBe(false);
   });
 
+  it("never throws on an author date git prints but People cannot use (the I3 ruling)", () => {
+    repo.write("a.py", "1\n");
+    const first = repo.commit("init", "+0000", ADA);
+    // Crafted author lines: a year-10000 timestamp, then a +99:59 offset.
+    const crafted = (parent: string, stamp: string) => {
+      const body = repo
+        .git("cat-file", "commit", parent)
+        .replace(/^(author .*>) \d+ [+-]\d{4}$/m, `$1 ${stamp}`)
+        .replace(/^parent .*\n/m, "")
+        .replace(/^(tree .*)$/m, `$1\nparent ${parent}`);
+      repo.write(".git/crafted", `${body}\n`);
+      return repo.git("hash-object", "--literally", "-t", "commit", "-w", ".git/crafted");
+    };
+    const late = crafted(first, "253402300800 +0000");
+    const offset = crafted(late, "1767225600 +9959");
+    const [o, l, f] = readAuthorship(repo.dir, offset);
+    // An invalid offset is read as +00:00, the clock time kept.
+    expect(o?.authorDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/);
+    expect(o?.undated).toBeUndefined();
+    // A year outside 1970-9999 leaves the commit undated, its commit date standing in.
+    expect(l?.undated).toBe(true);
+    expect(l?.authorDate).toBe(l?.commitDate);
+    expect(f?.undated).toBeUndefined();
+  });
+
   it("refuses a sha that is not 40 hex", () => {
     expect(() => readAuthorship(repo.dir, "HEAD")).toThrow(/not a 40-hex commit sha/);
   });
