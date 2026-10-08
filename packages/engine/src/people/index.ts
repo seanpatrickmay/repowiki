@@ -75,3 +75,14 @@ export {
   suggestionSnippet,
   suggestMerges,
 } from "./suggest.ts";
+export {
+  commitFeatureLookup,
+  MIN_NAMED_LENGTH,
+  PEOPLE_BANNED_WORDS,
+  type PersonVerifyContext,
+  personVerifyContext,
+  type StatedDate,
+  statedDates,
+  type VerifiedPersonClaim,
+  verifyPersonClaim,
+} from "./verify.ts";
