@@ -4,7 +4,19 @@ import { PeopleConfig } from "@repowiki/core";
 import { configuredEmail, readPeople } from "@repowiki/engine";
 import { PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPeopleFile, parseSuggestArgs, peopleFilePath, renderSuggest } from "./people-cli.ts";
+import {
+  DEFAULT_PEOPLE_MAX_USD,
+  exclusionNotes,
+  loadPeopleFile,
+  narrativeCeilingUsd,
+  parsePeopleArgs,
+  parseSuggestArgs,
+  parseUsd,
+  peopleFilePath,
+  renderPeopleSummary,
+  renderSuggest,
+  withinBudget,
+} from "./people-cli.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -119,5 +131,138 @@ describe("renderSuggest (spec v2 #6 §6 step 6)", () => {
       people: [{ match: ["login:bob-q7login"], narrative: true }],
     });
     expect(lowered).toMatch(/`bob`.*\| yes \(people file\) \|/);
+  });
+});
+
+describe("parsePeopleArgs (spec v2 #6 §10)", () => {
+  it("reads every flag, with --only repeated, and defaults to narratives on and $1", () => {
+    expect(parsePeopleArgs(["r"])).toEqual({
+      repo: "r",
+      out: null,
+      peopleFile: null,
+      config: null,
+      narrative: true,
+      only: [],
+      rebuildBlame: false,
+      batch: true,
+      maxUsd: DEFAULT_PEOPLE_MAX_USD,
+      dryRun: false,
+      disable: false,
+      forget: null,
+      verbose: false,
+    });
+    const args = parsePeopleArgs([
+      "r",
+      "--only",
+      "ada-lovelace",
+      "--only",
+      "kim-filler",
+      "--no-narrative",
+      "--rebuild-blame",
+      "--no-batch",
+      "--max-usd",
+      "0.25",
+      "--dry-run",
+    ]);
+    expect(args).toMatchObject({
+      only: ["ada-lovelace", "kim-filler"],
+      narrative: false,
+      rebuildBlame: true,
+      batch: false,
+      maxUsd: 0.25,
+      dryRun: true,
+    });
+    expect(parsePeopleArgs(["r", "--forget", "name:Someone Private"]).forget).toBe(
+      "name:Someone Private",
+    );
+  });
+
+  it.each([
+    [["r", "--only", "Ada Lovelace"], /--only takes a person id/],
+    [["r", "--max-usd", "0"], /--max-usd must be a number/],
+    [["r", "--max-usd", "1e3"], /--max-usd must be a number/],
+    [["r", "--max-usd", "101"], /up to 100/],
+    [["r", "--forget", "nobody"], /--forget takes a people-file match key/],
+    [["r", "--disable", "--dry-run"], /--disable takes no other run flag/],
+    [["r", "--forget", "name:x", "--only", "a"], /--forget takes no other run flag/],
+    [["r", "--disable", "--forget", "name:x"], /--disable takes no other run flag/],
+    [["r", "--dry-run", "--dry-run"], /usage/],
+  ])("refuses %j", (argv, message) => {
+    expect(() => parsePeopleArgs(argv)).toThrow(message);
+  });
+
+  it("never echoes an email key's value", () => {
+    try {
+      parsePeopleArgs(["r", "--forget", "email:not an address q7x"]);
+      expect.unreachable();
+    } catch (err) {
+      expect(String(err)).not.toContain("q7x");
+    }
+  });
+});
+
+describe("the People estimate and ceiling (R26)", () => {
+  it("prices a call and a retry, halved when batched", () => {
+    const batched = narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", true);
+    expect(narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", false)).toBeCloseTo(2 * batched);
+    // 2 x (5k + 3k) + 2.5k in, 5k out at $1/$5 per MTok, halved: about two cents.
+    expect(batched).toBeCloseTo((18_500 * 1 + 5_000 * 5) / 1e6 / 2);
+    expect(parseUsd("--people-max-usd", undefined, 0.5, "u")).toBe(0.5);
+  });
+
+  it("takes narratives in rank order while the next fits", () => {
+    const cost = (n: number) => n;
+    expect(withinBudget([0.4, 0.4, 0.3], cost, 1)).toEqual({
+      taken: [0.4, 0.4],
+      over: [0.3],
+      usd: 0.8,
+    });
+    expect(withinBudget([2, 0.1], cost, 1)).toEqual({ taken: [], over: [2, 0.1], usd: 0 });
+  });
+});
+
+describe("renderPeopleSummary", () => {
+  it("lists each person in code spans, the notes, and the cost block", () => {
+    const text = renderPeopleSummary(
+      "demo",
+      "a".repeat(40),
+      [
+        {
+          id: "ada-lovelace",
+          name: "Ada | Lovelace",
+          kind: "human",
+          commits: 1200,
+          narrative: "written",
+          dropped: 1,
+        },
+        {
+          id: "dependabot-bot",
+          name: "dependabot[bot]",
+          kind: "bot",
+          commits: 3,
+          narrative: "none (bot)",
+          dropped: 0,
+        },
+      ],
+      exclusionNotes(1, true),
+      {
+        calls: 1,
+        batchCalls: 1,
+        tokens: { in: 10, out: 5, cacheRead: 0, cacheWrite: 0 },
+        usd: 0.01,
+        unpricedCalls: 0,
+      },
+      0.02,
+    );
+    expect(text).toContain("# People: `demo` at aaaaaaa");
+    expect(text).toContain("| `ada-lovelace` | `Ada \\| Lovelace` | 1,200 | written | 1 |");
+    expect(text).toContain("| `dependabot-bot` (bot) |");
+    expect(text).toContain("is theirs by elimination");
+    expect(text).toContain("Cost: $0.0100 (estimated up front: at most $0.0200).");
+  });
+
+  it("says nothing of exclusion when nobody is excluded", () => {
+    expect(exclusionNotes(0, false)).toEqual([]);
+    expect(exclusionNotes(2, true)).toHaveLength(1);
   });
 });
