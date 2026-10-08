@@ -152,6 +152,30 @@ describe("writePeople (spec v2 #6 §8.4)", () => {
     expect(requests[0]?.cacheKey).toBeUndefined();
   });
 
+  it("keeps at most 30 chronicle claims, whatever the answer holds (the wave B re-review)", async () => {
+    const long = draft();
+    const chronicle = long.sections[1];
+    if (chronicle === undefined) throw new Error("the draft has a chronicle");
+    chronicle.claims = Array.from({ length: 32 }, (_, i) => ({
+      id: `c${i + 1}`,
+      text: `In January 2026, signal ingestion was started, step ${"x".repeat(i + 1)}.`,
+      cite: [c(fx.jan)],
+      supports: [],
+    }));
+    const lead = long.sections[0]?.claims[0];
+    if (lead !== undefined) lead.supports = ["c1", "c32", "a1"];
+    const { outcomes } = await write([long]);
+    const revision = outcomes[0]?.revision;
+    const kept = revision?.sections.find((s) => s.key === "chronicle")?.claims ?? [];
+    // The oldest 30 are kept; the lead's support of a cut claim goes with it.
+    expect(kept).toHaveLength(30);
+    expect(kept.at(-1)?.text).toContain(`step ${"x".repeat(30)}.`);
+    const ids = new Set(revision?.sections.flatMap((s) => s.claims.map((cl) => cl.id)));
+    const supports = revision?.sections[0]?.claims[0]?.supports ?? [];
+    expect(supports).toHaveLength(2);
+    for (const id of supports) expect(ids.has(id)).toBe(true);
+  });
+
   it("retries the failing claims once in a second batch, and drops what fails twice", async () => {
     const bad = draft();
     const chronicle = bad.sections[1];

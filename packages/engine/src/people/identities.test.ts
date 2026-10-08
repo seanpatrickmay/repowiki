@@ -160,6 +160,13 @@ describe("resolveIdentities (spec v2 #6 §6, R7)", () => {
     expect(only.groups[0]?.firstCommit).toBe("2026-03-01T00:00:00+00:00");
   });
 
+  it("numbers unnamed contributors among the people shown only (the final review's M1)", () => {
+    const resolved = resolve([by("\u200B", "hidden@e.com", 1), by("\u200B", "shown@e.com", 2)], {
+      exclude: ["email:hidden@e.com"],
+    });
+    expect(names(resolved)).toEqual(["Excluded contributor", "Contributor 1"]);
+  });
+
   it("fences an explicit group from the automatic rules, so a group splits a wrong merge", () => {
     const commits = [by("Sam Lee", "sam@a.com", 1), by("Sam Lee", "sam@b.com", 2)];
     expect(resolve(commits).groups).toHaveLength(1);

@@ -374,6 +374,21 @@ export function parsePeopleArgs(argv: readonly string[]): PeopleArgs {
   return args;
 }
 
+/**
+ * Tokens of a prompt part for People's ceiling (the final review's M5): estimateTokens' 2.5
+ * characters a token, except that a character above U+2E7F (CJK and beyond) counts as a whole
+ * token, so a pack in such a script cannot pass --max-usd.
+ */
+export function ceilingTokens(text: string): number {
+  let wide = 0;
+  let narrow = 0;
+  for (const ch of text) {
+    if ((ch.codePointAt(0) ?? 0) > 0x2e7f) wide++;
+    else narrow += ch.length;
+  }
+  return wide + Math.ceil(narrow / 2.5);
+}
+
 /** The first call's allowance beyond its system prompt and turn (spec v2 #6 §8.5's figure). */
 export const ASSUMED_PERSON_OUTPUT_TOKENS = 2500;
 

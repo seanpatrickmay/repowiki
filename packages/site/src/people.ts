@@ -250,16 +250,28 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
       ...(main.length > 0 ? [row("Main features", main.join(", "))] : []),
     ],
     leadHtml: claims("lead").length > 0 ? claims("lead").map(claimHtml).join(" ") : computedLead(p),
-    chart: barChart([{ label: p.name, href: null, cls: "series-1", activity: p.activity }], {
-      label: `${p.name}'s commits by ${bucket}`,
-      bucket,
-      starts: window.starts,
-      note: window.note,
-      hrefOf: (_start, days) => {
-        const year = zoomPeriod(days, 4, (y) => years.includes(y));
-        return year === null ? null : `#activity-${year}`;
+    // Only the window's days, as the other charts draw (the wave B re-review): a commit outside
+    // it but inside an edge bucket is in the note, not in a bar.
+    chart: barChart(
+      [
+        {
+          label: p.name,
+          href: null,
+          cls: "series-1",
+          activity: p.activity.filter((d) => d.day >= window.from && d.day <= window.to),
+        },
+      ],
+      {
+        label: `${p.name}'s commits by ${bucket}`,
+        bucket,
+        starts: window.starts,
+        note: window.note,
+        hrefOf: (_start, days) => {
+          const year = zoomPeriod(days, 4, (y) => years.includes(y));
+          return year === null ? null : `#activity-${year}`;
+        },
       },
-    }),
+    ),
     years: years.map((year) => ({
       anchor: `activity-${year}`,
       year,

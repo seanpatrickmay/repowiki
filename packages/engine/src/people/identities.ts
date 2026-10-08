@@ -487,8 +487,11 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       (keyText(a) < keyText(b) ? -1 : keyText(a) > keyText(b) ? 1 : 0) ||
       (a.at[0] ?? 0) - (b.at[0] ?? 0),
   );
-  // A name that cleans to nothing becomes "Contributor <n>", n in order of first commit.
-  for (const group of groups) if (group.name === "") group.name = `Contributor ${++unnamed}`;
+  // A name that cleans to nothing becomes "Contributor <n>", n in order of first commit among the
+  // people shown, so no gap in the numbers shows an excluded one (the final review's M1).
+  for (const group of groups)
+    if (group.name === "")
+      group.name = group.excluded ? "Excluded contributor" : `Contributor ${++unnamed}`;
   const groupIndex = new Map<string, number>();
   groups.forEach((group, g) => {
     for (const i of group.at) {

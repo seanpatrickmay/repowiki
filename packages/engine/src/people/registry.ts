@@ -37,6 +37,13 @@ function newId(name: string, taken: Set<string>): string {
   }
 }
 
+/** A new excluded person's private id: excluded-<n>, the lowest free n. */
+function excludedId(taken: Set<string>): string {
+  let n = 1;
+  while (taken.has(`excluded-${n}`)) n++;
+  return `excluded-${n}`;
+}
+
 /**
  * Gives each identity group its permanent id against the stored registry (spec v2 #6 R13): a
  * stored person is matched by identity-key overlap, and stays with the group sharing the most of
@@ -128,7 +135,9 @@ export function assignIds(
       if (id !== null) redirectTo.set(id, group.id);
       id = group.id;
     }
-    id ??= newId(group.name, taken);
+    // A new excluded person gets a private id, so no visible "-2" shows they hold the slug
+    // (the final review's M1); a stored row keeps its id.
+    id ??= group.excluded ? excludedId(taken) : newId(group.name, taken);
     taken.add(id);
     return id;
   });

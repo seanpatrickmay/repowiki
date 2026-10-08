@@ -12,6 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attributesNotes,
+  ceilingTokens,
   DEFAULT_PEOPLE_MAX_USD,
   exclusionNotes,
   loadPeopleFile,
@@ -260,6 +261,12 @@ describe("the People estimate and ceiling (R26)", () => {
     );
     expect(() => narrativeCeilingUsd(1, 1, "constructor", true)).toThrow(/no price for model/);
     expect(parseUsd("--people-max-usd", undefined, 0.5, "u")).toBe(0.5);
+  });
+
+  it("counts a CJK character as a whole token in the ceiling (the final review's M5)", () => {
+    expect(ceilingTokens("a".repeat(25))).toBe(10);
+    expect(ceilingTokens("\u6F22".repeat(10))).toBe(10);
+    expect(ceilingTokens(`${"a".repeat(5)}${"\u{20000}".repeat(3)}`)).toBe(5);
   });
 
   it("fails closed on a cost that is not a finite, non-negative number", () => {

@@ -62,8 +62,8 @@ function storedPeople(store: Store, manifest: { features: readonly { id: string 
 }
 
 /**
- * Work in flight's authors joined to People (spec v2 #6 C8), at export time so a people-file
- * change applies at the next export: a login the registry resolves to a person with a page gains
+ * Work in flight's authors joined to People (spec v2 #6 C8), at export time, through the stored
+ * registry (so a people-file change applies once a People refresh has stored it): a login the registry resolves to a person with a page gains
  * `person`; one resolving to an excluded person becomes null ("unknown author"), so their login
  * never appears; a bot keeps its badge; anyone else stays plain text. With no People in the
  * export (no snapshot, or a stale one), excluded logins are still dropped whenever the registry
