@@ -14,6 +14,7 @@ import type {
 } from "./inflight.ts";
 import type { LedgerEntry } from "./llm.ts";
 import type { Manifest } from "./manifest.ts";
+import type { PeopleSnapshot, PersonFacts } from "./person.ts";
 import type { Revision } from "./revision.ts";
 
 export const SHA_A = "a".repeat(40);
@@ -439,6 +440,92 @@ export function makeGitHubSnapshot(overrides: Partial<GitHubSnapshot> = {}): Git
     omitted: { pulls: 0, issues: 0 },
     dropped: 0,
     droppedPaths: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * Ada Lovelace's facts: four commits over two features, one pull request she authored and merged,
+ * and 90 of the snapshot's current lines.
+ */
+export function makePersonFacts(overrides: Partial<PersonFacts> = {}): PersonFacts {
+  return {
+    id: "ada-lovelace",
+    name: "Ada Lovelace",
+    otherNames: ["ada"],
+    kind: "human",
+    firstCommit: "2026-01-05T10:00:00+01:00",
+    lastCommit: "2026-03-14T16:30:00+01:00",
+    commits: 4,
+    added: 120,
+    deleted: 30,
+    currentLines: 90,
+    prsAuthored: [{ number: 3, title: "Add signal ingestion", mergedAt: "2026-01-20T09:00:00Z" }],
+    prsMerged: [3],
+    features: [
+      { featureId: "signals", commits: 3, currentLines: 80 },
+      { featureId: "deliverables", commits: 1, currentLines: 10 },
+    ],
+    activity: [
+      { day: "2026-01-05", commits: 2, added: 80, deleted: 0 },
+      { day: "2026-02-10", commits: 1, added: 30, deleted: 20 },
+      { day: "2026-03-14", commits: 1, added: 10, deleted: 10 },
+    ],
+    ...overrides,
+  };
+}
+
+/**
+ * The People snapshot at SHA_A over makeManifest()'s features: Ada Lovelace, Grace Hopper and the
+ * dependabot bot, with 40 lines whose author is excluded.
+ */
+export function makePeopleSnapshot(overrides: Partial<PeopleSnapshot> = {}): PeopleSnapshot {
+  return {
+    sha: SHA_A,
+    commitDate: "2026-03-14T16:30:00+01:00",
+    commits: 9,
+    people: [
+      makePersonFacts(),
+      makePersonFacts({
+        id: "dependabot",
+        name: "dependabot[bot]",
+        otherNames: [],
+        kind: "bot",
+        firstCommit: "2026-02-01T00:00:00Z",
+        lastCommit: "2026-02-01T00:00:00Z",
+        commits: 1,
+        added: 0,
+        deleted: 0,
+        currentLines: 0,
+        prsAuthored: [],
+        prsMerged: [],
+        features: [],
+        activity: [{ day: "2026-02-01", commits: 1, added: 0, deleted: 0 }],
+      }),
+      makePersonFacts({
+        id: "grace-hopper",
+        name: "Grace Hopper",
+        otherNames: [],
+        firstCommit: "2026-01-10T09:00:00-05:00",
+        lastCommit: "2026-02-20T09:00:00-05:00",
+        commits: 3,
+        added: 150,
+        deleted: 10,
+        currentLines: 110,
+        prsAuthored: [],
+        prsMerged: [],
+        features: [{ featureId: "signals", commits: 3, currentLines: 110 }],
+        activity: [
+          { day: "2026-01-10", commits: 1, added: 100, deleted: 0 },
+          { day: "2026-02-20", commits: 2, added: 50, deleted: 10 },
+        ],
+      }),
+    ],
+    redirects: [{ from: "ada", to: "ada-lovelace" }],
+    others: [{ day: "2026-02-15", commits: 1, added: 40, deleted: 0 }],
+    featureLines: { deliverables: 40, signals: 200 },
+    totalLines: 240,
+    unattributedLines: 40,
     ...overrides,
   };
 }

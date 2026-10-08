@@ -114,6 +114,25 @@ export {
 } from "./llms-txt.ts";
 export { Manifest, MemberId, Membership } from "./manifest.ts";
 export { memberId, parseMemberId } from "./member-id.ts";
+export {
+  ActivityDay,
+  CalendarDay,
+  cleanPersonName,
+  cleanPullTitle,
+  MAX_OTHER_NAMES,
+  PERSON_ID_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
+  PeopleSnapshot,
+  PersonFacts,
+  PersonFeature,
+  PersonId,
+  PersonKind,
+  PersonName,
+  PersonRedirect,
+  PR_TITLE_MAX_LENGTH,
+  PullRequestRef,
+  withoutEmails,
+} from "./person.ts";
 export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";
 export { Infobox, Revision, RevisionReason, TokenUsage } from "./revision.ts";
 export { claimRuleViolations, Section, SectionKey } from "./section.ts";
