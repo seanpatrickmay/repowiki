@@ -55,6 +55,7 @@ export {
   type CoChange,
   type CoChangePair,
   type CommitInfo,
+  configuredEmail,
   DEFAULT_MAX_FILE_BYTES,
   DEFAULT_MAX_FILES_PER_COMMIT,
   diffCommits,
@@ -134,6 +135,13 @@ export {
   markdownOneLine,
   renderManifestSummary,
 } from "./manifest/index.ts";
+export {
+  type IdentityGroup,
+  type PeopleRead,
+  type Refreshed,
+  readPeople,
+  refreshPeople,
+} from "./people/index.ts";
 export {
   addAliases,
   type BatchRequestRow,
