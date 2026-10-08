@@ -1,3 +1,5 @@
+import { PersonId } from "@repowiki/core";
+
 /** Every page URL the site emits. Feature ids and alias slugs are URL-safe kebab-case. */
 export const articleUrl = (id: string): string => `/wiki/${id}/`;
 export const historyUrl = (id: string): string => `/wiki/${id}/history/`;
@@ -22,7 +24,7 @@ export function wikipediaUrl(title: string): string {
 /** The People index (spec v2 #6 §11). */
 export const PEOPLE_URL = "/people/";
 /** A person's page; an id merged away keeps a redirect page here. */
-export const personUrl = (id: string): string => `${PEOPLE_URL}${id}/`;
+export const personUrl = (id: string): string => `${PEOPLE_URL}${PersonId.parse(id)}/`;
 /** The People index's part for one feature. */
 export const peopleFeatureUrl = (featureId: string): string => `${PEOPLE_URL}#feature-${featureId}`;
 /** The repository's activity: all time, a year (`2026`) or a month (`2026-03`). */

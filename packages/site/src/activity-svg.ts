@@ -14,13 +14,16 @@ export function xmlText(text: string): string {
     .replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
+/** A chart's href, in the SVG and the legend alike: one escaper (the Task 30 ruling). */
+const hrefText = xmlText;
+
 /** Text as HTML in a chart's legend and table: escaped, with the same characters dropped. */
 const htmlText = (text: string): string =>
   escapeHtml(text.toWellFormed().replace(INVISIBLE_CHARACTERS, ""));
 
 /** The bucket a bar covers (R22). */
-export type Bucket = "day" | "week" | "month" | "quarter";
-const BUCKETS: readonly Bucket[] = ["day", "week", "month", "quarter"];
+export type Bucket = "day" | "week" | "month" | "quarter" | "year";
+const BUCKETS: readonly Bucket[] = ["day", "week", "month", "quarter", "year"];
 /** The most bars an all-time chart draws (R22). */
 export const MAX_BARS = 120;
 
@@ -51,6 +54,7 @@ export function bucketStart(day: string, bucket: Bucket): string {
   if (bucket === "day") return day;
   if (bucket === "month") return `${y}-${pad(m)}-01`;
   if (bucket === "quarter") return `${y}-${pad(m - ((m - 1) % 3))}-01`;
+  if (bucket === "year") return `${y}-01-01`;
   const ms = toMs(day);
   const weekday = (new Date(ms).getUTCDay() + 6) % 7;
   return toDay(ms - weekday * DAY_MS);
@@ -61,22 +65,80 @@ function nextStart(start: string, bucket: Bucket): string {
   const [y, m] = parts(start);
   if (bucket === "day") return toDay(toMs(start) + DAY_MS);
   if (bucket === "week") return toDay(toMs(start) + 7 * DAY_MS);
-  const step = bucket === "month" ? 1 : 3;
-  const next = m - 1 + step;
-  return `${y + Math.floor(next / 12)}-${pad((next % 12) + 1)}-01`;
+  const step = bucket === "month" ? 1 : bucket === "quarter" ? 3 : 12;
+  return toDay(Date.UTC(y, m - 1 + step, 1));
 }
 
-/** Every bucket start from the one holding `from` to the one holding `to`, in order. */
-export function bucketStarts(from: string, to: string, bucket: Bucket): string[] {
+/**
+ * Every bucket start from the one holding `from` to the one holding `to`, in order, at most
+ * `limit` of them. Dates are compared as parsed times, never as strings (the Task 30 ruling).
+ */
+export function bucketStarts(
+  from: string,
+  to: string,
+  bucket: Bucket,
+  limit = Number.POSITIVE_INFINITY,
+): string[] {
   const starts: string[] = [];
-  const last = bucketStart(to, bucket);
-  for (let at = bucketStart(from, bucket); at <= last; at = nextStart(at, bucket)) starts.push(at);
+  const last = toMs(bucketStart(to, bucket));
+  for (
+    let at = bucketStart(from, bucket);
+    toMs(at) <= last && starts.length < limit;
+    at = nextStart(at, bucket)
+  )
+    starts.push(at);
   return starts;
 }
 
-/** The smallest bucket that draws `from` to `to` in at most MAX_BARS bars (R22). */
+/** The smallest bucket that draws `from` to `to` in at most MAX_BARS bars (R22), else years. */
 export function bucketFor(from: string, to: string): Bucket {
-  return BUCKETS.find((b) => bucketStarts(from, to, b).length <= MAX_BARS) ?? "quarter";
+  return BUCKETS.find((b) => bucketStarts(from, to, b, MAX_BARS + 1).length <= MAX_BARS) ?? "year";
+}
+
+/** The earliest day a chart draws: git dates start in 1970 (the Task 30 ruling). */
+export const FIRST_CHART_DAY = "1970-01-01";
+
+/** What a chart draws: its days, bucket and bars, and the commits it leaves out. */
+export interface ChartWindow {
+  from: string;
+  to: string;
+  bucket: Bucket;
+  starts: string[];
+  /** Commits dated outside the window: counted, not drawn. */
+  outside: number;
+  /** The note under a chart that leaves commits out, or null. */
+  note: string | null;
+}
+
+/**
+ * The window a chart of `activity` draws (the Task 30 ruling): its days clamped to 1970-01-01 and
+ * the head's date (a crafted commit date must not hang or break the build), bucketed by R22's
+ * rule, and when even years pass MAX_BARS, only the latest MAX_BARS years. Commits left out are
+ * counted, and the note says so. With no day inside, the head's day alone.
+ */
+export function chartWindow(activity: readonly ActivityDay[], head: string): ChartWindow {
+  const last = toMs(head) >= toMs(FIRST_CHART_DAY) ? head : FIRST_CHART_DAY;
+  const inside = activity
+    .map((d) => d.day)
+    .filter((d) => toMs(d) >= toMs(FIRST_CHART_DAY) && toMs(d) <= toMs(last));
+  const to = inside.reduce((a, b) => (toMs(b) > toMs(a) ? b : a), inside[0] ?? last);
+  let from = inside.reduce((a, b) => (toMs(b) < toMs(a) ? b : a), inside[0] ?? last);
+  const bucket = bucketFor(from, to);
+  let starts = bucketStarts(from, to, bucket);
+  const cut = starts.length > MAX_BARS;
+  if (cut) {
+    starts = starts.slice(-MAX_BARS);
+    from = starts[0] as string;
+  }
+  const outside = activity
+    .filter((d) => !(toMs(d.day) >= toMs(from) && toMs(d.day) <= toMs(to)))
+    .reduce((n, d) => n + d.commits, 0);
+  const floor = cut ? from.slice(0, 4) : FIRST_CHART_DAY.slice(0, 4);
+  const note =
+    outside === 0
+      ? null
+      : `${counted(outside)} dated before ${floor} or after the head's date ${outside === 1 ? "is" : "are"} not drawn.`;
+  return { from, to, bucket, starts, outside, note };
 }
 
 /** "9 Mar 2026", "Week of 9 Mar 2026", "March 2026" or "Q1 2026": a bar's period. */
@@ -86,6 +148,7 @@ export function bucketLabel(start: string, bucket: Bucket): string {
   if (bucket === "day") return date;
   if (bucket === "week") return `Week of ${date}`;
   if (bucket === "month") return `${MONTH_NAMES[m - 1]} ${y}`;
+  if (bucket === "year") return String(y);
   return `Q${Math.floor((m - 1) / 3) + 1} ${y}`;
 }
 
@@ -119,6 +182,23 @@ const counted = (n: number) => `${formatNumber(n)} ${n === 1 ? "commit" : "commi
 export const barTitle = (label: string, bar: Omit<Bar, "start">): string =>
   `${label}: ${counted(bar.commits)}, +${formatNumber(bar.added)} −${formatNumber(bar.deleted)} lines`;
 
+/**
+ * The year (`unit` 4) or month (`unit` 7) holding most of a bar's commits, the earlier on a tie,
+ * when `built` says it has a page or an anchor; else null (the Task 32 and 34 rulings). Every
+ * chart's zoom link goes through it, so a week starting in another period leads to its commits.
+ */
+export function zoomPeriod(
+  days: readonly ActivityDay[],
+  unit: 4 | 7,
+  built: (period: string) => boolean,
+): string | null {
+  const by = new Map<string, number>();
+  for (const d of days)
+    by.set(d.day.slice(0, unit), (by.get(d.day.slice(0, unit)) ?? 0) + d.commits);
+  const best = [...by].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
+  return best !== undefined && best[1] > 0 && built(best[0]) ? best[0] : null;
+}
+
 /** One series of a chart; `cls` names its CSS colour (`series-1` … `series-8`, `others`, `bots`). */
 export interface Series {
   label: string;
@@ -132,12 +212,19 @@ export interface ChartOptions {
   label: string;
   bucket: Bucket;
   starts: readonly string[];
-  /** Where a bar leads: the next zoom level, or null for the finest. */
-  hrefOf: (start: string) => string | null;
+  /**
+   * Where a bar leads: the next zoom level, or null for the finest. Gets the bar's days with
+   * commits, every series' (zoomPeriod reads them).
+   */
+  hrefOf: (start: string, days: readonly ActivityDay[]) => string | null;
+  /** A plain-text note printed under the chart (ChartWindow's), or none. */
+  note?: string | null;
 }
 
 const WIDTH = 720;
 const HEIGHT = 160;
+/** The least height a bar with a commit is drawn at, so a one-commit bar shows (Task 30). */
+const MIN_BAR = 2;
 
 /**
  * A bar chart as inline SVG (R21): one stack of series per bucket, each bucket an `<a>` to its
@@ -164,8 +251,9 @@ export function barChart(series: readonly Series[], options: ChartOptions): stri
     const rects = series.flatMap((s, k) => {
       const bar = bars[k]?.[i];
       if (bar === undefined || bar.commits === 0) return [];
-      const h = (bar.commits / max) * (HEIGHT - 4);
-      y -= h;
+      const h = Math.max(MIN_BAR, (bar.commits / max) * (HEIGHT - 4));
+      // A raised short segment can push a full stack's top past the edge: keep it inside.
+      y = Math.max(0, y - h);
       const name = series.length > 1 ? `${s.label}, ${label}` : label;
       return [
         `<rect class="${s.cls}" x="${x}" y="${y.toFixed(2)}" width="${w}" height="${h.toFixed(2)}"><title>${xmlText(barTitle(name, bar))}</title></rect>`,
@@ -173,8 +261,16 @@ export function barChart(series: readonly Series[], options: ChartOptions): stri
     });
     const hit = `<rect class="bar-hit" x="${x}" y="0" width="${w}" height="${HEIGHT}"><title>${xmlText(barTitle(label, total))}</title></rect>`;
     const body = `${hit}${rects.join("")}`;
-    const href = total.commits === 0 ? null : options.hrefOf(total.start);
-    return href === null ? `<g>${body}</g>` : `<a href="${xmlText(href)}">${body}</a>`;
+    const href =
+      total.commits === 0
+        ? null
+        : options.hrefOf(
+            total.start,
+            series.flatMap((s) =>
+              s.activity.filter((d) => d.commits > 0 && bucketStart(d.day, bucket) === total.start),
+            ),
+          );
+    return href === null ? `<g>${body}</g>` : `<a href="${hrefText(href)}">${body}</a>`;
   });
   const svg = `<svg class="activity-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${xmlText(options.label)}" preserveAspectRatio="none">${groups.join("")}</svg>`;
   const legend =
@@ -183,11 +279,15 @@ export function barChart(series: readonly Series[], options: ChartOptions): stri
       : `<ul class="chart-legend">${series
           .map((s) => {
             const name = htmlText(s.label);
-            const text = s.href === null ? name : `<a href="${escapeHtml(s.href)}">${name}</a>`;
+            const text = s.href === null ? name : `<a href="${hrefText(s.href)}">${name}</a>`;
             return `<li><span class="swatch ${s.cls}" aria-hidden="true"></span>${text}</li>`;
           })
           .join("")}</ul>`;
-  return `<figure class="activity">${svg}${legend}${chartTable(series, bars, totals, options)}</figure>`;
+  const note =
+    options.note == null
+      ? ""
+      : `<figcaption class="chart-note">${htmlText(options.note)}</figcaption>`;
+  return `<figure class="activity">${svg}${legend}${chartTable(series, bars, totals, options)}${note}</figure>`;
 }
 
 /** The visually hidden table after a chart: the same numbers, one row per bucket with activity. */

@@ -7,6 +7,7 @@ import {
   bucketLabel,
   bucketStart,
   bucketStarts,
+  chartWindow,
   heatLevel,
   heatmap,
   MAX_BARS,
@@ -47,7 +48,9 @@ describe("bucketing (R22)", () => {
     expect(bucketFor("2026-01-01", "2026-04-30")).toBe("day");
     expect(bucketFor("2026-01-01", "2027-06-30")).toBe("week");
     expect(bucketFor("2016-01-01", "2024-12-31")).toBe("month");
-    expect(bucketFor("1996-01-01", "2026-12-31")).toBe("quarter");
+    // 31 years of quarters is 124 bars: over the cap, so years (the Task 30 ruling).
+    expect(bucketFor("1996-01-01", "2026-12-31")).toBe("year");
+    expect(bucketFor("2001-01-01", "2026-12-31")).toBe("quarter");
     expect(bucketStarts("2016-01-01", "2024-12-31", "month").length).toBeLessThanOrEqual(MAX_BARS);
   });
 
@@ -169,5 +172,87 @@ describe("heatmap and sparkline", () => {
       /^<svg class="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">/,
     );
     expect(svg.match(/<rect /g)).toHaveLength(3);
+  });
+});
+
+describe("chart bounds (the Task 30 ruling)", () => {
+  const day = (d: string, commits = 1) => ({ day: d, commits, added: 1, deleted: 0 });
+
+  it("never draws more than MAX_BARS bars, coarsening to years and then cutting the oldest", () => {
+    for (const [from, to] of [
+      ["1970-01-01", "2026-12-31"],
+      ["1971-06-01", "2026-01-02"],
+    ] as const) {
+      const bucket = bucketFor(from, to);
+      expect(bucketStarts(from, to, bucket).length).toBeLessThanOrEqual(MAX_BARS);
+    }
+    expect(bucketStarts("2020-01-01", "2022-12-31", "year")).toEqual([
+      "2020-01-01",
+      "2021-01-01",
+      "2022-01-01",
+    ]);
+    expect(bucketLabel("2020-01-01", "year")).toBe("2020");
+    const wide = chartWindow([day("1970-01-01"), day("9999-12-31")], "9999-12-31");
+    expect(wide.starts.length).toBeLessThanOrEqual(MAX_BARS);
+    expect(wide.bucket).toBe("year");
+    expect(wide.outside).toBe(1);
+  });
+
+  it("clamps dates to 1970 and the head's date, counting what it leaves out, and never throws", () => {
+    const w = chartWindow(
+      [day("0100-05-01", 2), day("2026-01-05"), day("2026-02-03"), day("9999-12-31", 3)],
+      "2026-03-01",
+    );
+    expect([w.from, w.to, w.outside]).toEqual(["2026-01-05", "2026-02-03", 5]);
+    expect(w.bucket).toBe("day");
+    expect(w.note).toBe("5 commits dated before 1970 or after the head's date are not drawn.");
+    const none = chartWindow([day("2030-01-01")], "2026-03-01");
+    expect([none.from, none.to, none.starts]).toEqual(["2026-03-01", "2026-03-01", ["2026-03-01"]]);
+    expect(chartWindow([day("2026-01-05")], "2026-03-01").note).toBeNull();
+  });
+
+  it("gives a one-commit bar a visible height beside a tall one", () => {
+    const html = barChart(
+      [
+        {
+          label: "x",
+          href: null,
+          cls: "series-1",
+          activity: [day("2026-01-01", 2000), day("2026-02-01", 1)],
+        },
+      ],
+      { label: "c", bucket: "month", starts: ["2026-01-01", "2026-02-01"], hrefOf: () => null },
+    );
+    const heights = [...html.matchAll(/<rect class="series-1"[^>]* height="([\d.]+)"/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(heights).toHaveLength(2);
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("escapes a bar's and a legend's href the same way", () => {
+    const href = '/people/a"b\u0007/';
+    const html = barChart(
+      [
+        { label: "a", href, cls: "series-1", activity: [day("2026-01-01")] },
+        { label: "b", href: null, cls: "series-2", activity: [day("2026-01-01")] },
+      ],
+      { label: "c", bucket: "month", starts: ["2026-01-01"], hrefOf: () => href },
+    );
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+    expect(new Set(hrefs)).toEqual(new Set([xmlText(href)]));
+  });
+
+  it("prints a chart's note under it", () => {
+    const html = barChart([{ label: "x", href: null, cls: "series-1", activity: [] }], {
+      label: "c",
+      bucket: "month",
+      starts: ["2026-01-01"],
+      hrefOf: () => null,
+      note: "2 commits <b>dated</b> before 1970 are not drawn.",
+    });
+    expect(html).toContain(
+      '<figcaption class="chart-note">2 commits &lt;b&gt;dated&lt;/b&gt; before 1970 are not drawn.</figcaption>',
+    );
   });
 });
