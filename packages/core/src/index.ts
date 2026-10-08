@@ -155,6 +155,7 @@ export {
   PullRequestRef,
   peopleProblems,
   personClaimViolations,
+  RegistryRow,
   withoutEmails,
 } from "./person.ts";
 export { GitSha, IsoDateTime, RepoPath, Sha256Hex } from "./primitives.ts";

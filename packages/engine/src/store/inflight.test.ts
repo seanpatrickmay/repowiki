@@ -78,7 +78,7 @@ describe("migration 9 (spec v2 #9 §5.2, C2)", () => {
       reopened.close();
 
       const after = new Database(path);
-      expect(after.pragma("user_version", { simple: true })).toBe(9);
+      expect(after.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
       const tables = after
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .all()

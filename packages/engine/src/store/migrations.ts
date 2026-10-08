@@ -90,6 +90,27 @@ export const MIGRATIONS: readonly Migration[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // People (spec v2 #6 R29, C2): the private registry, the latest snapshot, the narrative
+  // revisions and the blame cache, plus the store's random identity salt. Additive.
+  `
+  CREATE TABLE people_registry (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+  CREATE TABLE people_snapshot (sha TEXT PRIMARY KEY, body TEXT NOT NULL);
+  CREATE TABLE person_revisions (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    person_id TEXT NOT NULL,
+    parent_id TEXT REFERENCES person_revisions(id),
+    body TEXT NOT NULL
+  );
+  CREATE INDEX person_revisions_person ON person_revisions(person_id);
+  CREATE TABLE blame_cache (
+    path TEXT NOT NULL,
+    oid TEXT NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY (path, oid)
+  );
+  INSERT INTO meta (key, value) VALUES ('people.salt', lower(hex(randomblob(32))));
+  `,
 ];
 
 interface StoredFeature {
