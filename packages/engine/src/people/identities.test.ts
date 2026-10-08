@@ -128,7 +128,21 @@ describe("resolveIdentities (spec v2 #6 §6, R7)", () => {
       },
     );
     expect(names(resolved)).toEqual(["Ada Lovelace"]);
-    expect(resolved.groups[0]?.otherNames).toEqual(["A", "Ada L"]);
+    // "A" is the name the mailmap replaced: it never leaves the store (the I1 ruling).
+    expect(resolved.groups[0]?.otherNames).toEqual(["Ada L"]);
+  });
+
+  it("never shows a name the mailmap replaced: not as an other name, nor as a shown name (I1)", () => {
+    const resolved = resolve(
+      [by("Old Deadname", "ada@e.com", 1), by("Ada Lovelace", "ada@e.com", 2)],
+      {},
+      { mailmap: "Ada Lovelace <ada@e.com>\n" },
+    );
+    const [ada] = resolved.groups;
+    expect(ada?.name).toBe("Ada Lovelace");
+    expect(ada?.otherNames).toEqual([]);
+    expect(ada?.identities.map((p) => p.shownName)).toEqual(["Ada Lovelace", "Ada Lovelace"]);
+    expect(ada?.replacedNames).toEqual(["Old Deadname"]);
   });
 
   it("fences an explicit group from the automatic rules, so a group splits a wrong merge", () => {

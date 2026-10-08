@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -207,6 +208,34 @@ describe("pnpm wiki:check's People half (spec v2 #6 §9)", () => {
     const fullwidth = run(CHECK);
     expect(fullwidth.stderr).toContain("export.json holds an author's email address");
     expect(fullwidth.stderr).not.toContain("llms.txt holds");
+  });
+});
+
+describe("the remembered people file (the C1 ruling)", () => {
+  it("is read by wiki:people and wiki:check, and a lost one undoes nothing", () => {
+    const team = join(fx.out, "..", "team-people.json");
+    writeFileSync(team, JSON.stringify({ exclude: [`email:${KIM.email}`] }));
+    const ids = () =>
+      JSON.parse(readFileSync(join(fx.out, "export.json"), "utf8")).people.snapshot.people.map(
+        (p: { id: string }) => p.id,
+      );
+    expect(run(PEOPLE, "--no-narrative", "--people-file", team).status).toBe(0);
+    expect(ids()).not.toContain("kim-hidden");
+    // No flag: the file wiki:people was given, not <out>/people.json.
+    expect(run(PEOPLE, "--no-narrative").status).toBe(0);
+    expect(ids()).not.toContain("kim-hidden");
+    expect(run(CHECK).stderr).not.toContain("people file");
+    rmSync(team);
+    const check = run(CHECK);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toMatch(/people file: the people file .*team-people\.json is missing/);
+    const people = run(PEOPLE, "--no-narrative");
+    expect(people.status).toBe(2);
+    expect(people.stderr).toMatch(
+      /team-people\.json is missing; restore it or run pnpm wiki:people/,
+    );
+    expect(ids()).not.toContain("kim-hidden");
+    scan([check.stdout, check.stderr, people.stdout, people.stderr]);
   });
 });
 

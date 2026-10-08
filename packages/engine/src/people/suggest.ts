@@ -74,7 +74,7 @@ export function suggestMerges(groups: readonly IdentityGroup[]): Suggestion[] {
     const handles = [
       ...new Set(
         a.identities
-          .map((p) => nameKeyOf(p.name))
+          .map((p) => nameKeyOf(p.shownName))
           .filter((name) => name !== "" && !name.includes(" "))
           .map(letters),
       ),
@@ -82,7 +82,7 @@ export function suggestMerges(groups: readonly IdentityGroup[]): Suggestion[] {
     if (handles.length === 0) return;
     groups.forEach((b, j) => {
       if (i === j || !candidate(b)) return;
-      const fulls = b.identities.map((p) => nameKeyOf(p.name)).filter((n) => n.includes(" "));
+      const fulls = b.identities.map((p) => nameKeyOf(p.shownName)).filter((n) => n.includes(" "));
       let rule: SuggestRule | null = null;
       for (const handle of handles) for (const full of fulls) rule ??= abbreviates(handle, full);
       const locals = b.identities.map((p) =>
@@ -109,11 +109,13 @@ export function suggestionSnippet(
 ): string[] {
   const handle = groups[suggestion.handle] as IdentityGroup;
   const full = groups[suggestion.name] as IdentityGroup;
-  const names = [...full.identities, ...handle.identities].map((p) => nameKeyOf(p.name));
+  // Names after the mailmap only: a name it replaced is never printed (the I1 ruling); the
+  // mailmap still maps those commits, so the shown name's key matches them.
+  const names = [...full.identities, ...handle.identities].map((p) => nameKeyOf(p.shownName));
   const keys = [...new Set(names.filter((n) => n !== "").map((n) => `name:${n}`))];
   const lines = [JSON.stringify({ name: full.name, match: keys })];
   for (const g of [suggestion.name, suggestion.handle])
-    if (groups[g]?.identities.some((p) => nameKeyOf(p.name) === ""))
+    if (groups[g]?.identities.some((p) => nameKeyOf(p.shownName) === ""))
       lines.push(
         `A name of ${ids[g] ?? "this person"} gives no name key: add that person's other keys to the entry by hand (people:suggest never prints an address).`,
       );

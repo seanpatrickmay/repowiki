@@ -18,6 +18,11 @@ export type JoinReason = "same email" | "same login" | "name is login" | "same f
 export interface RawIdentity {
   name: string;
   email: string;
+  /**
+   * The name after the committed mailmap: the one People may show. When the mailmap replaced
+   * `name`, `name` never leaves the store (the I1 ruling: a mailmap line is often a correction).
+   */
+  shownName: string;
   /** Non-merge commits under the pair, and all of its commits. */
   commits: number;
   allCommits: number;
@@ -54,8 +59,16 @@ export interface IdentityGroup {
   placeholderKeys: string[];
   /** The display name (R14). */
   name: string;
-  /** Every other cleaned name, sorted, without the display name or a derived login. */
+  /**
+   * Every other cleaned name after the mailmap, sorted, without the display name or a derived
+   * login; at most 10.
+   */
   otherNames: string[];
+  /**
+   * Cleaned names the mailmap replaced and the group never shows, sorted: never exported,
+   * packed or printed, only kept out of every narrative (the I1 ruling).
+   */
+  replacedNames: string[];
   kind: "human" | "bot";
   /**
    * True for a human group some (not all) of whose identities look like bots (R11), with no
@@ -260,6 +273,7 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       pairs.set(key, {
         name: commit.authorName,
         email: commit.authorEmail,
+        shownName: commit.authorName,
         commits: merge ? 0 : 1,
         allCommits: 1,
         first: commit.authorDate,
@@ -283,6 +297,7 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
   const keys = raws.map((raw, i) => keysOf(raw, mapped[i] as { name: string; email: string }));
   raws.forEach((raw, i) => {
     raw.keys = [...(keys[i] as Set<string>)].map((k) => saltedKey(input.salt, k)).sort();
+    raw.shownName = (mapped[i] as { name: string }).name;
   });
   const logins = keys.map((set) =>
     [...set].filter((k) => k.startsWith("login:")).map((k) => k.slice(6)),
@@ -401,14 +416,16 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
     // A group is a bot by the file's bots: key, or when every identity in it looks like one.
     const bot = !human && (anyMatch(list, config.bots) || botLike === list.length);
     const name = displayName(entry?.name, named);
-    const allNames = new Set(
-      named.flatMap((p) => [cleanPersonName(p.raw.name), cleanPersonName(p.mapped)]),
-    );
+    // Only names after the mailmap are shown (the I1 ruling): a name it replaced stays private.
+    const allNames = new Set(named.map((p) => cleanPersonName(p.mapped)));
     const loginSet = new Set(groupLogins);
     const otherNames = [...allNames]
       .filter((n) => n !== "" && n !== name && !loginSet.has(n.toLowerCase()))
       .sort()
       .slice(0, 10);
+    const replacedNames = [...new Set(named.map((p) => cleanPersonName(p.raw.name)))]
+      .filter((n) => n !== "" && n !== name && !allNames.has(n))
+      .sort();
     const groupReasons = new Set<JoinReason>();
     for (const i of list) for (const why of reasons.get(i) ?? []) groupReasons.add(why);
     const ids = list.map((i) => raws[i] as RawIdentity);
@@ -435,6 +452,7 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       placeholderKeys: salted("email:", "placeholder"),
       name,
       otherNames,
+      replacedNames,
       kind: bot ? "bot" : "human",
       partlyBot: !human && !bot && botLike > 0,
       excluded: anyMatch(list, config.exclude),

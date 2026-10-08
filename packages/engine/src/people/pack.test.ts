@@ -59,6 +59,8 @@ describe("buildPersonPack (spec v2 #6 §8.2)", () => {
     expect(p.shas.has(fx.b1)).toBe(false);
     expect(p.dates.get(fx.pr6)).toBe("2026-01-07T00:00:00Z");
     expect(p.dates.get(fx.feb)).toBe("2026-02-07T01:00:00+01:00");
+    // Bob's #6, which she merged, credits her with the merge only (the I2 ruling); #3 is hers.
+    expect([...p.mergedOnly]).toEqual([fx.pr6]);
   });
 
   it("collapses the oldest episodes first, then drops them, and cites only what it still shows", async () => {
@@ -105,6 +107,7 @@ function synthetic(
   landings: Landing[] = [],
   budgetTokens?: number,
   maxEpisodes?: number,
+  author = 0,
 ) {
   const person = {
     id: "ada",
@@ -121,7 +124,7 @@ function synthetic(
     groupOf: () => 0,
     commitFeatures: new Map(),
     landings: new Map(landings.map((l) => [l.number, l])),
-    prAuthors: new Map(landings.map((l) => [l.number, 0])),
+    prAuthors: new Map(landings.map((l) => [l.number, author])),
     snapshot: { sha: "f".repeat(40), featureLines: {} } as unknown as PeopleSnapshot,
     manifest: { features: [] } as unknown as Manifest,
     ...(budgetTokens === undefined ? {} : { budgetTokens }),
@@ -185,11 +188,22 @@ describe("buildPersonPack against hostile and large histories", () => {
       mergedAt: new Date(Date.UTC(2026, 0, 1) + (60 - i) * 86_400_000).toISOString(),
       merger: 0,
     }));
-    const p = synthetic([commit(1, "2026-01-01T00:00:00Z", "start")], merged);
+    // Written by someone else (group 1): a pull request of her own is an episode instead.
+    const p = synthetic(
+      [commit(1, "2026-01-01T00:00:00Z", "start")],
+      merged,
+      undefined,
+      undefined,
+      1,
+    );
     const line = p.text.split("\n").find((l) => l.startsWith("### Pull requests they merged"));
     const listed = [...(line ?? "").matchAll(/#(\d+) /g)].map((m) => Number(m[1]));
     expect(listed).toEqual(Array.from({ length: 50 }, (_, i) => 50 - i));
     expect(p.shas.has(hex(1000 + 59))).toBe(false);
+    expect(p.mergedOnly.size).toBe(50);
+    // Her own merged pull requests are not listed (the I2 ruling).
+    const own = synthetic([commit(1, "2026-01-01T00:00:00Z", "start")], merged);
+    expect(own.text).not.toContain("Pull requests they merged");
   });
 
   it("builds a 6,000-commit pack in linear time, its token count the text's", () => {

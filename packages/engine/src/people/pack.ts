@@ -68,6 +68,11 @@ export interface PersonPack {
   basis: string;
   /** The person's feature ids in the pack's order: what an areas section follows. */
   features: string[];
+  /**
+   * The citable merges of pull requests the person merged but did not write (the I2 ruling):
+   * they credit the person with the merge only, never with the pull request's features.
+   */
+  mergedOnly: Set<string>;
   /** Episodes shown in full, collapsed to one line, and dropped (R8.2's trimming). */
   episodes: { full: number; collapsed: number; dropped: number };
 }
@@ -154,7 +159,8 @@ function capped(episodes: readonly Episode[], limit: number): Episode[] {
 
 /**
  * The person's user turn (spec v2 #6 §8.2): who they are, their features, their episodes oldest
- * first (a pull request's commits together, the rest by month), and the pull requests they merged.
+ * first (a pull request's commits together, the rest by month), and the pull requests they merged
+ * but did not write.
  * Every repository string is one neutralised line (packText). Over the budget, the oldest episodes
  * are collapsed to one line, one at a time, then the oldest collapsed lines are dropped for "and N
  * earlier episodes". Every sha the pack shows is citable and no other is (R17).
@@ -171,6 +177,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
   const basis = input.snapshot.sha;
 
   // Episodes: a pull request's commits together, the rest by author month.
+  const mergedOnly = new Set<string>();
   const byKey = new Map<string, Episode>();
   for (const commit of shown) {
     const landing = commit.pr === null ? undefined : input.landings.get(commit.pr);
@@ -184,6 +191,8 @@ export function buildPersonPack(input: PackInput): PersonPack {
         landing.sha !== commit.sha &&
         (input.prAuthors.get(landing.number) === input.group || landing.merger === input.group);
       if (citable) own = { sha: landing.sha, date: landing.mergedAt };
+      if (citable && input.prAuthors.get(landing.number) !== input.group)
+        mergedOnly.add(landing.sha);
       name = `PR #${landing.number}${landing.title === null ? "" : ` ${quoted(landing.title)}`}`;
       merged = `merged ${day(landing.mergedAt)}${own === null ? "" : ` (commit:${sha12(own.sha)})`}`;
     } else {
@@ -258,7 +267,13 @@ export function buildPersonPack(input: PackInput): PersonPack {
     input.covered == null ? "## Episodes, oldest first" : "## New episodes, oldest first",
   ];
   const mergedLandings = [...input.landings.values()]
-    .filter((l) => l.merger === input.group && input.covered?.has(l.sha) !== true)
+    // Only those someone else wrote: a pull request of their own is an episode (the I2 ruling).
+    .filter(
+      (l) =>
+        l.merger === input.group &&
+        input.prAuthors.get(l.number) !== input.group &&
+        input.covered?.has(l.sha) !== true,
+    )
     .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt) || a.number - b.number)
     .slice(-MAX_MERGED_LISTED);
   const merged =
@@ -329,7 +344,10 @@ export function buildPersonPack(input: PackInput): PersonPack {
     for (const c of commits) cite(c.sha, c.authorDate);
     for (const l of e.landings) cite(l.sha, l.date);
   });
-  for (const l of mergedLandings) cite(l.sha, l.mergedAt);
+  for (const l of mergedLandings) {
+    cite(l.sha, l.mergedAt);
+    mergedOnly.add(l.sha);
+  }
   return {
     personId: person.id,
     features: person.features.map((f) => f.featureId),
@@ -338,6 +356,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
     shas,
     dates,
     basis,
+    mergedOnly: new Set([...mergedOnly].filter((sha) => shas.has(sha))),
     episodes: {
       full: episodes.length - Math.max(collapsedCount, dropped),
       collapsed: Math.max(0, collapsedCount - dropped),

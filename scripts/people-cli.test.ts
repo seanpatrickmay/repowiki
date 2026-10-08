@@ -129,6 +129,19 @@ describe("renderSuggest (spec v2 #6 §6 step 6)", () => {
     for (const secret of PEOPLE_SECRETS) expect(text).not.toContain(secret);
   });
 
+  it("shows only the names after the mailmap, with a count of those it replaced (I1)", () => {
+    fx.repo.write(".mailmap", `Ada Lovelace <${ADA.email}>\n`);
+    fx.head = fx.repo.commit("docs: an old name", "+0000", {
+      name: "Old Deadname",
+      email: ADA.email,
+    });
+    const text = render();
+    expect(text).not.toMatch(/deadname/i);
+    expect(text).toMatch(
+      /`ada-lovelace` \| `Ada Lovelace` \| \(1 name replaced by the mailmap\) \|/,
+    );
+  });
+
   it("flags a person whose identities look like bots only in part", () => {
     fx.repo.write("docs/bot.md", "bot\n");
     fx.head = fx.repo.commit("chore: bot run", "+0000", { name: "dependabot", email: ADA.email });

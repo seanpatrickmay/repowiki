@@ -24,6 +24,7 @@ import {
   markdownCodeSpan,
   maskEmail,
   type PeopleRead,
+  type Store,
   suggestionSnippet,
   suggestMerges,
   wantsNarrative,
@@ -127,6 +128,47 @@ export function loadPeopleFile(path: string): PeopleConfig {
   return parsed.config;
 }
 
+/** The People meta keys of the people file's path (the C1 ruling): never its contents. */
+const FILE_META = "file";
+const FILE_READ_META = "file-read";
+
+/** What a run needs of the store to find its people file. */
+export type PeopleFileStore = Pick<
+  Store,
+  "getPeopleMeta" | "setPeopleMeta" | "listPeopleRegistry" | "listCurrentPersonRevisions"
+>;
+
+/**
+ * The people file a run reads, and its config (the C1 ruling): `--people-file`, else the path
+ * wiki:people remembered, else `<out>/people.json`. `remember` (wiki:people) stores the resolved
+ * path; a run that reads a file notes that one was read. A missing file while the registry
+ * excludes someone, or while a narrative is stored and a people file was read before, is a
+ * CliError: its defaults would bring an excluded person back and revoke consent, the owner's
+ * decisions, which a lost file must never undo.
+ */
+export function peopleConfigFor(
+  store: PeopleFileStore,
+  repo: string,
+  out: string,
+  flag: string | null,
+  remember: boolean,
+): { path: string; config: PeopleConfig } {
+  const path = peopleFilePath(repo, out, flag ?? store.getPeopleMeta(FILE_META));
+  if (!existsSync(path) && !isEntry(path)) {
+    const excludes = store.listPeopleRegistry().some((r) => r.status === "excluded");
+    const consents =
+      store.getPeopleMeta(FILE_READ_META) !== null && store.listCurrentPersonRevisions().length > 0;
+    if (excludes || consents)
+      throw new CliError(
+        `the people file ${path} is missing; restore it or run pnpm wiki:people --people-file <file>`,
+      );
+  }
+  const config = loadPeopleFile(path);
+  if (remember) store.setPeopleMeta(FILE_META, path);
+  if (existsSync(path)) store.setPeopleMeta(FILE_READ_META, path);
+  return { path, config };
+}
+
 /** Whether anything, a dangling link included, is at `path`. */
 function isEntry(path: string): boolean {
   try {
@@ -174,7 +216,15 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
         "",
         id,
         guarded(g.name),
-        g.otherNames.map(guarded).join(", "),
+        // A name the mailmap replaced is never shown, only counted (the I1 ruling).
+        [
+          ...g.otherNames.map(guarded),
+          ...(g.replacedNames.length === 0
+            ? []
+            : [
+                `(${g.replacedNames.length} ${g.replacedNames.length === 1 ? "name" : "names"} replaced by the mailmap)`,
+              ]),
+        ].join(", "),
         emails.map(cell).join(", "),
         g.logins.map(guarded).join(", "),
         count(g.commits),

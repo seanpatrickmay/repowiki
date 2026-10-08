@@ -5,10 +5,9 @@ import { openStore, readPeople, WikiBuildError } from "@repowiki/engine";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
-  loadPeopleFile,
   ownerEmailOf,
   parseSuggestArgs,
-  peopleFilePath,
+  peopleConfigFor,
   renderSuggest,
   SUGGEST_USAGE,
   storeCopy,
@@ -34,7 +33,6 @@ function main(): void {
     throw new CliError(
       "refusing an out dir inside the documented repository; choose --out elsewhere",
     );
-  const config = loadPeopleFile(peopleFilePath(repo, out, args.peopleFile));
   const db = join(out, "wiki.db");
   if (!existsSync(db)) throw new WikiBuildError(`no wiki at ${db}; run pnpm wiki:build first`);
   const copy = storeCopy(out);
@@ -44,6 +42,8 @@ function main(): void {
       const sha = store.getHead();
       if (sha === null)
         throw new WikiBuildError(`the wiki at ${db} has no head; run pnpm wiki:build first`);
+      // --people-file, else the path wiki:people remembered (the C1 ruling).
+      const { config } = peopleConfigFor(store, repo, out, args.peopleFile, false);
       const ownerEmail = ownerEmailOf(repo, (line) => console.error(line));
       const read = readPeople({ repo, sha, store, config, ownerEmail });
       for (const warning of read.warnings) console.error(problemLine(warning));
