@@ -48,7 +48,7 @@ const targetName =
     {index.bots.length > 0 && (
       <section aria-labelledby="automated">
         <h2 id="automated">Automated contributors</h2>
-        <ul>{index.bots.map((b) => <li>{b.name} ({b.commits} commits)</li>)}</ul>
+        <ul>{index.bots.map((b) => <li>{b.name} ({b.commits})</li>)}</ul>
       </section>
     )}
     {index.byFeature.length > 0 && (

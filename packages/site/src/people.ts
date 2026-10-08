@@ -5,6 +5,7 @@ import {
   type PeopleExport,
   type PersonFacts,
   type PersonRevision,
+  withoutEmails,
 } from "@repowiki/core";
 import {
   barChart,
@@ -51,6 +52,34 @@ const byCommits = (a: PersonFacts, b: PersonFacts) =>
   b.commits - a.commits || (a.id < b.id ? -1 : 1);
 const percent = (share: number) => `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
 const range = (p: PersonFacts) => `${formatDate(p.firstCommit)} – ${formatDate(p.lastCommit)}`;
+/**
+ * People's narratives with every cited commit's subject scrubbed of addresses (spec v2 #6 R10,
+ * R38, the Task 33 ruling): the engine stores them so, and the site holds to it for whatever it
+ * writes from an export (pages, export.json, llms.txt). Null stays null.
+ */
+export function withoutQuotedAddresses(people: PeopleExport | null): PeopleExport | null {
+  if (people === null) return null;
+  return {
+    ...people,
+    pages: people.pages.map((page) => ({
+      ...page,
+      sections: page.sections.map((s) => ({
+        ...s,
+        claims: s.claims.map((c) => ({
+          ...c,
+          citations: c.citations.map((cite) =>
+            cite.kind === "commit" ? { ...cite, subject: withoutEmails(cite.subject) } : cite,
+          ),
+        })),
+      })),
+    })),
+  };
+}
+
+/** A share of current lines, or "no current lines" for none (the Task 33 ruling). */
+const lineShare = (lines: number, total: number) =>
+  lines === 0 ? "no current lines" : percent(lines / Math.max(1, total));
+
 const counted = (n: number, one: string) => `${formatNumber(n)} ${one}${n === 1 ? "" : "s"}`;
 
 /** A feature as trusted HTML: its link when it has a page, else its title as text. */
@@ -113,13 +142,13 @@ export function peopleIndexView(site: SiteModel, people: PeopleExport): PeopleIn
         href: personUrl(p.id),
         active: range(p),
         commits: formatNumber(p.commits),
-        share: percent(p.currentLines / total),
+        share: lineShare(p.currentLines, total),
         sparkline: sparkline(p.activity, from, to),
       })),
     bots: snapshot.people
       .filter((p) => p.kind === "bot")
       .sort(byCommits)
-      .map((p) => ({ name: p.name, commits: formatNumber(p.commits) })),
+      .map((p) => ({ name: p.name, commits: counted(p.commits, "commit") })),
     byFeature: site.wiki.manifest.features
       .filter((f) => f.status.kind === "active" && (snapshot.featureLines[f.id] ?? 0) > 0)
       .sort((a, b) =>
@@ -173,7 +202,8 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
   const { snapshot } = people;
   const p = snapshot.people.find((x) => x.id === personId && x.kind === "human");
   if (p === undefined) throw new Error(`no person ${personId}`);
-  const narrative: PersonRevision | null = people.pages.find((r) => r.personId === p.id) ?? null;
+  const narrative: PersonRevision | null =
+    withoutQuotedAddresses(people)?.pages.find((r) => r.personId === p.id) ?? null;
   const refs = narrative === null ? null : collectReferences(narrative);
   // A person claim never links Wikipedia (planner ruling R6): defence in depth over the engine's.
   const links = { link: (id: string) => featureLink(site, id), wikipediaLinks: false };
@@ -207,7 +237,12 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
       row("Active", escapeHtml(range(p))),
       row("Commits", formatNumber(p.commits)),
       row("Lines", `+${formatNumber(p.added)} −${formatNumber(p.deleted)}`),
-      row("Current lines", `${formatNumber(p.currentLines)} (${percent(p.currentLines / total)})`),
+      row(
+        "Current lines",
+        p.currentLines === 0
+          ? "no current lines"
+          : `${formatNumber(p.currentLines)} (${percent(p.currentLines / total)})`,
+      ),
       row(
         "Pull requests",
         `${formatNumber(p.prsAuthored.length)} authored, ${formatNumber(p.prsMerged.length)} merged`,
@@ -236,7 +271,7 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
       feature: featureHtml(site, f.featureId),
       commits: formatNumber(f.commits),
       lines: formatNumber(f.currentLines),
-      share: percent(f.currentLines / Math.max(1, snapshot.featureLines[f.featureId] ?? 0)),
+      share: lineShare(f.currentLines, snapshot.featureLines[f.featureId] ?? 0),
     })),
     pulls: p.prsAuthored.map((pr) => ({
       number: pr.number,

@@ -18,7 +18,7 @@ import { escapeHtml } from "./inline.ts";
 import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
-import { peopleExport } from "./test-people.ts";
+import { peopleExport, QUOTED_ADDRESS } from "./test-people.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -1578,8 +1578,9 @@ describe("the People pages (spec v2 #6 §11)", () => {
   });
 
   it("prints a hostile name as text everywhere, and links only real pages", () => {
-    const pages = htmlFiles(peopleSite.outDir).filter((p) => p.startsWith("people/"));
+    const pages = htmlFiles(peopleSite.outDir);
     expect(pages).toContain("people/hostile-name/index.html");
+    // Every built page, not only People's: a name could reach any of them (the Task 33 ruling).
     for (const page of pages) expect(peopleSite.read(page), page).not.toContain("<script>alert(1)");
     expect(brokenLinks(peopleSite.outDir).broken).toEqual([]);
     for (const page of htmlFiles(peopleSite.outDir))
@@ -1636,6 +1637,9 @@ describe("the People pages (spec v2 #6 §11)", () => {
       (f) => /\.(?:html|json|txt|xml|svg)$/.test(f) && !/^(?:pagefind|_astro)\//.test(f),
     );
     expect(text.length).toBeGreaterThan(0);
+    // The fixture's source data holds an address in a cited commit's subject and the excluded
+    // Kim's commits, so this scan can fail.
+    expect(JSON.stringify(peopleExport())).toContain(QUOTED_ADDRESS);
     for (const file of text) {
       const body = peopleSite.read(file);
       expect({ file, email: EMAIL.exec(body)?.[0] ?? null }).toEqual({ file, email: null });

@@ -2,6 +2,7 @@ import { WikiExport } from "@repowiki/core";
 import { makePersonFacts } from "@repowiki/core/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { articleView } from "./article.ts";
+import { oldRevisionView } from "./history.ts";
 import { articleInflight } from "./inflight-article.ts";
 import { buildSiteModel } from "./model.ts";
 import {
@@ -13,7 +14,7 @@ import {
   personView,
 } from "./people.ts";
 import { fixtureExport } from "./test-fixtures.ts";
-import { fixturePeople, HOSTILE_PERSON_NAME, peopleExport } from "./test-people.ts";
+import { fixturePeople, HOSTILE_PERSON_NAME, peopleExport, QUOTED_ADDRESS } from "./test-people.ts";
 import { personUrl } from "./urls.ts";
 
 const site = buildSiteModel(peopleExport(), "https://github.com/acme/demo-repo");
@@ -41,9 +42,9 @@ describe("peopleIndexView", () => {
     expect(view.people.map((p) => [p.name, p.commits, p.share])).toEqual([
       ["Ada Lovelace", "4", "38%"],
       ["Grace Hopper", "3", "46%"],
-      [HOSTILE_PERSON_NAME, "1", "0.0%"],
+      [HOSTILE_PERSON_NAME, "1", "no current lines"],
     ]);
-    expect(view.bots).toEqual([{ name: "dependabot[bot]", commits: "1" }]);
+    expect(view.bots).toEqual([{ name: "dependabot[bot]", commits: "1 commit" }]);
     expect(view.byFeature.map((f) => [f.anchor, f.contributors])).toEqual([
       ["feature-deliverables", ['<a href="/people/ada-lovelace/">Ada Lovelace</a> (25%)']],
       [
@@ -183,6 +184,52 @@ describe("Main contributors (R23)", () => {
     expect(row?.html).toMatch(/^<a href="\/people\/p-6\/">Person 6<\/a> \(18%\)/);
     expect(row?.html).toContain('<a href="/people/#feature-signals">and 2 more</a>');
   });
+
+  it("never lists a bot, even one with the most current lines (R30)", () => {
+    const base = fixturePeople();
+    const human = makePersonFacts({
+      id: "p-1",
+      name: "Person 1",
+      currentLines: 10,
+      features: [{ featureId: "signals", commits: 1, currentLines: 10 }],
+    });
+    const bot = makePersonFacts({
+      id: "busy-bot",
+      name: "busy[bot]",
+      kind: "bot",
+      currentLines: 500,
+      features: [{ featureId: "signals", commits: 9, currentLines: 500 }],
+    });
+    const wiki = {
+      ...peopleExport(),
+      people: {
+        ...base,
+        snapshot: {
+          ...base.snapshot,
+          people: [bot, human],
+          redirects: [],
+          totalLines: 510 + base.snapshot.unattributedLines,
+          featureLines: { signals: 510 },
+        },
+        pages: [],
+      },
+    };
+    const s = buildSiteModel(wiki, null);
+    const page = s.pages.get("signals");
+    if (page === undefined) throw new Error("signals has a page");
+    const row = articleView(s, page).infobox.find((r) => r.label === "Main contributors");
+    expect(row?.html).toBe('<a href="/people/p-1/">Person 1</a> (2.0%)');
+  });
+
+  it("is left off an old revision's page: a past view shows no current people", () => {
+    const n = site.history.get("signals")?.length ?? 0;
+    expect(n).toBeGreaterThan(0);
+    const labels = (view: ReturnType<typeof oldRevisionView>) => view.infobox.map((r) => r.label);
+    expect(labels(oldRevisionView(site, "signals", n))).not.toContain("Main contributors");
+    const current = site.pages.get("signals");
+    if (current === undefined) throw new Error("signals has a page");
+    expect(articleView(site, current).infobox.map((r) => r.label)).toContain("Main contributors");
+  });
 });
 
 /** The fixture with Ada's activity replaced and nobody else's: for the zoom-link edges. */
@@ -281,5 +328,33 @@ describe("zoom links at period edges (the Task 32 and Task 34 rulings)", () => {
       (f) => f.anchor,
     );
     expect(anchors).toEqual([...anchors].sort());
+  });
+});
+
+describe("People pages' wording and privacy (the Task 33 ruling)", () => {
+  it("says a person with no current lines has none, rather than 0.0%", () => {
+    const view = personView(site, people, "hostile-name");
+    expect(view.infobox.find((r) => r.label === "Current lines")?.html).toBe("no current lines");
+    expect(view.areas.map((a) => a.share)).toEqual(["no current lines"]);
+  });
+
+  it("never shows an address a cited commit's subject quotes", () => {
+    const view = personView(site, people, "ada-lovelace");
+    expect(JSON.stringify(view)).not.toContain(QUOTED_ADDRESS);
+    expect(JSON.stringify(view)).toContain("cc [email]");
+  });
+
+  it("refuses an export whose person name is an address, before the site sees it", () => {
+    const base = fixturePeople();
+    const named = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        people: base.snapshot.people.map((p) =>
+          p.id === "grace-hopper" ? { ...p, name: QUOTED_ADDRESS } : p,
+        ),
+      },
+    };
+    expect(WikiExport.safeParse({ ...fixtureExport(), people: named }).success).toBe(false);
   });
 });

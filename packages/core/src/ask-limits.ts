@@ -27,8 +27,9 @@ export const ASK_SECTION_TITLE_MAX_LENGTH = 64;
 
 /**
  * Every link an answer may carry (R19): a feature page or the About article, optionally at one of
- * its claims or sections. The server builds links from handles; the client refuses anything else,
- * with this very pattern. M11 widens it to person pages.
+ * its claims or sections. The server builds links from handles and refuses anything else with this
+ * very pattern, so a served answer never links a person page. M11 widens only the client's
+ * SAFE_HREF (ask-render.ts) to person pages, for the search results it renders; not this one.
  */
 export const ASK_HREF =
   /^\/(wiki\/[a-z0-9-]{1,64}\/|special\/about\/)(#claim-[A-Za-z0-9_-]{1,64}|#[a-z-]{1,32})?$/;
