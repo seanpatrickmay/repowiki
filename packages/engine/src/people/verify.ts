@@ -99,7 +99,7 @@ const MONTHS = [
   "december",
 ];
 /** A month's name, written out or cut to three letters (four for "Sept"), with an optional dot. */
-const MONTH = `(?:${MONTHS.join("|")}|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec).?`;
+const MONTH = `(?:${MONTHS.join("|")}|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\\.?`;
 /** A day of the month, with an optional ordinal suffix ("15th"). */
 const DAY = "(\\d{1,2})(?:st|nd|rd|th)?";
 /**
@@ -201,6 +201,12 @@ const wholeWord = (word: string) =>
  * every whitespace one space, invisible characters dropped, lower case), as the names are.
  */
 const nameForm = (text: string) => normalizeName(text.replace(/[*_]+/g, ""));
+/**
+ * The claim as the page shows it, for the name check (the wave B re-review): code spans reduced
+ * to their contents and links to their labels, so a name split across markup is one name.
+ */
+const shownForm = (text: string) =>
+  nameForm(text.replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1").replace(/[`[\]]+/g, ""));
 /** Each context's other names as whole-word patterns, compiled once per context. */
 const namePatterns = new WeakMap<readonly string[], RegExp[]>();
 const patternsOf = (names: readonly string[]): RegExp[] => {
@@ -264,8 +270,8 @@ function factProblems(
   if (holdsEmail(text)) problems.push("the claim holds an email address; never write one");
   if (STATISTIC.test(normalizedText(text)))
     problems.push("the claim states a statistic; the infobox has the numbers, so leave them out");
-  const named = nameForm(text);
-  if (patternsOf(ctx.otherNames).some((pattern) => pattern.test(named)))
+  const named = [nameForm(text), shownForm(text)];
+  if (patternsOf(ctx.otherNames).some((pattern) => named.some((form) => pattern.test(form))))
     problems.push("the claim names another person; name no one but the page's subject");
   const banned = BANNED.filter((b) => b.pattern.test(words)).map((b) => quote(b.word));
   if (banned.length > 0)
@@ -416,15 +422,29 @@ export function personVerifyContext(
   const self = groups[group];
   const normal = (names: readonly string[]) =>
     names.map((n) => normalizeName(cleanPersonName(n))).filter((n) => n !== "");
-  // Every name a group was ever written under, those the mailmap replaced included.
+  // Every name a group was ever written under, those the mailmap replaced included, and its
+  // logins of MIN_NAMED_LENGTH or more (the final review's M2: a subject can quote one).
   const namesOf = (g: IdentityGroup) =>
-    normal([g.name, ...g.otherNames, ...g.replacedNames, ...g.identities.map((p) => p.name)]);
-  // The person's own names are only those People shows: a name the mailmap replaced is no
-  // narrative's to use, theirs included (the I1 ruling).
+    normal([
+      g.name,
+      ...g.otherNames,
+      ...g.replacedNames,
+      ...g.identities.map((p) => p.name),
+      ...g.logins.filter((login) => login.length >= MIN_NAMED_LENGTH),
+    ]);
+  // The person's own names, those the mailmap replaced included (the Task 37 residual ruling):
+  // only other people's names are refused, so "Lovelace" mapped to "Ada Lovelace" never refuses
+  // her own lead. Held here only; the replaced names reach no output.
   const own = new Set(
     self === undefined
       ? []
-      : normal([self.name, ...self.otherNames, ...self.identities.map((p) => p.shownName)]),
+      : normal([
+          self.name,
+          ...self.otherNames,
+          ...self.replacedNames,
+          ...self.identities.flatMap((p) => [p.shownName, p.name]),
+          ...self.logins,
+        ]),
   );
   const otherNames = [...new Set(groups.flatMap(namesOf))].filter((n) => !own.has(n));
   const commits = topologicalNewestFirst(refreshed.commits);

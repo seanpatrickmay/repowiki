@@ -165,6 +165,20 @@ describe("PeopleSnapshot", () => {
     expect(PeopleSnapshot.parse(makePeopleSnapshot())).toEqual(makePeopleSnapshot());
   });
 
+  it("accepts all-digit feature ids, which JavaScript always lists first (Task 2's M1)", () => {
+    const base = makePeopleSnapshot();
+    const lines = Object.values(base.featureLines).reduce((a, b) => a + b, 0);
+    const featureLines = JSON.parse(
+      `{"1-a": 0, "9": 0, "4294967294": 0, "10": 0, ${JSON.stringify(base.featureLines).slice(1)}`,
+    );
+    // Ten digits too (the round 2 ruling: any all-digit id).
+    expect(Object.keys(featureLines).slice(0, 3)).toEqual(["9", "10", "4294967294"]);
+    expect(PeopleSnapshot.safeParse({ ...base, featureLines }).success).toBe(true);
+    expect(lines).toBe(Object.values(featureLines).reduce((a: number, b) => a + (b as number), 0));
+    const unsorted = JSON.parse(`{"zz": 0, ${JSON.stringify(base.featureLines).slice(1)}`);
+    expect(PeopleSnapshot.safeParse({ ...base, featureLines: unsorted }).success).toBe(false);
+  });
+
   it("refuses unsorted people, a redirect from a person or to a bot, and lines that do not add up", () => {
     const [ada, bot, grace] = makePeopleSnapshot().people;
     const bad = [

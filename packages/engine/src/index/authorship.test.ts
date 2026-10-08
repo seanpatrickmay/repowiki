@@ -244,6 +244,20 @@ describe("readAuthorship (spec v2 #6 R5, R6, R20)", () => {
     expect(attrSourceSupported("not git")).toBe(false);
   });
 
+  it("reads the author date, not the committer's (the Task 6 review's minor)", () => {
+    repo.write("a.py", "1\n");
+    const sha = repo.commit("init", "+0100", ADA);
+    const body = repo
+      .git("cat-file", "commit", sha)
+      .replace(/^(committer .*>) \d+ [+-]\d{4}$/m, "$1 1800000000 -0700");
+    repo.write(".git/recommitted", `${body}\n`);
+    const later = repo.git("hash-object", "-t", "commit", "-w", ".git/recommitted");
+    const [c] = readAuthorship(repo.dir, later);
+    expect(c?.authorDate).toMatch(/\+01:00$/);
+    expect(c?.commitDate).toBe("2027-01-15T01:00:00-07:00");
+    expect(c?.authorDate).not.toBe(c?.commitDate);
+  });
+
   it("never throws on an author date git prints but People cannot use (the I3 ruling)", () => {
     repo.write("a.py", "1\n");
     const first = repo.commit("init", "+0000", ADA);

@@ -135,9 +135,9 @@ export async function blameTree(
   // Binary blobs are sniffed as text is elsewhere (a NUL in the first 8,000 bytes).
   const oids = [...new Set(todo.map((b) => b.oid))];
   const sniffed = new Map<string, { binary: boolean; lines: number }>();
-  let next = 0;
+  // Keyed by each streamed blob's own oid, not its place (the Task 12 review's minor).
   for await (const data of streamBlobs(repo, oids, 0, read)) {
-    sniffed.set(oids[next++] as string, { binary: data.head.includes(0), lines: data.lines });
+    sniffed.set(data.oid, { binary: data.head.includes(0), lines: data.lines });
   }
   const text = todo.filter((b) => sniffed.get(b.oid)?.binary !== true);
   skipped += todo.length - text.length;

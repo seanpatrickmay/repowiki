@@ -31,7 +31,7 @@ export interface AuthoredCommit {
    * stays out of activity and first and last dates (the I3 ruling). Absent otherwise.
    */
   undated?: true;
-  /** The committer date, as readHistory gives it. */
+  /** The committer date, as readHistory gives it, its offset read as +00:00 when invalid (I3). */
   commitDate: string;
   subject: string;
   /** A merge's first non-empty body line, where GitHub writes the PR's title (R6); else null. */
@@ -43,18 +43,19 @@ export interface AuthoredCommit {
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/;
-/** An author date as git can print it: any year's length, any two-digit offset. */
-const AUTHOR_DATE = /^(\d{4,})(-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(Z|[+-](\d{2}):(\d{2}))$/;
+/** A date as git can print it: any year's length, any two-digit offset. */
+const GIT_DATE = /^(\d{4,})(-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(Z|[+-](\d{2}):(\d{2}))$/;
 
 /**
- * An author date People can use (the I3 ruling), or null: a year outside 1970-9999, or a date
- * that does not parse, gives null; an offset past +-23:59 is read as +00:00, the clock time kept.
+ * The one form of every date People reads that reaches a schema (the I3 rulings): an offset past
+ * +-23:59 is read as +00:00, the clock time kept; a year that is not four digits, or (for an
+ * author date, `dated`) one outside 1970-9999, or a date that does not parse, gives null.
  */
-export function usableAuthorDate(raw: string): string | null {
-  const m = AUTHOR_DATE.exec(raw);
+export function schemaDate(raw: string, dated = true): string | null {
+  const m = GIT_DATE.exec(raw);
   if (m === null) return null;
   const [, year = "", rest = "", offset = "", hours = "", minutes = ""] = m;
-  if (year.length !== 4 || year < "1970") return null;
+  if (year.length !== 4 || (dated && year < "1970")) return null;
   const valid = offset === "Z" || (Number(hours) <= 23 && Number(minutes) <= 59);
   const date = `${year}${rest}${valid ? offset : "+00:00"}`;
   return Number.isFinite(Date.parse(date)) ? date : null;
@@ -200,15 +201,18 @@ export function readAuthorship(
     }
     const merge = parentShas.length > 1;
     const titleLine = body.split("\n").find((line) => line.trim() !== "");
-    const usable = usableAuthorDate(authorDate);
+    const usable = schemaDate(authorDate);
+    // The commit date takes the same form (its offset fixed): an undated commit stands on it.
+    const committed = schemaDate(commitDate, false);
+    if (committed === null) throw unparseable();
     commits.push({
       sha: hash,
       parents: parentShas,
       authorName: name,
       authorEmail: email,
-      authorDate: usable ?? commitDate,
+      authorDate: usable ?? committed,
       ...(usable === null ? { undated: true as const } : {}),
-      commitDate,
+      commitDate: committed,
       subject,
       mergeTitle: merge && titleLine !== undefined ? titleLine.trim() : null,
       files,

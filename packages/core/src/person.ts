@@ -236,7 +236,10 @@ export const PeopleSnapshot = z
       if (people.get(redirect.to)?.kind !== "human")
         issue(`${redirect.to} is not a person with a page`, ["redirects", r, "to"]);
     });
-    const keys = Object.keys(snapshot.featureLines);
+    // JavaScript lists integer-like keys first, in numeric order, whatever order they were
+    // written in (the Task 2 review's M1), up to ten digits: every all-digit key is left out, and
+    // only the other keys' order is checked (the round 2 ruling).
+    const keys = Object.keys(snapshot.featureLines).filter((key) => !/^\d+$/.test(key));
     if (!keys.every((key, i) => i === 0 || (keys[i - 1] ?? "") < key))
       issue("feature lines are keyed in sorted order", ["featureLines"]);
     const lines = snapshot.people.reduce((n, p) => n + p.currentLines, 0);

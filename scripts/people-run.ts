@@ -1,7 +1,6 @@
 import type { PeopleConfig } from "@repowiki/core";
 import {
   type BuildJournal,
-  estimateTokens,
   gitReadsAttributesAtSha,
   type PersonOutcome,
   type PersonRequest,
@@ -20,6 +19,7 @@ import {
 import type { ModelConfig, Provider } from "@repowiki/llm";
 import {
   attributesNotes,
+  ceilingTokens,
   exclusionNotes,
   narrativeCeilingUsd,
   type PeopleRow,
@@ -102,12 +102,12 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
   const systems = [false, true].map((append) => {
     const system = peopleSystemPrompt(input.repoName, manifest, append);
     const calls = prepared.requests.filter((r) => r.append === append).length;
-    return { tokens: estimateTokens(system), cached: peopleCacheKey(sha, system, calls) !== null };
+    return { tokens: ceilingTokens(system), cached: peopleCacheKey(sha, system, calls) !== null };
   });
   const ceiling = (r: PersonRequest) => {
     const system = systems[r.append ? 1 : 0] as (typeof systems)[0];
     return narrativeCeilingUsd(
-      estimateTokens(personTurn(r.pack, r.append ? r.parent : null)),
+      ceilingTokens(personTurn(r.pack, r.append ? r.parent : null)),
       system.tokens,
       input.models.people,
       input.batch,

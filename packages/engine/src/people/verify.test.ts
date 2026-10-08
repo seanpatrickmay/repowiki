@@ -350,11 +350,37 @@ describe("verifyPersonClaim and merges the person did not write (the I2 ruling)"
   });
 });
 
+describe("verifyPersonClaim's final-wave checks (Task 37)", () => {
+  it("reads a month's dot only as a dot: no word that starts like a month is a date", () => {
+    expect(statedDates("in Junk 2025 and Mark 2025").map((d) => d.text)).toEqual(["2025", "2025"]);
+    expect(statedDates("in Jan. 2026").map((d) => d.text)).toEqual(["Jan. 2026"]);
+  });
+
+  it("refuses a name split by a code span or a link label (the wave B re-review)", () => {
+    for (const text of [
+      "On 14 March 2026, `Grace` Hopper's parser was used.",
+      "On 14 March 2026, `Grace` `Hopper` reviewed it.",
+      "On 14 March 2026, [[signals|Grace]] Hopper gained scoring.",
+      "On 14 March 2026, Grace [[signals|Hopper]] gained scoring.",
+    ])
+      expect(problems("chronicle", claim(text, [`commit:${A}`])), text).toContain(
+        "the claim names another person; name no one but the page's subject",
+      );
+  });
+});
+
 describe("personVerifyContext (R17)", () => {
-  const group = (name: string, excluded = false, otherNames: string[] = [], replaced = "") =>
+  const group = (
+    name: string,
+    excluded = false,
+    otherNames: string[] = [],
+    replaced = "",
+    logins: string[] = [],
+  ) =>
     ({
       name,
       otherNames,
+      logins,
       replacedNames: replaced === "" ? [] : [replaced],
       identities: [
         { name, shownName: name, email: "x@e.com" },
@@ -392,16 +418,42 @@ describe("personVerifyContext (R17)", () => {
       "the claim names another person; name no one but the page's subject",
     );
   });
+
+  it("names other people's logins of 4 or more characters too (the final review's M2)", () => {
+    const refreshed = {
+      sha: A,
+      commits: [],
+      commitFeatures: new Map(),
+      identities: {
+        groups: [
+          group("Ada Lovelace", false, [], "", ["ada-q7"]),
+          group("Kim Hidden", true, [], "", ["kimq7", "kq"]),
+        ],
+        groupOf: () => 0,
+      },
+    } as unknown as Parameters<typeof personVerifyContext>[0];
+    const ctx = personVerifyContext(refreshed, 0, pack, makeManifest());
+    expect([...ctx.otherNames].sort()).toEqual(["kim hidden", "kimq7"]);
+    const said = verifyPersonClaim(
+      "chronicle",
+      claim("In March 2026, x changed after review from kimq7.", [`commit:${A}`]),
+      { ...ctx, verify: { ...ctx.verify, commits: [commit(A, "x", "2026-03-14T10:00:00+01:00")] } },
+    );
+    expect(said.problems).toContain(
+      "the claim names another person; name no one but the page's subject",
+    );
+  });
 });
 
 describe("personVerifyContext and the mailmap (the I1 ruling)", () => {
-  it("lets no narrative use a name the mailmap replaced, the person's own included", () => {
+  it("lets no narrative use another person's replaced name; the person's own are theirs (round 2)", () => {
     const group = (name: string, replaced: string[]) =>
       ({
         name,
         otherNames: [],
         replacedNames: replaced,
         identities: [name, ...replaced].map((raw) => ({ name: raw, shownName: name })),
+        logins: [],
         excluded: false,
         firstCommit: "2026-03-14T10:00:00+01:00",
         lastCommit: "2026-04-03T00:00:00Z",
@@ -411,12 +463,25 @@ describe("personVerifyContext and the mailmap (the I1 ruling)", () => {
       commits: [],
       commitFeatures: new Map(),
       identities: {
-        groups: [group("Ada Lovelace", ["Old Deadname"]), group("Grace Hopper", ["Gracie Old"])],
+        groups: [
+          group("Ada Lovelace", ["Old Deadname", "Lovelace"]),
+          group("Grace Hopper", ["Gracie Old"]),
+        ],
         groupOf: () => 0,
       },
     } as unknown as Parameters<typeof personVerifyContext>[0];
     const ctx = personVerifyContext(refreshed, 0, pack, makeManifest());
-    expect([...ctx.otherNames].sort()).toEqual(["grace hopper", "gracie old", "old deadname"]);
+    expect([...ctx.otherNames].sort()).toEqual(["grace hopper", "gracie old"]);
+    // The re-review's probe-i1b: a surname-only identity mapped to the full name never refuses
+    // the person's own bold-name lead.
+    const lead = verifyPersonClaim(
+      "lead",
+      { id: "l1", text: "**Ada Lovelace** contributed to signals.", cite: [], supports: ["c1"] },
+      ctx,
+    );
+    expect(lead.problems).not.toContain(
+      "the claim names another person; name no one but the page's subject",
+    );
   });
 });
 

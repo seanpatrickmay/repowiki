@@ -398,13 +398,25 @@ function assemble(
     if (id !== undefined) repeated.set(claim.id, id);
     return id === undefined;
   });
+  // At most MAX_CHRONICLE_CLAIMS, oldest first, whatever the answer holds (the wave B
+  // re-review): the cap is the engine's, not only the prompt's.
+  const chronicle = [...state.kept, ...newChronicle.map((v) => page(v.claim))].slice(
+    0,
+    MAX_CHRONICLE_CLAIMS,
+  );
+  const cut = new Set(
+    newChronicle.map((v) => v.claim.id).filter((id) => !chronicle.some((c) => c.id === id)),
+  );
   const lead = fresh("lead").map((v) =>
     page({
       ...v.claim,
-      supports: [...new Set(v.claim.supports.map((id) => repeated.get(id) ?? id))],
+      supports: [
+        ...new Set(
+          v.claim.supports.map((id) => repeated.get(id) ?? id).filter((id) => !cut.has(id)),
+        ),
+      ],
     }),
   );
-  const chronicle = [...state.kept, ...newChronicle.map((v) => page(v.claim))];
   // Each areas claim is linked alone; one the linker changed past its single link keeps its text.
   const newAreas = fresh("areas").map(({ claim }) => {
     const linked = createClaimLinker(manifest, "", new Map())(claim);

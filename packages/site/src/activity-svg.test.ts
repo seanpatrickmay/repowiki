@@ -166,6 +166,19 @@ describe("heatmap and sparkline", () => {
     expect([0, 1, 3, 6, 7].map(heatLevel)).toEqual([0, 1, 2, 3, 4]);
   });
 
+  it("draws leap years whole, links nothing, and escapes its label (the Task 31 review)", () => {
+    // 2024 starts on a Monday and 2028 on a Saturday; both have 29 February.
+    for (const year of [2024, 2028]) {
+      const html = heatmap(year, [], "x");
+      expect(html.match(/<rect /g)).toHaveLength(366);
+      expect(html).toContain(`29 Feb ${year}: 0 commits`);
+    }
+    const hostile = heatmap(2026, ada.activity, '<script>alert(1)</script> "x" & y');
+    expect(hostile).not.toContain("<a ");
+    expect(hostile).not.toContain("<script>");
+    expect(hostile).toContain("&lt;script&gt;");
+  });
+
   it("draws a decorative sparkline", () => {
     const svg = sparkline(ada.activity, "2026-01-01", "2026-03-31");
     expect(svg).toMatch(

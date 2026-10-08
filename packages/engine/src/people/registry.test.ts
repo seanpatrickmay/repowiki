@@ -40,6 +40,54 @@ function assign(commits: AuthoredCommit[], stored: RegistryRow[] = [], file: unk
   return { ...result, byName: Object.fromEntries(groups.map((g, i) => [g.name, result.ids[i]])) };
 }
 
+describe("assignIds and excluded people (the final review's M1)", () => {
+  it("gives a new excluded person a private id, so a visible id never shows they exist", () => {
+    const { ids } = assign([by("Alex Smith", "a1@e.com", 1), by("Alex Smith", "a2@e.com", 2)], [], {
+      exclude: ["email:a1@e.com"],
+      people: [{ match: ["email:a2@e.com"] }],
+    });
+    expect(ids).toEqual(["excluded-1", "alex-smith"]);
+  });
+
+  it("gives a person whose exclusion is lifted a normal id, the private one gone (round 2)", () => {
+    const commits = [by("Kim Hidden", "kim@e.com", 1), by("Ada Lovelace", "ada@e.com", 2)];
+    const first = assign(commits, [], { exclude: ["email:kim@e.com"] });
+    expect(first.ids).toEqual(["excluded-1", "ada-lovelace"]);
+    const lifted = assign(commits, first.registry);
+    expect(lifted.ids).toEqual(["kim-hidden", "ada-lovelace"]);
+    expect(lifted.redirects).toEqual([]);
+    expect(lifted.registry.map((r) => r.id)).toEqual(["kim-hidden", "ada-lovelace"]);
+    expect(lifted.registry[0]?.order).toBe(first.registry[0]?.order);
+  });
+
+  it("never redirects from a private id when the lifted person is given a people-file id (round 3)", () => {
+    const commits = [by("Kim Hidden", "kim@e.com", 1), by("Ada Lovelace", "ada@e.com", 2)];
+    const first = assign(commits, [], { exclude: ["email:kim@e.com"] });
+    const lifted = assign(commits, first.registry, {
+      people: [{ match: ["email:kim@e.com"], id: "kim-h" }],
+    });
+    expect(lifted.ids).toEqual(["kim-h", "ada-lovelace"]);
+    expect(lifted.redirects).toEqual([]);
+    expect(lifted.registry.map((r) => r.id)).not.toContain("excluded-1");
+  });
+
+  it("never redirects from a private id merged into a visible person (round 3)", () => {
+    const commits = [
+      by("Kim Hidden", "kim@e.com", 1),
+      by("K H", "k2@e.com", 2),
+      by("K H", "k2@e.com", 3),
+    ];
+    const first = assign(commits, [], { exclude: ["email:kim@e.com"] });
+    expect(first.ids).toEqual(["excluded-1", "k-h"]);
+    const merged = assign(commits, first.registry, {
+      people: [{ match: ["email:kim@e.com", "email:k2@e.com"] }],
+    });
+    expect(merged.ids).toEqual(["k-h"]);
+    expect(merged.redirects).toEqual([]);
+    expect(merged.registry.map((r) => r.id)).toEqual(["k-h"]);
+  });
+});
+
 describe("assignIds (spec v2 #6 R13)", () => {
   it("makes ids from display names, accents stripped, collisions numbered by first commit", () => {
     const { ids, registry } = assign([

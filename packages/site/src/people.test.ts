@@ -256,6 +256,23 @@ function withActivity(days: { day: string; commits: number }[]) {
 const hrefsIn = (html: string) =>
   [...(html.split("</svg>")[0] ?? "").matchAll(/<a href="([^"]+)">/g)].map((m) => m[1]);
 
+describe("a person chart's edge buckets (the wave B re-review)", () => {
+  it("draws no commit dated after the head, even one inside the head's week", () => {
+    const { site: s, people: p } = withActivity([
+      { day: "2025-06-02", commits: 1 },
+      { day: "2026-03-02", commits: 1 },
+      { day: "2026-03-06", commits: 2 },
+    ]);
+    const later = { ...p, snapshot: { ...p.snapshot, commitDate: "2026-03-04T12:00:00Z" } };
+    const chart = personView(s, later, "ada-lovelace").chart;
+    expect(chart).toContain(
+      "2 commits dated before 1970 or after the head&#39;s date are not drawn.",
+    );
+    expect(chart).toContain("Week of 2 Mar 2026: 1 commit,");
+    expect(chart).not.toContain("3 commits");
+  });
+});
+
 describe("zoom links at period edges (the Task 32 and Task 34 rulings)", () => {
   // Weeks: the first bar is the week of 29 December 2025, whose only commit is on 2 January.
   const straddle = [
