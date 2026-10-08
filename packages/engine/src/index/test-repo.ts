@@ -9,15 +9,27 @@ export interface TestRepo {
   dir: string;
   git(...args: string[]): string;
   write(path: string, content: string | Buffer): void;
-  /** Stages everything and commits; returns the new sha. Dates advance one day per commit, in `tz`. */
-  commit(message: string, tz?: string): string;
+  /**
+   * Stages everything and commits; returns the new sha. Dates advance one day per commit, in `tz`.
+   * `author` sets the commit's author name and email (the committer stays the fixture's).
+   */
+  commit(message: string, tz?: string, author?: TestAuthor): string;
   /**
    * Merges `branch` into the current branch with a merge commit (never a fast-forward), dated
-   * like a commit; returns the merge's sha.
+   * like a commit; returns the merge's sha. `author` is the merge's author, as for commit.
    */
-  merge(branch: string, message: string): string;
+  merge(branch: string, message: string, author?: TestAuthor): string;
   remove(): void;
 }
+
+/** Who a fixture commit is by (spec v2 #6 §13: scripted per-commit authors). */
+export interface TestAuthor {
+  name: string;
+  email: string;
+}
+
+const authorEnv = (author: TestAuthor | undefined): Record<string, string> =>
+  author === undefined ? {} : { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email };
 
 // Isolate from the developer's git config (signing, hooks, default branch, identity).
 const ISOLATED_ENV = {
@@ -47,22 +59,24 @@ export function createTestRepo(): TestRepo {
       mkdirSync(dirname(full), { recursive: true });
       writeFileSync(full, content);
     },
-    commit(message, tz = "+0000") {
+    commit(message, tz = "+0000", author) {
       day++;
       const date = `@${1_767_225_600 + day * 86_400} ${tz}`;
       run(["add", "-A"]);
       run(["commit", "-q", "--allow-empty", "--allow-empty-message", "-m", message], {
         GIT_AUTHOR_DATE: date,
         GIT_COMMITTER_DATE: date,
+        ...authorEnv(author),
       });
       return run(["rev-parse", "HEAD"]);
     },
-    merge(branch, message) {
+    merge(branch, message, author) {
       day++;
       const date = `@${1_767_225_600 + day * 86_400} +0000`;
       run(["merge", "-q", "--no-ff", "-m", message, branch], {
         GIT_AUTHOR_DATE: date,
         GIT_COMMITTER_DATE: date,
+        ...authorEnv(author),
       });
       return run(["rev-parse", "HEAD"]);
     },
