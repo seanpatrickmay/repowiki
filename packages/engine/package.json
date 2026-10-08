@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./test-inflight": "./src/inflight/test-inflight.ts",
+    "./test-people": "./src/people/test-people.ts",
     "./test-repo": "./src/index/test-repo.ts"
   },
   "dependencies": {

@@ -137,10 +137,15 @@ export {
 } from "./manifest/index.ts";
 export {
   type IdentityGroup,
+  maskEmail,
   type PeopleRead,
   type Refreshed,
   readPeople,
   refreshPeople,
+  type Suggestion,
+  suggestionSnippet,
+  suggestMerges,
+  wantsNarrative,
 } from "./people/index.ts";
 export {
   addAliases,
