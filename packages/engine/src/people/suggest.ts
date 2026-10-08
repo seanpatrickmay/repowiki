@@ -1,15 +1,25 @@
-import { normalizeName } from "@repowiki/core";
+import { cleanPersonName, INVISIBLE_CHARACTERS, normalizeName } from "@repowiki/core";
 import type { IdentityGroup } from "./identities.ts";
 
+/** The parts of an address a reader can see: no control, bidi or invisible character. */
+const seen = (text: string): string => text.toWellFormed().replace(INVISIBLE_CHARACTERS, "");
+
 /**
- * An email as people:suggest may show it (spec v2 #6 R10): the first three characters of the
- * local part, then "…@" and the domain. Nothing else in RepoWiki prints an address at all.
+ * An email as people:suggest may show it (spec v2 #6 R10): at most the first character of the
+ * local part (nothing of one under three characters), then "…@" and the domain, both stripped of
+ * control and invisible characters so an address cannot steer the terminal. Nothing else in
+ * RepoWiki prints an address at all.
  */
 export function maskEmail(email: string): string {
   const at = email.lastIndexOf("@");
   if (at <= 0) return "…";
-  return `${[...email.slice(0, at)].slice(0, 3).join("")}…@${email.slice(at + 1)}`;
+  const local = [...seen(email.slice(0, at))];
+  return `${local.length < 3 ? "" : local[0]}…@${seen(email.slice(at + 1))}`;
 }
+
+/** A name's key as the people file writes it, or "" for a name that cleans to nothing (R10). */
+const nameKeyOf = (name: string): string =>
+  cleanPersonName(name) === "" ? "" : normalizeName(name);
 
 /** Why two people may be one (R8): a rule people:suggest names and never applies. */
 export type SuggestRule =
@@ -58,7 +68,7 @@ export function suggestMerges(groups: readonly IdentityGroup[]): Suggestion[] {
     const handles = [
       ...new Set(
         a.identities
-          .map((p) => normalizeName(p.name))
+          .map((p) => nameKeyOf(p.name))
           .filter((name) => name !== "" && !name.includes(" "))
           .map(letters),
       ),
@@ -66,7 +76,7 @@ export function suggestMerges(groups: readonly IdentityGroup[]): Suggestion[] {
     if (handles.length === 0) return;
     groups.forEach((b, j) => {
       if (i === j || !candidate(b)) return;
-      const fulls = b.identities.map((p) => normalizeName(p.name)).filter((n) => n.includes(" "));
+      const fulls = b.identities.map((p) => nameKeyOf(p.name)).filter((n) => n.includes(" "));
       let rule: SuggestRule | null = null;
       for (const handle of handles) for (const full of fulls) rule ??= abbreviates(handle, full);
       const locals = b.identities.map((p) =>
@@ -80,17 +90,26 @@ export function suggestMerges(groups: readonly IdentityGroup[]): Suggestion[] {
   return out;
 }
 
-/** The people-file entry that would apply a suggestion: name keys only, so no email is shown. */
+/**
+ * The people-file entry that would apply a suggestion, as lines: the entry, with name keys only
+ * so no email is shown, and taken only from names that clean to something (a name holding an
+ * address gives no key, R10). For each person with such a name, a line saying to add that
+ * person's other keys by hand, naming them by id (`ids` are the groups' assigned ids).
+ */
 export function suggestionSnippet(
   groups: readonly IdentityGroup[],
+  ids: readonly string[],
   suggestion: Suggestion,
-): string {
+): string[] {
   const handle = groups[suggestion.handle] as IdentityGroup;
   const full = groups[suggestion.name] as IdentityGroup;
-  const keys = [
-    ...new Set(
-      [...full.identities, ...handle.identities].map((p) => `name:${normalizeName(p.name)}`),
-    ),
-  ];
-  return JSON.stringify({ name: full.name, match: keys });
+  const names = [...full.identities, ...handle.identities].map((p) => nameKeyOf(p.name));
+  const keys = [...new Set(names.filter((n) => n !== "").map((n) => `name:${n}`))];
+  const lines = [JSON.stringify({ name: full.name, match: keys })];
+  for (const g of [suggestion.name, suggestion.handle])
+    if (groups[g]?.identities.some((p) => nameKeyOf(p.name) === ""))
+      lines.push(
+        `A name of ${ids[g] ?? "this person"} gives no name key: add that person's other keys to the entry by hand (people:suggest never prints an address).`,
+      );
+  return lines;
 }

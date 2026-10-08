@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { INVISIBLE_CHARACTERS } from "./alias.ts";
+import { INFLIGHT_FILLERS, INVISIBLE_CHARACTERS } from "./alias.ts";
 import { Claim } from "./claim.ts";
 import { FeatureId } from "./feature.ts";
+import { hasVisibleText, holdsEmail, withoutEmails } from "./plain-text.ts";
 import { GitSha, IsoDateTime } from "./primitives.ts";
 import { TokenUsage } from "./revision.ts";
 import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rules.ts";
@@ -19,36 +20,36 @@ export const PersonId = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "person ids are lowercase kebab-case slugs");
 export type PersonId = z.infer<typeof PersonId>;
 
-/** What an email address looks like in free text: something@something.tld, no spaces. */
-const EMAIL_TOKEN =
-  /[^\s<>()[\]{}@,;:"'`|\\]+@[^\s<>()[\]{}@,;:"'`|\\]+\.[^\s<>()[\]{}@,;:"'`|\\]+/gu;
-const EMAIL_TEST = new RegExp(EMAIL_TOKEN.source, "u");
-
-/**
- * Text with every email-shaped token replaced by "[email]" (planner ruling R5): People never
- * shows an address, even one a commit subject or a pull-request title quotes.
- */
-export function withoutEmails(text: string): string {
-  return text.replace(EMAIL_TOKEN, "[email]");
-}
-
 /** The longest display name, in code points (spec v2 #6 R14: an Architecture title's rule). */
 export const PERSON_NAME_MAX_LENGTH = 120;
 
-/**
- * An author name as People shows it (spec v2 #6 §6.1, R14): whitespace made spaces, every other
- * control, bidi and invisible character dropped, spaces collapsed, trimmed and cut to PERSON_NAME_MAX_LENGTH code points.
- * A name that holds an email address is unusable (R10): it cleans to "", as does one with nothing
- * left, and the caller falls back to the next name.
- */
-export function cleanPersonName(raw: string): string {
-  const flat = raw
-    .replace(/\s+/g, " ")
-    .replace(INVISIBLE_CHARACTERS, "")
+/** Every whitespace character, as normalizedText reads it: `\s` (U+2028 and U+2029 in it) and NEL. */
+const WHITESPACE = /[\s\u0085]+/gu;
+
+/** `text` well formed, every whitespace character a space, and every invisible one `to`. */
+const flattened = (text: string, to: "" | " "): string =>
+  text
+    .toWellFormed()
+    .replace(WHITESPACE, " ")
+    .replace(INVISIBLE_CHARACTERS, to)
+    .replace(INFLIGHT_FILLERS, to)
     .replace(/ +/g, " ")
     .trim();
-  if (EMAIL_TEST.test(flat)) return "";
-  return [...flat].slice(0, PERSON_NAME_MAX_LENGTH).join("").trimEnd();
+
+/**
+ * An author name as People shows it (spec v2 #6 §6.1, R14, the fix-forward ruling): every
+ * whitespace character (NEL and U+2028/9 included) a space, every other control, bidi, invisible
+ * or filler character dropped, a lone surrogate made U+FFFD, spaces collapsed, trimmed and cut to
+ * PERSON_NAME_MAX_LENGTH code points. A name that holds an email address, raw, normalized or once
+ * cleaned (with or without its spaces), is unusable (R10), as is one with no visible character:
+ * it cleans to "", and the caller falls back to the next name.
+ */
+export function cleanPersonName(raw: string): string {
+  if (holdsEmail(raw)) return "";
+  const flat = flattened(raw, "");
+  if (holdsEmail(flat) || holdsEmail(flat.replace(/ /g, ""))) return "";
+  const cut = [...flat].slice(0, PERSON_NAME_MAX_LENGTH).join("").trimEnd();
+  return hasVisibleText(cut) ? cut : "";
 }
 
 /** A cleaned, non-empty display name: cleanPersonName leaves it as it is. */
@@ -95,10 +96,14 @@ const activity = z
 /** The longest pull-request title People keeps, in code points. */
 export const PR_TITLE_MAX_LENGTH = 200;
 
-/** A pull-request title: one line with no control or invisible character, and no address. */
+/**
+ * A pull-request title (the fix-forward ruling): addresses removed first, then one line, every
+ * control or invisible character a space, spaces collapsed, checked for an address again, cut to
+ * PR_TITLE_MAX_LENGTH code points with "…"; null when nothing visible is left.
+ */
 export function cleanPullTitle(raw: string): string | null {
-  const flat = withoutEmails(raw.replace(INVISIBLE_CHARACTERS, " ").replace(/\s+/g, " ").trim());
-  if (flat === "") return null;
+  const flat = withoutEmails(flattened(withoutEmails(raw), " "));
+  if (!hasVisibleText(flat)) return null;
   const chars = [...flat];
   return chars.length <= PR_TITLE_MAX_LENGTH
     ? flat

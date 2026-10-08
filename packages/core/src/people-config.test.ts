@@ -31,6 +31,8 @@ describe("match keys (spec v2 #6 §5)", () => {
 
   it("compares names case- and width-insensitively", () => {
     expect(normalizeName("ＡＤＡ\tLovelace")).toBe("ada lovelace");
+    // Whitespace is a space as cleanPersonName makes it, so a key and a display name agree.
+    expect(normalizeName("Ada\u0085Love\u2028lace\u3164")).toBe("ada love lace");
   });
 
   it("shows a key in a message without an email's value", () => {

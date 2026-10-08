@@ -1,11 +1,24 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makePersonRevision } from "@repowiki/core/test-fixtures";
 import { openStore } from "@repowiki/engine";
 import { listing } from "@repowiki/engine/test-inflight";
-import { PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
+import {
+  KIM,
+  PEOPLE_SECRETS,
+  type PeopleFixture,
+  peopleFixture,
+} from "@repowiki/engine/test-people";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Each test builds a fixture wiki and runs the command as a process: seconds on a loaded machine.
@@ -39,12 +52,56 @@ describe("pnpm people:suggest (spec v2 #6 §6 step 6)", () => {
     const repo = listing(fx.repo.dir);
     const result = run(SUGGEST);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("`ada…@example.com`");
+    expect(result.stdout).toContain("`a…@example.com`");
     expect(result.stdout).toContain("`ada-lovelace`");
     for (const secret of PEOPLE_SECRETS)
       expect(result.stdout + result.stderr).not.toContain(secret);
     expect(readFileSync(join(fx.out, "wiki.db")).equals(db)).toBe(true);
     expect(listing(fx.repo.dir)).toEqual(repo);
+  });
+
+  it("never prints an address, not even a name that is one, and keeps its scratch copy in the out dir", () => {
+    // Kim committed once with her address as her name; "kimh" is a handle suggested for her.
+    fx.repo.write("docs/kim.md", "kim\n");
+    fx.repo.commit("docs: kim", "+0000", { name: KIM.email, email: KIM.email });
+    fx.repo.write("docs/more.md", "more\n");
+    const head = fx.repo.commit("docs: more", "+0000", {
+      name: "kimh",
+      email: "kimh.q7other@example.com",
+    });
+    const store = openStore(join(fx.out, "wiki.db"));
+    const manifest = store.getLatestManifest();
+    if (manifest === null) throw new Error("the fixture stores a manifest");
+    store.putManifest({ ...manifest, sha: head });
+    store.setHead(head);
+    store.close();
+    const tmp = join(fx.out, "..", "tmp");
+    mkdirSync(tmp);
+    const result = spawnSync(process.execPath, [SUGGEST, fx.repo.dir, "--out", fx.out], {
+      encoding: "utf8",
+      env: { ...process.env, ANTHROPIC_API_KEY: "", TMPDIR: tmp },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("`k…@example.com`");
+    expect(result.stdout).toContain("A name of kim-hidden gives no name key");
+    scan([result.stdout, result.stderr]);
+    expect(result.stdout + result.stderr).not.toContain("q7other");
+    expect(readdirSync(tmp)).toEqual([]);
+    expect(readdirSync(fx.out).filter((f) => f.startsWith(".people-scratch-"))).toEqual([]);
+  });
+
+  it("refuses a people file that is a broken link, or unreadable, with exit 2", () => {
+    symlinkSync(join(fx.out, "gone.json"), join(fx.out, "people.json"));
+    const broken = run(SUGGEST);
+    expect(broken.status).toBe(2);
+    expect(broken.stderr).toMatch(/people file .* is a broken link/);
+    const locked = join(fx.out, "locked.json");
+    writeFileSync(locked, "{}");
+    chmodSync(locked, 0o000);
+    const unreadable = run(SUGGEST, "--people-file", locked);
+    chmodSync(locked, 0o600);
+    expect(unreadable.status).toBe(2);
+    expect(unreadable.stderr).toMatch(/cannot read the people file/);
   });
 
   it("refuses a people file inside the repository with exit 2", () => {
