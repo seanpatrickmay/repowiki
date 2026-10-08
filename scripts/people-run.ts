@@ -6,6 +6,7 @@ import {
   type PersonOutcome,
   type PersonRequest,
   type PreparedPeople,
+  peopleCacheKey,
   peopleSystemPrompt,
   personTurn,
   preparePeople,
@@ -41,7 +42,11 @@ export interface PeopleStepInput {
   batch: boolean;
   /** The round's ceiling (R26): --max-usd, or --people-max-usd in wiki:update and wiki:replay. */
   maxUsd: number;
-  /** True for --dry-run: the estimate and the table, no call. */
+  /**
+   * True for --dry-run: the estimate and the table, no call. The refresh still stores the
+   * snapshot and the registry and deletes revoked narratives, so a dry run must be given a
+   * throwaway copy of the store (wiki:people --dry-run's storeCopy).
+   */
   dryRun: boolean;
   /** The round's provider and journal, built only when a narrative is sent. */
   connect: () => { provider: Provider; journal: BuildJournal };
@@ -84,18 +89,33 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     narrative: input.narrative,
     only: input.only,
   });
-  for (const warning of prepared.refreshed.warnings) log(problemLine(warning));
-  const systemTokens = estimateTokens(peopleSystemPrompt(input.repoName, manifest));
-  const ceiling = (r: PersonRequest) =>
-    narrativeCeilingUsd(
+  // Every line this step prints goes through problemLine (the Task 25 ruling).
+  const say = (line: string) => log(problemLine(line));
+  for (const warning of prepared.refreshed.warnings) say(warning);
+  // A whole narrative's and an append's system prompts differ (APPEND_INSTRUCTIONS); each is
+  // priced with the cache-write premium when its calls would carry a key (writePeople's rule,
+  // counted over every due request, so never under the round's own count).
+  const systems = [false, true].map((append) => {
+    const system = peopleSystemPrompt(input.repoName, manifest, append);
+    const calls = prepared.requests.filter((r) => r.append === append).length;
+    return { tokens: estimateTokens(system), cached: peopleCacheKey(sha, system, calls) !== null };
+  });
+  const ceiling = (r: PersonRequest) => {
+    const system = systems[r.append ? 1 : 0] as (typeof systems)[0];
+    return narrativeCeilingUsd(
       estimateTokens(personTurn(r.pack, r.append ? r.parent : null)),
-      systemTokens,
+      system.tokens,
       input.models.people,
       input.batch,
+      system.cached,
     );
+  };
   const { taken, over, usd } = withinBudget(prepared.requests, ceiling, input.maxUsd);
-  log(
-    `${prepared.requests.length} narratives due; ${taken.length} within the $${input.maxUsd.toFixed(2)} ceiling, estimated at most $${usd.toFixed(4)}${input.batch ? " (batched)" : ""}`,
+  const due = prepared.requests.length;
+  say(
+    input.narrative
+      ? `${due} ${due === 1 ? "narrative" : "narratives"} due; ${taken.length} within the $${input.maxUsd.toFixed(4)} ceiling, estimated at most $${usd.toFixed(4)}${input.batch ? " (batched)" : ""}`
+      : "narratives skipped (--no-narrative)",
   );
   let outcomes: PersonOutcome[] = [];
   if (!input.dryRun && taken.length > 0) {
@@ -103,7 +123,7 @@ export async function runPeopleStep(input: PeopleStepInput): Promise<PeopleStep>
     outcomes = await writePeople(
       { requests: taken, manifest, sha, commitDate: prepared.refreshed.snapshot.commitDate },
       // Every line printed goes through problemLine (the Task 20 ruling).
-      { provider, repoName: input.repoName, batch: input.batch, log: (l) => log(problemLine(l)) },
+      { provider, repoName: input.repoName, batch: input.batch, log: say },
     );
     storeNarratives(store, outcomes, journal);
   }
@@ -135,8 +155,9 @@ function peopleRows(
           : "written";
     if (over.has(id)) return "over budget; due next run";
     const d = due.get(id);
-    if (d !== undefined && !input.narrative) return "due; not written (--no-narrative)";
+    if (d !== undefined && !input.narrative) return "skipped (--no-narrative)";
     if (d !== undefined && taken.has(id)) return `due (${d.reason})`;
+    if (d !== undefined) return `due (${d.reason}); not written (no pack)`;
     if (plan.carried.includes(id)) return "carried";
     if (plan.overCap.includes(id)) return `over the cap of ${input.config.maxNarratives}`;
     if (plan.skipped.includes(id)) return "skipped (--only)";

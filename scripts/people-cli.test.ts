@@ -235,12 +235,30 @@ describe("parsePeopleArgs (spec v2 #6 §10)", () => {
 });
 
 describe("the People estimate and ceiling (R26)", () => {
-  it("prices a call and a retry, halved when batched", () => {
+  it("prices a call and a retry at their output caps, halved when batched (the Task 23 ruling)", () => {
     const batched = narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", true);
     expect(narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", false)).toBeCloseTo(2 * batched);
-    // 2 x (5k + 3k) + 2.5k in, 5k out at $1/$5 per MTok, halved: about two cents.
-    expect(batched).toBeCloseTo((18_500 * 1 + 5_000 * 5) / 1e6 / 2);
+    // 2 x (5k + 3k + 2.5k) in, 6k + 3k out at $1/$5 per MTok, halved.
+    expect(batched).toBeCloseTo((21_000 * 1 + 9_000 * 5) / 1e6 / 2);
+    // A cache key makes the first call write the system prompt at $1.25 instead of $1.
+    expect(narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", true, true)).toBeCloseTo(
+      batched + (5_000 * 0.25) / 1e6 / 2,
+    );
+    expect(() => narrativeCeilingUsd(1, 1, "constructor", true)).toThrow(/no price for model/);
     expect(parseUsd("--people-max-usd", undefined, 0.5, "u")).toBe(0.5);
+  });
+
+  it("fails closed on a cost that is not a finite, non-negative number", () => {
+    for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY])
+      expect(
+        withinBudget([bad, 0.1], (n: number) => n, 1),
+        String(bad),
+      ).toEqual({
+        taken: [],
+        over: [bad, 0.1],
+        usd: 0,
+      });
+    expect(withinBudget([0.5, 0.5], (n: number) => n, 1).taken).toEqual([0.5, 0.5]);
   });
 
   it("takes narratives in rank order while the next fits", () => {
@@ -292,6 +310,34 @@ describe("renderPeopleSummary", () => {
     expect(text).toContain("| `dependabot-bot` (bot) |");
     expect(text).toContain("is theirs by elimination");
     expect(text).toContain("Cost: $0.0100 (estimated up front: at most $0.0200).");
+  });
+
+  it("prints no address from a repo name, a status or a note", () => {
+    const text = renderPeopleSummary(
+      "ada@example.com",
+      "a".repeat(40),
+      [
+        {
+          id: "ada-lovelace",
+          name: "Ada",
+          kind: "human",
+          commits: 1,
+          narrative: "failed, computed lead kept: kim@example.org",
+          dropped: 0,
+        },
+      ],
+      ["A note naming bob@example.net."],
+      {
+        calls: 0,
+        batchCalls: 0,
+        tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 },
+        usd: 0,
+        unpricedCalls: 0,
+      },
+      null,
+    );
+    expect(text).not.toMatch(/@example/);
+    expect(text).toContain("[email]");
   });
 
   it("says nothing of exclusion when nobody is excluded", () => {

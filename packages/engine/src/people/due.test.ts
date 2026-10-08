@@ -1,9 +1,12 @@
 import { PeopleConfig, type PersonRevision } from "@repowiki/core";
 import { makePersonRevision } from "@repowiki/core/test-fixtures";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestRepo } from "../index/index.ts";
+import { openStore } from "../store/index.ts";
 import { planNarratives } from "./due.ts";
 import { refreshPeople } from "./refresh.ts";
 import { type TeamFixture, teamFixture } from "./test-people.ts";
+import { personRequest } from "./write.ts";
 
 let fx: TeamFixture;
 beforeAll(async () => {
@@ -89,5 +92,125 @@ describe("planNarratives (spec v2 #6 R15, R25)", () => {
     expect(
       planNarratives(await refresh(excluded), current, PeopleConfig.parse(excluded)).revoked,
     ).toEqual([]);
+  });
+});
+
+describe("planNarratives across runs (the Task 21 ruling)", () => {
+  it("settles after one append when the person's commits sit on sibling branches", async () => {
+    const repo = createTestRepo();
+    const store = openStore(":memory:");
+    try {
+      const ada = { name: "Ada Lovelace", email: "ada.q7private@example.com" };
+      const bob = { name: "Bob Smith", email: "bob@example.com" };
+      repo.write("src/signals/ingest.py", "a = 1\n");
+      const base = repo.commit("feat: start", "+0000", ada);
+      repo.git("switch", "-q", "-c", "b1");
+      repo.write("src/signals/x.py", "x = 1\n");
+      repo.commit("feat: x", "+0000", ada);
+      repo.git("switch", "-q", "main");
+      repo.git("switch", "-q", "-c", "b2");
+      repo.write("src/signals/y.py", "y = 1\n");
+      repo.commit("feat: y", "+0000", ada);
+      repo.git("switch", "-q", "main");
+      repo.merge("b1", "Merge pull request #1 from ada/b1\n\nX", bob);
+      const head = repo.merge("b2", "Merge pull request #2 from ada/b2\n\nY", bob);
+      const manifest = {
+        ...fx.manifest,
+        sha: head,
+        features: fx.manifest.features.map((f) => ({
+          ...f,
+          lineage: [{ kind: "create" as const, sha: base }],
+        })),
+        membership: {
+          "src/signals/ingest.py": { featureId: "signals", weight: 1 },
+          "src/signals/x.py": { featureId: "signals", weight: 1 },
+          "src/signals/y.py": { featureId: "signals", weight: 1 },
+        },
+      };
+      store.putManifest(manifest);
+      store.setHead(head);
+      const config = PeopleConfig.parse({
+        people: [{ match: ["name:ada lovelace"], narrative: true }],
+      });
+      const refreshed = await refreshPeople({
+        repo: repo.dir,
+        sha: head,
+        store,
+        config,
+        ownerEmail: null,
+        lock: null,
+      });
+      const request = personRequest(refreshed, "ada-lovelace", manifest, {
+        parent: null,
+        append: false,
+      });
+      // The basis is the head the round ran at, so it reaches both branches' commits.
+      expect(request?.pack.basis).toBe(head);
+      const written = makePersonRevision({
+        id: `person-ada-lovelace-${head.slice(0, 12)}-1`,
+        basis: request?.pack.basis ?? "",
+        groupFingerprint: request?.fingerprint ?? null,
+      });
+      const plan = planNarratives(refreshed, new Map([["ada-lovelace", written]]), config);
+      expect(plan.carried).toEqual(["ada-lovelace"]);
+      expect(plan.due).toEqual([]);
+    } finally {
+      store.close();
+      repo.remove();
+    }
+  });
+
+  it("keeps a split person's narrative due, run after run, until it is rewritten", async () => {
+    const store = openStore(":memory:");
+    try {
+      store.putManifest(fx.manifest);
+      store.setHead(fx.feb);
+      const merged = {
+        people: [
+          { id: "ada-lovelace", match: ["name:ada lovelace", "name:bob smith"], narrative: true },
+        ],
+      };
+      const run = (file: unknown) =>
+        refreshPeople({
+          repo: fx.repo.dir,
+          sha: fx.feb,
+          store,
+          config: PeopleConfig.parse(file),
+          ownerEmail: null,
+          lock: null,
+        });
+      const together = await run(merged);
+      const request = personRequest(together, "ada-lovelace", fx.manifest, {
+        parent: null,
+        append: false,
+      });
+      const written = makePersonRevision({
+        id: `person-ada-lovelace-${fx.feb.slice(0, 12)}-1`,
+        basis: fx.feb,
+        groupFingerprint: request?.fingerprint ?? null,
+      });
+      const current = new Map([["ada-lovelace", written]]);
+      // Carried while the group stays the same...
+      expect(
+        planNarratives(await run(merged), current, PeopleConfig.parse(merged)).carried,
+      ).toEqual(["ada-lovelace"]);
+      // ...then split apart, and still due on the next run, with nothing written in between.
+      const split = {
+        people: [{ id: "ada-lovelace", match: ["name:ada lovelace"], narrative: true }],
+      };
+      for (let i = 0; i < 2; i++) {
+        const plan = planNarratives(await run(split), current, PeopleConfig.parse(split));
+        expect(plan.due, `run ${i + 1}`).toMatchObject([
+          { personId: "ada-lovelace", reason: "regrouped", append: false },
+        ]);
+      }
+      // A revision stored before the fingerprint existed is never called regrouped by it.
+      const old = new Map([["ada-lovelace", { ...written, groupFingerprint: null }]]);
+      expect(planNarratives(await run(split), old, PeopleConfig.parse(split)).carried).toEqual([
+        "ada-lovelace",
+      ]);
+    } finally {
+      store.close();
+    }
   });
 });

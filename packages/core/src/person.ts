@@ -312,8 +312,12 @@ const SECTION_ORDER = PersonSectionKey.options;
 
 /**
  * One revision of a person's narrative (spec v2 #6 §5, R27): a chain like the Architecture
- * article's, stored whole; the export carries only the current one. `basis` is the newest of the
- * person's commits it covers, so a newer one makes the narrative due (R25).
+ * article's, stored whole; the export carries only the current one. `basis` is the head commit
+ * the round that wrote it ran at, so a commit of the person it does not reach makes the narrative
+ * due (R25, the Task 21 ruling). `groupFingerprint` is the SHA-256 of the person's sorted salted
+ * identity keys when it was written: a different one today means the person was regrouped, so
+ * the narrative is rewritten whole. It stays in the store (null in the export) and is null on a
+ * revision stored before it existed.
  */
 export const PersonRevision = z
   .object({
@@ -328,6 +332,11 @@ export const PersonRevision = z
     model: z.string().min(1),
     tokens: TokenUsage,
     basis: GitSha,
+    groupFingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .nullable()
+      .default(null),
     sections: z.array(PersonSection).min(1),
   })
   .superRefine((revision, ctx) => {

@@ -547,6 +547,7 @@ export function makePersonRevision(overrides: Partial<PersonRevision> = {}): Per
     model: "claude-haiku-4-5",
     tokens: { in: 5000, out: 900, cacheRead: 0, cacheWrite: 0 },
     basis: SHA_B,
+    groupFingerprint: null,
     sections: [
       {
         key: "lead",

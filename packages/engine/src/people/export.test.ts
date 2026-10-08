@@ -68,12 +68,19 @@ describe("buildExport's People (spec v2 #6 §5, R28)", () => {
   });
 });
 
+/** A stored revision's group fingerprint: a hash of salted keys, kept in the store (R10). */
+const FINGERPRINT = "e".repeat(64);
+
 describe("the export's privacy (spec v2 #6 §13)", () => {
   it("writes no author email, local part, salt or salted key to export.json or llms.txt, and nothing of an excluded person", async () => {
     await refresh({ exclude: ["name:Kim Hidden"] });
     // A stored narrative, so the pages half of the export is scanned too.
     fx.store.putPersonRevision(
-      makePersonRevision({ sha: fx.head, id: `person-ada-lovelace-${fx.head.slice(0, 12)}-1` }),
+      makePersonRevision({
+        sha: fx.head,
+        id: `person-ada-lovelace-${fx.head.slice(0, 12)}-1`,
+        groupFingerprint: FINGERPRINT,
+      }),
     );
     const path = join(fx.out, "export.json");
     writeExport(fx.store, path, options);
@@ -84,6 +91,7 @@ describe("the export's privacy (spec v2 #6 §13)", () => {
     expect(WikiExport.parse(JSON.parse(json)).people?.pages).toHaveLength(1);
     // Neither the store's salt nor any salted key of the registry leaves the store (R10).
     const hashes = [
+      FINGERPRINT,
       fx.store.getPeopleSalt(),
       ...fx.store.listPeopleRegistry().flatMap((row) => row.keys),
     ];

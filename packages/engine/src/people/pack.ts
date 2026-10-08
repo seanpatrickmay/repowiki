@@ -61,7 +61,10 @@ export interface PersonPack {
   shas: Set<string>;
   /** The author date of each sha in `shas`, for R18's date check. */
   dates: Map<string, string>;
-  /** The newest of the person's commits the narrative will cover: the revision's basis (R25). */
+  /**
+   * The head commit the round runs at (the snapshot's sha): the revision's basis (R25, the Task
+   * 21 ruling), so every commit it reaches is covered, on any branch.
+   */
   basis: string;
   /** The person's feature ids in the pack's order: what an areas section follows. */
   features: string[];
@@ -165,7 +168,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
   );
   const fresh = mine.filter((c) => input.covered?.has(c.sha) !== true);
   const shown = [...fresh].reverse();
-  const basis = mine[0]?.sha ?? input.snapshot.sha;
+  const basis = input.snapshot.sha;
 
   // Episodes: a pull request's commits together, the rest by author month.
   const byKey = new Map<string, Episode>();
@@ -208,7 +211,7 @@ export function buildPersonPack(input: PackInput): PersonPack {
 
   const commitLine = (c: AuthoredCommit) => {
     const features = input.commitFeatures.get(c.sha) ?? [];
-    const paths = c.files.slice(0, MAX_PATHS).map((f) => packText(f.path));
+    const paths = c.files.slice(0, MAX_PATHS).map((f) => quoted(f.path));
     const more = c.files.length > MAX_PATHS ? `, and ${c.files.length - MAX_PATHS} more` : "";
     return `- commit:${sha12(c.sha)} ${day(c.authorDate)} ${quoted(c.subject)} — features: ${features.length === 0 ? "none" : features.join(", ")} — files: ${paths.join(", ") || "none"}${more}`;
   };

@@ -1,6 +1,11 @@
 import { PeopleConfig } from "@repowiki/core";
 import { buildJournal, configuredEmail } from "@repowiki/engine";
-import { chronicleProvider, type PeopleFixture, peopleFixture } from "@repowiki/engine/test-people";
+import {
+  chronicleProvider,
+  PEOPLE_SECRETS,
+  type PeopleFixture,
+  peopleFixture,
+} from "@repowiki/engine/test-people";
 import { DEFAULT_MODELS } from "@repowiki/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPeopleStep } from "./people-run.ts";
@@ -50,7 +55,11 @@ describe("runPeopleStep (spec v2 #6 §9, §10)", () => {
       "dependabot-bot": "none (bot)",
     });
     expect(log[0]).toMatch(
-      /^1 narratives due; 1 within the \$1\.00 ceiling, estimated at most \$0\.0\d+ \(batched\)$/,
+      /^1 narrative due; 1 within the \$1\.0000 ceiling, estimated at most \$0\.0\d+ \(batched\)$/,
+    );
+    // One row per person of the snapshot, no more and no fewer.
+    expect(result.rows.map((r) => r.id)).toEqual(
+      result.prepared.refreshed.snapshot.people.map((p) => p.id),
     );
   });
 
@@ -68,14 +77,50 @@ describe("runPeopleStep (spec v2 #6 §9, §10)", () => {
     const facts = await step({ narrative: false });
     expect(facts.requests).toHaveLength(0);
     expect(facts.result.rows.find((r) => r.id === "ada-lovelace")?.narrative).toBe(
-      "due; not written (--no-narrative)",
+      "skipped (--no-narrative)",
     );
+    expect(facts.log[0]).toBe("narratives skipped (--no-narrative)");
     const poor = await step({ maxUsd: 0.0001 });
+    expect(poor.log[0]).toMatch(/^1 narrative due; 0 within the \$0\.0001 ceiling/);
     expect(poor.requests).toHaveLength(0);
     expect(poor.result.rows.find((r) => r.id === "ada-lovelace")?.narrative).toBe(
       "over budget; due next run",
     );
     expect(fx.store.getCurrentPersonRevision("ada-lovelace")).toBeNull();
+  });
+
+  it("takes three consenting people in rank order while the next fits the ceiling", async () => {
+    const config = PeopleConfig.parse({
+      minCommits: 1,
+      people: [
+        { match: ["name:bob"], narrative: true },
+        { match: ["name:kim hidden"], narrative: true },
+      ],
+    });
+    const all = await step({ config, dryRun: true });
+    expect(all.result.taken.map((r) => r.personId)).toEqual(["ada-lovelace", "bob", "kim-hidden"]);
+    const two = await step({ config, maxUsd: all.result.estimateUsd - 1e-9 });
+    expect(
+      two.requests.map((r) => /^# Person: (.+)$/m.exec(r.messages[0]?.content ?? "")?.[1]),
+    ).toEqual(["Ada Lovelace", "bob"]);
+    expect(two.result.rows.find((r) => r.id === "kim-hidden")?.narrative).toBe(
+      "over budget; due next run",
+    );
+    expect(two.log[0]).toMatch(/^3 narratives due; 2 within the/);
+  });
+
+  it("prints no author address or local part, in its rows, notes, log or requests", async () => {
+    const { result, requests, log } = await step({
+      config: PeopleConfig.parse({ exclude: ["name:Kim Hidden"] }),
+    });
+    const printed = JSON.stringify([
+      result.rows,
+      result.notes,
+      log,
+      requests.map((r) => r.messages),
+    ]);
+    for (const secret of PEOPLE_SECRETS) expect(printed).not.toContain(secret);
+    expect(printed).not.toContain("Kim");
   });
 
   it("notes an exclusion and its caveat, naming no one", async () => {

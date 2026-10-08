@@ -23,6 +23,7 @@ import {
   uniqueDraft,
   verifyClaims,
 } from "../write/index.ts";
+import { groupFingerprint } from "./identities.ts";
 import { ancestorsOf, MAX_CHRONICLE_CLAIMS, type PersonPack, packFor } from "./pack.ts";
 import {
   MAX_PERSON_OUTPUT_TOKENS,
@@ -46,6 +47,8 @@ export interface PersonRequest {
   parent: PersonRevision | null;
   /** True for an append (R25): the parent's chronicle is kept and only new episodes are asked. */
   append: boolean;
+  /** The person's identity group's fingerprint today (groupFingerprint), stored on the revision. */
+  fingerprint: string;
 }
 
 export interface WritePeopleInput {
@@ -78,7 +81,8 @@ export interface PersonOutcome {
   tokens: TokenUsage;
 }
 
-const MAX_FIX_OUTPUT_TOKENS = 3000;
+/** Longest answer of a retry that fixes claims (R16); the narrative call's is 6,000. */
+export const MAX_FIX_OUTPUT_TOKENS = 3000;
 const ORDER = PersonSectionKey.options;
 const NO_NARRATIVE = "no lead or no body claim survived verification";
 
@@ -145,15 +149,22 @@ export async function writePeople(
   const log = options.log ?? (() => {});
   const now = options.now ?? (() => new Date());
   const batch = options.batch ?? true;
-  const system = peopleSystemPrompt(options.repoName, manifest);
-  const cacheKey = peopleCacheKey(input.sha, system, input.requests.length);
+  // Whole narratives and appends have their own system prompt (APPEND_INSTRUCTIONS), and each
+  // its own cache key, counted over the calls that send it.
+  const systems = [false, true].map((append) => {
+    const system = peopleSystemPrompt(options.repoName, manifest, append);
+    const calls = input.requests.filter((r) => r.append === append).length;
+    return { system, cacheKey: peopleCacheKey(input.sha, system, calls) };
+  });
   const call = <T>(
+    state: State,
     schema: z.ZodType<T>,
     messages: readonly LlmMessage[],
     maxTokens: number,
     keyed: boolean,
-  ) =>
-    settle(
+  ) => {
+    const { system, cacheKey } = systems[state.request.append ? 1 : 0] as (typeof systems)[0];
+    return settle(
       options.provider.generate({
         purpose: "people",
         featureId: null,
@@ -165,6 +176,7 @@ export async function writePeople(
         ...(keyed && cacheKey !== null ? { cacheKey } : {}),
       }),
     );
+  };
   const states: State[] = input.requests.map((request) => {
     const stored = (key: PersonSectionKey) =>
       request.append ? (request.parent?.sections.find((s) => s.key === key)?.claims ?? []) : [];
@@ -192,6 +204,7 @@ export async function writePeople(
   const first = await Promise.all(
     states.map((state) =>
       call(
+        state,
         PersonDraft,
         [{ role: "user", content: state.pack.text }],
         MAX_PERSON_OUTPUT_TOKENS,
@@ -233,11 +246,18 @@ export async function writePeople(
       state.rejected !== null
         ? {
             kind: "whole" as const,
-            outcome: await call(PersonDraft, retryRequest(state), MAX_PERSON_OUTPUT_TOKENS, false),
+            outcome: await call(
+              state,
+              PersonDraft,
+              retryRequest(state),
+              MAX_PERSON_OUTPUT_TOKENS,
+              false,
+            ),
           }
         : {
             kind: "fixes" as const,
             outcome: await call(
+              state,
               PersonFixes,
               fixRequest(state, PEOPLE_GIVE_UP),
               MAX_FIX_OUTPUT_TOKENS,
@@ -415,6 +435,7 @@ function assemble(
     model: state.model ?? "unknown",
     tokens: state.tokens,
     basis: pack.basis,
+    groupFingerprint: state.request.fingerprint,
     sections,
   });
   if (!parsed.success)
@@ -453,11 +474,13 @@ export function personRequest(
   });
   if (pack === null) return null;
   const group = refreshed.assigned.ids.indexOf(personId);
+  const keys = refreshed.identities.groups[group]?.keys ?? [];
   return {
     personId,
     pack,
     ctx: personVerifyContext(refreshed, group, pack, manifest),
     parent: options.parent,
     append,
+    fingerprint: groupFingerprint({ keys }),
   };
 }

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { PersonRevision } from "@repowiki/core";
+import { featureLinkTargets, PersonRevision } from "@repowiki/core";
 import {
   cassetteFetch,
   cassetteMode,
@@ -61,7 +61,18 @@ function expectSound(revision: PersonRevision, request: PersonRequest) {
         true,
       );
   expect(JSON.stringify(revision)).not.toMatch(/q7pack|@example\.com/);
+  // The Task 18 and Task 22 rulings: at most 30 chronicle claims, none told twice.
+  const chronicle = revision.sections.find((s) => s.key === "chronicle")?.claims ?? [];
+  expect(chronicle.length).toBeLessThanOrEqual(30);
+  const told = chronicle.map((c) => c.text.replace(/\s+/g, " ").trim().toLowerCase());
+  expect(new Set(told).size).toBe(told.length);
 }
+
+/** The features a revision's areas claims link. */
+const areasOf = (revision: PersonRevision) =>
+  (revision.sections.find((s) => s.key === "areas")?.claims ?? []).flatMap((c) =>
+    featureLinkTargets(c.text).slice(0, 1),
+  );
 
 describe("writePeople with Claude (cassette)", () => {
   it(
@@ -94,6 +105,8 @@ describe("writePeople with Claude (cassette)", () => {
       const kept = revision.sections.find((s) => s.key === "chronicle")?.claims.map((c) => c.text);
       const now = update.sections.find((s) => s.key === "chronicle")?.claims.map((c) => c.text);
       expect(now?.slice(0, kept?.length)).toEqual(kept);
+      // The append's areas still cover every feature the parent's did (the Task 22 ruling).
+      expect(new Set(areasOf(update))).toEqual(new Set(areasOf(revision)));
 
       for (const e of [...built.entries, ...appended.entries]) {
         expect(e).toMatchObject({

@@ -16,9 +16,13 @@ export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = {
 /** The Message Batches API bills every token class at half price; it stacks with caching. */
 export const BATCH_PRICE_FACTOR = 0.5;
 
+/** The table's own entry for `id`: never an Object.prototype key such as "constructor". */
+const ownPrice = (id: string): ModelPrice | undefined =>
+  Object.hasOwn(MODEL_PRICES, id) ? MODEL_PRICES[id] : undefined;
+
 /** Price for a model id, accepting dated ids ("claude-haiku-4-5-20251001"); null if unknown. */
 export function priceFor(model: string): ModelPrice | null {
-  return MODEL_PRICES[model] ?? MODEL_PRICES[model.replace(/-\d{8}$/, "")] ?? null;
+  return ownPrice(model) ?? ownPrice(model.replace(/-\d{8}$/, "")) ?? null;
 }
 
 /** Dollar cost of one call, or null when the model has no known price. */

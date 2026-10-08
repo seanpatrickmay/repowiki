@@ -19,6 +19,8 @@ import {
 import {
   configuredEmail,
   GitError,
+  MAX_FIX_OUTPUT_TOKENS,
+  MAX_PERSON_OUTPUT_TOKENS,
   markdownCodeSpan,
   maskEmail,
   type PeopleRead,
@@ -26,7 +28,7 @@ import {
   suggestMerges,
   wantsNarrative,
 } from "@repowiki/engine";
-import type { LedgerTotals } from "@repowiki/llm";
+import { BATCH_PRICE_FACTOR, type LedgerTotals, priceFor } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import {
@@ -323,21 +325,29 @@ export function parsePeopleArgs(argv: readonly string[]): PeopleArgs {
   return args;
 }
 
-/** Output tokens a narrative is assumed to take before any is written (spec v2 #6 §8.5). */
+/** The draft a retry resends is counted at this many tokens (spec v2 #6 §8.5's figure). */
 export const ASSUMED_PERSON_OUTPUT_TOKENS = 2500;
 
 /**
- * One narrative's ceiling (R26): its call and a retry that resends the turn and the draft, each
- * with the system prompt, priced at the model's rates, halved when batched; no cache hit.
+ * One narrative's ceiling (R26, C12, the Task 23 ruling): its call and a retry, each sending the
+ * system prompt, the turn and a draft of ASSUMED_PERSON_OUTPUT_TOKENS, so (system + turn + 2,500)
+ * input twice; output at the calls' own caps, MAX_PERSON_OUTPUT_TOKENS and MAX_FIX_OUTPUT_TOKENS;
+ * plus, when the round's calls carry a cache key (`cached`), the premium of writing the system
+ * prompt to the cache; all at the model's rates, halved when batched; no cache hit.
  */
 export function narrativeCeilingUsd(
   turnTokens: number,
   systemTokens: number,
   model: string,
   batch: boolean,
+  cached = false,
 ): number {
-  const input = 2 * (systemTokens + turnTokens) + ASSUMED_PERSON_OUTPUT_TOKENS;
-  return priced(model, input, 2 * ASSUMED_PERSON_OUTPUT_TOKENS, batch);
+  const input = 2 * (systemTokens + turnTokens + ASSUMED_PERSON_OUTPUT_TOKENS);
+  const usd = priced(model, input, MAX_PERSON_OUTPUT_TOKENS + MAX_FIX_OUTPUT_TOKENS, batch);
+  const price = priceFor(model);
+  if (!cached || price === null) return usd;
+  const premium = (systemTokens * (price.cacheWrite - price.input)) / 1_000_000;
+  return usd + premium * (batch ? BATCH_PRICE_FACTOR : 1);
 }
 
 /**
@@ -353,7 +363,8 @@ export function withinBudget<T>(
   let i = 0;
   for (; i < items.length; i++) {
     const cost = costOf(items[i] as T);
-    if (usd + cost > maxUsd) break;
+    // Fails closed: a cost that is NaN, negative or infinite stops the round there.
+    if (!(Number.isFinite(cost) && cost >= 0 && usd + cost <= maxUsd)) break;
     usd += cost;
   }
   return { taken: items.slice(0, i), over: items.slice(i), usd };
@@ -377,7 +388,7 @@ export function peopleTable(rows: readonly PeopleRow[]): string[] {
     "|---|---|---:|---|---:|",
     ...rows.map(
       (r) =>
-        `| ${cell(r.id)}${r.kind === "bot" ? " (bot)" : ""} | ${cell(r.name)} | ${count(r.commits)} | ${r.narrative} | ${r.dropped} |`,
+        `| ${cell(r.id)}${r.kind === "bot" ? " (bot)" : ""} | ${cell(r.name)} | ${count(r.commits)} | ${withoutEmails(r.narrative).replace(/\|/g, "\\|")} | ${r.dropped} |`,
     ),
   ];
 }
@@ -398,13 +409,14 @@ export function renderPeopleSummary(
   const upFront =
     estimateUsd === null ? "." : ` (estimated up front: at most $${estimateUsd.toFixed(4)}).`;
   const lines = [
-    `# People: ${markdownCodeSpan(repoName)} at ${sha.slice(0, 7)}`,
+    `# People: ${markdownCodeSpan(withoutEmails(repoName))} at ${sha.slice(0, 7)}`,
     "",
     `${rows.length} people (${humans} with a page, ${rows.length - humans} bots).`,
     "",
     ...peopleTable(rows),
     "",
-    ...notes.flatMap((n) => [n, ""]),
+    // Every note and status passes withoutEmails before it is printed (the Task 23 ruling).
+    ...notes.flatMap((n) => [withoutEmails(n), ""]),
     ...costLines(totals, upFront, estimateUsd !== null, PEOPLE_ESTIMATE_NOTE),
   ];
   return `${lines.join("\n")}\n`;
@@ -412,7 +424,7 @@ export function renderPeopleSummary(
 
 /** What a People summary says of its estimate. */
 export const PEOPLE_ESTIMATE_NOTE =
-  "The estimate counts each narrative's call and a retry, with no cache hits: an upper-side figure.";
+  "The estimate counts each narrative's call and a retry at their output caps, with the cache-write premium where a cache key applies and no cache hits: a ceiling.";
 
 /**
  * What wiki:people says when the people file excludes someone (spec v2 #6 R12, §12): repository

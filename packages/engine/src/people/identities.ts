@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   cleanPersonName,
   normalizeName,
@@ -25,6 +26,16 @@ export interface RawIdentity {
   last: string;
   /** The pair's salted keys, sorted (the registry tells a split by them, R13). */
   keys: string[];
+}
+
+/**
+ * A group's fingerprint (the Task 21 ruling): the SHA-256 of its sorted salted keys. A narrative
+ * records the one it was written for; another today means the person was regrouped.
+ */
+export function groupFingerprint(group: Pick<IdentityGroup, "keys">): string {
+  return createHash("sha256")
+    .update([...group.keys].sort().join("\n"))
+    .digest("hex");
 }
 
 /** One person as the identity rules see them (spec v2 #6 §6). */
