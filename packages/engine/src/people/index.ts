@@ -37,6 +37,20 @@ export {
   packText,
 } from "./pack.ts";
 export {
+  MAX_PERSON_OUTPUT_TOKENS,
+  MIN_CACHED_PREFIX_TOKENS,
+  PEOPLE_GIVE_UP,
+  PEOPLE_INSTRUCTIONS,
+  PEOPLE_STYLE,
+  PersonDraft,
+  PersonDraftClaim,
+  PersonFixes,
+  peopleCacheKey,
+  peopleSystemPrompt,
+  personTurn,
+  WRITE_NARRATIVE,
+} from "./prompt.ts";
+export {
   type PeopleRead,
   type ReadInput,
   type Refreshed,
