@@ -26,3 +26,9 @@ export {
   type Ownership,
 } from "./ownership.ts";
 export { type Assigned, assignIds } from "./registry.ts";
+export {
+  type ComputedSnapshot,
+  computeSnapshot,
+  type SnapshotInput,
+  topologicalNewestFirst,
+} from "./snapshot.ts";
