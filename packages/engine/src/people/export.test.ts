@@ -7,11 +7,12 @@ import {
   makeInFlightPull,
   makePersonRevision,
 } from "@repowiki/core/test-fixtures";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configuredEmail } from "../index/index.ts";
-import { buildExport, writeExport } from "../store/index.ts";
+import { buildExport, openStore, writeExport } from "../store/index.ts";
 import { refreshPeople } from "./refresh.ts";
-import { PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "./test-people.ts";
+import { KIM, PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "./test-people.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -101,6 +102,73 @@ describe("the export's privacy (spec v2 #6 §13)", () => {
       expect(text).not.toContain("Kim Hidden");
       expect(text).not.toContain("kim-hidden");
     }
+  });
+});
+
+describe("cited commit subjects (the wave B ruling on T33, R10)", () => {
+  /** A narrative whose commit citations' subjects quote Kim's address, as repository text can. */
+  const quoting = () => {
+    const revision = makePersonRevision({
+      sha: fx.head,
+      id: `person-ada-lovelace-${fx.head.slice(0, 12)}-1`,
+    });
+    return {
+      ...revision,
+      sections: revision.sections.map((section) => ({
+        ...section,
+        claims: section.claims.map((claim) => ({
+          ...claim,
+          citations: claim.citations.map((cite) =>
+            cite.kind === "commit"
+              ? { ...cite, subject: `${cite.subject}, cc ${KIM.email}` }
+              : cite,
+          ),
+        })),
+      })),
+    };
+  };
+  const subjects = (sections: { claims: { citations: { kind: string }[] }[] }[]) =>
+    sections.flatMap((s) =>
+      s.claims.flatMap((c) =>
+        c.citations.flatMap((cite) => ("subject" in cite ? [String(cite.subject)] : [])),
+      ),
+    );
+
+  it("are stored without an address", async () => {
+    await refresh();
+    fx.store.putPersonRevision(quoting());
+    const stored = fx.store.getCurrentPersonRevision("ada-lovelace");
+    expect(subjects(stored?.sections ?? []).length).toBeGreaterThan(0);
+    for (const subject of subjects(stored?.sections ?? [])) {
+      expect(subject).toContain("cc [email]");
+      expect(subject).not.toContain(KIM.email);
+    }
+  });
+
+  it("leave the original export.json without an address, even from a body stored before", async () => {
+    fx.remove();
+    fx = await peopleFixture({ onDisk: true });
+    const file = join(fx.out, "wiki.db");
+    fx = { ...fx, store: openStore(file) };
+    try {
+      await refresh();
+      const revision = quoting();
+      fx.store.putPersonRevision(revision);
+      // A body stored before the store scrubbed subjects.
+      const db = new Database(file);
+      db.prepare("UPDATE person_revisions SET body = ? WHERE id = ?").run(
+        JSON.stringify(revision),
+        revision.id,
+      );
+      db.close();
+      writeExport(fx.store, join(fx.out, "export.json"), options);
+    } finally {
+      fx.store.close();
+    }
+    const path = join(fx.out, "export.json");
+    const json = readFileSync(path, "utf8");
+    expect(json).toContain("cc [email]");
+    expect(json).not.toContain(KIM.email);
   });
 });
 

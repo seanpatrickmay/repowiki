@@ -7,10 +7,30 @@ import {
   RepoPath,
   type ResolvedPerson,
   saltedKey,
+  withoutEmails,
 } from "@repowiki/core";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import { DuplicateRevisionError, StalePersonParentError, StoreError } from "./errors.ts";
+
+/**
+ * A person revision whose commit citations' subjects hold no address (R10, the wave B ruling on
+ * T33): applied when it is stored and again when it is exported.
+ */
+export function withoutCitedEmails(revision: PersonRevision): PersonRevision {
+  return {
+    ...revision,
+    sections: revision.sections.map((section) => ({
+      ...section,
+      claims: section.claims.map((claim) => ({
+        ...claim,
+        citations: claim.citations.map((cite) =>
+          cite.kind === "commit" ? { ...cite, subject: withoutEmails(cite.subject) } : cite,
+        ),
+      })),
+    })),
+  };
+}
 
 /** A file's blame as the cache keeps it (spec v2 #6 R3): `[commit sha, lines]` runs in order. */
 const BlameRuns = z.array(z.tuple([GitSha, z.int().positive()]));
@@ -131,7 +151,7 @@ export function peopleStore(db: Database.Database): PeopleStore {
     },
 
     putPersonRevision(revision) {
-      const parsed = PersonRevision.parse(revision);
+      const parsed = PersonRevision.parse(withoutCitedEmails(revision));
       db.transaction(() => {
         if (db.prepare("SELECT 1 FROM person_revisions WHERE id = ?").get(parsed.id) !== undefined)
           throw new DuplicateRevisionError(parsed.id);
