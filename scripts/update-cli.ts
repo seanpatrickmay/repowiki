@@ -1,6 +1,7 @@
 import { estimateTokens, markdownCodeSpan, type WikiUpdate } from "@repowiki/engine";
 import type { LedgerTotals, ModelConfig } from "@repowiki/llm";
 import { CliError } from "./manifest-cli.ts";
+import { DEFAULT_PEOPLE_UPDATE_MAX_USD, parseUsd } from "./people-cli.ts";
 import {
   ASSUMED_PAGE_OUTPUT_TOKENS,
   architectureRow,
@@ -14,13 +15,15 @@ import {
 } from "./wiki-cli.ts";
 
 const FLAGS =
-  "[--out dir] [--config file.json] [--no-batch] [--dry-run] [--budget tokens] [--deadline minutes] [--verbose]";
+  "[--out dir] [--config file.json] [--no-batch] [--dry-run] [--budget tokens] [--deadline minutes] [--people-max-usd N] [--verbose]";
 export const UPDATE_USAGE = `usage: pnpm wiki:update <repo-path> <rev> ${FLAGS}`;
 export const REPLAY_USAGE = `usage: pnpm wiki:replay <repo-path> <from-rev> <to-rev> [--limit N] ${FLAGS}`;
 
 export interface UpdateArgs extends RunFlags {
   repo: string;
   rev: string;
+  /** The People round's ceiling (spec v2 #6 R26); People runs only on a wiki that has it on. */
+  peopleMaxUsd: number;
 }
 
 export interface ReplayArgs extends RunFlags {
@@ -29,6 +32,8 @@ export interface ReplayArgs extends RunFlags {
   to: string;
   /** Replay at most this many steps this run; null replays every step left. */
   limit: number | null;
+  /** The People round's ceiling at the replay's final head (spec v2 #6 R26). */
+  peopleMaxUsd: number;
 }
 
 /** Non-empty positionals, exactly `names` of them, or a CliError naming the usage. */
@@ -42,20 +47,37 @@ function positionals(given: string[], names: readonly string[], usage: string): 
 
 /** `<repo> <rev>` plus wiki:build's flags in any order. */
 export function parseUpdateArgs(argv: readonly string[]): UpdateArgs {
-  const { positionals: given, flags } = parseRunArgs(argv, UPDATE_USAGE);
+  const { positionals: given, flags, peopleMaxUsd } = parseRunArgs(argv, UPDATE_USAGE, false, true);
   const [repo = "", rev = ""] = positionals(given, ["<repo-path>", "<rev>"], UPDATE_USAGE);
-  return { repo, rev, ...flags };
+  const usd = parseUsd(
+    "--people-max-usd",
+    peopleMaxUsd,
+    DEFAULT_PEOPLE_UPDATE_MAX_USD,
+    UPDATE_USAGE,
+  );
+  return { repo, rev, ...flags, peopleMaxUsd: usd };
 }
 
 /** `<repo> <from> <to> [--limit N]` plus wiki:build's flags in any order. */
 export function parseReplayArgs(argv: readonly string[]): ReplayArgs {
-  const { positionals: given, flags, limit } = parseRunArgs(argv, REPLAY_USAGE, true);
+  const {
+    positionals: given,
+    flags,
+    limit,
+    peopleMaxUsd,
+  } = parseRunArgs(argv, REPLAY_USAGE, true, true);
   const [repo = "", from = "", to = ""] = positionals(
     given,
     ["<repo-path>", "<from-rev>", "<to-rev>"],
     REPLAY_USAGE,
   );
-  return { repo, from, to, limit, ...flags };
+  const usd = parseUsd(
+    "--people-max-usd",
+    peopleMaxUsd,
+    DEFAULT_PEOPLE_UPDATE_MAX_USD,
+    REPLAY_USAGE,
+  );
+  return { repo, from, to, limit, ...flags, peopleMaxUsd: usd };
 }
 
 /** Output tokens an update call is assumed to take: it returns only the claims it rewrites. */

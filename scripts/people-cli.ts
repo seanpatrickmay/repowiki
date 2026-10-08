@@ -392,3 +392,6 @@ export function storeCopy(out: string): { path: string; remove: () => void } {
   }
   return { path: join(scratch, "wiki.db"), remove };
 }
+
+/** A People round's ledger run ids start with this, then the sha and the start time. */
+export const WIKI_PEOPLE_RUN_PREFIX = "wiki-people-";

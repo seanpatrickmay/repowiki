@@ -11,6 +11,7 @@ import {
 import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
+import { peopleAfterUpdate } from "./people-hook.ts";
 import { estimateLine, parseUpdateArgs } from "./update-cli.ts";
 import { estimateFor, needsKey, readInput, runUpdate, writeUpdateOutputs } from "./update-run.ts";
 import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
@@ -44,6 +45,10 @@ async function main(): Promise<void> {
       const input = await readInput(repo, sha);
       const estimate = estimateFor(store, input, args, models, repoName);
       console.error(estimateLine(estimate, args.batch));
+      if (store.getPeopleSnapshot() !== null)
+        console.error(
+          `People is on: its due narratives are estimated after the refresh, capped at $${args.peopleMaxUsd.toFixed(2)} (--people-max-usd)`,
+        );
       if (args.dryRun) return;
       // Calls are certain, so fail once here rather than once per page; an update that makes
       // none (nothing cited changed, no article due) needs no key.
@@ -61,6 +66,18 @@ async function main(): Promise<void> {
               ran.update.to,
               false,
             );
+      // Then People, when it is on: refreshed at the new head, its due narratives capped (R24).
+      const people = await peopleAfterUpdate({
+        repo,
+        out,
+        repoName,
+        store,
+        models,
+        log,
+        command: "wiki:update",
+        batch: args.batch,
+        maxUsd: args.peopleMaxUsd,
+      });
       // An article that failed after the update was stored still gets the export and summary.
       const { summary, exportPath, summaryPath } = writeUpdateOutputs(
         store,
@@ -68,7 +85,7 @@ async function main(): Promise<void> {
         repoName,
         ran,
         estimate,
-        inflight,
+        [...inflight, ...people],
       );
       console.log(summary);
       console.log(`Wrote ${exportPath} and ${summaryPath}; store: ${db}`);

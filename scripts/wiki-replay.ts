@@ -23,6 +23,7 @@ import { totalsOf } from "@repowiki/llm";
 import { beforeUpdate, inflightAfterUpdate } from "./inflight-hook.ts";
 import { CliError, exitCodeFor, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
+import { peopleAfterUpdate } from "./people-hook.ts";
 import {
   invariantsHold,
   newestBuildTokens,
@@ -323,6 +324,19 @@ async function replay(
     for (const line of lines)
       if (line !== "" && !line.startsWith("#")) log(`work in flight: ${line}`);
   }
+  // People, once, at the head the replay reached (R24): never per step.
+  const people = await peopleAfterUpdate({
+    repo,
+    out,
+    repoName,
+    store,
+    models,
+    log,
+    command: "wiki:replay",
+    batch: args.batch,
+    maxUsd: args.peopleMaxUsd,
+  });
+  for (const line of people) if (line !== "" && !line.startsWith("#")) log(`people: ${line}`);
   writeExports();
   console.log(renderReplaySummary(repoName, args.from, args.to, records, left, buildTokens));
   console.log(`Wrote ${exportPath} and ${summaryPath}; store: ${join(out, "wiki.db")}`);

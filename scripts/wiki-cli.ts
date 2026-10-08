@@ -112,10 +112,17 @@ export function parseRunArgs(
   argv: readonly string[],
   usage: string,
   limit = false,
-): { positionals: string[]; flags: RunFlags; limit: number | null } {
+  people = false,
+): {
+  positionals: string[];
+  flags: RunFlags;
+  limit: number | null;
+  /** `--people-max-usd`'s text, when `people` allows the flag (spec v2 #6 §10). */
+  peopleMaxUsd: string | undefined;
+} {
   let parsed: ReturnType<typeof parse>;
   try {
-    parsed = parse(argv, limit);
+    parsed = parse(argv, limit, people);
   } catch (err) {
     throw badOption(err, usage);
   }
@@ -132,6 +139,7 @@ export function parseRunArgs(
       verbose: once("--verbose", v.verbose, usage) ?? false,
     },
     limit: positive("--limit", once("--limit", v.limit as string[] | undefined, usage), usage),
+    peopleMaxUsd: once("--people-max-usd", v["people-max-usd"] as string[] | undefined, usage),
   };
 }
 
@@ -179,7 +187,7 @@ export function parseWikiArgs(argv: readonly string[]): WikiArgs {
   return { repo, rev, ...flags };
 }
 
-function parse(argv: readonly string[], limit: boolean) {
+function parse(argv: readonly string[], limit: boolean, people = false) {
   return parseArgs({
     args: [...argv],
     allowPositionals: true,
@@ -192,6 +200,7 @@ function parse(argv: readonly string[], limit: boolean) {
       deadline: { type: "string", multiple: true },
       verbose: { type: "boolean", multiple: true },
       ...(limit ? { limit: { type: "string", multiple: true } as const } : {}),
+      ...(people ? { "people-max-usd": { type: "string", multiple: true } as const } : {}),
     },
   });
 }
