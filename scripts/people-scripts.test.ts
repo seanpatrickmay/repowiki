@@ -211,6 +211,24 @@ describe("pnpm wiki:check's People half (spec v2 #6 §9)", () => {
   });
 });
 
+describe("pnpm wiki:check with People off (the I4 ruling, C4)", () => {
+  it("runs no People half: a broken people file and a quoted address change nothing", () => {
+    expect(run(EXPORT).status).toBe(0);
+    const before = run(CHECK);
+    expect(before.stdout).not.toContain("person narratives");
+    // A v1 export whose cited subject quotes an author's address, and a broken people file.
+    const llms = join(fx.out, "llms.txt");
+    writeFileSync(llms, `${readFileSync(llms, "utf8")}\nContact: ${KIM.email}\n`);
+    writeFileSync(join(fx.out, "people.json"), "{ not json");
+    const after = run(CHECK);
+    expect([after.status, after.stdout, after.stderr]).toEqual([
+      before.status,
+      before.stdout,
+      before.stderr,
+    ]);
+  });
+});
+
 describe("the remembered people file (the C1 ruling)", () => {
   it("is read by wiki:people and wiki:check, and a lost one undoes nothing", () => {
     const team = join(fx.out, "..", "team-people.json");

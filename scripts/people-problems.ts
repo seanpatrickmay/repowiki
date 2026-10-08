@@ -6,6 +6,8 @@ import { loadPeopleFile, ownerEmailOf, peopleConfigFor } from "./people-cli.ts";
 
 /** What wiki:check found about People. */
 export interface PeopleCheck {
+  /** Whether the out dir has People on (a stored snapshot, or one that no longer reads). */
+  on: boolean;
   /** Current narratives re-verified. */
   narratives: number;
   /** Files scanned for an author's email. */
@@ -39,13 +41,23 @@ function outputFiles(out: string): string[] {
  * wiki:check's People half (spec v2 #6 §9): every current narrative re-verified against the
  * stored snapshot's history and the identity map as it stands now (personRevisionProblems), then
  * the export, llms.txt, People summaries and the built site scanned for any author's email, read
- * from git at check time. A problem names the file, never the address.
+ * from git at check time. A problem names the file, never the address. With People off (no
+ * stored snapshot) it does nothing, so a v1 check is as it was (the I4 ruling, C4); a snapshot
+ * that no longer reads counts as on, and is a problem.
  */
 export function checkPeopleStored(store: Store, repo: string, out: string): PeopleCheck {
   const problems: string[] = [];
-  const snapshot = store.getPeopleSnapshot();
+  let snapshot: ReturnType<Store["getPeopleSnapshot"]>;
+  try {
+    snapshot = store.getPeopleSnapshot();
+  } catch (err) {
+    snapshot = null;
+    problems.push(`people snapshot: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (snapshot === null && problems.length === 0)
+    return { on: false, narratives: 0, scanned: 0, problems };
   const sha = snapshot?.sha ?? store.getHead();
-  if (sha === null) return { narratives: 0, scanned: 0, problems };
+  if (sha === null) return { on: true, narratives: 0, scanned: 0, problems };
   let config: ReturnType<typeof loadPeopleFile>;
   try {
     // The file wiki:people was given (the C1 ruling); a lost one is a problem.
@@ -85,5 +97,5 @@ export function checkPeopleStored(store: Store, repo: string, out: string): Peop
     if (emails.some((email) => text.includes(email)))
       problems.push(`${relative(out, file)} holds an author's email address`);
   }
-  return { narratives: revisions.length, scanned: files.length, problems };
+  return { on: true, narratives: revisions.length, scanned: files.length, problems };
 }
