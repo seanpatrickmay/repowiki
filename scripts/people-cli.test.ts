@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { PeopleConfig } from "@repowiki/core";
 import { configuredEmail, readPeople } from "@repowiki/engine";
 import {
+  ADA,
   KIM,
   PEOPLE_SECRETS,
   type PeopleFixture,
@@ -125,6 +126,15 @@ describe("renderSuggest (spec v2 #6 §6 step 6)", () => {
     expect(text).toContain("A name of kim-hidden gives no name key");
     expect(text).toMatch(/`kimh`.*\| no \|/);
     for (const secret of PEOPLE_SECRETS) expect(text).not.toContain(secret);
+  });
+
+  it("flags a person whose identities look like bots only in part", () => {
+    fx.repo.write("docs/bot.md", "bot\n");
+    fx.head = fx.repo.commit("chore: bot run", "+0000", { name: "dependabot", email: ADA.email });
+    const text = render();
+    expect(text).toMatch(/`ada-lovelace` \(mixed bot\) \| `Ada Lovelace`/);
+    expect(text).toContain('A "(mixed bot)" person has identities that look like bots');
+    expect(render({ humans: ["name:dependabot"] })).not.toContain("(mixed bot)");
   });
 
   it("says no to a consenting person past maxNarratives in rank", () => {
@@ -286,6 +296,8 @@ describe("renderPeopleSummary", () => {
   it("says nothing of exclusion when nobody is excluded", () => {
     expect(exclusionNotes(0, false)).toEqual([]);
     expect(exclusionNotes(2, true)).toHaveLength(1);
+    // Two excluded, one of them merge-only: the series is still one person's.
+    expect(exclusionNotes(2, true, 1)).toHaveLength(2);
   });
 });
 

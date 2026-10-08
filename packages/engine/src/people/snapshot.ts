@@ -286,7 +286,9 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
 
   const people: PersonFacts[] = [];
   const others = new Map<string, ActivityDay>();
-  const excludedCount = groups.filter((g) => g.excluded).length;
+  // Only excluded people with a non-merge commit add to `others`, so only they count toward
+  // othersMinPeople (R12): a merge-only one would let the series show one person alone.
+  const excludedCount = groups.filter((g) => g.excluded && g.commits > 0).length;
   groups.forEach((group, g) => {
     if (group.excluded) {
       if (excludedCount < input.config.othersMinPeople) return;

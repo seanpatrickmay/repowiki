@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, type TestRepo } from "../index/index.ts";
+import { createTestRepo, GitError, type TestRepo } from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
 import { blameTree, ignoreRevsFrom, isLockfile } from "./ownership.ts";
 
@@ -140,5 +140,40 @@ describe("blameTree (spec v2 #6 R1, R3, R20)", () => {
       rebuild: true,
     });
     expect([...four.files]).toEqual([...one.files]);
+  });
+
+  it("skips and counts a tracked path that is not a valid repository path", async () => {
+    const { head } = tree();
+    repo.write("a\\b.py", "x = 1\n");
+    const next = repo.commit("feat: odd path", "+0000", ADA);
+    const owned = await blameTree(repo.dir, next, store, { ignoreRevs: [], maxFileBytes: 1000 });
+    expect([...owned.files.keys()]).toEqual(["a.py", "b.py"]);
+    expect(owned.skipped).toBe(4);
+    expect(head).not.toBe(next);
+  });
+
+  it("stops the pool at the first failure that is not a timeout", async () => {
+    for (let i = 0; i < 10; i++) repo.write(`f${i}.py`, `${i}\n`);
+    const head = repo.commit("feat: many", "+0000", ADA);
+    let calls = 0;
+    const failing = async () => {
+      calls++;
+      await new Promise((done) => setTimeout(done, 20));
+      throw new GitError("git blame failed: boom");
+    };
+    await expect(
+      blameTree(repo.dir, head, store, { ignoreRevs: [], concurrency: 2, blame: failing }),
+    ).rejects.toThrow(/boom/);
+    await new Promise((done) => setTimeout(done, 100));
+    expect(calls).toBe(2);
+  });
+
+  it("refuses a concurrency that is not a whole number of at least 1", async () => {
+    const { head } = tree();
+    for (const concurrency of [0, -1, 1.5, Number.NaN])
+      await expect(
+        blameTree(repo.dir, head, store, { ignoreRevs: [], concurrency }),
+        String(concurrency),
+      ).rejects.toThrow(/concurrency/);
   });
 });
