@@ -251,8 +251,9 @@ describe("the People estimate and ceiling (R26)", () => {
   it("prices a call and a retry at their output caps, halved when batched (the Task 23 ruling)", () => {
     const batched = narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", true);
     expect(narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", false)).toBeCloseTo(2 * batched);
-    // 2 x (5k + 3k + 2.5k) in, 6k + 3k out at $1/$5 per MTok, halved.
-    expect(batched).toBeCloseTo((21_000 * 1 + 9_000 * 5) / 1e6 / 2);
+    // (5k + 3k + 2.5k) in, then a retry resending a 6k draft: (5k + 3k + 6k) in; 6k + 6k out,
+    // since a whole retry can write 6,000 (the wave B ruling); at $1/$5 per MTok, halved.
+    expect(batched).toBeCloseTo((24_500 * 1 + 12_000 * 5) / 1e6 / 2);
     // A cache key makes the first call write the system prompt at $1.25 instead of $1.
     expect(narrativeCeilingUsd(3000, 5000, "claude-haiku-4-5", true, true)).toBeCloseTo(
       batched + (5_000 * 0.25) / 1e6 / 2,
