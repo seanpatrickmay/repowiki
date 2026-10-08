@@ -62,9 +62,23 @@ export function personRevisionProblems(input: PeopleCheckInput): string[] {
     const dates = new Map<string, string>();
     for (const c of commits)
       if (c.parents.length <= 1 && groupOf(c) === group) dates.set(c.sha, c.authorDate);
-    for (const l of landings.values())
-      if (l.merger === group || authors.get(l.number) === group) dates.set(l.sha, l.mergedAt);
-    const pack = { personId: revision.personId, shas: new Set(dates.keys()), dates } as PersonPack;
+    // A merge of a pull request they did not write credits them with the merge only (I2).
+    const mergedOnly = new Set<string>();
+    for (const l of landings.values()) {
+      if (l.merger !== group && authors.get(l.number) !== group) continue;
+      dates.set(l.sha, l.mergedAt);
+      if (authors.get(l.number) !== group) mergedOnly.add(l.sha);
+    }
+    const features =
+      snapshot.people.find((p) => p.id === revision.personId)?.features.map((f) => f.featureId) ??
+      [];
+    const pack = {
+      personId: revision.personId,
+      shas: new Set(dates.keys()),
+      dates,
+      mergedOnly,
+      features,
+    } as PersonPack;
     const manifest = input.manifestAt(revision.sha);
     const ctx = personVerifyContext(
       { sha: snapshot.sha, commits: read.commits, identities: read.identities, commitFeatures },

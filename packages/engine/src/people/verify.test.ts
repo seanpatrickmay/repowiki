@@ -15,6 +15,8 @@ const A = "a".repeat(40);
 const B = "b".repeat(40);
 const M = "c".repeat(40);
 const OTHER = "d".repeat(40);
+/** The merge of Bob's pull request #9, which Ada merged but did not write. */
+const X = "e".repeat(40);
 
 const commit = (sha: string, subject: string, date: string, pr: number | null = null) => ({
   sha,
@@ -27,13 +29,16 @@ const commit = (sha: string, subject: string, date: string, pr: number | null = 
 
 const pack = {
   personId: "ada-lovelace",
-  shas: new Set([A, B, M]),
+  shas: new Set([A, B, M, X]),
   dates: new Map([
     [A, "2026-03-14T10:00:00+01:00"],
     [B, "2026-04-02T09:00:00+01:00"],
     [M, "2026-04-03T00:00:00Z"],
+    [X, "2026-04-05T00:00:00Z"],
   ]),
-} as PersonPack;
+  features: ["signals", "deliverables"],
+  mergedOnly: new Set([X]),
+} as unknown as PersonPack;
 
 const ctx: PersonVerifyContext = {
   verify: {
@@ -45,14 +50,27 @@ const ctx: PersonVerifyContext = {
       commit(B, "fix: crud paging", "2026-04-02T09:00:00+01:00", 7),
       commit(M, "Merge pull request #7", "2026-04-03T00:00:00Z", 7),
       commit(OTHER, "feat: someone else's", "2026-03-20T00:00:00Z"),
+      commit(X, "Merge pull request #9", "2026-04-05T00:00:00Z", 9),
     ],
   },
   pack,
   firstCommit: "2026-03-14T10:00:00+01:00",
   lastCommit: "2026-04-03T00:00:00Z",
   otherNames: ["grace hopper", "kim hidden", "bob"],
-  featuresOf: (sha) => (sha === A ? ["signals"] : sha === B || sha === M ? ["deliverables"] : []),
-  features: new Set(["signals", "deliverables"]),
+  featuresOf: (sha) =>
+    sha === A
+      ? ["signals"]
+      : sha === B || sha === M
+        ? ["deliverables"]
+        : sha === X
+          ? ["crud", "signals"]
+          : [],
+  features: new Set(["signals", "deliverables", "crud"]),
+  featureTitles: new Map([
+    ["signals", "Signal ingestion"],
+    ["deliverables", "Deliverables"],
+    ["crud", "CRUD API"],
+  ]),
 };
 
 const claim = (text: string, cite: string[] = [], supports: string[] = []) => ({
@@ -292,6 +310,43 @@ describe("verifyPersonClaim's checks against disguises (the Task 19 ruling)", ()
     });
     // A day-precise wrong date is refused, not read as the whole year.
     expect(one("On 15 Mar 2026, x changed.")[0]).toMatch(/outside/);
+  });
+});
+
+describe("verifyPersonClaim and merges the person did not write (the I2 ruling)", () => {
+  const x = `commit:${X.slice(0, 12)}`;
+  it("refuses an areas claim citing the merge of someone else's pull request", () => {
+    expect(
+      problems("areas", claim("[[signals]]: the commits added scoring.", [`commit:${A}`, x])),
+    ).toEqual([
+      `the claim cites ${x}, the merge of a pull request the person did not write; areas cite only the person's own commits`,
+    ]);
+  });
+
+  it("lets a chronicle claim citing such a merge say only that the person merged it", () => {
+    expect(
+      problems("chronicle", claim("On 5 April 2026, Ada merged a teammate's change.", [x])),
+    ).toEqual([]);
+    expect(
+      problems("chronicle", claim("On 5 April 2026, Ada added paging to the CRUD API.", [x])),
+    ).toEqual([
+      "the claim cites only merges of pull requests the person did not write; say that they merged them",
+      "the claim cites the merge of a pull request the person did not write and names a feature they have no commits in; describe only the merge",
+    ]);
+    expect(
+      problems("chronicle", claim("On 5 April 2026, Ada merged paging for [[crud|the API]].", [x])),
+    ).toEqual([
+      "the claim cites the merge of a pull request the person did not write and names a feature they have no commits in; describe only the merge",
+    ]);
+  });
+
+  it("still lets the merge sit beside the person's own work on their own feature", () => {
+    expect(
+      problems(
+        "chronicle",
+        claim("On 5 April 2026, Ada merged a change to [[signals]].", [`commit:${A}`, x]),
+      ),
+    ).toEqual([]);
   });
 });
 

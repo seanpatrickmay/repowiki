@@ -80,6 +80,8 @@ export interface PersonVerifyContext {
   featuresOf(sha: string): readonly string[];
   /** Active feature ids at the head: what an areas claim may link. */
   features: ReadonlySet<string>;
+  /** Each active feature's title, by id: how a chronicle claim can name a feature in words. */
+  featureTitles: ReadonlyMap<string, string>;
 }
 
 const MONTHS = [
@@ -211,6 +213,19 @@ const patternsOf = (names: readonly string[]): RegExp[] => {
 };
 const BANNED = PEOPLE_BANNED_WORDS.map((w) => ({ word: w, pattern: wholeWord(w) }));
 
+/**
+ * The features a claim names (the I2 ruling): those it links, and those whose title it writes as
+ * whole words, in the name check's normalised form.
+ */
+function namedFeatures(text: string, ctx: PersonVerifyContext): string[] {
+  const form = nameForm(text);
+  const linked = new Set(featureLinkTargets(text).map((t) => t.trim()));
+  return [...ctx.featureTitles].flatMap(([id, title]) => {
+    const words = normalizeName(title);
+    return linked.has(id) || (words !== "" && wholeWord(words).test(form)) ? [id] : [];
+  });
+}
+
 /** R18's mechanical checks, for a claim whose citations resolved to `cited`. */
 function factProblems(
   key: PersonSectionKey,
@@ -257,6 +272,23 @@ function factProblems(
     problems.push(
       `the claim uses the banned ${banned.length === 1 ? "word" : "words"} ${banned.join(", ")}`,
     );
+  // A merge of a pull request the person did not write credits them with the merge only (I2).
+  const mergedOnly = cited.filter((c) => c.kind === "commit" && ctx.pack.mergedOnly.has(c.sha));
+  if (key === "areas" && mergedOnly.length > 0)
+    problems.push(
+      `the claim cites ${mergedOnly.map((c) => (c.kind === "commit" ? `commit:${c.sha.slice(0, 12)}` : "")).join(", ")}, the merge of a pull request the person did not write; areas cite only the person's own commits`,
+    );
+  if (key === "chronicle" && mergedOnly.length > 0) {
+    if (mergedOnly.length === cited.length && !/\bmerg(?:e|ed|es|ing)\b/i.test(words))
+      problems.push(
+        "the claim cites only merges of pull requests the person did not write; say that they merged them",
+      );
+    const own = new Set(ctx.pack.features);
+    if (namedFeatures(text, ctx).some((id) => !own.has(id)))
+      problems.push(
+        "the claim cites the merge of a pull request the person did not write and names a feature they have no commits in; describe only the merge",
+      );
+  }
   if (key === "areas") {
     const [target] = featureLinkTargets(text);
     if (target !== undefined && !ctx.features.has(target.trim()))
@@ -421,5 +453,8 @@ export function personVerifyContext(
       pullRequestLandings(commits, groupOf),
     ),
     features: new Set(manifest.features.filter((f) => f.status.kind === "active").map((f) => f.id)),
+    featureTitles: new Map(
+      manifest.features.filter((f) => f.status.kind === "active").map((f) => [f.id, f.title]),
+    ),
   };
 }
