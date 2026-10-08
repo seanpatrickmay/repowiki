@@ -296,11 +296,15 @@ describe("verifyPersonClaim's checks against disguises (the Task 19 ruling)", ()
 });
 
 describe("personVerifyContext (R17)", () => {
-  const group = (name: string, excluded = false, otherNames: string[] = []) =>
+  const group = (name: string, excluded = false, otherNames: string[] = [], replaced = "") =>
     ({
       name,
       otherNames,
-      identities: [{ name, email: "x@e.com" }],
+      replacedNames: replaced === "" ? [] : [replaced],
+      identities: [
+        { name, shownName: name, email: "x@e.com" },
+        ...(replaced === "" ? [] : [{ name: replaced, shownName: name, email: "x@e.com" }]),
+      ],
       excluded,
       firstCommit: "2026-03-14T10:00:00+01:00",
       lastCommit: "2026-04-03T00:00:00Z",
@@ -332,6 +336,32 @@ describe("personVerifyContext (R17)", () => {
     expect(kim.problems).toContain(
       "the claim names another person; name no one but the page's subject",
     );
+  });
+});
+
+describe("personVerifyContext and the mailmap (the I1 ruling)", () => {
+  it("lets no narrative use a name the mailmap replaced, the person's own included", () => {
+    const group = (name: string, replaced: string[]) =>
+      ({
+        name,
+        otherNames: [],
+        replacedNames: replaced,
+        identities: [name, ...replaced].map((raw) => ({ name: raw, shownName: name })),
+        excluded: false,
+        firstCommit: "2026-03-14T10:00:00+01:00",
+        lastCommit: "2026-04-03T00:00:00Z",
+      }) as unknown as IdentityGroup;
+    const refreshed = {
+      sha: A,
+      commits: [],
+      commitFeatures: new Map(),
+      identities: {
+        groups: [group("Ada Lovelace", ["Old Deadname"]), group("Grace Hopper", ["Gracie Old"])],
+        groupOf: () => 0,
+      },
+    } as unknown as Parameters<typeof personVerifyContext>[0];
+    const ctx = personVerifyContext(refreshed, 0, pack, makeManifest());
+    expect([...ctx.otherNames].sort()).toEqual(["grace hopper", "gracie old", "old deadname"]);
   });
 });
 

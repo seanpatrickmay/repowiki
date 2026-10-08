@@ -382,14 +382,19 @@ export function personVerifyContext(
 ): PersonVerifyContext {
   const { groups } = refreshed.identities;
   const self = groups[group];
+  const normal = (names: readonly string[]) =>
+    names.map((n) => normalizeName(cleanPersonName(n))).filter((n) => n !== "");
+  // Every name a group was ever written under, those the mailmap replaced included.
   const namesOf = (g: IdentityGroup) =>
-    [g.name, ...g.otherNames, ...g.identities.map((p) => cleanPersonName(p.name))]
-      .map(normalizeName)
-      .filter((n) => n !== "");
-  const own = new Set(self === undefined ? [] : namesOf(self));
-  const otherNames = [...new Set(groups.flatMap((g, i) => (i === group ? [] : namesOf(g))))].filter(
-    (n) => !own.has(n),
+    normal([g.name, ...g.otherNames, ...g.replacedNames, ...g.identities.map((p) => p.name)]);
+  // The person's own names are only those People shows: a name the mailmap replaced is no
+  // narrative's to use, theirs included (the I1 ruling).
+  const own = new Set(
+    self === undefined
+      ? []
+      : normal([self.name, ...self.otherNames, ...self.identities.map((p) => p.shownName)]),
   );
+  const otherNames = [...new Set(groups.flatMap(namesOf))].filter((n) => !own.has(n));
   const commits = topologicalNewestFirst(refreshed.commits);
   const groupOf = (c: AuthoredCommit) => refreshed.identities.groupOf(c.authorName, c.authorEmail);
   return {

@@ -216,7 +216,15 @@ export function renderSuggest(read: PeopleRead, config: PeopleConfig): string {
         "",
         id,
         guarded(g.name),
-        g.otherNames.map(guarded).join(", "),
+        // A name the mailmap replaced is never shown, only counted (the I1 ruling).
+        [
+          ...g.otherNames.map(guarded),
+          ...(g.replacedNames.length === 0
+            ? []
+            : [
+                `(${g.replacedNames.length} ${g.replacedNames.length === 1 ? "name" : "names"} replaced by the mailmap)`,
+              ]),
+        ].join(", "),
         emails.map(cell).join(", "),
         g.logins.map(guarded).join(", "),
         count(g.commits),

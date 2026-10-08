@@ -32,6 +32,23 @@ const groups = (commits: AuthoredCommit[], file: unknown = {}, ownerEmail: strin
     ownerEmail,
   }).groups;
 
+describe("suggestionSnippet and the mailmap (the I1 ruling)", () => {
+  it("builds its keys from the names after the mailmap, never from a name it replaced", () => {
+    const team = resolveIdentities({
+      commits: [by("Old Deadname", "wb@e.com", 1), by("wyattb", "w1@e.com", 2)],
+      mailmap: parseMailmap("Wyatt Brown <wb@e.com>\n"),
+      config: PeopleConfig.parse({}),
+      salt: "1".repeat(64),
+      ownerEmail: null,
+    }).groups;
+    const [s] = suggestMerges(team);
+    if (s === undefined) throw new Error("wyattb abbreviates Wyatt Brown");
+    const lines = suggestionSnippet(team, ["wyatt-brown", "wyattb"], s).join("\n");
+    expect(lines).toContain('"name:wyatt brown"');
+    expect(lines).not.toMatch(/deadname/i);
+  });
+});
+
 describe("maskEmail (spec v2 #6 R10)", () => {
   it("shows at most the first character of the local part, and the domain", () => {
     expect(maskEmail("wyatt.brown@uni.example")).toBe("w…@uni.example");
