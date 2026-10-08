@@ -18,6 +18,7 @@ import { escapeHtml } from "./inline.ts";
 import { siteMarker } from "./site-format.ts";
 import { EXPONENTIAL_BACKOFF, fixtureExport, hostileArchitectureExport } from "./test-fixtures.ts";
 import { fixtureInFlight, HOSTILE_PULL_TITLE, inflightExport } from "./test-inflight.ts";
+import { peopleExport } from "./test-people.ts";
 import {
   type BuiltSite,
   brokenLinks,
@@ -1538,6 +1539,76 @@ describe("site build --no-inflight (R18, C11)", () => {
         file,
         leaked: [],
       });
+    }
+  });
+});
+
+/** The fixture with People on (spec v2 #6 §11): Ada's narrative, Grace, a hostile name, a bot. */
+let peopleSite: BuiltSite;
+const peopleNormalized = (path: string): string =>
+  peopleSite.read(path).replace(/\/_astro\/[^"]+/g, "/_astro/ASSET");
+
+describe("the People pages (spec v2 #6 §11)", () => {
+  beforeAll(() => {
+    peopleSite = buildFixtureSite(
+      ["--repo-url", "https://github.com/acme/demo-repo"],
+      peopleExport(),
+    );
+  }, 120_000);
+  afterAll(() => peopleSite?.cleanup());
+
+  it("renders the People index and a person page", async () => {
+    await expect(peopleNormalized("people/index.html")).toMatchFileSnapshot(
+      "__snapshots__/people.html",
+    );
+    await expect(peopleNormalized("people/ada-lovelace/index.html")).toMatchFileSnapshot(
+      "__snapshots__/people-ada-lovelace.html",
+    );
+  });
+
+  it("indexes person pages for search, and redirects a merged-away id", () => {
+    expect(peopleSite.read("people/ada-lovelace/index.html")).toContain("data-pagefind-body");
+    expect(peopleSite.read("people/index.html")).not.toContain("data-pagefind-body");
+    const redirect = peopleSite.read("people/ada/index.html");
+    expect(redirect).toContain(
+      '<meta http-equiv="refresh" content="0; url=/people/ada-lovelace/">',
+    );
+    expect(redirect).toContain('<meta name="robots" content="noindex">');
+    expect(redirect).not.toContain("data-pagefind-body");
+  });
+
+  it("prints a hostile name as text everywhere, and links only real pages", () => {
+    const pages = htmlFiles(peopleSite.outDir).filter((p) => p.startsWith("people/"));
+    expect(pages).toContain("people/hostile-name/index.html");
+    for (const page of pages) expect(peopleSite.read(page), page).not.toContain("<script>alert(1)");
+    expect(brokenLinks(peopleSite.outDir).broken).toEqual([]);
+    for (const page of htmlFiles(peopleSite.outDir))
+      expect({ page, offsite: offsiteResources(peopleSite.read(page)) }).toEqual({
+        page,
+        offsite: [],
+      });
+  });
+
+  it("links People last in the nav, only when the export has People", () => {
+    const nav =
+      /<nav class="site-nav"[\s\S]*?<\/nav>/.exec(peopleSite.read("index.html"))?.[0] ?? "";
+    expect(nav).toMatch(/<li><a href="\/people\/">People<\/a><\/li>\s*<\/ul>/);
+    expect(site.read("index.html")).not.toContain('href="/people/"');
+    expect(existsSync(join(site.outDir, "people"))).toBe(false);
+  });
+
+  it("writes no email address, and nothing of an excluded person, to any built file", () => {
+    const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
+    // Every file the build writes from the export; Pagefind's and the bundles' vendored code
+    // (which carries its authors' addresses) is not the wiki's.
+    const text = (readdirSync(peopleSite.outDir, { recursive: true }) as string[]).filter(
+      (f) => /\.(?:html|json|txt|xml|svg)$/.test(f) && !/^(?:pagefind|_astro)\//.test(f),
+    );
+    expect(text.length).toBeGreaterThan(0);
+    for (const file of text) {
+      const body = peopleSite.read(file);
+      expect({ file, email: EMAIL.exec(body)?.[0] ?? null }).toEqual({ file, email: null });
+      expect({ file, excluded: /kim/i.test(body) }).toEqual({ file, excluded: false });
     }
   });
 });
