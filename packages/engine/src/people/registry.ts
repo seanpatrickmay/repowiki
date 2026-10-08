@@ -122,6 +122,7 @@ export function assignIds(
   // A private excluded-<n> id a visible group won: it was never published, so the group gets a
   // normal id in its place, with no redirect, and the private one goes (the round 2 ruling).
   const lifted = new Map<string, string>();
+  const retiredPrivate = new Set<string>();
   const ids = groups.map((group, g) => {
     let id = won[g]?.[0]?.id ?? null;
     const unexcluded = id !== null && !group.excluded && group.id === null && isExcludedId(id);
@@ -156,6 +157,19 @@ export function assignIds(
   });
   const active = new Map(groups.map((group, g) => [ids[g] as string, group]));
   for (const id of active.keys()) redirectTo.delete(id);
+  // A private excluded-<n> id is never a redirect (the round 3 ruling): one a group won and no
+  // longer holds (given a people-file id, or merged into a visible person) simply goes, and its
+  // order passes to the id that took its keys.
+  groups.forEach((_, g) => {
+    for (const row of won[g] as RegistryRow[])
+      if (isExcludedId(row.id) && row.id !== ids[g]) {
+        redirectTo.delete(row.id);
+        if (!lifted.has(ids[g] as string) && row === won[g]?.[0])
+          lifted.set(ids[g] as string, row.id);
+        retiredPrivate.add(row.id);
+      }
+  });
+  for (const id of [...redirectTo.keys()]) if (isExcludedId(id)) redirectTo.delete(id);
   /** Where a redirect ends: an id a group holds now, or null for a cycle or a dead end. */
   const finalOf = (id: string): string | null => {
     const seen = new Set<string>();
@@ -197,7 +211,11 @@ export function assignIds(
     });
   }
   // A stored person no group matches now (their commits left the history) keeps their row.
-  const written = new Set([...registry.map((row) => row.id), ...lifted.values()]);
+  const written = new Set([
+    ...registry.map((row) => row.id),
+    ...lifted.values(),
+    ...retiredPrivate,
+  ]);
   for (const row of stored) if (!written.has(row.id)) registry.push(row);
   registry.sort((a, b) => a.order - b.order);
 
