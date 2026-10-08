@@ -1,3 +1,4 @@
+import { makePeopleSnapshot, makePersonRevision } from "@repowiki/core/test-fixtures";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { accuracySheet, tallySheet } from "./accuracy.ts";
 import { type SampleWiki, sampleWiki } from "./test-wiki.ts";
@@ -49,6 +50,30 @@ describe("accuracySheet", () => {
     expect(sheet).toContain("## Signal ingestion (signals)");
     expect(sheet).toContain("## Deliverables (deliverables)");
     expect(sheet.match(/^- \[ \] /gm)).toHaveLength(8);
+  });
+});
+
+describe("accuracySheet with person pages (spec v2 #6 §15.4)", () => {
+  const withPeople = () => ({
+    ...sample.wiki,
+    people: { snapshot: makePeopleSnapshot(), pages: [makePersonRevision()] },
+  });
+
+  it("lists a named person's narrative claims, and no feature page when only people are named", () => {
+    const sheet = accuracySheet(withPeople(), [], ["ada-lovelace", "grace-hopper"]);
+    expect(sheet).not.toContain("(signals)");
+    expect(sheet).toContain("## Person: Ada Lovelace (people/ada-lovelace)");
+    // Grace has no narrative: nothing to review.
+    expect(sheet).not.toContain("grace-hopper");
+    const claims = sheet.split("\n").filter((l) => l.startsWith("- [ ] "));
+    expect(claims[0]).toMatch(/^- \[ \] `people\/ada-lovelace\/l1` \(Lead\): /);
+    expect(claims.some((l) => /\(Chronicle\): .*\(commit [0-9a-f]{7}\)$/.test(l))).toBe(true);
+    expect(tallySheet(sheet).unmarked).toBe(claims.length);
+  });
+
+  it("adds people after the named feature pages", () => {
+    const sheet = accuracySheet(withPeople(), ["deliverables"], ["ada-lovelace"]);
+    expect(sheet.indexOf("(deliverables)")).toBeLessThan(sheet.indexOf("(people/ada-lovelace)"));
   });
 });
 

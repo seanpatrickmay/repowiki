@@ -10,14 +10,18 @@ import { resolveOutDir } from "./out-dir.ts";
 import { exitWithError } from "./wiki-cli.ts";
 
 const USAGE =
-  "usage: pnpm eval:accuracy sheet <repo-path> [--out dir] [feature-id ...]\n       pnpm eval:accuracy tally <sheet>";
+  "usage: pnpm eval:accuracy sheet <repo-path> [--out dir] [--person <person-id>]... [feature-id ...]\n       pnpm eval:accuracy tally <sheet>";
 
 /** The sheet's name in the wiki's out dir. */
 export const ACCURACY_SHEET = join("eval", "accuracy-review.md");
 
 function parseSheetArgs(args: string[]) {
   try {
-    return parseArgs({ args, allowPositionals: true, options: { out: { type: "string" } } });
+    return parseArgs({
+      args,
+      allowPositionals: true,
+      options: { out: { type: "string" }, person: { type: "string", multiple: true } },
+    });
   } catch (err) {
     throw new CliError(USAGE, { cause: err });
   }
@@ -25,7 +29,8 @@ function parseSheetArgs(args: string[]) {
 
 /**
  * pnpm eval:accuracy: spec §9's accuracy review. `sheet` writes <out>/eval/accuracy-review.md,
- * every claim of the named pages (every active page when none is named) to mark true or false,
+ * every claim of the named pages (every active page when no page or person is named) and of each
+ * `--person`'s narrative (spec v2 #6 §15.4) to mark true or false,
  * and never writes over a sheet that exists, since it may hold the author's marks. `tally`
  * counts a marked sheet against the 1-in-50 bar. No LLM call.
  */
@@ -71,13 +76,28 @@ function main(): void {
       `no page for ${unknown.slice(0, 5).join(", ")}; the pages are ${[...paged].sort().join(", ")}`,
     );
   }
+  // Person pages (spec v2 #6 §15.4): each named person must have a narrative to review.
+  const personIds = values.person ?? [];
+  if (personIds.length > 0 && wiki.people === null)
+    throw new CliError("the export has no People; run pnpm wiki:people first");
+  const narrated = new Set(wiki.people?.pages.map((p) => p.personId) ?? []);
+  const silent = personIds.filter((id) => !narrated.has(id));
+  if (silent.length > 0) {
+    const shown = [...narrated].sort().slice(0, 10).join(", ") || "none";
+    throw new CliError(
+      `no narrative for ${silent
+        .slice(0, 5)
+        .map((id) => JSON.stringify(id.slice(0, 64)))
+        .join(", ")}; the people with one are ${shown}`,
+    );
+  }
   const path = join(out, ACCURACY_SHEET);
   if (existsSync(path)) {
     throw new CliError(
       `${path} exists and may hold your marks; move it aside to write a new sheet`,
     );
   }
-  const sheet = accuracySheet(wiki, featureIds);
+  const sheet = accuracySheet(wiki, featureIds, personIds);
   mkdirSync(join(out, "eval"), { recursive: true });
   writeFileSync(path, sheet, { flag: "wx" });
   console.log(`Wrote ${path}: ${sheet.match(/^- \[ \] /gm)?.length ?? 0} claims to review`);

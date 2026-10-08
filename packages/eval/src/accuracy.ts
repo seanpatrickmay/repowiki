@@ -1,6 +1,7 @@
 import {
   type Citation,
   CLAIM_TEXT_MAX_LENGTH,
+  type PersonSectionKey,
   plainClaimText,
   type WikiExport,
 } from "@repowiki/core";
@@ -26,13 +27,18 @@ const shownId = (id: string) => [...id.replace(/[^A-Za-z0-9._-]/g, "?")].slice(0
  * The accuracy review's sheet (spec §9): every claim of the named pages (each page once), one
  * checkbox line each with its section and references, for the author to mark true or false. With
  * no ids it lists every active page. Titles, claim text and paths are written as plain one-line
- * markdown text (markdownText), claims in full.
+ * markdown text (markdownText), claims in full. `personIds` adds those people's narrative claims
+ * (spec v2 #6 §15.4); naming only people lists no feature page.
  */
-export function accuracySheet(wiki: WikiExport, featureIds: readonly string[]): string {
+export function accuracySheet(
+  wiki: WikiExport,
+  featureIds: readonly string[],
+  personIds: readonly string[] = [],
+): string {
   const features = new Map(wiki.manifest.features.map((f) => [f.id, f]));
   const pages = new Map(wiki.pages.map((p) => [p.featureId, p]));
   const ids =
-    featureIds.length > 0
+    featureIds.length > 0 || personIds.length > 0
       ? [...new Set(featureIds)]
       : wiki.pages
           .filter((p) => features.get(p.featureId)?.status.kind === "active")
@@ -59,8 +65,33 @@ export function accuracySheet(wiki: WikiExport, featureIds: readonly string[]): 
       }
     }
   }
+  // Person pages (spec v2 #6 §15.4): their narrative claims, under `people/<id>/<claim>`.
+  const facts = new Map(wiki.people?.snapshot.people.map((p) => [p.id, p]) ?? []);
+  const narratives = new Map(wiki.people?.pages.map((p) => [p.personId, p]) ?? []);
+  for (const id of new Set(personIds)) {
+    const narrative = narratives.get(id);
+    if (narrative === undefined) continue;
+    lines.push("", `## Person: ${markdownText(facts.get(id)?.name ?? id, 120)} (people/${id})`, "");
+    for (const section of narrative.sections) {
+      for (const claim of section.claims) {
+        const plain = plainClaimText(claim.text, (to) => features.get(to)?.title ?? null);
+        const text = markdownText(plain, CLAIM_TEXT_MAX_LENGTH);
+        const refs = claim.citations.map(reference).join("; ");
+        lines.push(
+          `- [ ] \`people/${id}/${shownId(claim.id)}\` (${PERSON_SECTION_TITLES[section.key]}): ${text}${refs === "" ? "" : ` (${refs})`}`,
+        );
+      }
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
+
+/** A person narrative's section titles, as the person page shows them. */
+const PERSON_SECTION_TITLES: Record<PersonSectionKey, string> = {
+  lead: "Lead",
+  chronicle: "Chronicle",
+  areas: "Areas of work",
+};
 
 export interface AccuracyTally {
   /** Claims marked true or false. */
