@@ -1,0 +1,80 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { PeopleConfig, WikiExport } from "@repowiki/core";
+import { makePersonRevision } from "@repowiki/core/test-fixtures";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configuredEmail } from "../index/index.ts";
+import { buildExport, writeExport } from "../store/index.ts";
+import { refreshPeople } from "./refresh.ts";
+import { PEOPLE_SECRETS, type PeopleFixture, peopleFixture } from "./test-people.ts";
+
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
+let fx: PeopleFixture;
+beforeEach(async () => {
+  fx = await peopleFixture();
+});
+afterEach(() => fx.remove());
+
+const refresh = (file: unknown = {}) =>
+  refreshPeople({
+    repo: fx.repo.dir,
+    sha: fx.head,
+    store: fx.store,
+    config: PeopleConfig.parse(file),
+    ownerEmail: configuredEmail(fx.repo.dir),
+  });
+const options = { repo: "demo", exportedAt: "2026-10-06T12:00:00Z" };
+
+describe("buildExport's People (spec v2 #6 §5, R28)", () => {
+  it("is null until People runs, then carries the snapshot and the current narratives", async () => {
+    expect(buildExport(fx.store, options).people).toBeNull();
+    await refresh();
+    fx.store.putPersonRevision(
+      makePersonRevision({ sha: fx.head, id: `person-ada-lovelace-${fx.head.slice(0, 12)}-1` }),
+    );
+    const people = buildExport(fx.store, options).people;
+    expect(people?.snapshot).toEqual(fx.store.getPeopleSnapshot());
+    expect(people?.pages.map((p) => p.personId)).toEqual(["ada-lovelace"]);
+  });
+
+  it("leaves out the narrative of a person no longer in the snapshot", async () => {
+    await refresh();
+    fx.store.putPersonRevision(
+      makePersonRevision({
+        personId: "kim-hidden",
+        sha: fx.head,
+        id: `person-kim-hidden-${fx.head.slice(0, 12)}-1`,
+      }),
+    );
+    expect(buildExport(fx.store, options).people?.pages).toHaveLength(1);
+    await refresh({ exclude: ["name:Kim Hidden"] });
+    expect(buildExport(fx.store, options).people?.pages).toEqual([]);
+  });
+
+  it("is null when the snapshot names a feature the manifest lacks", async () => {
+    const { snapshot } = await refresh();
+    fx.store.putPeopleSnapshot({
+      ...snapshot,
+      featureLines: { ...snapshot.featureLines, zzz: 0 },
+    });
+    expect(buildExport(fx.store, options).people).toBeNull();
+  });
+});
+
+describe("the export's privacy (spec v2 #6 §13)", () => {
+  it("writes no author email or local part to export.json or llms.txt, and nothing of an excluded person", async () => {
+    await refresh({ exclude: ["name:Kim Hidden"] });
+    const path = join(fx.out, "export.json");
+    writeExport(fx.store, path, options);
+    const json = readFileSync(path, "utf8");
+    const llms = readFileSync(join(fx.out, "llms.txt"), "utf8");
+    expect(WikiExport.parse(JSON.parse(json)).people?.snapshot.people.length).toBeGreaterThan(0);
+    expect(llms).toContain("(people/ada-lovelace/)");
+    for (const text of [json, llms]) {
+      for (const secret of PEOPLE_SECRETS) expect(text).not.toContain(secret);
+      expect(text).not.toContain("Kim Hidden");
+      expect(text).not.toContain("kim-hidden");
+    }
+  });
+});

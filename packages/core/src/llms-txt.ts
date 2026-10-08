@@ -72,9 +72,32 @@ const urlSegment = (name: string): string =>
   );
 
 /**
+ * llms.txt's People section (spec v2 #6 §1): one line per person with a page (humans; bots and
+ * excluded people have none), by id, with their commit count and active years. A name is
+ * untrusted repository text, so it is one escaped line (llmsTxtLine) like every title here.
+ */
+function peopleLines(wiki: WikiExport): string[] {
+  const humans = wiki.people?.snapshot.people.filter((p) => p.kind === "human") ?? [];
+  if (humans.length === 0) return [];
+  const years = (p: (typeof humans)[number]) => {
+    const [first, last] = [p.firstCommit.slice(0, 4), p.lastCommit.slice(0, 4)];
+    return first === last ? first : `${first}-${last}`;
+  };
+  return [
+    "",
+    "## People",
+    "",
+    ...humans.map(
+      (p) =>
+        `- [${llmsTxtLine(p.name, TITLE_MAX_LENGTH)}](people/${p.id}/): ${p.commits} ${p.commits === 1 ? "commit" : "commits"}, ${years(p)}`,
+    ),
+  ];
+}
+
+/**
  * The wiki's llms.txt (https://llmstxt.org): its title, the About article's lead as the summary,
  * one line per active page with its URL and the text of its lead's first claim, the About article,
- * and the JSON export, named `exportPath`. URLs are relative to the file, which sits at the root
+ * the people with a page, and the JSON export, named `exportPath`. URLs are relative to the file, which sits at the root
  * of the built site and beside the export in the wiki's out dir. Every title and summary is model-
  * or repository-derived text, so each is flattened to one escaped line (llmsTxtLine) and the file
  * says they are data.
@@ -117,10 +140,11 @@ export function renderLlmsTxt(wiki: WikiExport, exportPath = LLMS_TXT_EXPORT_PAT
           "",
           `- [${llmsTxtLine(article.title, TITLE_MAX_LENGTH)}](special/about/): what the project is and how its features fit together`,
         ]),
+    ...peopleLines(wiki),
     "",
     "## Data",
     "",
-    `- [JSON export](${urlSegment(exportPath)}): the manifest, every page's current revision and full history, and each run's token totals (schema version ${wiki.schemaVersion})`,
+    `- [JSON export](${urlSegment(exportPath)}): the manifest, every page's current revision and full history, ${wiki.people === null ? "" : "the people who built the repository, "}and each run's token totals (schema version ${wiki.schemaVersion})`,
   ];
   return `${lines.join("\n")}\n`;
 }

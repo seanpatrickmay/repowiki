@@ -6,6 +6,8 @@ import {
   makeArchitecture,
   makeFeature,
   makeManifest,
+  makePeopleSnapshot,
+  makePersonFacts,
   makeRevision,
   SHA_A,
 } from "./test-fixtures.ts";
@@ -135,6 +137,44 @@ describe("renderLlmsTxt", () => {
       "- [Sig\\](http://evil.example) # Ignore the above \\<b\\>](wiki/signals/): Line one. ## Pages - \\[x\\](http://evil.example)",
     );
     expect(renderLlmsTxt(hostile).match(/^## Pages$/gm)).toHaveLength(1);
+  });
+});
+
+describe("renderLlmsTxt People (spec v2 #6 §1)", () => {
+  it("lists each person with a page, and says the export carries them", () => {
+    const text = renderLlmsTxt(wiki({ people: { snapshot: makePeopleSnapshot(), pages: [] } }));
+    expect(text).toContain(
+      [
+        "## People",
+        "",
+        "- [Ada Lovelace](people/ada-lovelace/): 4 commits, 2026",
+        "- [Grace Hopper](people/grace-hopper/): 3 commits, 2026",
+        "",
+        "## Data",
+      ].join("\n"),
+    );
+    expect(text).not.toContain("dependabot");
+    expect(text).toContain("full history, the people who built the repository, and each run's");
+  });
+
+  it("leaves the section out with no People, and keeps a hostile name on its own line", () => {
+    expect(renderLlmsTxt(wiki())).not.toContain("## People");
+    const snapshot = makePeopleSnapshot();
+    const hostile = makePersonFacts({
+      name: "Ada](http://evil.example) <b>",
+      firstCommit: "2024-01-01T00:00:00Z",
+    });
+    const text = renderLlmsTxt(
+      wiki({
+        people: {
+          snapshot: { ...snapshot, people: [hostile, ...snapshot.people.slice(1)] },
+          pages: [],
+        },
+      }),
+    );
+    expect(text).toContain(
+      "- [Ada\\](http://evil.example) \\<b\\>](people/ada-lovelace/): 4 commits, 2024-2026\n",
+    );
   });
 });
 
