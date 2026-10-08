@@ -1,88 +1,16 @@
-import { type Manifest, PeopleConfig } from "@repowiki/core";
-import { makeFeature } from "@repowiki/core/test-fixtures";
+import type { Manifest } from "@repowiki/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestRepo, type TestRepo } from "../index/index.ts";
-import { openStore, type Store } from "../store/index.ts";
 import { ancestorsOf, PERSON_BUDGET_TOKENS, packFor, packText } from "./pack.ts";
-import { type Refreshed, refreshPeople } from "./refresh.ts";
-
-const ADA = { name: "Ada Lovelace", email: "ada.q7pack@example.com" };
-const BOB = { name: "Bob Smith", email: "bob@example.com" };
-const KIM = { name: "Kim Filler", email: "kim@example.com" };
+import type { Refreshed } from "./refresh.ts";
+import { type TeamFixture, teamFixture } from "./test-people.ts";
 
 // The tests only read the fixture, so it is built once.
-let repo: TestRepo;
-let store: Store;
-let built: ReturnType<typeof build>;
-beforeAll(() => {
-  repo = createTestRepo();
-  store = openStore(":memory:");
-  built = build();
+let fx: TeamFixture;
+beforeAll(async () => {
+  fx = await teamFixture();
 });
-afterAll(() => {
-  store.close();
-  repo.remove();
-});
-const history = () => built;
-
-/** Ada: a January commit, PR #3 merged by Bob, a February commit; she merges Bob's PR #6. */
-async function build() {
-  repo.write("src/signals/ingest.py", "a = 1\n");
-  const jan = repo.commit("feat: start signals", "+0100", ADA);
-  repo.git("switch", "-q", "-c", "topic");
-  repo.write("src/signals/ingest.py", "a = 1\nb = 2\n");
-  const a1 = repo.commit("feat: parse chunks", "+0100", ADA);
-  repo.write("src/deliverables/crud.py", "x = 1\n");
-  const a2 = repo.commit("feat: store chunks, mail ada.q7pack@example.com", "+0100", ADA);
-  repo.git("switch", "-q", "main");
-  const pr3 = repo.merge(
-    "topic",
-    "Merge pull request #3 from ada/topic\n\nAdd signal ingestion",
-    BOB,
-  );
-  repo.git("switch", "-q", "-c", "topic2");
-  repo.write("src/deliverables/crud.py", "x = 2\n");
-  const b1 = repo.commit("fix: crud", "+0000", BOB);
-  repo.git("switch", "-q", "main");
-  const pr6 = repo.merge("topic2", "Merge pull request #6 from bob/topic2\n\nFix crud", ADA);
-  for (let i = 0; i < 30; i++) {
-    repo.write("docs/filler.md", `${i}\n`);
-    repo.commit(`docs: filler ${i}`, "+0000", KIM);
-  }
-  repo.write("src/signals/ingest.py", "a = 1\nb = 3\n");
-  const feb = repo.commit("fix: signals \u202E\u2028 edge", "+0100", ADA);
-  const manifest: Manifest = {
-    sha: feb,
-    features: [
-      makeFeature({
-        id: "signals",
-        title: "Signal ingestion",
-        aliases: [],
-        lineage: [{ kind: "create", sha: jan }],
-      }),
-      makeFeature({
-        id: "deliverables",
-        title: "Deliverables",
-        aliases: [],
-        lineage: [{ kind: "create", sha: jan }],
-      }),
-    ],
-    membership: {
-      "src/signals/ingest.py": { featureId: "signals", weight: 1 },
-      "src/deliverables/crud.py": { featureId: "deliverables", weight: 1 },
-    },
-  };
-  store.putManifest(manifest);
-  store.setHead(feb);
-  const refreshed = await refreshPeople({
-    repo: repo.dir,
-    sha: feb,
-    store,
-    config: PeopleConfig.parse({}),
-    ownerEmail: null,
-  });
-  return { jan, a1, a2, pr3, b1, pr6, feb, manifest, refreshed };
-}
+afterAll(() => fx.remove());
+const history = async () => fx;
 
 const pack = (r: Refreshed, m: Manifest, options = {}) => {
   const p = packFor(r, "ada-lovelace", m, options);
