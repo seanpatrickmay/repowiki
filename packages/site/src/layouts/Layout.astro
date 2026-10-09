@@ -2,7 +2,7 @@
 import "../styles/wiki.css";
 import { CONTENT_SECURITY_POLICY } from "../csp.ts";
 import { getSite } from "../site.ts";
-import { ARCHITECTURE_URL, IN_PROGRESS_URL, PEOPLE_URL } from "../urls.ts";
+import { architectureUrl, inProgressUrl, peopleUrl, siteBase, withBase } from "../urls.ts";
 
 interface Props {
   /** Shown in the browser tab as "<title> - <repo> wiki". */
@@ -11,10 +11,12 @@ interface Props {
 
 const { title } = Astro.props;
 const { wiki, architecture } = getSite();
+// The client scripts read the base here (base-path.ts); the default "/" leaves pages unchanged.
+const base = siteBase();
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-base={base === "/" ? undefined : base}>
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content={CONTENT_SECURITY_POLICY} />
@@ -27,8 +29,8 @@ const { wiki, architecture } = getSite();
   <body>
     <a class="skip-link" href="#content">Jump to content</a>
     <header class="site-header">
-      <a class="site-name" href="/">{wiki.repo}<span class="site-tagline">wiki</span></a>
-      <form class="site-search" role="search" action="/search/" method="get">
+      <a class="site-name" href={withBase("/")}>{wiki.repo}<span class="site-tagline">wiki</span></a>
+      <form class="site-search" role="search" action={withBase("/search/")} method="get">
         <label class="visually-hidden" for="site-search-q">Search the {wiki.repo} wiki</label>
         <input id="site-search-q" name="q" type="search" placeholder={`Search ${wiki.repo} wiki`} />
         <button type="submit">Search</button>
@@ -37,12 +39,12 @@ const { wiki, architecture } = getSite();
     <div class="page">
       <nav class="site-nav" aria-label="Site">
         <ul>
-          <li><a href="/">Main page</a></li>
-          <li><a href="/random/">Random article</a></li>
-          <li><a href="/special/all-pages/">All articles</a></li>
+          <li><a href={withBase("/")}>Main page</a></li>
+          <li><a href={withBase("/random/")}>Random article</a></li>
+          <li><a href={withBase("/special/all-pages/")}>All articles</a></li>
           {architecture !== null && (
-            <li><a href={ARCHITECTURE_URL}>About {architecture.title}</a></li>
-          )}{wiki.inflight !== null && <li><a href={IN_PROGRESS_URL}>In progress</a></li>}{wiki.people !== null && <li><a href={PEOPLE_URL}>People</a></li>}
+            <li><a href={architectureUrl()}>About {architecture.title}</a></li>
+          )}{wiki.inflight !== null && <li><a href={inProgressUrl()}>In progress</a></li>}{wiki.people !== null && <li><a href={peopleUrl()}>People</a></li>}
         </ul>
       </nav>
       <main id="content" class="content">

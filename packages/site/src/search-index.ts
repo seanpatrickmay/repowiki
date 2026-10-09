@@ -15,7 +15,20 @@ export interface SearchIndexApi {
 }
 
 /**
- * Indexes the built HTML in outDir and writes the Pagefind bundle to outDir/pagefind.
+ * Pagefind's scripts fall back to the bundle path "/pagefind/" when they cannot tell where they
+ * were loaded from; a site served under `base` keeps its bundle at <base>pagefind/, so that is
+ * the fallback its scripts get. Other files, and every file under the base "/", are unchanged.
+ */
+function bundleFile(path: string, content: Uint8Array, base: string): Uint8Array {
+  if (base === "/" || !path.endsWith(".js")) return content;
+  const script = Buffer.from(content).toString("utf8");
+  return Buffer.from(script.replaceAll('"/pagefind/"', JSON.stringify(`${base}pagefind/`)));
+}
+
+/**
+ * Indexes the built HTML in outDir and writes the Pagefind bundle to outDir/pagefind, for a site
+ * served under `base`. The index's URLs stay relative to the site's root; the search page gives
+ * Pagefind the base (client/search.ts).
  *
  * The bundle is fetched from the backend (getFiles) and written here, not written by the backend
  * (writeFiles): the backend answers writeFiles before it has finished writing, so the files can
@@ -24,6 +37,7 @@ export interface SearchIndexApi {
  */
 export async function writeSearchIndex(
   outDir: string,
+  base = "/",
   api: SearchIndexApi = pagefind,
 ): Promise<{ htmlPages: number }> {
   const { index, errors } = await api.createIndex({ forceLanguage: "en" });
@@ -47,7 +61,7 @@ export async function writeSearchIndex(
       ) {
         throw new Error(`pagefind: refusing to write outside the output directory: "${file.path}"`);
       }
-      return { path, content: file.content };
+      return { path, content: bundleFile(file.path, file.content, base) };
     });
     for (const { path, content } of writes) {
       mkdirSync(dirname(path), { recursive: true });

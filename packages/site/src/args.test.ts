@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseRepoUrl, parseSiteArgs, UsageError } from "./args.ts";
+import { parseBase, parseRepoUrl, parseSiteArgs, UsageError } from "./args.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "repowiki-args-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -15,6 +15,7 @@ describe("parseSiteArgs", () => {
       outDir: "/data/demo/site",
       repoUrl: null,
       inflight: true,
+      base: "/",
     });
   });
 
@@ -102,6 +103,7 @@ describe("parseSiteArgs", () => {
       outDir: "/srv/site",
       repoUrl: null,
       inflight: true,
+      base: "/",
     });
   });
 
@@ -156,6 +158,58 @@ describe("parseSiteArgs", () => {
         "--no-inflight",
       ]),
     ).toMatchObject({ inflight: false });
+  });
+
+  it.each([
+    ["/", "/"],
+    ["wiki/ncos", "/wiki/ncos/"],
+    ["/wiki/ncos", "/wiki/ncos/"],
+    ["wiki/ncos/", "/wiki/ncos/"],
+    ["/wiki/ncos/", "/wiki/ncos/"],
+    ["demo", "/demo/"],
+    ["A-z_0.9~x/v1.2", "/A-z_0.9~x/v1.2/"],
+    ["...", "/.../"],
+  ])("normalizes --base %j to %j", (given, base) => {
+    expect(parseSiteArgs(["build", "--export", "x.json", "--base", given]).base).toBe(base);
+    expect(parseSiteArgs(["preview", "--out", "o", "--base", given]).base).toBe(base);
+  });
+
+  it.each([
+    "",
+    "//",
+    "//evil.example/x",
+    "wiki//ncos",
+    "..",
+    "../x",
+    "wiki/../x",
+    "wiki/..",
+    ".",
+    "wiki/./ncos",
+    "./wiki",
+    "wiki?x=1",
+    "wiki#top",
+    "wiki%2F..",
+    'wiki"onload="alert(1)',
+    "wiki'x",
+    "wiki`x",
+    "wiki ncos",
+    "wiki\\ncos",
+    "https://evil.example/",
+    "javascript:alert(1)",
+    "wiki/<script>",
+    "wiki)/x",
+    "wiki;x",
+    "wiki\nncos",
+    "wiki/\u00e9",
+  ])("refuses --base %j with a usage error", (base) => {
+    expect(() => parseSiteArgs(["build", "--export", "x.json", "--base", base])).toThrow(
+      UsageError,
+    );
+    expect(() => parseBase(base)).toThrow(/^--base must be/);
+  });
+
+  it("names the source it validates the base from", () => {
+    expect(() => parseBase("../x", "REPOWIKI_BASE")).toThrow(/^REPOWIKI_BASE must be/);
   });
 
   it.each([

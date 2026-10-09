@@ -88,9 +88,10 @@ export interface BrokenLinksResult {
 /**
  * Same-site links that point nowhere: root-relative href/src values whose target file is
  * missing, and "#fragment" links whose id is not on the target page. Returns { broken, checked }
- * where broken is ["page -> link", ...] and checked is the count of links validated.
+ * where broken is ["page -> link", ...] and checked is the count of links validated. A site built
+ * for a `base` is served from it: a root-relative link outside the base is broken.
  */
-export function brokenLinks(outDir: string): BrokenLinksResult {
+export function brokenLinks(outDir: string, base = "/"): BrokenLinksResult {
   const pages = htmlFiles(outDir);
   if (pages.length === 0) throw new Error("site has no HTML files");
 
@@ -140,7 +141,11 @@ export function brokenLinks(outDir: string): BrokenLinksResult {
       const fragPart = hashIndex >= 0 ? link.slice(hashIndex + 1) : undefined;
       // Strip query string before decoding
       const pathWithoutQuery = pathPart.replace(/\?.*$/, "");
-      const decodedPath = decodeURIComponent(pathWithoutQuery);
+      if (!pathWithoutQuery.startsWith(base)) {
+        broken.push(`${page} -> ${link}`);
+        continue;
+      }
+      const decodedPath = decodeURIComponent(`/${pathWithoutQuery.slice(base.length)}`);
       const target = decodedPath.endsWith("/") ? `${decodedPath}index.html` : decodedPath;
 
       if (!existsSync(join(outDir, target))) {

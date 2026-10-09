@@ -10,7 +10,7 @@ import {
 import { escapeHtml, renderInline } from "./inline.ts";
 import type { SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
-import { IN_PROGRESS_URL, pullUrl } from "./urls.ts";
+import { inProgressUrl, pullUrl } from "./urls.ts";
 
 /** A claim shows at most this many pull requests' markers, then one "+k" (spec v2 #9 §6.2). */
 export const MAX_CLAIM_MARKERS = 3;
@@ -92,7 +92,7 @@ export function articleInflight(site: SiteModel, featureId: string): ArticleInfl
       const more = numbers.length - shown.length;
       if (more > 0)
         shown.push(
-          `<sup class="inflight-marker" data-pagefind-ignore="all"><a href="${IN_PROGRESS_URL}">[+${more}]</a></sup>`,
+          `<sup class="inflight-marker" data-pagefind-ignore="all"><a href="${inProgressUrl()}">[+${more}]</a></sup>`,
         );
       return [claimId, shown.join("")];
     }),

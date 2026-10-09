@@ -1113,7 +1113,7 @@ describe("diagrams", () => {
     expect(count(layoutScript, "securityLevel:`strict`")).toBe(1);
     expect(layoutScript).not.toMatch(/securityLevel:`(?:loose|antiscript|sandbox)`/);
     // The hover-preview module is in the same script, so Layout's one script tag carries both.
-    expect(count(layoutScript, "/api/preview/")).toBe(1);
+    expect(count(layoutScript, "api/preview/")).toBe(1);
     const layoutTag = `<script type="module" src="/${layoutPath}"></script>`;
     for (const page of htmlFiles(site.outDir)) {
       const html = site.read(page);
@@ -1122,7 +1122,7 @@ describe("diagrams", () => {
         if (src === layoutPath) continue;
         const other = site.read(src);
         expect(other, `${page} ${src}`).not.toContain("pre.mermaid");
-        expect(other, `${page} ${src}`).not.toContain("/api/preview/");
+        expect(other, `${page} ${src}`).not.toContain("api/preview/");
       }
     }
   });

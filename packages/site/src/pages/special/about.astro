@@ -4,6 +4,7 @@ import { STALE_NOTICE } from "../../article.ts";
 import Diagram from "../../components/Diagram.astro";
 import Layout from "../../layouts/Layout.astro";
 import { getSite } from "../../site.ts";
+import { withBase } from "../../urls.ts";
 
 const site = getSite();
 const view = architectureView(site);
@@ -19,7 +20,7 @@ const view = architectureView(site);
     <p class="tagline">From the {site.wiki.repo} wiki</p>
     {view === null ? (
       <p>
-        This wiki has no About article yet. <a href="/special/all-pages/">All articles</a>
+        This wiki has no About article yet. <a href={withBase("/special/all-pages/")}>All articles</a>
         lists every feature.
       </p>
     ) : (

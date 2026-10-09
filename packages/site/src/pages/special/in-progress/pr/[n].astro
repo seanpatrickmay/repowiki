@@ -3,7 +3,7 @@ import type { InFlightPull } from "@repowiki/core";
 import { inflightStatus, pullView } from "../../../../inflight.ts";
 import Layout from "../../../../layouts/Layout.astro";
 import { getSite } from "../../../../site.ts";
-import { IN_PROGRESS_URL } from "../../../../urls.ts";
+import { inProgressUrl } from "../../../../urls.ts";
 
 export function getStaticPaths() {
   return (getSite().wiki.inflight?.pulls ?? []).map((pull) => ({
@@ -38,7 +38,7 @@ const status = inflightStatus(site, inflight);
       <code>{view.base}</code>.
     </p>
     <p>{view.merge}</p>
-    <p class="inflight-more">{status.line} <a href={IN_PROGRESS_URL}>All work in progress</a></p>
+    <p class="inflight-more">{status.line} <a href={inProgressUrl()}>All work in progress</a></p>
     <h2 id="summary">Summary</h2>
     {view.summary === null ? (
       <p>{view.summaryNote}</p>

@@ -7,10 +7,11 @@ try {
   if (args.command === "build") {
     const { htmlPages } = await buildSite(args.exportFile ?? "", args.outDir, args.repoUrl, {
       inflight: args.inflight,
+      base: args.base,
     });
     console.log(`built ${args.outDir} (${htmlPages} HTML pages)`);
   } else {
-    await previewSite(args.outDir);
+    await previewSite(args.outDir, args.base);
   }
 } catch (error) {
   if (error instanceof UsageError || error instanceof ExportError) {

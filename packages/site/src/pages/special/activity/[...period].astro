@@ -2,7 +2,7 @@
 import Layout from "../../../layouts/Layout.astro";
 import { activityRoutes, activityView } from "../../../people.ts";
 import { getSite } from "../../../site.ts";
-import { PEOPLE_URL } from "../../../urls.ts";
+import { peopleUrl } from "../../../urls.ts";
 
 /** Generated only when the export has People, for each year and month with commits (R22). */
 export function getStaticPaths() {
@@ -18,7 +18,7 @@ const view = activityView(site, people, Astro.params.period);
   <h1 class="page-title">{view.title}</h1>
   <p class="tagline">From the {site.wiki.repo} wiki</p>
   <p>
-    {view.up !== null && <><a href={view.up.href}>{view.up.label}</a> · </>}<a href={PEOPLE_URL}>People</a>
+    {view.up !== null && <><a href={view.up.href}>{view.up.label}</a> · </>}<a href={peopleUrl()}>People</a>
   </p>
   <Fragment set:html={view.chart} />
   {view.down.length > 0 && (

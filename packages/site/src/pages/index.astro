@@ -4,6 +4,7 @@ import { featureMapCaption, featureMapSource } from "../feature-map.ts";
 import Layout from "../layouts/Layout.astro";
 import { articleCountText, mainPageView } from "../main-page.ts";
 import { getSite } from "../site.ts";
+import { withBase } from "../urls.ts";
 
 const site = getSite();
 const view = mainPageView(site);
@@ -76,7 +77,7 @@ const map = featureMapSource(site);
         source={map}
         caption={featureMapCaption(site)}
       />
-      <p><a href="/special/all-pages/">All articles</a> lists every article as text.</p>
+      <p><a href={withBase("/special/all-pages/")}>All articles</a> lists every article as text.</p>
     </section>
   )}
 </Layout>
