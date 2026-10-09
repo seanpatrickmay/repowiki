@@ -36,12 +36,12 @@ Never reuse their names, dates or commits.
 
 ## The chronicle
 
-- One claim per episode of the pack, oldest first.
+- One claim per heading of the pack's work, oldest first.
 - Each claim opens with its date, at the granularity its commits support: "On 14 March 2026, …"
   for one day, "In March 2026, …" for one month, "Between January and February 2026, …" for a
   range. Every date stated lies within the cited commits' author dates.
-- Each claim cites the commits of its episode it describes ("commit:<sha>"), and only commits the
-  pack shows.
+- Each claim cites the commits under the heading it describes ("commit:<sha>"), and only commits
+  the pack shows.
 
 ## Areas of work
 
