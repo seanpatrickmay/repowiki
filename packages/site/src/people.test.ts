@@ -68,6 +68,8 @@ describe("personView", () => {
     expect(view.leadHtml).toContain('href="/wiki/signals/"');
     expect(view.chronicle).toHaveLength(1);
     expect(view.areasHtml).toContain("her commits added the ingestion loop");
+    expect(view.areasHtml?.startsWith('<ul class="claim-list"><li>')).toBe(true);
+    expect(view.areasHtml?.split("<li>").length).toBe(2);
     expect(view.references[0]?.html).toContain("https://github.com/acme/demo-repo/commit/");
     expect(view.pulls).toEqual([
       {

@@ -95,7 +95,7 @@ const targetName =
       )}
       <section aria-labelledby="areas">
         <h2 id="areas">Areas of work</h2>
-        {person.areasHtml !== null && <p set:html={person.areasHtml} />}
+        {person.areasHtml !== null && <div class="section-body" set:html={person.areasHtml} />}
         <table class="wikitable" data-pagefind-ignore="all">
           <thead><tr><th scope="col">Feature</th><th scope="col">Commits</th><th scope="col">Current lines</th><th scope="col">Share of the feature</th></tr></thead>
           <tbody>

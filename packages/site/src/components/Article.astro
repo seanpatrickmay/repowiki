@@ -60,7 +60,7 @@ const { wiki } = getSite();
       {section.anchor === "data-flow" && view.diagram !== null && (
         <Diagram source={view.diagram} caption={`Data flow of ${view.title}`} />
       )}
-      <p set:html={section.html} />
+      <div class="section-body" set:html={section.html} />
     </section>
   ))}{view.inflight !== undefined && <InflightSection view={view.inflight} />}
   {view.seeAlso.length > 0 && (
