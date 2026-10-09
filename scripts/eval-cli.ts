@@ -38,7 +38,7 @@ import { CliError } from "./manifest-cli.ts";
 import { badOption, once, priced, problemLine } from "./wiki-cli.ts";
 
 export const EVAL_USAGE =
-  "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|smoke [--agents wiki,repo] [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
+  "usage: pnpm eval:run <repo-path> --questions <file> --set dev|held-out|history|smoke [--agents wiki,repo,mcp,repo+mcp] [--out dir] [--run-dir dir] [--turns N] [--max-usd N] [--config file.json] [--no-batch] [--dry-run] [--verbose]";
 
 /** Both agents' turn limit unless --turns says otherwise (spec \u00A79: the same for both). */
 export const DEFAULT_TURN_LIMIT = 15;
@@ -52,7 +52,10 @@ export interface EvalArgs {
   repo: string;
   questions: string;
   set: QuestionSet;
-  /** --agents, in the order given (the held-out set's, in v1's order); null for wiki,repo. */
+  /**
+   * --agents, in the order given (the held-out set's, in v1's order); null when not given, for
+   * the set's default: wiki,repo, or wiki,mcp on the history suite.
+   */
   agents: AgentKind[] | null;
   out: string | null;
   runDir: string | null;
@@ -78,7 +81,7 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs {
   const [repo, ...extra] = parsed.positionals;
   if (repo === undefined || repo === "" || extra.length > 0) throw new CliError(EVAL_USAGE);
   const set = QuestionSet.safeParse(once("--set", v.set, EVAL_USAGE));
-  if (!set.success) throw fail("--set must be dev, held-out or smoke");
+  if (!set.success) throw fail("--set must be dev, held-out, history or smoke");
   const questions = once("--questions", v.questions, EVAL_USAGE);
   if (questions === undefined) throw fail("--questions is required");
   const runDir = once("--run-dir", v["run-dir"], EVAL_USAGE) ?? null;
@@ -154,11 +157,15 @@ export function runDirFor(out: string, set: QuestionSet, runDir: string | null, 
 
 /**
  * Turns an agent is assumed to take on a typical question: the wiki agent searches and reads; the
- * repo agent lists, greps and reads.
+ * mcp agent too, plus an as_of read or page_changes on a history question (spec v2 #5 §7 assumes
+ * 5 there; every set uses 5, so the estimate stays upper-side); the repo agent lists, greps and
+ * reads; repo+mcp reads the wiki first, then less code.
  */
 export const ASSUMED_TURNS: Readonly<Record<AgentKind, number>> = {
   wiki: 4,
   repo: 8,
+  mcp: 5,
+  "repo+mcp": 6,
 };
 /** Tokens a typical turn adds to the conversation: one tool call and its result. */
 export const ASSUMED_TURN_GROWTH = 2_700;

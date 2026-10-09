@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { markdownText, oneLine } from "@repowiki/query";
+import { interfaceSection } from "./interface.ts";
 import { visibleText } from "./judge.ts";
 import type { AgentKind } from "./prompts.ts";
 import { QuestionKind } from "./questions.ts";
@@ -40,6 +41,8 @@ const KINDS: readonly QuestionKind[] = QuestionKind.options;
 const LABELS: Readonly<Record<AgentKind, string>> = {
   wiki: "Wiki",
   repo: "Repo",
+  mcp: "MCP",
+  "repo+mcp": "Repo+MCP",
 };
 
 /** The run's report for the owner (spec §9): accuracy, tokens, the pass test and the break-even point. */
@@ -54,12 +57,17 @@ export function renderReport(
   const lines = [
     `# Eval: ${cell(info.repo, 80)}, ${info.set} set`,
     "",
-    `${n} questions, each asked to ${info.agents.length === 2 ? "both agents" : info.agents.length === 1 ? `the ${info.agents[0]} agent` : `the ${info.agents.length} agents`} with ${cell(info.models.evalAgent, 60)} and a limit of ${info.turnLimit} turns, and judged by ${cell(info.models.evalJudge, 60)}. The wiki is the export at commit ${info.head.slice(0, 7)}${info.agents.includes("repo") ? "; the repo agent read the repository at the same commit" : ""}.${info.writtenOn === null ? "" : ` The author wrote the questions on ${info.writtenOn}, by his statement.`} The run began ${info.startedAt}.`,
+    `${n} questions, each asked to ${info.agents.length === 2 ? "both agents" : info.agents.length === 1 ? `the ${info.agents[0]} agent` : `the ${info.agents.length} agents`} with ${cell(info.models.evalAgent, 60)} and a limit of ${info.turnLimit} turns, and judged by ${cell(info.models.evalJudge, 60)}. The wiki is the export at commit ${info.head.slice(0, 7)}${info.agents.some((a) => a === "repo" || a === "repo+mcp") ? "; the repo agent read the repository at the same commit" : ""}.${info.writtenOn === null ? "" : ` The author wrote the questions on ${info.writtenOn}, by his statement.`} The run began ${info.startedAt}.`,
     "",
   ];
   if (info.set === "smoke") {
     lines.push(
       "This is the smoke set: questions about the test fixture that check the harness. It measures nothing.",
+      "",
+    );
+  } else if (info.set === "history") {
+    lines.push(
+      "This is the history suite: questions about the wiki's past (spec v2 #5 \u00A78.1). Spec \u00A79's pass test does not apply to it.",
       "",
     );
   } else if (info.set === "dev") {
@@ -85,6 +93,25 @@ export function renderReport(
     }),
     "",
   );
+  // Answers an MCP server failure ended (agent.ts), so a low score is read for what it is.
+  const toolFailures = info.agents.flatMap((a) => {
+    const ended = info.questions.flatMap((q) => {
+      const r = answers.get(`${q.id}\0${a}`);
+      return r?.stop === "tool-failure" ? [`  - ${cell(q.id)}: ${cell(r.failure ?? "", 200)}`] : [];
+    });
+    return ended.length === 0 ? [] : [`- ${a} (${ended.length}):`, ...ended];
+  });
+  if (toolFailures.length > 0) {
+    lines.push(
+      "## Failed answers",
+      "",
+      "Each ended when a call to the MCP server failed; it is graded 0, and a resumed run does not ask it again.",
+      "",
+      ...toolFailures,
+      "",
+    );
+  }
+  lines.push(...interfaceSection(summary, records));
   const v1 = info.agents.includes("wiki") && info.agents.includes("repo");
   if (complete && v1 && agents.repo.correct === 0) {
     lines.push(

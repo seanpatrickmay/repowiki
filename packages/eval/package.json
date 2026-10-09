@@ -11,6 +11,7 @@
     "@repowiki/core": "workspace:*",
     "@repowiki/engine": "workspace:*",
     "@repowiki/llm": "workspace:*",
+    "@repowiki/mcp": "workspace:*",
     "@repowiki/query": "workspace:*",
     "zod": "4.6.5"
   }

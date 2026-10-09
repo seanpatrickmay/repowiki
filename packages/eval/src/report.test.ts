@@ -37,7 +37,46 @@ describe("renderReport", () => {
     expect(text).toContain("Agents $0.4000, judge $0.0040: $0.4040 in all");
   });
 
-  it("says a run is incomplete, and what a dev or smoke set is for", () => {
+  it("lists the answers an MCP server failure ended, per agent, each with its cause", () => {
+    const run = info({ agents: ["wiki", "mcp"] });
+    const all = records().flatMap((r): RunRecord[] => {
+      if (r.agent !== "repo") return [r];
+      if (r.kind !== "answer") return [{ ...r, agent: "mcp", score: 0 } as RunRecord];
+      const failed = r.questionId === "q1" || r.questionId === "q3";
+      return [
+        {
+          ...r,
+          agent: "mcp",
+          ...(failed
+            ? {
+                stop: "tool-failure",
+                answer: "",
+                failure: `read_page: the MCP server has *exited*`,
+              }
+            : {}),
+        },
+      ];
+    });
+    const text = renderReport(summarize(run, all), all, null);
+    expect(text).toContain(
+      [
+        "## Failed answers",
+        "",
+        "Each ended when a call to the MCP server failed; it is graded 0, and a resumed run does not ask it again.",
+        "",
+        "- mcp (2):",
+        "  - q1: read\\_page: the MCP server has \\*exited\\*",
+        "  - q3: read\\_page: the MCP server has \\*exited\\*",
+        "",
+      ].join("\n"),
+    );
+    // A run with no failed answer has no such section: v1's report is unchanged.
+    expect(renderReport(summarize(info(), records()), records(), null)).not.toContain(
+      "## Failed answers",
+    );
+  });
+
+  it("says a run is incomplete, and what a dev, smoke or history set is for", () => {
     const partial = renderReport(
       summarize(info(), records().slice(0, -1)),
       records().slice(0, -1),
@@ -53,6 +92,8 @@ describe("renderReport", () => {
       null,
     );
     expect(smoke).toContain("It measures nothing.");
+    const history = renderReport(summarize(info({ set: "history" }), records()), records(), null);
+    expect(history).toContain("This is the history suite: questions about the wiki's past");
   });
 
   it("states the break-even only for a complete run, and what its numerator leaves out", () => {

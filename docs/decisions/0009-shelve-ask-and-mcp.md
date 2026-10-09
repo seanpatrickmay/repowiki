@@ -1,6 +1,7 @@
 # 0009. Shelve the Ask sidebar (F09) and the MCP server (F07, F08)
 
 - Status: accepted
+- Restored: F08 and the server half of F07, the MCP server, by merging branch `mcp/restore`
 - Date: 2026-10-08
 - Features: F07, F08, F09
 

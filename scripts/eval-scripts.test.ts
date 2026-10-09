@@ -82,16 +82,16 @@ describe("eval-run.ts as a process (no network)", () => {
     expect(existsSync(join(out, "eval"))).toBe(false);
   });
 
-  it("estimates one agent on a dry run when --agents names one, writing nothing", () => {
+  it("estimates the mcp agent on a dry run through a started server, writing nothing", () => {
     const before = readdirSync(out, { recursive: true }).sort();
-    const result = evalRun("--questions", smoke, "--set", "smoke", "--agents", "wiki", "--dry-run");
+    const result = evalRun("--questions", smoke, "--set", "smoke", "--agents", "mcp", "--dry-run");
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toMatch(
-      /^3 questions to the wiki agent: about \$\d+\.\d\d \(wiki \$\d+\.\d\d at 4 turns a question, no cache hits\), .*\(--max-usd\)\n$/,
+      /^3 questions to the mcp agent: about \$\d+\.\d\d \(mcp \$\d+\.\d\d at 5 turns a question, no cache hits\), .*\(--max-usd\)\n$/,
     );
     expect(readdirSync(out, { recursive: true }).sort()).toEqual(before);
-  });
+  }, 30_000);
 
   it("says on a dry run when the export records no build run, so the break-even would be unknown", () => {
     writeFileSync(join(out, "export.json"), JSON.stringify({ ...sample.wiki, runs: [] }));
@@ -228,9 +228,9 @@ describe("eval-run.ts as a process (no network)", () => {
     // The dev set of the same file still runs (here, as a dry run).
     expect(evalRun("--questions", file, "--set", "dev", "--dry-run").status).toBe(0);
     // The held-out set is v1's: no other agent may spend it.
-    const one = evalRun("--questions", file, "--set", "held-out", "--agents", "wiki", "--dry-run");
-    expect(one.status).toBe(2);
-    expect(one.stderr).toMatch(
+    const mcp = evalRun("--questions", file, "--set", "held-out", "--agents", "mcp", "--dry-run");
+    expect(mcp.status).toBe(2);
+    expect(mcp.stderr).toMatch(
       /^the held-out set is v1's single-use sign-off .* wiki,repo with it; usage: /,
     );
 
