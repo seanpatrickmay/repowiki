@@ -32,7 +32,7 @@ const view = inflight === null ? null : inflightIndexView(site, inflight);
         {view.pulls.length === 0 ? (
           <p>No open pull requests.</p>
         ) : (
-          <table class="wikitable">
+          <div class="table-scroll"><table class="wikitable">
             <thead>
               <tr>
                 <th scope="col">Pull request</th>
@@ -63,7 +63,7 @@ const view = inflight === null ? null : inflightIndexView(site, inflight);
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
         {view.more.map((line) => <p class="inflight-more">{line}</p>)}
         <h2 id="planned-work">Planned work</h2>
