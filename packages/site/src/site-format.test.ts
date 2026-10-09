@@ -21,7 +21,7 @@ function withCore(): string {
   const core = join(root, "core");
   mkdirSync(join(core, "src"), { recursive: true });
   writeFileSync(join(core, "package.json"), '{"name":"@repowiki/core"}');
-  writeFileSync(join(core, "src", "claim.ts"), "export const CLAIM = /x/;\n");
+  writeFileSync(join(core, "src", "ask-limits.ts"), "export const ASK_HREF = /x/;\n");
   return core;
 }
 
@@ -54,9 +54,9 @@ describe("siteFormat over the core the site bundles", () => {
   it("changes when core's sources change, not when its tests do", () => {
     const core = withCore();
     const before = siteFormat(root, core);
-    writeFileSync(join(core, "src", "claim.test.ts"), "it();\n");
+    writeFileSync(join(core, "src", "ask.test.ts"), "it();\n");
     expect(siteFormat(root, core)).toBe(before);
-    writeFileSync(join(core, "src", "claim.ts"), "export const CLAIM = /y/;\n");
+    writeFileSync(join(core, "src", "ask-limits.ts"), "export const ASK_HREF = /y/;\n");
     expect(siteFormat(root, core)).not.toBe(before);
   });
 

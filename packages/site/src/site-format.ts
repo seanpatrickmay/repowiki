@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 /** packages/site, whose source and package.json make a build what it is. */
 const SITE_ROOT = fileURLToPath(new URL("..", import.meta.url));
-/** packages/core, whose sources the site bundles (claimAnchor, renderLlmsTxt and more). */
+/** packages/core, whose sources the site bundles (ASK_HREF, claimAnchor, renderLlmsTxt and more). */
 const CORE_ROOT = fileURLToPath(new URL("../../core", import.meta.url));
 
 /** Files only tests read: changing them changes no built page. */
@@ -25,7 +25,8 @@ function packageFiles(root: string): string[] {
  * The site code's format (spec v2 #4 R16, M9 final review I2): a SHA-256 over the paths and bytes
  * of `package.json` and every file under `src` but the tests, in path order, of packages/site and
  * of the @repowiki/core it bundles. A site built by other site or core code (an upgrade, M9's
- * claim anchors) has another format, so the marker tells a current build from a stale one.
+ * sidebar and claim anchors, a wider ASK_HREF) has another format, so wiki:serve rebuilds it
+ * instead of serving it as current.
  */
 export function siteFormat(root = SITE_ROOT, core = CORE_ROOT): string {
   const hash = createHash("sha256");

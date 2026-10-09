@@ -160,7 +160,7 @@ async function render(
   }
 
   // An empty marker allows a rebuild; only a finished build's marker names its format, so a
-  // build cut short (a half-written Pagefind index) is never taken for a current one.
+  // build cut short (a half-written Pagefind index) is not current for wiki:serve.
   writeFileSync(`${outDir}/.repowiki-site`, "");
   writeSiteRoot(outDir, wiki);
   const result = await writeSearchIndex(outDir);

@@ -212,7 +212,8 @@ export type LiveCommand =
   | "wiki:replay"
   | "wiki:inflight"
   | "wiki:people"
-  | "eval:run";
+  | "eval:run"
+  | "ask:eval";
 
 /** Why a run that needs a call cannot make one; the commands load .env only if present. */
 export function keylessMessage(command: LiveCommand): string {

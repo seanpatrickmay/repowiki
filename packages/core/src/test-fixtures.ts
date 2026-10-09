@@ -1,4 +1,5 @@
 import type { Architecture, ArchitectureClaim } from "./architecture.ts";
+import type { AskResponse } from "./ask.ts";
 import type { CodeCitation, CommitCitation } from "./citation.ts";
 import type { Claim } from "./claim.ts";
 import { contentHash } from "./content-hash.ts";
@@ -227,6 +228,54 @@ export function makeArchitecture(overrides: Partial<Architecture> = {}): Archite
         claims: [architectureClaim({ id: "a-2", citations: [], pages: ["signals"] })],
       },
     ],
+    ...overrides,
+  };
+}
+
+/** An answered AskResponse: two sentences citing two claims of the signals page. */
+export function makeAskResponse(overrides: Partial<AskResponse> = {}): AskResponse {
+  return {
+    status: "answered",
+    question: "Where are signals made?",
+    head: SHA_A,
+    sentences: [
+      { text: "Signals are made by `ingest_chunk` in src/signals/ingest.py.", sources: [1] },
+      { text: "Ingestion stops after `MAX_SIGNALS` signals.", sources: [1, 2] },
+    ],
+    sources: [
+      {
+        n: 1,
+        pageId: "signals",
+        pageTitle: "Signal ingestion",
+        section: "overview",
+        sectionTitle: "Overview",
+        claimId: "s-1",
+        href: "/wiki/signals/#claim-s-1",
+        excerpt: "ingest_chunk makes one signal per non-blank sentence of a chunk.",
+      },
+      {
+        n: 2,
+        pageId: "signals",
+        pageTitle: "Signal ingestion",
+        section: "how-it-works",
+        sectionTitle: "How it works",
+        claimId: "s-2",
+        href: "/wiki/signals/#claim-s-2",
+        excerpt: "Ingestion stops once a chunk has made MAX_SIGNALS (50) signals.",
+      },
+    ],
+    readNext: [
+      {
+        pageId: "deliverables",
+        title: "Deliverables",
+        href: "/wiki/deliverables/",
+        summary: "Deliverables are built from signals.",
+      },
+    ],
+    refused: 0,
+    cached: false,
+    answeredAt: "2026-10-05T12:00:00.000Z",
+    cost: { turns: 2, usd: 0.0098, model: "claude-haiku-4-5-20251001" },
     ...overrides,
   };
 }

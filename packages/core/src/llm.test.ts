@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LedgerEntry, LlmConfigFile, LlmRole } from "./llm.ts";
+import { LedgerEntry, LlmConfigFile } from "./llm.ts";
 import { makeLedgerEntry } from "./test-fixtures.ts";
 
 describe("LedgerEntry", () => {
@@ -46,16 +46,5 @@ describe("LlmConfigFile", () => {
     ["an unknown top-level key", { model: "claude-haiku-4-5" }],
   ])("rejects %s", (_name, file) => {
     expect(LlmConfigFile.safeParse(file).success).toBe(false);
-  });
-});
-
-describe("the ask role (spec v2 #4 R13, kept unused by ADR-0009)", () => {
-  it("is an LLM role a ledger row and a config file may still name", () => {
-    expect(LlmRole.options).toContain("ask");
-    const row = makeLedgerEntry({ purpose: "ask" });
-    expect(LedgerEntry.parse(row)).toEqual(row);
-    expect(LlmConfigFile.parse({ models: { ask: "claude-haiku-4-5" } })).toEqual({
-      models: { ask: "claude-haiku-4-5" },
-    });
   });
 });

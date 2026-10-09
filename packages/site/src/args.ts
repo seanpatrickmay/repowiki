@@ -63,11 +63,11 @@ export function parseSiteArgs(argv: readonly string[]): SiteArgs {
   const exportFile = exportFlag === undefined ? null : resolve(resolveExportFile(exportFlag));
   const defaultOut = resolve(dirname(exportFile ?? ""), "site");
   const outDir = resolve(outFlag ?? defaultOut);
-  // <out>/site/ is the default site, built with the work in flight; a site to share without
+  // <out>/site/ is the site wiki:serve rebuilds with the work in flight; a site to share without
   // it goes elsewhere, so one directory never holds both (R18, C11), however a symlink spells it.
   if (noInflight > 0 && realPath(outDir) === realPath(defaultOut)) {
     throw new UsageError(
-      `--no-inflight refuses ${defaultOut}, the default site, built with the work in flight; choose another --out\n${USAGE}`,
+      `--no-inflight refuses ${defaultOut}, the site wiki:serve rebuilds with the work in flight; choose another --out\n${USAGE}`,
     );
   }
   return {

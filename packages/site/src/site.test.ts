@@ -86,7 +86,7 @@ describe("content security policy", () => {
   const CSP =
     "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
 
-  it("is the one constant every page's Layout renders (C10)", () => {
+  it("is the one constant wiki:serve sends as a header too (C10)", () => {
     expect(CONTENT_SECURITY_POLICY).toBe(CSP);
   });
 
@@ -502,6 +502,81 @@ describe("article page", () => {
     await expect(normalized("wiki/signals/index.html")).toMatchFileSnapshot(
       "__snapshots__/wiki-signals.html",
     );
+  });
+});
+
+describe("the Ask sidebar's shell (spec v2 #4 R21)", () => {
+  const pages = () => htmlFiles(site.outDir).filter((p) => p !== "special/ask/index.html");
+
+  it("puts a hidden Ask button after the search form, controlling the hidden panel", () => {
+    for (const page of pages()) {
+      const html = site.read(page);
+      const search = html.indexOf('<form class="site-search"');
+      const button = html.indexOf('<button type="button" class="ask-button"');
+      expect({ page, after: button > search && search >= 0 }).toEqual({ page, after: true });
+      expect(html.split("data-ask-open").length - 1, page).toBe(1);
+      expect(html, page).toMatch(
+        /<button type="button" class="ask-button" aria-expanded="false" aria-controls="ask-panel" data-ask-open hidden>/,
+      );
+      expect(html, page).toContain(
+        '<aside id="ask-panel" class="ask-sidebar" data-pagefind-ignore="all" hidden>',
+      );
+      const main = html.indexOf("</main>");
+      expect({ page, after: main >= 0 && html.indexOf('<aside id="ask-panel"') > main }).toEqual({
+        page,
+        after: true,
+      });
+    }
+  });
+
+  it("gives the panel a labelled form, a polite live region and a link to the full page", () => {
+    const html = site.read("wiki/signals/index.html");
+    expect(html).toContain(
+      '<section class="ask" data-ask="sidebar" aria-labelledby="ask-panel-title">',
+    );
+    expect(html).toContain(
+      '<label for="ask-panel-q" class="visually-hidden">Your question</label>',
+    );
+    expect(html).toContain('<div class="ask-live" aria-live="polite" data-ask-live></div>');
+    expect(html).toContain('<div class="ask-result" aria-live="polite" data-ask-result></div>');
+    expect(html).toContain('<a href="/special/ask/">Open Ask as a page</a>');
+  });
+
+  it("serves /special/ask/ as the panel itself, with no sidebar, out of search", () => {
+    const html = site.read("special/ask/index.html");
+    expect(html).toContain(
+      '<section class="ask" data-ask="page" aria-labelledby="ask-page-title">',
+    );
+    expect(html).not.toContain("data-ask-open");
+    expect(html).not.toContain('id="ask-panel"');
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    // Without the client the form could only reload the page: it shows once the client runs.
+    expect(html).toContain('<form class="ask-form" data-ask-form hidden>');
+  });
+
+  it("ships the ask client in the Layout's script, with no zod in the browser", () => {
+    const scripts = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".js"));
+    const client = scripts
+      .map((f) => site.read(`_astro/${f}`))
+      .filter((js) => js.includes("/api/ask/status"));
+    expect(client).toHaveLength(1);
+    expect(client[0]).toContain("/pagefind/pagefind.js");
+    expect(client[0]).not.toMatch(/ZodError|\$ZodType|too_big|invalid_type/);
+  });
+
+  it("covers the viewport under 720px", () => {
+    const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
+    const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
+    // The rule must sit inside the 720px block itself: no "}}" (the block's end) before it.
+    expect(css).toMatch(
+      /@media[^{]*720px[^{]*\{(?:(?!\}\})[^@])*\.ask-sidebar\{[^}]*position:\s*fixed/,
+    );
+  });
+
+  it("outlines the question box on keyboard focus, as links and buttons are", () => {
+    const sheets = readdirSync(join(site.outDir, "_astro")).filter((f) => f.endsWith(".css"));
+    const css = sheets.map((f) => site.read(`_astro/${f}`)).join("\n");
+    expect(css).toMatch(/textarea:focus-visible/);
   });
 });
 

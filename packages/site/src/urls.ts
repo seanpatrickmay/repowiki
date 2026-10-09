@@ -14,6 +14,8 @@ export const ARCHITECTURE_URL = "/special/about/";
 export const IN_PROGRESS_URL = "/special/in-progress/";
 /** One open pull request's page. */
 export const pullUrl = (n: number): string => `${IN_PROGRESS_URL}pr/${n}/`;
+/** The Ask panel as a page of its own (spec v2 #4 R21). */
+export const ASK_URL = "/special/ask/";
 
 /** English Wikipedia article URL for a [[wp:Title]] token. */
 export function wikipediaUrl(title: string): string {

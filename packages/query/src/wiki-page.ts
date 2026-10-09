@@ -51,7 +51,11 @@ export function referenceList(sections: PageSections): Citation[] {
 }
 
 /** Sections of claims with numbered references, the same for a feature page and the About page. */
-function renderSections(view: WikiView, sections: PageSections): string[] {
+function renderSections(
+  view: WikiView,
+  sections: PageSections,
+  claimHandle: (claimId: string) => string | null,
+): string[] {
   const refs = referenceList(sections).map(reference);
   const refOf = (citation: Citation) => refs.indexOf(reference(citation)) + 1;
   const lines: string[] = [];
@@ -62,8 +66,11 @@ function renderSections(view: WikiView, sections: PageSections): string[] {
       const pages =
         (claim.pages ?? []).length > 0 ? ` [pages: ${(claim.pages ?? []).join(", ")}]` : "";
       const stale = claim.staleSince === null ? "" : " (may be out of date)";
+      const handle = claimHandle(claim.id);
       // Every claim, the lead's too, is a bullet: claim text never starts a line of its own.
-      lines.push(`- ${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}`);
+      lines.push(
+        `- ${handle === null ? "" : `${handle} `}${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}`,
+      );
     }
   }
   if (refs.length > 0) lines.push("", "References", ...refs.map((r, i) => `[${i + 1}] ${r}`));
@@ -94,13 +101,20 @@ function fitPage(
   const whole = assemble(0, true, null);
   if (codePoints(whole) <= max) return whole;
   const noteFor = (dropped: number, withSeeAlso: boolean) => {
+    // A page read without its history (the ask's) names only what it had to leave out.
     const parts = [
-      dropped === revisions.length
-        ? "the whole page history"
-        : `the ${dropped} oldest page history ${dropped === 1 ? "entry" : "entries"}`,
+      ...(revisions.length === 0
+        ? []
+        : [
+            dropped === revisions.length
+              ? "the whole page history"
+              : `the ${dropped} oldest page history ${dropped === 1 ? "entry" : "entries"}`,
+          ]),
       ...(withSeeAlso || seeAlso === null ? [] : ["the See also list"]),
     ];
-    return `(Left out to fit the ${max}-character limit: ${parts.join(" and ")}.)`;
+    return parts.length === 0
+      ? null
+      : `(Left out to fit the ${max}-character limit: ${parts.join(" and ")}.)`;
   };
   for (let dropped = 1; dropped <= revisions.length; dropped++) {
     const lines = assemble(dropped, true, noteFor(dropped, true));
@@ -114,6 +128,7 @@ function renderFeaturePage(
   featureId: string,
   from: string | null,
   max: number,
+  options: PageOptions,
 ): string {
   const page = view.pages.get(featureId) as Revision;
   const feature = view.features.get(featureId);
@@ -131,26 +146,26 @@ function renderFeaturePage(
       ? [`Also called: ${listed((feature?.aliases ?? []).map(titleText), 80).join("; ")}`]
       : []),
     `Infobox: ${count(box.files, "file")}, ${count(box.loc, "line")}; languages: ${listed(box.languages, 80).join(", ") || "none"}; entry points: ${listed(box.entryPoints, 200).join(", ") || "none"}; first commit ${date(box.firstCommitDate)}, last commit ${date(box.lastCommitDate)}.`,
-    ...renderSections(view, page.sections),
+    ...renderSections(view, page.sections, options.claimHandle ?? (() => null)),
   ];
   const seeAlso = page.seeAlso.filter((id) => view.hasRoute(id));
   const seeAlsoLine =
     seeAlso.length === 0
       ? null
       : `See also: ${seeAlso.map((id) => `${id} (${titleText(view.title(id))})`).join(", ")}`;
-  const revisions = history.map(
+  const revisions = (options.history === false ? [] : history).map(
     (r) =>
       `${date(r.commitDate)} commit ${sha7(r.sha)} (${r.reason}${r.pr === null ? "" : `, pull request #${r.pr}`})`,
   );
   return `${fitPage(lines, seeAlsoLine, revisions, max).join("\n")}\n`;
 }
 
-function renderAbout(view: WikiView): string {
+function renderAbout(view: WikiView, options: PageOptions): string {
   const article = view.article as Architecture;
   const lines = [
     `${titleText(article.title)} (page id: ${ABOUT_PAGE_ID}): the project's own article`,
     `This revision: commit ${sha7(article.sha)}, ${date(article.commitDate)}.`,
-    ...renderSections(view, article.sections),
+    ...renderSections(view, article.sections, options.claimHandle ?? (() => null)),
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -167,16 +182,34 @@ function renderChoices(view: WikiView, from: string, targets: readonly string[])
 }
 
 /**
+ * What the Ask sidebar's read_page (readPageWithHandles) changes in a page: a handle at the start
+ * of each claim's bullet, and no page history. Each handle is one line of untrusted-safe text;
+ * with no options the page is exactly v1's.
+ */
+export interface PageOptions {
+  /** A mark put before a claim's text, by claim id (the ask's `{page#claim}`), or null for none. */
+  claimHandle?: (claimId: string) => string | null;
+  /** False leaves out a feature page's dated history (spec v2 #4 R22); default true. */
+  history?: boolean;
+}
+
+/**
  * One page as the wiki agent reads it (read_page): a feature page with its status, aliases,
  * infobox, claims, numbered references, See also and dated history; the About article; or the
  * choices of a disambiguation. Redirects and alias routes are followed as the site follows them.
  * A feature page over `max` code points leaves out its oldest history, then its See also list.
- * The page is byte for byte v1's (the M7 cassettes pin it, C4).
+ * `options` add the Ask sidebar's claim handles or leave out the history; without them the page
+ * is byte for byte v1's (the M7 cassettes pin it, C4).
  */
-export function readPage(view: WikiView, id: string, max = MAX_TOOL_RESULT_CHARS): string {
+export function readPage(
+  view: WikiView,
+  id: string,
+  max = MAX_TOOL_RESULT_CHARS,
+  options: PageOptions = {},
+): string {
   const resolved = view.resolve(id);
-  if (resolved.kind === "about") return toolText(renderAbout(view));
+  if (resolved.kind === "about") return toolText(renderAbout(view, options));
   if (resolved.kind === "choices")
     return toolText(renderChoices(view, resolved.from, resolved.targets));
-  return toolText(renderFeaturePage(view, resolved.featureId, resolved.from, max));
+  return toolText(renderFeaturePage(view, resolved.featureId, resolved.from, max, options));
 }

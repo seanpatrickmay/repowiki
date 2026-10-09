@@ -1,0 +1,428 @@
+import { AskResponse, NOT_FOUND_SENTENCE } from "@repowiki/core";
+import { bodyClaim, codeCitation } from "@repowiki/core/test-fixtures";
+import { handleClaim, WikiView } from "@repowiki/query";
+import { extendedWiki, type SampleWiki, sampleWiki } from "@repowiki/query/test-wiki";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  buildResponse,
+  checkAnswer,
+  codeTokens,
+  type ResponseInput,
+  readNextOf,
+  ungroundedToken,
+} from "./answer.ts";
+import { askIndexes } from "./pack.ts";
+
+let sample: SampleWiki;
+let view: WikiView;
+beforeAll(() => {
+  sample = sampleWiki();
+  view = new WikiView(extendedWiki(sample));
+});
+afterAll(() => sample.repo.remove());
+
+const SHOWN = new Set(["signals#s-1", "signals#s-2", "signals#s-l", "deliverables#d-1"]);
+const sentence = (text: string, claims: string[]) => ({ text, claims });
+const answer = (sentences: { text: string; claims: string[] }[], status = "answered") => ({
+  status,
+  sentences,
+  readNext: [],
+});
+const claimsOf = (...handles: string[]) => handles.flatMap((h) => handleClaim(view, h) ?? []);
+
+describe("codeTokens", () => {
+  it("finds backtick spans, paths, snake_case, calls and source files", () => {
+    expect(
+      codeTokens(
+        "Use `ingest_chunk` in src/signals/ingest.py, call save_signal() (see README.md).",
+      ),
+    ).toEqual(["ingest_chunk", "src/signals/ingest.py", "save_signal()", "README.md"]);
+  });
+
+  it("leaves plain words alone, GitHub and a sentence's last word included", () => {
+    expect(codeTokens("GitHub sends events to the API, then Slack does too.")).toEqual([]);
+    expect(codeTokens("It is fast (really).")).toEqual([]);
+  });
+
+  it("strips the punctuation around a word but keeps a call's parentheses", () => {
+    expect(codeTokens('("src/a.ts"), run()! and `x` .')).toEqual(["x", "src/a.ts", "run()"]);
+  });
+
+  it.each([
+    ["a possessive", "Keys live in secrets.txt's first line.", ["secrets.txt"]],
+    ["a curly possessive", "Keys live in secrets.txt\u2019s first line.", ["secrets.txt"]],
+    ["curly double quotes", "Keys live in \u201Csecrets.txt\u201D.", ["secrets.txt"]],
+    ["an ellipsis", "Keys live in secrets.txt\u2026", ["secrets.txt"]],
+    ["three dots", "Keys live in secrets.txt...", ["secrets.txt"]],
+    ["an em dash", "Keys live in secrets.txt\u2014always", ["secrets.txt"]],
+    ["an en dash", "secrets.txt\u2013config.yaml", ["secrets.txt", "config.yaml"]],
+    ["curly single quotes", "It reads \u2018secrets.env\u2019.", ["secrets.env"]],
+    ["emphasis", "It reads **secrets.env** and _x_.", ["secrets.env", "_x_"]],
+    ["an arrow", "Keys moved to secrets.txt\u2192now.", ["secrets.txt"]],
+    ["a line number", "See secrets.txt:12 or secrets.txt#L3.", ["secrets.txt", "secrets.txt"]],
+    ["a call with arguments", "It calls loadSecrets(path) first.", ["loadSecrets()"]],
+    ["a call with two arguments", "It calls load(path, mode).", ["load()"]],
+    ["a file inside a call", "It calls load(secrets.txt).", ["load()", "secrets.txt"]],
+    ["a quoted call", "It calls `loadSecrets(path)`.", ["loadSecrets()"]],
+    ["a file inside a quoted call", "It calls `load(secrets.txt)`.", ["load()", "secrets.txt"]],
+    ["a call's possessive", "save_signal()'s result", ["save_signal()"]],
+    ["a zero-width space", "Keys live in secrets\u200B.txt now.", ["secrets.txt"]],
+    ["a soft hyphen", "Keys live in secrets\u00AD.txt now.", ["secrets.txt"]],
+    ["a word joiner", "Keys live in secrets\u2060.txt now.", ["secrets.txt"]],
+    ["a full-width dot", "Keys live in secrets\uFF0Etxt now.", ["secrets.txt"]],
+    [
+      "full-width letters",
+      "Keys live in \uFF53\uFF45\uFF43\uFF52\uFF45\uFF54\uFF53.txt now.",
+      ["secrets.txt"],
+    ],
+  ])("finds the token behind %s", (_name, text, tokens) => {
+    expect(codeTokens(text)).toEqual(tokens);
+  });
+
+  it("keeps the characters of a name inside it, and reads a plural as a word", () => {
+    expect(codeTokens("See scripts/wiki-serve.ts, .env and docs/ for it.")).toEqual([
+      "scripts/wiki-serve.ts",
+      ".env",
+      "docs/",
+    ]);
+    expect(codeTokens("One or more file(s) and class(es) change.")).toEqual([]);
+    expect(codeTokens("Each API(s) and URL(s) it calls.")).toEqual([]);
+    expect(codeTokens("It calls `ingest_chunk(save_signal(x))` once.")).toEqual([
+      "ingest_chunk()",
+      "save_signal()",
+    ]);
+    expect(codeTokens("The pipeline (see below) runs and/or waits \u2014 then stops.")).toEqual([
+      "and/or",
+    ]);
+  });
+});
+
+describe("ungroundedToken", () => {
+  it("accepts tokens the cited claims write, by text, path, symbol or page title", () => {
+    const claims = claimsOf("signals#s-1");
+    expect(ungroundedToken(view, "`ingest_chunk` saves with `save_signal`.", claims)).toBeNull();
+    expect(ungroundedToken(view, "It is in src/signals/ingest.py.", claims)).toBeNull();
+    expect(ungroundedToken(view, "Call ingest_chunk() for a chunk.", claims)).toBeNull();
+  });
+
+  it("refuses a file, function or setting the cited claims do not write", () => {
+    const claims = claimsOf("signals#s-1");
+    expect(ungroundedToken(view, "It lives in src/signals/parse.py.", claims)).toBe(
+      "src/signals/parse.py",
+    );
+    expect(ungroundedToken(view, "Call `split_sentences` first.", claims)).toBe("split_sentences");
+    expect(ungroundedToken(view, "Edit config.yaml to change it.", claims)).toBe("config.yaml");
+    expect(ungroundedToken(view, "The key is in secrets.txt.", claims)).toBe("secrets.txt");
+    expect(ungroundedToken(view, "Its server is main.go.", claims)).toBe("main.go");
+    expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claims)).toBe("MAX_SIGNALS");
+    expect(ungroundedToken(view, "MAX_SIGNALS caps it.", claimsOf("signals#s-2"))).toBeNull();
+  });
+
+  it.each([
+    "Keys live in secrets.txt's first line.",
+    "Keys live in \u201Csecrets.txt\u201D.",
+    "Keys live in secrets.txt\u2026",
+    "Keys live in secrets.txt\u2014always.",
+    "It reads \u2018secrets.env\u2019.",
+    "It calls loadSecrets(path) first.",
+  ])("refuses a name hidden by punctuation or call syntax: %s", (text) => {
+    expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).not.toBeNull();
+  });
+
+  it("refuses a name hidden by an invisible or full-width character", () => {
+    for (const text of ["Keys live in secrets\u200B.txt.", "Keys live in secrets\uFF0Etxt."]) {
+      expect(ungroundedToken(view, text, claimsOf("signals#s-1"))).toBe("secrets.txt");
+    }
+  });
+
+  it("does not refuse a plural in capitals or a nested call its claims write", () => {
+    const claims = claimsOf("signals#s-1");
+    expect(ungroundedToken(view, "Its API(s) and URL(s) stay as they are.", claims)).toBeNull();
+    expect(
+      ungroundedToken(view, "It runs `ingest_chunk(save_signal(x))` for a chunk.", claims),
+    ).toBeNull();
+  });
+
+  it("grounds a call with arguments by its name", () => {
+    expect(
+      ungroundedToken(view, "Then ingest_chunk(text) saves it.", claimsOf("signals#s-1")),
+    ).toBeNull();
+  });
+
+  it("matches a name only on identifier boundaries, not inside a longer name", () => {
+    const store = {
+      handle: "signals#s-9",
+      pageId: "signals",
+      pageTitle: "Signal ingestion",
+      aliases: [],
+      sectionKey: "overview",
+      claim: bodyClaim({
+        id: "s-9",
+        text: "Each piece is stored by `save_signal` after `ingest_chunk` runs.",
+        citations: [codeCitation({ path: "src/store/write.py", symbol: "ingest_chunk" })],
+      }),
+    };
+    const token = (text: string) => ungroundedToken(view, text, [store]);
+    expect(token("Call `signal()` next.")).toBe("signal()");
+    expect(token("Call sign() next.")).toBe("sign()");
+    expect(token("Then `save` runs.")).toBe("save");
+    expect(token("Then `ingest` runs.")).toBe("ingest");
+    expect(token("Then `chunk` runs.")).toBe("chunk");
+    expect(token("`save_signal` and ingest_chunk() run.")).toBeNull();
+    expect(token("It is in src/store/write.py, see write.py.")).toBeNull();
+  });
+});
+
+describe("checkAnswer", () => {
+  it("keeps cited sentences, reading handles with or without braces, at most four each", () => {
+    const checked = checkAnswer(
+      view,
+      answer([
+        sentence("Signals are made by `ingest_chunk`.", ["{signals#s-1}", "signals#s-1"]),
+        sentence("Ingestion stops at `MAX_SIGNALS`.", ["signals#s-2", " {signals#s-l} "]),
+      ]),
+      SHOWN,
+    );
+    expect(checked).toEqual({
+      status: "answered",
+      sentences: [
+        { text: "Signals are made by `ingest_chunk`.", handles: ["signals#s-1"] },
+        { text: "Ingestion stops at `MAX_SIGNALS`.", handles: ["signals#s-2", "signals#s-l"] },
+      ],
+      readNext: [],
+      refusals: [],
+    });
+  });
+
+  it("drops handles it did not show and refuses a sentence left with none", () => {
+    const checked = checkAnswer(
+      view,
+      answer([
+        sentence("Signals are saved.", ["signals#s-h", "signals#s-1"]),
+        sentence("Deliverables are records.", ["deliverables#d-lead", "nowhere#c1", "x"]),
+        sentence("No citation at all.", []),
+      ]),
+      SHOWN,
+    );
+    expect(checked.sentences).toEqual([{ text: "Signals are saved.", handles: ["signals#s-1"] }]);
+    expect(checked.refusals).toEqual([
+      { n: 2, reason: "it cites no handle of a claim you were shown" },
+      { n: 3, reason: "it cites no handle of a claim you were shown" },
+    ]);
+  });
+
+  it("refuses a sentence naming an identifier its cited claims do not write", () => {
+    const checked = checkAnswer(
+      view,
+      answer([sentence("It is in src/signals/parse.py.", ["signals#s-1"])]),
+      SHOWN,
+    );
+    expect(checked.sentences).toEqual([]);
+    expect(checked.refusals).toEqual([
+      { n: 1, reason: "it names a file, function or setting that its cited claims do not write" },
+    ]);
+  });
+
+  it("stops at six sentences and 120 words", () => {
+    const seven = Array.from({ length: 7 }, (_, i) =>
+      sentence(`Signals are saved, point ${i + 1}.`, ["signals#s-1"]),
+    );
+    const capped = checkAnswer(view, answer(seven), SHOWN);
+    expect(capped.sentences).toHaveLength(6);
+    expect(capped.refusals).toEqual([{ n: 7, reason: "it is past the 6-sentence limit" }]);
+    const long = checkAnswer(
+      view,
+      answer([
+        sentence("w ".repeat(100).trim(), ["signals#s-1"]),
+        sentence("w ".repeat(21).trim(), ["signals#s-1"]),
+        sentence("w ".repeat(20).trim(), ["signals#s-1"]),
+      ]),
+      SHOWN,
+    );
+    expect(long.sentences.map((s) => s.text.split(" ").length)).toEqual([100, 20]);
+    expect(long.refusals).toEqual([{ n: 2, reason: "it is past the 120-word limit" }]);
+  });
+
+  it("puts each sentence on one neutralised line of at most 400 characters", () => {
+    const checked = checkAnswer(
+      view,
+      answer([
+        sentence("Line one\nline two\u202E <img src=x>", ["signals#s-1"]),
+        sentence("x".repeat(10_000), ["signals#s-1"]),
+        sentence(" \n ", ["signals#s-1"]),
+      ]),
+      SHOWN,
+    );
+    expect(checked.sentences[0]?.text).toBe("Line one line two\uFFFD <img src=x>");
+    expect([...(checked.sentences[1]?.text ?? "")]).toHaveLength(400);
+    expect(checked.refusals).toEqual([{ n: 3, reason: "it is empty" }]);
+  });
+
+  it("finds no answer in input that is not one", () => {
+    for (const input of [null, "text", { status: "maybe" }, { status: "answered", sentences: 3 }]) {
+      expect(checkAnswer(view, input, SHOWN).status).toBeNull();
+    }
+  });
+});
+
+describe("buildResponse", () => {
+  const base = (): ResponseInput => ({
+    view,
+    indexes: askIndexes(view),
+    question: "Where are signals made?",
+    status: "answered",
+    sentences: [],
+    readNext: [],
+    refused: 0,
+    cost: { turns: 1, usd: 0.0048, model: "claude-haiku-4-5-20251001" },
+    answeredAt: new Date("2026-10-05T12:00:00Z"),
+  });
+
+  it("drops a claim whose id is too long for an answer, rather than fail the whole response", () => {
+    const long = "x".repeat(65);
+    const wiki = structuredClone(extendedWiki(sample));
+    wiki.pages
+      .find((p) => p.featureId === "signals")
+      ?.sections.find((s) => s.key === "overview")
+      ?.claims.push(
+        bodyClaim({ id: long, text: "A claim with a long id.", citations: [codeCitation()] }),
+      );
+    const longView = new WikiView(wiki);
+    const response = buildResponse({
+      ...base(),
+      view: longView,
+      indexes: askIndexes(longView),
+      sentences: [
+        { text: "Long.", handles: [`signals#${long}`] },
+        { text: "Short.", handles: [`signals#${long}`, "signals#s-1"] },
+      ],
+    });
+    expect(response.sentences).toEqual([{ text: "Short.", sources: [1] }]);
+    expect(response.sources.map((s) => s.claimId)).toEqual(["s-1"]);
+    expect(response.refused).toBe(1);
+  });
+
+  it("numbers sources by first citation and links each claim", () => {
+    const response = buildResponse({
+      ...base(),
+      sentences: [
+        { text: "First.", handles: ["signals#s-2", "signals#s-1"] },
+        { text: "Second.", handles: ["signals#s-1", "deliverables#d-1"] },
+      ],
+    });
+    expect(AskResponse.parse(response)).toEqual(response);
+    expect(response.sentences).toEqual([
+      { text: "First.", sources: [1, 2] },
+      { text: "Second.", sources: [2, 3] },
+    ]);
+    expect(response.sources.map((s) => [s.n, s.href, s.sectionTitle])).toEqual([
+      [1, "/wiki/signals/#claim-s-2", "How it works"],
+      [2, "/wiki/signals/#claim-s-1", "Overview"],
+      [3, "/wiki/deliverables/#claim-d-1", "Overview"],
+    ]);
+    expect(response.sources[1]?.excerpt).toBe(
+      "`ingest_chunk` makes one signal per non-blank sentence of a chunk and saves each one with `save_signal`.",
+    );
+    expect(response).toMatchObject({ status: "answered", head: sample.sha, cached: false });
+  });
+
+  it("makes an answer with no sentence left not-found, with the fixed sentence", () => {
+    const response = buildResponse({ ...base(), refused: 2 });
+    expect(response.status).toBe("not-found");
+    expect(response.sentences).toEqual([{ text: NOT_FOUND_SENTENCE, sources: [] }]);
+    expect(response.refused).toBe(2);
+    const model = buildResponse({
+      ...base(),
+      status: "not-found",
+      sentences: [{ text: "Ignored.", handles: ["signals#s-1"] }],
+    });
+    expect(model.sentences).toEqual([{ text: NOT_FOUND_SENTENCE, sources: [] }]);
+    expect(model.sources).toEqual([]);
+  });
+
+  it("gives a budget or error answer no sentence but Read next", () => {
+    for (const status of ["budget", "error"] as const) {
+      const response = buildResponse({ ...base(), status });
+      expect(response.sentences).toEqual([]);
+      expect(response.readNext.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("lists at most twelve sources, refusing a sentence left with none", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const more = Array.from({ length: 8 }, (_, i) =>
+      bodyClaim({ id: `x-${i}`, text: `Extra claim ${i}.` }),
+    );
+    wiki.pages[0]?.sections.find((s) => s.key === "overview")?.claims.push(...more);
+    const wide = new WikiView(wiki);
+    const handles = [...askIndexes(wide).claims.entries.keys()];
+    expect(handles.length).toBeGreaterThan(12);
+    const response = buildResponse({
+      ...base(),
+      view: wide,
+      sentences: [0, 4, 8, 12].map((i) => ({ text: `S${i}.`, handles: handles.slice(i, i + 4) })),
+    });
+    expect(response.sources).toHaveLength(12);
+    expect(response.sentences).toHaveLength(3);
+    expect(response.refused).toBe(1);
+  });
+
+  it("refuses a sentence whose kept sources no longer write its names, adding none of them", () => {
+    const wiki = structuredClone(extendedWiki(sample));
+    const more = Array.from({ length: 12 }, (_, i) =>
+      bodyClaim({ id: `x-${i}`, text: `Extra claim ${i}.` }),
+    );
+    wiki.pages
+      .find((p) => p.featureId === "signals")
+      ?.sections.find((s) => s.key === "overview")
+      ?.claims.push(...more);
+    const wide = new WikiView(wiki);
+    const x = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => `signals#x-${from + i}`);
+    const response = buildResponse({
+      ...base(),
+      view: wide,
+      sentences: [
+        { text: "S1.", handles: x(0, 4) },
+        { text: "S2.", handles: x(4, 8) },
+        { text: "S3.", handles: x(8, 11) },
+        { text: "It is saved by `save_signal`.", handles: ["signals#x-11", "signals#s-1"] },
+        { text: "S5.", handles: ["deliverables#d-1"] },
+      ],
+    });
+    expect(response.sentences.map((s) => s.text)).toEqual(["S1.", "S2.", "S3.", "S5."]);
+    expect(response.refused).toBe(1);
+    expect(response.sources).toHaveLength(12);
+    expect(response.sources.map((s) => s.claimId)).not.toContain("x-11");
+    expect(response.sources.at(-1)).toMatchObject({ n: 12, claimId: "d-1" });
+  });
+});
+
+describe("readNextOf", () => {
+  it("takes the model's pages that resolve, then the page search, each once, at most three", () => {
+    const indexes = askIndexes(view);
+    expect(
+      readNextOf(view, indexes, "signals", [
+        "deliverables",
+        "legacy-signals",
+        "nowhere",
+        "records",
+      ]),
+    ).toEqual([
+      {
+        pageId: "deliverables",
+        title: "Deliverables",
+        href: "/wiki/deliverables/",
+        summary: view.summary("deliverables"),
+      },
+      {
+        pageId: "signals",
+        title: "Signal ingestion",
+        href: "/wiki/signals/",
+        summary: view.summary("signals"),
+      },
+      expect.objectContaining({ href: expect.stringMatching(/^\/(wiki|special)\//) }),
+    ]);
+    expect(readNextOf(view, indexes, "kubernetes", [])).toEqual([]);
+  });
+});
