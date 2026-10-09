@@ -18,30 +18,8 @@ export {
   FeatureEdge,
   MAX_CLAIM_PAGES,
 } from "./architecture.ts";
-export {
-  ASK_EXCERPT_LENGTH,
-  ASK_HREF,
-  ASK_ID_MAX_LENGTH,
-  ASK_MAX_READ_NEXT,
-  ASK_MAX_SENTENCE_SOURCES,
-  ASK_MAX_SENTENCES,
-  ASK_MAX_SOURCES,
-  ASK_PAGE_MAX_LENGTH,
-  ASK_QUESTION_MAX_LENGTH,
-  ASK_SENTENCE_MAX_LENGTH,
-  ASK_SUMMARY_MAX_LENGTH,
-  ASK_TITLE_MAX_LENGTH,
-  AskAnswerStatus,
-  AskProgress,
-  AskRequest,
-  AskResponse,
-  AskSource,
-  AskStatus,
-  claimAnchor,
-  NOT_FOUND_SENTENCE,
-} from "./ask.ts";
 export { Citation, CodeCitation, CommitCitation } from "./citation.ts";
-export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind } from "./claim.ts";
+export { CLAIM_TEXT_MAX_LENGTH, Claim, ClaimId, ClaimKind, claimAnchor } from "./claim.ts";
 export { codeTokens, ungroundedCodeToken, writesName } from "./code-tokens.ts";
 export { contentHash } from "./content-hash.ts";
 export {

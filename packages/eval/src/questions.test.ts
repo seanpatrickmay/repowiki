@@ -11,25 +11,7 @@ const SMOKE_QUESTIONS = fileURLToPath(
   new URL("./__fixtures__/smoke-questions.json", import.meta.url),
 );
 
-/** The committed history smoke file: questions about historyWiki(), never the owner's suite. */
-const HISTORY_SMOKE = fileURLToPath(
-  new URL("./__fixtures__/history-smoke-questions.json", import.meta.url),
-);
-
 const KINDS = ["where", "how", "why", "what-changed"] as const;
-
-/** A schema-valid history suite of placeholder questions (spec v2 #5 §8.1). Test data only. */
-function historyFile(edit: (questions: Record<string, unknown>[]) => void = () => {}) {
-  const questions: Record<string, unknown>[] = Array.from({ length: 10 }, (_, i) => ({
-    id: `h${String(i + 1).padStart(2, "0")}`,
-    set: "history",
-    kind: i < 5 ? "as-of" : "what-changed",
-    question: `Placeholder history question ${i + 1}?`,
-    reference: `PLACEHOLDER-HISTORY-${i + 1}`,
-  }));
-  edit(questions);
-  return { suite: "history", repo: "sample", writtenOn: "2026-10-05", questions };
-}
 
 /**
  * A schema-valid exit-criteria file of placeholder questions about the fixture repo. Test data
@@ -185,80 +167,6 @@ describe("selectQuestions", () => {
     expect(selectQuestions(file, "smoke").map((q) => q.kind)).toEqual([
       "where",
       "how",
-      "what-changed",
-    ]);
-  });
-});
-
-describe("the history suite", () => {
-  it("loads 10 as-of and what-changed questions and runs them only as the history set", () => {
-    const { file } = loadQuestions(write(historyFile()));
-    expect(selectQuestions(file, "history")).toHaveLength(10);
-    expect(() => selectQuestions(file, "dev")).toThrow(/run it with --set history/);
-    const author = loadQuestions(write(exitFile())).file;
-    expect(() => selectQuestions(author, "history")).toThrow(
-      /--set history runs only the history question file/,
-    );
-  });
-
-  it("needs 8 to 20 questions, two of each kind, and no kind of v1's", () => {
-    expect(() => loadQuestions(write(historyFile((q) => q.splice(7))))).toThrow(QuestionFileError);
-    expect(() =>
-      loadQuestions(
-        write(
-          historyFile((q) => {
-            for (const x of q.slice(0, -1)) x.kind = "as-of";
-          }),
-        ),
-      ),
-    ).toThrow(/at least 2 what-changed questions, found 1/);
-    expect(() =>
-      loadQuestions(
-        write(
-          historyFile((q) => {
-            Object.assign(q[0] ?? {}, { kind: "where" });
-          }),
-        ),
-      ),
-    ).toThrow(QuestionFileError);
-  });
-
-  it("refuses more than 20 questions, a question of another set, and a smoke file as the history set", () => {
-    const more = (q: Record<string, unknown>[]) => {
-      for (let i = q.length; i < 21; i++) {
-        q.push({
-          ...q[i % 10],
-          id: `h${i + 1}`,
-          question: `Placeholder history question ${i + 1}?`,
-        });
-      }
-    };
-    expect(() => loadQuestions(write(historyFile(more)))).toThrow(QuestionFileError);
-    expect(() =>
-      loadQuestions(write(historyFile((q) => Object.assign(q[0] ?? {}, { set: "dev" })))),
-    ).toThrow(QuestionFileError);
-    const smoke = loadQuestions(HISTORY_SMOKE).file;
-    expect(() => selectQuestions(smoke, "history")).toThrow(/^this is the smoke question file/);
-  });
-
-  it("keeps the as-of kind out of the author's exit-criteria file", () => {
-    expect(() =>
-      loadQuestions(
-        write(
-          exitFile((q) => {
-            Object.assign(q[0] ?? {}, { kind: "as-of" });
-          }),
-        ),
-      ),
-    ).toThrow(QuestionFileError);
-  });
-
-  it("finds the committed history smoke file: three questions about historyWiki()", () => {
-    const { file } = loadQuestions(HISTORY_SMOKE);
-    expect(file).toMatchObject({ suite: "smoke", repo: "sample" });
-    expect(selectQuestions(file, "smoke").map((q) => q.kind)).toEqual([
-      "as-of",
-      "as-of",
       "what-changed",
     ]);
   });

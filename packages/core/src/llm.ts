@@ -4,8 +4,9 @@ import { GitSha, IsoDateTime } from "./primitives.ts";
 import { TokenUsage } from "./revision.ts";
 
 /**
- * What an LLM call is for. Each role has its own model id in config (spec §4). `ask` is the Ask
- * sidebar's (spec v2 #4 R13): its calls are ledgered in memory per serve session, never stored.
+ * What an LLM call is for. Each role has its own model id in config (spec §4). `ask` was the Ask
+ * sidebar's (spec v2 #4 R13); the sidebar is shelved (ADR-0009), and the role stays so config
+ * files that name it still parse.
  * `inflight` summarizes an open pull request (spec v2 #9 R20); `people` writes a person's
  * narrative (spec v2 #6 R30).
  */
