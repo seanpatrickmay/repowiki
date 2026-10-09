@@ -72,19 +72,17 @@ describe("parseEvalArgs", () => {
   });
 
   it.each([
-    [["r", "--questions", "q.json"], "--set must be dev, held-out, history or smoke"],
-    [
-      ["r", "--questions", "q.json", "--set", "all"],
-      "--set must be dev, held-out, history or smoke",
-    ],
+    [["r", "--questions", "q.json"], "--set must be dev, held-out or smoke"],
+    [["r", "--questions", "q.json", "--set", "all"], "--set must be dev, held-out or smoke"],
+    [["r", "--questions", "q.json", "--set", "history"], "--set must be dev, held-out or smoke"],
     [["r", "--set", "dev"], "--questions is required"],
     [["r", "--questions", "q", "--set", "held-out", "--run-dir", "d"], "--run-dir cannot be given"],
     [
-      ["r", "--questions", "q", "--set", "held-out", "--agents", "mcp"],
+      ["r", "--questions", "q", "--set", "held-out", "--agents", "wiki"],
       "the held-out set is v1's single-use sign-off of the wiki and repo agents, so --agents can only be wiki,repo with it",
     ],
     [
-      ["r", "--questions", "q", "--set", "held-out", "--agents", "wiki,repo,mcp"],
+      ["r", "--questions", "q", "--set", "held-out", "--agents", "repo"],
       "--agents can only be wiki,repo with it",
     ],
     [["r", "--questions", "q", "--set", "dev", "--turns", "0"], "--turns must be a whole number"],
@@ -136,18 +134,16 @@ describe("parseEvalArgs and the held-out set", () => {
 
 describe("scoreLine", () => {
   const stats = (correct: number) => ({ correct });
-  const agents = { wiki: stats(2), repo: stats(1), mcp: stats(3), "repo+mcp": stats(0) };
+  const agents = { wiki: stats(2), repo: stats(1) };
   it("names each asked agent's score, in the order asked", () => {
     const questions = [1, 2, 3];
     expect(scoreLine({ info: { agents: ["wiki", "repo"], questions }, agents })).toBe(
       "wiki 2 of 3, repo 1 of 3",
     );
-    expect(scoreLine({ info: { agents: ["mcp", "repo+mcp"], questions }, agents })).toBe(
-      "mcp 3 of 3, repo+mcp 0 of 3",
+    expect(scoreLine({ info: { agents: ["repo", "wiki"], questions }, agents })).toBe(
+      "repo 1 of 3, wiki 2 of 3",
     );
-    expect(scoreLine({ info: { agents: ["wiki", "mcp"], questions }, agents })).toBe(
-      "wiki 2 of 3, mcp 3 of 3",
-    );
+    expect(scoreLine({ info: { agents: ["wiki"], questions }, agents })).toBe("wiki 2 of 3");
   });
 });
 
@@ -159,9 +155,6 @@ describe("runDirFor", () => {
       join("/o", "eval", "dev-2026-10-04T12-30-00-000Z"),
     );
     expect(runDirFor("/o", "smoke", "/runs/s", now)).toBe("/runs/s");
-    expect(runDirFor("/o", "history", null, now)).toBe(
-      join("/o", "eval", "history-2026-10-04T12-30-00-000Z"),
-    );
   });
 });
 
@@ -233,46 +226,17 @@ describe("estimateEval", () => {
     );
     expect(short).not.toContain("(batched)");
   });
-
-  it("estimates each asked agent, the mcp ones from the server's tool definitions", () => {
-    // Six tools with long descriptions, as the server lists them: a longer prefix than the wiki's.
-    const mcpTools = Array.from({ length: 6 }, (_, i) => ({
-      name: `tool_${i}`,
-      description: "x".repeat(400),
-      inputSchema: { type: "object" as const },
-    }));
-    const four = estimateEval(
-      input({
-        agents: ["wiki", "repo", "mcp", "repo+mcp"],
-        tools: {
-          ...input().tools,
-          mcp: mcpTools,
-          "repo+mcp": [...(input().tools.repo ?? []), ...mcpTools],
-        },
-      }),
-    );
-    expect(Object.keys(four.byAgent)).toEqual(["wiki", "repo", "mcp", "repo+mcp"]);
-    const sum = Object.values(four.byAgent).reduce((a, b) => a + (b ?? 0), 0);
-    expect(four.agentsUsd).toBeCloseTo(sum, 10);
-    expect(four.byAgent.mcp ?? 0).toBeGreaterThan(four.byAgent.wiki ?? 0);
-    expect(four.byAgent["repo+mcp"] ?? 0).toBeLessThan(four.byAgent.repo ?? 0);
-    const line = estimateLine(four, { turnLimit: 15, maxUsd: 5, batch: true });
-    expect(line).toMatch(
-      /^3 questions to the wiki, repo, mcp and repo\+mcp agents: about \$\d+\.\d\d \(wiki \$\d+\.\d\d at 4 turns, repo \$\d+\.\d\d at 8 turns, mcp \$\d+\.\d\d at 5 turns, repo\+mcp \$\d+\.\d\d at 6 turns a question/,
-    );
-  });
 });
 
 describe("parseAgents", () => {
   it("reads --agents as a list of agent kinds, each once", () => {
     const parse = (agents: string) =>
       parseEvalArgs(["r", "--questions", "q", "--set", "dev", "--agents", agents]).agents;
-    expect(parse("wiki,repo,mcp,repo+mcp")).toEqual(["wiki", "repo", "mcp", "repo+mcp"]);
-    expect(parse(" mcp , repo+mcp ")).toEqual(["mcp", "repo+mcp"]);
-    expect(() => parse("wiki,grep")).toThrow(
-      "--agents takes a comma-separated list of wiki, repo, mcp, repo+mcp",
-    );
-    expect(() => parse("mcp,mcp")).toThrow("--agents lists mcp twice");
+    expect(parse("wiki,repo")).toEqual(["wiki", "repo"]);
+    expect(parse(" repo , wiki ")).toEqual(["repo", "wiki"]);
+    expect(parse("wiki")).toEqual(["wiki"]);
+    expect(() => parse("wiki,mcp")).toThrow("--agents takes a comma-separated list of wiki, repo");
+    expect(() => parse("repo,repo")).toThrow("--agents lists repo twice");
     expect(() => parse("")).toThrow(CliError);
   });
 });

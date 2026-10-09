@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { count, cut, oneLine, toolText } from "./text.ts";
 import {
-  combineToolSets,
   defineTool,
   MAX_TOOL_ERROR_CHARS,
   MAX_TOOL_RESULT_CHARS,
@@ -103,24 +102,5 @@ describe("text helpers", () => {
     expect(cut("abcdef", 4)).toBe("abc…");
     expect(cut("abc", 4)).toBe("abc");
     expect([count(1, "file"), count(2, "file")]).toEqual(["1 file", "2 files"]);
-  });
-});
-
-describe("combineToolSets", () => {
-  const one = toolSet([defineTool("a", "A.", z.strictObject({}), () => "from a")]);
-  const two = toolSet([defineTool("b", "B.", z.strictObject({}), () => "from b")]);
-
-  it("serves every set's tools, in order, and names them all for an unknown one", async () => {
-    const both = combineToolSets(one, two);
-    expect(both.definitions.map((d) => d.name)).toEqual(["a", "b"]);
-    expect(await both.run("b", {})).toEqual({ text: "from b", isError: false });
-    expect(await both.run("c\nd", {})).toEqual({
-      text: "no tool named c d; the tools are a, b",
-      isError: true,
-    });
-  });
-
-  it("refuses two tools of one name", () => {
-    expect(() => combineToolSets(one, one)).toThrow("two tools are named a");
   });
 });

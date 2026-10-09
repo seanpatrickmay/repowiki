@@ -41,7 +41,7 @@ export function fileImports(
   return new Map(paths.map((path) => [path, read(join(root, path))]));
 }
 
-/** Network modules no query or mcp source may load (spec v2 #5 §4). */
+/** Network modules no query source may load (spec v2 #5 §4). */
 export const NETWORK_MODULES = [
   "node:http",
   "node:https",

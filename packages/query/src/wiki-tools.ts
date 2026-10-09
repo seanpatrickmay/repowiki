@@ -1,7 +1,6 @@
 import type { Claim, WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { type SearchDoc, type SearchIndex, searchIndex } from "./search.ts";
-import { oneLine } from "./text.ts";
 import { defineTool, type LocalToolSet, toolSet } from "./tools.ts";
 import { readPage } from "./wiki-page.ts";
 import { ABOUT_PAGE_ID, listedPage, reference, WikiView } from "./wiki-view.ts";
@@ -62,23 +61,16 @@ export function pageSearchIndex(view: WikiView): SearchIndex {
 
 /**
  * Up to MAX_SEARCH_RESULTS pages for `query`, best first, one line each (id, title, first lead
- * sentence), then `hint`. `note` adds a few words after a page's line (the MCP server's
- * "(cites changed files)"); without it the text is v1's search result.
+ * sentence), then how to read one: v1's search result.
  */
-export function searchResults(
-  view: WikiView,
-  index: SearchIndex,
-  query: string,
-  options: { note?: (id: string) => string | null; hint?: string } = {},
-): string {
+export function searchResults(view: WikiView, index: SearchIndex, query: string): string {
   const ids = index.search(query, MAX_SEARCH_RESULTS);
   if (ids.length === 0) return "No page matches; try other words.\n";
   const lines = ids.map((id) => {
     const title = id === ABOUT_PAGE_ID ? (view.article?.title ?? "About") : view.title(id);
-    const note = options.note?.(id) ?? null;
-    return `${listedPage(id, title, view.summary(id))}${note === null ? "" : ` ${oneLine(note)}`}`;
+    return listedPage(id, title, view.summary(id));
   });
-  return `${lines.join("\n")}\n${oneLine(options.hint ?? "Read one with read_page(id).")}\n`;
+  return `${lines.join("\n")}\nRead one with read_page(id).\n`;
 }
 
 /**

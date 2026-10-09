@@ -1,5 +1,4 @@
 import { assertSha, GitError, gitFailureCause, listBlobs, type TreeBlob } from "@repowiki/engine";
-import { runGit, topLevel } from "@repowiki/mcp";
 import {
   count,
   cut,
@@ -12,6 +11,7 @@ import {
   toolText,
 } from "@repowiki/query";
 import { z } from "zod";
+import { runGit, topLevel } from "./git.ts";
 
 /** The most paths list_files names before it summarizes by directory instead. */
 export const MAX_LISTED_FILES = 400;

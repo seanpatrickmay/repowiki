@@ -1,6 +1,5 @@
 export {
   ABOUT_PAGE_ID,
-  combineToolSets,
   createWikiTools,
   MAX_TOOL_RESULT_CHARS,
   type ToolSet,
@@ -13,15 +12,6 @@ export {
 } from "./accuracy.ts";
 export { AGENT_TEMPERATURE, type AgentAnswer, MAX_TURN_OUTPUT_TOKENS, runAgent } from "./agent.ts";
 export {
-  HISTORY_CORRECT_PERCENT,
-  HISTORY_MARGIN,
-  interfaceSection,
-  MCP_ACCURACY_SLACK,
-  MCP_TOKEN_PERCENT,
-  REPO_MCP_TOKEN_PERCENT,
-  REPO_TOOL_NAMES,
-} from "./interface.ts";
-export {
   JUDGE_MAX_TOKENS,
   JUDGE_SYSTEM,
   judgeAnswer,
@@ -30,20 +20,11 @@ export {
   MAX_RETRY_PROBLEM_CHARS,
   retryTurn,
 } from "./judge.ts";
-export {
-  MCP_SERVE_SCRIPT,
-  type McpAgentTools,
-  type McpAgentToolsOptions,
-  openMcpTools,
-} from "./mcp-tools.ts";
 export { type AgentKind, ANSWER_WORDS, agentSystemPrompt, questionTurn } from "./prompts.ts";
 export {
   EvalQuestion,
   EXIT_CRITERIA_COUNTS,
   ExitCriteriaQuestions,
-  HISTORY_QUESTION_COUNT,
-  HISTORY_QUESTION_KINDS,
-  HistoryQuestions,
   type LoadedQuestions,
   loadQuestions,
   MAX_QUESTION_LENGTH,
@@ -54,7 +35,6 @@ export {
   QuestionSet,
   SmokeQuestions,
   selectQuestions,
-  V1_QUESTION_KINDS,
 } from "./questions.ts";
 export {
   AGENTS,
@@ -62,9 +42,7 @@ export {
   AnswerRecord,
   appendRecord,
   DEFAULT_AGENTS,
-  defaultAgents,
   EvalRunError,
-  HISTORY_AGENTS,
   JudgmentRecord,
   openRun,
   RESULTS_FILE,

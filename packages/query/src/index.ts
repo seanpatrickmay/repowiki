@@ -1,24 +1,4 @@
 export {
-  type AsOf,
-  architectureAt,
-  asOfBanner,
-  asOfLabel,
-  historyBegins,
-  type IsAncestor,
-  parseAsOf,
-  pointAt,
-  type ResolveCommit,
-  revisionAt,
-  viewAt,
-} from "./as-of.ts";
-export {
-  type ChangedRevision,
-  renderChanges,
-  revisionEntry,
-  wordDiffText,
-} from "./changes.ts";
-export { ExportLoadError, loadExport } from "./load.ts";
-export {
   type RankedMatch,
   type SearchDoc,
   type SearchField,
@@ -28,7 +8,6 @@ export {
 } from "./search.ts";
 export { andList, count, cut, markdownText, oneLine, toolText } from "./text.ts";
 export {
-  combineToolSets,
   defineTool,
   type LocalToolSet,
   MAX_TOOL_ERROR_CHARS,
@@ -39,15 +18,9 @@ export {
   type ToolOutput,
   type ToolSet,
   toolSet,
-  unknownTool,
 } from "./tools.ts";
-export { type PageOptions, readPage, referenceList, SECTION_TITLES } from "./wiki-page.ts";
-export {
-  createWikiTools,
-  MAX_SEARCH_RESULTS,
-  pageSearchIndex,
-  searchResults,
-} from "./wiki-tools.ts";
+export { readPage, SECTION_TITLES } from "./wiki-page.ts";
+export { createWikiTools, MAX_SEARCH_RESULTS, pageSearchIndex } from "./wiki-tools.ts";
 export {
   ABOUT_PAGE_ID,
   listedPage,

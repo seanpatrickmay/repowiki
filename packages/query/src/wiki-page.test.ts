@@ -188,36 +188,6 @@ describe("readPage", () => {
     );
     expect(text).toContain("\nDependencies\n- Signals feed deliverables. [pages: signals]\n");
   });
-
-  it("adds a banner, a freshness line and claim notes when asked, each on one line", () => {
-    const view = new WikiView(sample.wiki);
-    const text = readPage(view, "signals", undefined, {
-      banner: ["As of then.", "Line\ntwo"],
-      freshness: "1 of 4 claims changed.",
-      claimNote: (id) => (id === "s-2" ? "(changed since the wiki's commit: x.py:1-2)" : null),
-    });
-    const lines = text.split("\n");
-    expect(lines.slice(0, 5)).toEqual([
-      "Signal ingestion (page id: signals)",
-      "As of then.",
-      "Line two",
-      `Status: active. This revision: commit ${sample.sha.slice(0, 7)}, 2026-01-03.`,
-      "1 of 4 claims changed.",
-    ]);
-    expect(text).toContain(
-      "- Ingestion stops once a chunk has made `MAX_SIGNALS` (50) signals; the rest of the chunk is dropped. [2][3] (changed since the wiki's commit: x.py:1-2)\n",
-    );
-    expect(readPage(view, "signals", undefined, {})).toBe(readPage(view, "signals"));
-    const about = readPage(new WikiView(extendedWiki(sample)), ABOUT_PAGE_ID, undefined, {
-      banner: ["As of then."],
-      freshness: "Fresh.",
-    });
-    expect(about.split("\n").slice(1, 4)).toEqual([
-      "As of then.",
-      `This revision: commit ${sample.sha.slice(0, 7)}, 2026-02-03.`,
-      "Fresh.",
-    ]);
-  });
 });
 
 describe("referenceList", () => {

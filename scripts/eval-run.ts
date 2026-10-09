@@ -13,14 +13,11 @@ import {
 import {
   type AgentKind,
   buildTokensOf,
-  combineToolSets,
   createRepoTools,
   createWikiTools,
-  defaultAgents,
+  DEFAULT_AGENTS,
   EvalRunError,
   loadQuestions,
-  type McpAgentTools,
-  openMcpTools,
   QuestionFileError,
   RUN_INFO_FILE,
   type RunInfo,
@@ -47,15 +44,12 @@ import { CliError, loadModels } from "./manifest-cli.ts";
 import { resolveOutDir } from "./out-dir.ts";
 import { acquireBuildLock, exitWithError, requireApiKey } from "./wiki-cli.ts";
 
-/** The MCP server the mcp agents use, when they run; closed however the run ends. */
-const started: { mcp: McpAgentTools | null } = { mcp: null };
-
 /**
  * pnpm eval:run <repo> --questions <file> --set <set>: spec §9's Q&A eval. Asks each question of
  * the set to every agent --agents names (by default the wiki agent, on the export in the out dir,
- * and the repo agent, on the repository at the wiki's commit; the history suite's are wiki and
- * mcp, the MCP server pinned at the wiki's commit), judges every answer, and writes run.json, results.jsonl, report.md and, once
- * every answer is judged, spot-check.json in the run directory (writeReport). States its estimate before any
+ * and the repo agent, on the repository at the wiki's commit), judges every answer, and writes
+ * run.json, results.jsonl, report.md and, once every answer is judged, spot-check.json in the run
+ * directory (writeReport). States its estimate before any
  * call; --dry-run stops there. The held-out set runs once: a second run resumes an unfinished one
  * and refuses a finished one. Holds the out dir's lock (and refuses an export that changed before
  * it was taken), and never writes in <repo>. The judge's
@@ -136,25 +130,14 @@ async function main(): Promise<void> {
       );
     }
   }
-  const agents = args.agents ?? [...defaultAgents(args.set)];
-  // The mcp agents use the MCP server through its real stdio transport, pinned at the wiki's head
-  // (spec v2 #5 R19). A dry run starts it too: the estimate counts its tool definitions. The
-  // server makes no call and writes nothing.
-  if (agents.some((a) => a === "mcp" || a === "repo+mcp")) {
-    started.mcp = await openMcpTools({ repo, out, compareTo: wiki.head, log: logLine });
-  }
-  const mcp = started.mcp;
-  const tools: Partial<Record<AgentKind, ToolSet>> = {
-    wiki: wikiTools,
-    repo: repoTools,
-    ...(mcp === null ? {} : { mcp: mcp.tools, "repo+mcp": combineToolSets(repoTools, mcp.tools) }),
-  };
+  const agents = args.agents ?? [...DEFAULT_AGENTS];
+  const tools: Record<AgentKind, ToolSet> = { wiki: wikiTools, repo: repoTools };
   const estimate = estimateEval({
     questions,
     repoName: wiki.repo,
     turnLimit: args.turnLimit,
     agents,
-    tools: Object.fromEntries(agents.map((a) => [a, tools[a]?.definitions ?? []])),
+    tools: Object.fromEntries(agents.map((a) => [a, tools[a].definitions])),
     models,
     batchJudge: args.batch,
   });
@@ -212,13 +195,11 @@ async function main(): Promise<void> {
       judge: createJudgeProvider({ models, ledger, runId, journal, log }),
       batchJudge: args.batch,
       maxUsd: args.maxUsd,
-      // A dead MCP server is started again once; a second death stops the run (it resumes).
-      halted: () => mcp?.lost() ?? null,
       log,
     });
     const { summary, reportPath } = writeReport(runDir);
     console.log(
-      `${scoreLine(summary)}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.stopped === "halted" ? "; stopped: the MCP server died twice" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
+      `${scoreLine(summary)}; this run cost $${result.spentUsd.toFixed(4)}${result.stopped === "budget" ? "; stopped at --max-usd" : ""}${result.unjudged > 0 ? `; ${result.unjudged} answers unjudged` : ""}`,
     );
     console.log(`Wrote ${reportPath}`);
   } finally {
@@ -233,11 +214,5 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  // The run's own error is the one to report, even if stopping the server fails too.
-  try {
-    await started.mcp?.close();
-  } finally {
-    exitWithError(err);
-  }
+  exitWithError(err);
 }
-await started.mcp?.close();

@@ -1,10 +1,7 @@
 import { cut, oneLine } from "@repowiki/query";
 
-/**
- * Which agent: the one reading the wiki, the one reading the repository's files (M7), the one
- * using the MCP server, and the one with the repository's tools and the MCP server (M8).
- */
-export type AgentKind = "wiki" | "repo" | "mcp" | "repo+mcp";
+/** Which agent: the one reading the wiki, or the one reading the repository's files (M7). */
+export type AgentKind = "wiki" | "repo";
 
 /** The most words an answer may have, as both agents are told. */
 export const ANSWER_WORDS = 200;
@@ -22,20 +19,6 @@ const SOURCES: Readonly<Record<AgentKind, { tools: string; method: string; sourc
     method:
       "List the files, grep for names and words from the question, then read the parts of the files that answer it.",
     source: "repository",
-  },
-  mcp: {
-    tools:
-      "they read the repository's wiki through its MCP server, which has one page per feature of the code, each claim on a page citing the code lines or commits it rests on, and can show the code a claim cites",
-    method:
-      "Search for the pages the question is about, then read the most relevant ones; use cited_code to see the code a reference cites, and as_of or page_changes when the question is about an earlier time. When the answer spans pages, follow a page's [page: id] links and its See also list.",
-    source: "wiki",
-  },
-  "repo+mcp": {
-    tools:
-      "they read the repository's files at one commit, and its wiki through the wiki's MCP server, which has one page per feature of the code, each claim citing the code lines or commits it rests on",
-    method:
-      "Start with the wiki: search it and read the most relevant page, whose references name the files and lines that matter. Then read only the code you still need, with cited_code or read_file.",
-    source: "repository and its wiki",
   },
 };
 

@@ -14,7 +14,6 @@ import {
   appendRecord,
   checkRecords,
   createOnce,
-  defaultAgents,
   EvalRunError,
   openRun,
   RESULTS_FILE,
@@ -124,11 +123,6 @@ describe("openRun", () => {
     expect(openRun(dir, info)).toEqual(info);
   });
 
-  it("asks the wiki and repo agents by default, and the wiki and mcp agents on the history suite", () => {
-    expect(defaultAgents("dev")).toEqual(["wiki", "repo"]);
-    expect(defaultAgents("history")).toEqual(["wiki", "mcp"]);
-  });
-
   it("resumes with the same agents in another order, keeping the run's own order", () => {
     openRun(dir, info);
     expect(openRun(dir, { ...info, agents: ["repo", "wiki"] }).agents).toEqual(["wiki", "repo"]);
@@ -136,10 +130,10 @@ describe("openRun", () => {
 
   it("refuses to resume with other agents, and a run that names an agent twice", () => {
     openRun(dir, info);
-    expect(() => openRun(dir, { ...info, agents: ["wiki", "repo", "mcp"] })).toThrow(
+    expect(() => openRun(dir, { ...info, agents: ["wiki"] })).toThrow(
       new EvalRunError(`${dir} holds another run: its agents differ from this one's`),
     );
-    expect(RunInfo.safeParse({ ...info, agents: ["mcp", "mcp"] }).success).toBe(false);
+    expect(RunInfo.safeParse({ ...info, agents: ["wiki", "wiki"] }).success).toBe(false);
     expect(RunInfo.safeParse({ ...info, agents: ["grep"] }).success).toBe(false);
   });
 });
@@ -180,7 +174,7 @@ describe("checkRecords", () => {
     const failure = {
       kind: "judge-failure" as const,
       questionId: "smoke-where",
-      agent: "repo+mcp" as const,
+      agent: "repo" as const,
       reason: "r",
       usage: { in: 1, out: 1, cacheRead: 0, cacheWrite: 0 },
       usd: 0,
@@ -188,15 +182,14 @@ describe("checkRecords", () => {
       batch: true,
       at: "2026-10-04T12:02:00.000Z",
     };
-    expect(() => checkRecords(dir, info, [{ ...answer, agent: "mcp" }])).toThrow(
+    const wikiOnly = { ...info, agents: ["wiki" as const] };
+    expect(() => checkRecords(dir, wikiOnly, [{ ...answer, agent: "repo" }])).toThrow(
       new EvalRunError(
-        `${join(dir, RESULTS_FILE)} holds a record of the mcp agent, which this run does not ask (it asks wiki, repo)`,
+        `${join(dir, RESULTS_FILE)} holds a record of the repo agent, which this run does not ask (it asks wiki)`,
       ),
     );
-    expect(() => checkRecords(dir, info, [failure])).toThrow(/of the repo\+mcp agent, which/);
-    expect(() =>
-      checkRecords(dir, { ...info, agents: ["wiki", "repo", "repo+mcp"] }, [failure]),
-    ).not.toThrow();
+    expect(() => checkRecords(dir, wikiOnly, [failure])).toThrow(/of the repo agent, which/);
+    expect(() => checkRecords(dir, info, [failure])).not.toThrow();
   });
 });
 

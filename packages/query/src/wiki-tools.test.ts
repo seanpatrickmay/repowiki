@@ -1,13 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extendedWiki, type SampleWiki, sampleWiki } from "./test-wiki.ts";
 import { MAX_TOOL_RESULT_CHARS } from "./tools.ts";
-import {
-  createWikiTools,
-  MAX_SEARCH_RESULTS,
-  pageSearchIndex,
-  searchResults,
-} from "./wiki-tools.ts";
-import { ABOUT_PAGE_ID, WikiView } from "./wiki-view.ts";
+import { createWikiTools, MAX_SEARCH_RESULTS } from "./wiki-tools.ts";
+import { ABOUT_PAGE_ID } from "./wiki-view.ts";
 
 let sample: SampleWiki;
 beforeAll(() => {
@@ -155,22 +150,5 @@ describe("createWikiTools", () => {
       text: "no tool named grep; the tools are search, read_page",
       isError: true,
     });
-  });
-});
-
-describe("searchResults' note and hint", () => {
-  it("keep each result on one line", () => {
-    const wiki = sampleWiki();
-    try {
-      const view = new WikiView(wiki.wiki);
-      const text = searchResults(view, pageSearchIndex(view), "signals", {
-        note: () => "(cites\nchanged files)",
-        hint: "Read one\nwith read_page(id).",
-      });
-      expect(text).toContain(" (cites changed files)\n");
-      expect(text.endsWith("\nRead one with read_page(id).\n")).toBe(true);
-    } finally {
-      wiki.repo.remove();
-    }
   });
 });

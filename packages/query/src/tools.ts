@@ -20,7 +20,7 @@ export interface ToolOutput {
 
 /**
  * The tools one agent has, and how to run a call to one of them. A call may answer at once or
- * later (the MCP client's tools answer over stdio), so the agent loop awaits it.
+ * later, so the agent loop awaits it.
  */
 export interface ToolSet {
   definitions: readonly ToolDefinition[];
@@ -101,7 +101,7 @@ export function defineTool<S extends z.ZodType>(
 }
 
 /** The error result for a tool name a set does not have: one short line, naming the tools. */
-export function unknownTool(name: string, names: Iterable<string>): ToolOutput {
+function unknownTool(name: string, names: Iterable<string>): ToolOutput {
   return {
     text: `no tool named ${cut(oneLine(name), 60)}; the tools are ${[...names].join(", ")}`,
     isError: true,
@@ -125,27 +125,6 @@ export function toolSet(tools: readonly Tool[]): LocalToolSet {
     run(name, input) {
       const tool = byName.get(name);
       return tool === undefined ? unknownTool(name, byName.keys()) : tool.run(input);
-    },
-  };
-}
-
-/**
- * Several tool sets as one (the repo+mcp agent's: the repository's tools and the MCP server's).
- * Two tools of one name are refused; an unknown name is an error result naming every tool.
- */
-export function combineToolSets(...sets: readonly ToolSet[]): ToolSet {
-  const byName = new Map<string, ToolSet>();
-  for (const set of sets) {
-    for (const definition of set.definitions) {
-      if (byName.has(definition.name)) throw new Error(`two tools are named ${definition.name}`);
-      byName.set(definition.name, set);
-    }
-  }
-  return {
-    definitions: sets.flatMap((set) => set.definitions),
-    run(name, input) {
-      const set = byName.get(name);
-      return set === undefined ? unknownTool(name, byName.keys()) : set.run(name, input);
     },
   };
 }

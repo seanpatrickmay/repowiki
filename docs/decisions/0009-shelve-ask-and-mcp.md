@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-10-08
-- Features: F09
+- Features: F07, F08, F09
 
 ## Context
 
@@ -11,6 +11,10 @@ site, and link to those sites from a personal website. A linked site is static. 
 (M9, F09) needs `pnpm wiki:serve` running beside the site, with an API key and a live model call per
 question, so it does nothing on a site served as plain files. The owner does not need it, and code
 that stays on `main` has to be kept green, reviewed and paid for in check time.
+
+The MCP server (M8: the part of F07 that serves a wiki to a coding agent, and all of F08, reading
+the wiki as of a past date or commit) is the same case: the owner does not run an agent against
+their wikis, and the server and the eval agents that measure it are the largest package left.
 
 ## Decision
 
@@ -40,9 +44,40 @@ Kept:
 - The site format marker (`.repowiki-site`), Pagefind search, the CSP, and the llm package's
   forced tool choice and call timeout, which are not Ask-specific.
 
+### The MCP server (F07's server half, F08)
+
+The MCP server comes off `main` too. F08 and the server half of F07 are deferred, not rejected:
+ADR-0004 (the hand-rolled stdio protocol) stays as the record of how it was built, and merging
+branch `mcp/restore` brings the server back.
+
+Removed:
+
+- `packages/mcp` (the stdio JSON-RPC server, its client, the six agent tools, the as-of and
+  freshness views, its git reads and their tests) and `pnpm mcp:serve` and `pnpm mcp:probe`
+  (`scripts/mcp-*.ts`).
+- What exists only to run or measure agents through the server: the eval's `mcp` and `repo+mcp`
+  agents, `openMcpTools`, the M8 report section (`interface.ts`), the history suite (`--set
+  history`, the `as-of` question kind and its smoke file), the `tool-failure` answer stop and the
+  run's `halted` stop, the M8 smoke cassettes (`smoke-mcp.json`, `smoke-history.json`), and
+  query's as-of views, page changes, `loadExport`, `combineToolSets`, `readPage`'s banner,
+  freshness and claim-note options, `searchResults`' note and hint, and the history test wiki.
+
+Kept, because v1 uses it:
+
+- The v1 eval: `eval:run` with the wiki and repo agents, `eval:report`, `eval:accuracy` and its
+  sheets (M11's `--person` included), and the `--agents` option, which now takes `wiki` and
+  `repo`. The repo agent's read-only git runner (`runGit`, `topLevel`), which M8 had moved into
+  `packages/mcp`, moves back into the eval as `packages/eval/src/git.ts`.
+- `packages/query` for the eval, `llms.txt`, `export.json`, core's diff helpers (the site's diff
+  view uses them) and the engine functions M8 exported for the server.
+
+No stored run is lost: no eval run directory that names an `mcp` agent or the history set exists.
+
 ## Consequences
 
 Every page's HTML loses the 22 lines of sidebar markup; nothing else on a page changes. A built
-site needs no server. The specs and plans for M9 still describe the sidebar as shipped; this ADR
-is what says it is shelved. Restoring it is one merge of `ask/restore`, which also marks F09
-restored here.
+site needs no server. The specs and plans for M8 and M9 still describe the server and the sidebar
+as shipped; this ADR is what says they are shelved. Restoring either is one merge, of
+`ask/restore` or `mcp/restore`, each of which also marks its features restored here. A run.json
+or question file that names an `mcp` agent or the history set no longer parses until
+`mcp/restore` is merged.

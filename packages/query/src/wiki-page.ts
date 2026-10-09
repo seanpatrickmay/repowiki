@@ -35,7 +35,7 @@ type PageSections = readonly { key: string; claims: readonly (Claim & { pages?: 
 
 /**
  * The citations a page's References list, in the order read_page numbers them: by first
- * appearance, one entry per distinct reference text. cited_code finds reference n here.
+ * appearance, one entry per distinct reference text.
  */
 export function referenceList(sections: PageSections): Citation[] {
   const seen = new Map<string, Citation>();
@@ -51,11 +51,7 @@ export function referenceList(sections: PageSections): Citation[] {
 }
 
 /** Sections of claims with numbered references, the same for a feature page and the About page. */
-function renderSections(
-  view: WikiView,
-  sections: PageSections,
-  claimNote: (claimId: string) => string | null,
-): string[] {
+function renderSections(view: WikiView, sections: PageSections): string[] {
   const refs = referenceList(sections).map(reference);
   const refOf = (citation: Citation) => refs.indexOf(reference(citation)) + 1;
   const lines: string[] = [];
@@ -66,11 +62,8 @@ function renderSections(
       const pages =
         (claim.pages ?? []).length > 0 ? ` [pages: ${(claim.pages ?? []).join(", ")}]` : "";
       const stale = claim.staleSince === null ? "" : " (may be out of date)";
-      const note = claimNote(claim.id);
       // Every claim, the lead's too, is a bullet: claim text never starts a line of its own.
-      lines.push(
-        `- ${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}${note === null ? "" : ` ${oneLine(note)}`}`,
-      );
+      lines.push(`- ${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}`);
     }
   }
   if (refs.length > 0) lines.push("", "References", ...refs.map((r, i) => `[${i + 1}] ${r}`));
@@ -121,7 +114,6 @@ function renderFeaturePage(
   featureId: string,
   from: string | null,
   max: number,
-  options: PageOptions,
 ): string {
   const page = view.pages.get(featureId) as Revision;
   const feature = view.features.get(featureId);
@@ -134,14 +126,12 @@ function renderFeaturePage(
   const lines = [
     `${titleText(view.title(featureId))} (page id: ${featureId})`,
     ...(from === null ? [] : [`(Redirected from ${cut(oneLine(from), 80)})`]),
-    ...(options.banner ?? []).map(oneLine),
     `Status: ${status}. This revision: commit ${sha7(page.sha)}, ${date(page.commitDate)}.`,
-    ...freshnessLines(options),
     ...((feature?.aliases.length ?? 0) > 0
       ? [`Also called: ${listed((feature?.aliases ?? []).map(titleText), 80).join("; ")}`]
       : []),
     `Infobox: ${count(box.files, "file")}, ${count(box.loc, "line")}; languages: ${listed(box.languages, 80).join(", ") || "none"}; entry points: ${listed(box.entryPoints, 200).join(", ") || "none"}; first commit ${date(box.firstCommitDate)}, last commit ${date(box.lastCommitDate)}.`,
-    ...renderSections(view, page.sections, claimNoteOf(options)),
+    ...renderSections(view, page.sections),
   ];
   const seeAlso = page.seeAlso.filter((id) => view.hasRoute(id));
   const seeAlsoLine =
@@ -155,21 +145,12 @@ function renderFeaturePage(
   return `${fitPage(lines, seeAlsoLine, revisions, max).join("\n")}\n`;
 }
 
-/** The freshness line a caller adds under the revision line, as zero or one line. */
-const freshnessLines = (options: PageOptions): string[] =>
-  options.freshness === undefined || options.freshness === null ? [] : [oneLine(options.freshness)];
-
-/** The caller's note after a claim, or none. */
-const claimNoteOf = (options: PageOptions) => options.claimNote ?? (() => null);
-
-function renderAbout(view: WikiView, options: PageOptions): string {
+function renderAbout(view: WikiView): string {
   const article = view.article as Architecture;
   const lines = [
     `${titleText(article.title)} (page id: ${ABOUT_PAGE_ID}): the project's own article`,
-    ...(options.banner ?? []).map(oneLine),
     `This revision: commit ${sha7(article.sha)}, ${date(article.commitDate)}.`,
-    ...freshnessLines(options),
-    ...renderSections(view, article.sections, claimNoteOf(options)),
+    ...renderSections(view, article.sections),
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -186,33 +167,16 @@ function renderChoices(view: WikiView, from: string, targets: readonly string[])
 }
 
 /**
- * What a caller adds to a page (the MCP server's read_page): lines under the title (an as-of
- * banner), a line under the revision line (freshness), and a note after a claim, by claim id.
- * Each is one line of untrusted-safe text; with no options the page is exactly v1's.
- */
-export interface PageOptions {
-  banner?: readonly string[];
-  freshness?: string | null;
-  claimNote?: (claimId: string) => string | null;
-}
-
-/**
  * One page as the wiki agent reads it (read_page): a feature page with its status, aliases,
  * infobox, claims, numbered references, See also and dated history; the About article; or the
  * choices of a disambiguation. Redirects and alias routes are followed as the site follows them.
  * A feature page over `max` code points leaves out its oldest history, then its See also list.
- * `options` add the MCP server's banner, freshness line and claim notes; without them the page
- * is byte for byte v1's (the M7 cassettes pin it, C4).
+ * The page is byte for byte v1's (the M7 cassettes pin it, C4).
  */
-export function readPage(
-  view: WikiView,
-  id: string,
-  max = MAX_TOOL_RESULT_CHARS,
-  options: PageOptions = {},
-): string {
+export function readPage(view: WikiView, id: string, max = MAX_TOOL_RESULT_CHARS): string {
   const resolved = view.resolve(id);
-  if (resolved.kind === "about") return toolText(renderAbout(view, options));
+  if (resolved.kind === "about") return toolText(renderAbout(view));
   if (resolved.kind === "choices")
     return toolText(renderChoices(view, resolved.from, resolved.targets));
-  return toolText(renderFeaturePage(view, resolved.featureId, resolved.from, max, options));
+  return toolText(renderFeaturePage(view, resolved.featureId, resolved.from, max));
 }
