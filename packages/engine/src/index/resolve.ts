@@ -1,5 +1,7 @@
 import { posix } from "node:path";
+import type { CargoManifest } from "./cargo.ts";
 import type { RawImport } from "./imports.ts";
+import { createRustResolver } from "./resolve-rust.ts";
 
 export interface WorkspacePackage {
   name: string;
@@ -79,8 +81,10 @@ const ES_EXTENSIONS = [".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mjs", ".cjs"];
 export function createResolver(
   paths: readonly string[],
   packages: readonly WorkspacePackage[],
+  cargo: readonly CargoManifest[] = [],
 ): Resolver {
   const files = new Set(paths);
+  const resolveRust = createRustResolver(files, cargo);
   const byName = new Map(packages.map((pkg) => [pkg.name, pkg]));
 
   // A Python source root is the parent of a top-level package (a dir with __init__.py whose parent has none).
@@ -207,6 +211,10 @@ export function createResolver(
 
   return {
     resolve: (fromPath, raw) =>
-      raw.kind === "python" ? resolvePython(fromPath, raw) : resolveEs(fromPath, raw.specifier),
+      raw.kind === "python"
+        ? resolvePython(fromPath, raw)
+        : raw.kind === "es"
+          ? resolveEs(fromPath, raw.specifier)
+          : resolveRust(fromPath, raw),
   };
 }
