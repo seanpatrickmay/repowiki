@@ -6,6 +6,7 @@ ignoredBuiltDependencies:
   - esbuild
   - tree-sitter-javascript
   - tree-sitter-python
+  - tree-sitter-rust
   - tree-sitter-typescript
 ignoredOptionalDependencies:
   - sharp

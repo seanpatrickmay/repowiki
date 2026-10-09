@@ -1,12 +1,13 @@
 import { createRequire } from "node:module";
 import { Language, type Node, Parser } from "web-tree-sitter";
 
-export type SourceLanguage = "python" | "typescript" | "tsx";
+export type SourceLanguage = "python" | "typescript" | "tsx" | "rust";
 
 const GRAMMARS: Record<SourceLanguage, string> = {
   python: "tree-sitter-python/tree-sitter-python.wasm",
   typescript: "tree-sitter-typescript/tree-sitter-typescript.wasm",
   tsx: "tree-sitter-typescript/tree-sitter-tsx.wasm",
+  rust: "tree-sitter-rust/tree-sitter-rust.wasm",
 };
 
 /** The grammar used for a path, or null for files indexed at file level only. */
@@ -14,6 +15,7 @@ export function languageForPath(path: string): SourceLanguage | null {
   if (path.endsWith(".py")) return "python";
   if (path.endsWith(".tsx")) return "tsx";
   if (/\.[cm]?ts$/.test(path)) return "typescript";
+  if (path.endsWith(".rs")) return "rust";
   return null;
 }
 

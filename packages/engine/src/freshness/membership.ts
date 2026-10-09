@@ -196,7 +196,8 @@ export function coverageGaps(
     if (file.language === null || isTestFile(file.path)) continue;
     const old = renames.get(file.path) ?? file.path;
     for (const symbol of file.symbols) {
-      if (!symbol.exported || symbol.qualifiedName.includes(".")) continue;
+      // A member: K.m, or Rust's T::m and module::item.
+      if (!symbol.exported || /\.|::/.test(symbol.qualifiedName)) continue;
       if (previous.membership[memberId(old, symbol.qualifiedName)] !== undefined) continue;
       const covered = (cited.get(file.path) ?? []).some(
         (r) => r.start <= symbol.endLine && r.end >= symbol.startLine,

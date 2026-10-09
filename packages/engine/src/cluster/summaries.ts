@@ -48,7 +48,9 @@ const KIND_RANK: Record<SymbolKind, number> = {
   enum: 0,
   function: 1,
   method: 1,
+  macro: 1,
   variable: 2,
+  module: 2,
 };
 
 /** Rounds each weight first, so that weights equal as printed rank by name. */

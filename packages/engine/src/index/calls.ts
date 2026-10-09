@@ -1,6 +1,6 @@
 import type { Node } from "web-tree-sitter";
 import type { RawImport } from "./imports.ts";
-import type { SourceLanguage } from "./languages.ts";
+import { languageForPath, type SourceLanguage } from "./languages.ts";
 
 /**
  * A name an import statement binds in a file. `imported` is the name exported by the target
@@ -21,6 +21,11 @@ export interface ImportBinding {
  * Only a plain-identifier receiver is recorded. A call on anything else (a chain `a.b().c()`,
  * `this.a.b()`, `a!.b()`, `super.m()`, `a.b.c()`) records only what it records today: the
  * inner call of a chain, and nothing for the outer call.
+ *
+ * In Rust, a path call `T::f()` has the receiver "T", `Self::f()` and `self.f()` have "self",
+ * `super::f()` has "super", and `self::f()` and `f::<T>()` are plain `f()`. A longer path
+ * (`a::b::f()`) is like a chain: nothing. A macro call is `name!` and a struct literal `T { .. }`
+ * is a call of `T`, as a class call is in Python.
  */
 export interface CallSite {
   name: string;
@@ -106,7 +111,20 @@ export function extractCalls(language: SourceLanguage, root: Node): CallSite[] {
     if (site === null) return;
     found.set(`${site.receiver ?? ""}\0${site.name}\0${line}`, { ...site, line });
   };
-  if (language === "python") {
+  if (language === "rust") {
+    for (const node of root.descendantsOfType(RUST_CALLS)) {
+      if (node.hasError) continue;
+      const callee = node.childForFieldName(RUST_CALLEE[node.type] ?? "");
+      if (node.type !== "macro_invocation") add(callee, lineOf(node));
+      else if (callee?.type === "identifier") {
+        found.set(`\0${callee.text}!\0${lineOf(node)}`, {
+          name: `${callee.text}!`,
+          receiver: null,
+          line: lineOf(node),
+        });
+      }
+    }
+  } else if (language === "python") {
     for (const call of root.descendantsOfType("call")) {
       if (!call.hasError) add(call.childForFieldName("function"), lineOf(call));
     }
@@ -131,10 +149,39 @@ export function extractCalls(language: SourceLanguage, root: Node): CallSite[] {
   return [...found.values()].sort((a, b) => a.line - b.line);
 }
 
-function calleeOf(
-  language: SourceLanguage,
-  node: Node,
-): { name: string; receiver: string | null } | null {
+const RUST_CALLEE: Record<string, string> = {
+  call_expression: "function",
+  macro_invocation: "macro",
+  struct_expression: "name",
+};
+const RUST_CALLS = Object.keys(RUST_CALLEE);
+
+type Callee = { name: string; receiver: string | null };
+
+function rustCallee(node: Node | null): Callee | null {
+  if (node?.type === "generic_function") return rustCallee(node.childForFieldName("function"));
+  if (node?.type === "identifier" || node?.type === "type_identifier") {
+    return { name: node.text, receiver: null };
+  }
+  if (node?.type === "field_expression") {
+    const value = node.childForFieldName("value");
+    const field = node.childForFieldName("field");
+    if (field?.type !== "field_identifier") return null;
+    if (value?.type === "self") return { name: field.text, receiver: "self" };
+    return value?.type === "identifier" ? { name: field.text, receiver: value.text } : null;
+  }
+  const name = node?.type === "scoped_identifier" ? node.childForFieldName("name") : null;
+  if (!name) return null;
+  const path = node?.childForFieldName("path") ?? null;
+  if (path?.type === "self") return { name: name.text, receiver: null };
+  if (path?.type === "super") return { name: name.text, receiver: "super" };
+  const type = path?.type === "generic_type" ? path.childForFieldName("type") : path;
+  if (type?.type !== "identifier" && type?.type !== "type_identifier") return null;
+  return { name: name.text, receiver: type.text === "Self" ? "self" : type.text };
+}
+
+function calleeOf(language: SourceLanguage, node: Node): Callee | null {
+  if (language === "rust") return rustCallee(node);
   if (node.type === "identifier") return { name: node.text, receiver: null };
   if (node.type !== "attribute" && node.type !== "member_expression") return null;
   const object = node.childForFieldName("object");
@@ -208,6 +255,10 @@ export function resolveBinding(
  * an import after the `def` resolves wrongly here). A parameter, nested def or local const that
  * shadows an imported or top-level name is not tracked either, so such a call resolves to the
  * wrong symbol. Treat call edges as hints, not proof.
+ *
+ * In Rust, `self.m()` and `Self::m()` inside the method T::n resolve as T::m, `super::f()` inside an
+ * inline module as f of the module around it, and a name or `T::f()` inside inline modules to the
+ * innermost module of the file that has it (`tests::helper`, then `helper`).
  */
 export function resolveCalls(
   file: { id: string; path: string; symbols: readonly SymbolSpan[] },
@@ -225,7 +276,29 @@ export function resolveCalls(
       )
       .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))[0];
 
+  // Inline Rust modules around a line, innermost first, then the file's top level ("").
+  const scopes = (line: number): string[] => [
+    ...file.symbols
+      .filter((s) => s.kind === "module" && s.startLine <= line && line <= s.endLine)
+      .sort((a, b) => a.endLine - a.startLine - (b.endLine - b.startLine))
+      .map((s) => `${s.qualifiedName}::`),
+    "",
+  ];
+  const inScope = (scoped: readonly string[], name: string) =>
+    scoped.map((scope) => find(file.path, `${scope}${name}`)).find((s) => s !== undefined);
+  const rustCallee = (call: CallSite): SymbolSpan | undefined => {
+    if (call.receiver === "self") {
+      const method = enclosing(call.line, "method")?.qualifiedName;
+      const owner = method?.slice(0, method.lastIndexOf("::"));
+      return owner ? find(file.path, `${owner}::${call.name}`) : undefined;
+    }
+    if (call.receiver === "super") return inScope(scopes(call.line).slice(1), call.name);
+    const name = call.receiver === null ? call.name : `${call.receiver}::${call.name}`;
+    return inScope(scopes(call.line), name);
+  };
+
   const callee = (call: CallSite): SymbolSpan | undefined => {
+    if (languageForPath(file.path) === "rust") return rustCallee(call);
     if (call.receiver === "self") {
       const owner = enclosing(call.line, "class");
       return owner === undefined
