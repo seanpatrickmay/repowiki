@@ -145,4 +145,51 @@ describe("indexRepo on a Cargo workspace", () => {
       },
     ]);
   });
+
+  it("resolves calls through use bindings, aliases and mod declarations", async () => {
+    const index = await indexRepo(repo.dir, "HEAD");
+    expect(index.calls).toEqual([
+      { from: "crates/cli/src/app.rs#main", to: "crates/cli/src/commands.rs#run", line: 11 },
+      {
+        from: "crates/cli/src/app.rs#main",
+        to: "crates/engine/src/board.rs#Board::new",
+        line: 9,
+      },
+      {
+        from: "crates/cli/src/app.rs#main",
+        to: "crates/engine/src/rules/setup.rs#place",
+        line: 10,
+      },
+      {
+        from: "crates/cli/src/commands.rs#run",
+        to: "crates/cli/src/commands/show.rs#print",
+        line: 8,
+      },
+      {
+        from: "crates/engine/src/board.rs#Board::new",
+        to: "crates/engine/src/board.rs#Board",
+        line: 10,
+      },
+      {
+        from: "crates/engine/src/board.rs#Board::new",
+        to: "crates/engine/src/util.rs#clamp",
+        line: 10,
+      },
+      {
+        from: "crates/engine/src/board.rs#tests::builds",
+        to: "crates/engine/src/board.rs#Board::new",
+        line: 20,
+      },
+      {
+        from: "crates/engine/src/lib.rs#new_game",
+        to: "crates/engine/src/board.rs#Board::new",
+        line: 9,
+      },
+      {
+        from: "crates/engine/src/rules/setup.rs#place",
+        to: "crates/engine/src/util.rs#clamp",
+        line: 5,
+      },
+    ]);
+  });
 });
