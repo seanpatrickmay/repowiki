@@ -3,11 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    "./build": "./src/build.ts",
-    "./csp": "./src/csp.ts",
-    "./format": "./src/site-format.ts"
-  },
   "dependencies": {
     "@repowiki/core": "workspace:*",
     "astro": "7.3.5",

@@ -55,7 +55,6 @@ function renderSections(
   view: WikiView,
   sections: PageSections,
   claimNote: (claimId: string) => string | null,
-  claimHandle: (claimId: string) => string | null,
 ): string[] {
   const refs = referenceList(sections).map(reference);
   const refOf = (citation: Citation) => refs.indexOf(reference(citation)) + 1;
@@ -68,10 +67,9 @@ function renderSections(
         (claim.pages ?? []).length > 0 ? ` [pages: ${(claim.pages ?? []).join(", ")}]` : "";
       const stale = claim.staleSince === null ? "" : " (may be out of date)";
       const note = claimNote(claim.id);
-      const handle = claimHandle(claim.id);
       // Every claim, the lead's too, is a bullet: claim text never starts a line of its own.
       lines.push(
-        `- ${handle === null ? "" : `${handle} `}${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}${note === null ? "" : ` ${oneLine(note)}`}`,
+        `- ${view.text(claim.text)}${marks === "" ? "" : ` ${marks}`}${pages}${stale}${note === null ? "" : ` ${oneLine(note)}`}`,
       );
     }
   }
@@ -103,20 +101,13 @@ function fitPage(
   const whole = assemble(0, true, null);
   if (codePoints(whole) <= max) return whole;
   const noteFor = (dropped: number, withSeeAlso: boolean) => {
-    // A page read without its history (the ask's) names only what it had to leave out.
     const parts = [
-      ...(revisions.length === 0
-        ? []
-        : [
-            dropped === revisions.length
-              ? "the whole page history"
-              : `the ${dropped} oldest page history ${dropped === 1 ? "entry" : "entries"}`,
-          ]),
+      dropped === revisions.length
+        ? "the whole page history"
+        : `the ${dropped} oldest page history ${dropped === 1 ? "entry" : "entries"}`,
       ...(withSeeAlso || seeAlso === null ? [] : ["the See also list"]),
     ];
-    return parts.length === 0
-      ? null
-      : `(Left out to fit the ${max}-character limit: ${parts.join(" and ")}.)`;
+    return `(Left out to fit the ${max}-character limit: ${parts.join(" and ")}.)`;
   };
   for (let dropped = 1; dropped <= revisions.length; dropped++) {
     const lines = assemble(dropped, true, noteFor(dropped, true));
@@ -150,19 +141,14 @@ function renderFeaturePage(
       ? [`Also called: ${listed((feature?.aliases ?? []).map(titleText), 80).join("; ")}`]
       : []),
     `Infobox: ${count(box.files, "file")}, ${count(box.loc, "line")}; languages: ${listed(box.languages, 80).join(", ") || "none"}; entry points: ${listed(box.entryPoints, 200).join(", ") || "none"}; first commit ${date(box.firstCommitDate)}, last commit ${date(box.lastCommitDate)}.`,
-    ...renderSections(
-      view,
-      page.sections,
-      claimNoteOf(options),
-      options.claimHandle ?? (() => null),
-    ),
+    ...renderSections(view, page.sections, claimNoteOf(options)),
   ];
   const seeAlso = page.seeAlso.filter((id) => view.hasRoute(id));
   const seeAlsoLine =
     seeAlso.length === 0
       ? null
       : `See also: ${seeAlso.map((id) => `${id} (${titleText(view.title(id))})`).join(", ")}`;
-  const revisions = (options.history === false ? [] : history).map(
+  const revisions = history.map(
     (r) =>
       `${date(r.commitDate)} commit ${sha7(r.sha)} (${r.reason}${r.pr === null ? "" : `, pull request #${r.pr}`})`,
   );
@@ -183,12 +169,7 @@ function renderAbout(view: WikiView, options: PageOptions): string {
     ...(options.banner ?? []).map(oneLine),
     `This revision: commit ${sha7(article.sha)}, ${date(article.commitDate)}.`,
     ...freshnessLines(options),
-    ...renderSections(
-      view,
-      article.sections,
-      claimNoteOf(options),
-      options.claimHandle ?? (() => null),
-    ),
+    ...renderSections(view, article.sections, claimNoteOf(options)),
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -207,18 +188,12 @@ function renderChoices(view: WikiView, from: string, targets: readonly string[])
 /**
  * What a caller adds to a page (the MCP server's read_page): lines under the title (an as-of
  * banner), a line under the revision line (freshness), and a note after a claim, by claim id.
- * The Ask sidebar's read_page (readPageWithHandles) puts a handle at the start of each claim's
- * bullet and leaves out the page history. Each is one line of untrusted-safe text; with no
- * options the page is exactly v1's.
+ * Each is one line of untrusted-safe text; with no options the page is exactly v1's.
  */
 export interface PageOptions {
   banner?: readonly string[];
   freshness?: string | null;
   claimNote?: (claimId: string) => string | null;
-  /** A mark put before a claim's text, by claim id (the ask's `{page#claim}`), or null for none. */
-  claimHandle?: (claimId: string) => string | null;
-  /** False leaves out a feature page's dated history (spec v2 #4 R22); default true. */
-  history?: boolean;
 }
 
 /**

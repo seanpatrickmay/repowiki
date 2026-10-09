@@ -81,10 +81,6 @@ export function searchResults(
   return `${lines.join("\n")}\n${oneLine(options.hint ?? "Read one with read_page(id).")}\n`;
 }
 
-/** The `search` tool's description and input, shared by the wiki agent and the Ask sidebar. */
-export const SEARCH_TOOL_DESCRIPTION = `Search the wiki. Returns up to ${MAX_SEARCH_RESULTS} pages, best match first, each with its id, title and the first sentence of its lead.`;
-export const SearchToolInput = z.strictObject({ query: z.string().trim().min(1).max(200) });
-
 /**
  * The wiki agent's tools over an export (spec §9): `search(query)` ranks the active pages and the
  * About article by their titles, aliases, leads, claims and cited paths; `read_page(id)` returns
@@ -94,8 +90,11 @@ export function createWikiTools(wiki: WikiExport): LocalToolSet {
   const view = new WikiView(wiki);
   const index = pageSearchIndex(view);
   return toolSet([
-    defineTool("search", SEARCH_TOOL_DESCRIPTION, SearchToolInput, ({ query }) =>
-      searchResults(view, index, query),
+    defineTool(
+      "search",
+      `Search the wiki. Returns up to ${MAX_SEARCH_RESULTS} pages, best match first, each with its id, title and the first sentence of its lead.`,
+      z.strictObject({ query: z.string().trim().min(1).max(200) }),
+      ({ query }) => searchResults(view, index, query),
     ),
     defineTool(
       "read_page",

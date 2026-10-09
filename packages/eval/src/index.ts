@@ -24,7 +24,6 @@ export {
 export {
   JUDGE_MAX_TOKENS,
   JUDGE_SYSTEM,
-  JudgeError,
   judgeAnswer,
   judgeTurn,
   MAX_JUDGED_ANSWER_CHARS,
@@ -77,16 +76,9 @@ export {
 } from "./records.ts";
 export { createRepoTools } from "./repo-tools.ts";
 export { REPORT_FILE, renderReport, writeReport } from "./report.ts";
-export {
-  type EvalRunOptions,
-  type EvalRunResult,
-  MAX_DIRECT_JUDGE_CALLS,
-  runEval,
-  settleAll,
-} from "./run.ts";
+export { type EvalRunOptions, type EvalRunResult, runEval } from "./run.ts";
 export { SPOT_CHECK_FILE, SpotCheck, spotCheckSample } from "./spot-check.ts";
 export {
-  ACCURACY_PERCENT,
   ACCURACY_SHARE,
   buildTokensOf,
   type EvalSummary,

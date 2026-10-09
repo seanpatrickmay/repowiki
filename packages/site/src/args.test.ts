@@ -110,7 +110,7 @@ describe("parseSiteArgs", () => {
       parseSiteArgs(["build", "--no-inflight", "--export", "/d/export.json", "--out", "/share"]),
     ).toMatchObject({ outDir: "/share", inflight: false });
     expect(() => parseSiteArgs(["build", "--export", "/d/export.json", "--no-inflight"])).toThrow(
-      /^--no-inflight refuses \/d\/site, the site wiki:serve rebuilds/,
+      /^--no-inflight refuses \/d\/site, the default site, built with the work in flight/,
     );
     expect(() =>
       parseSiteArgs(["build", "--export", "/d/x.json", "--out", "/d/site", "--no-inflight"]),

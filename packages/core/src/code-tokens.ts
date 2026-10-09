@@ -1,5 +1,5 @@
-// Code-like tokens and whether a text writes them (spec v2 #4 R6), with no zod: the Ask
-// sidebar's sentence check and work in flight's summary check ground names by the same rule.
+// Code-like tokens and whether a text writes them (spec v2 #4 R6), with no zod: work in flight's
+// summary check grounds names by this rule.
 
 /**
  * File extensions that make a word code-like: spec v2 #4 R6's list, plus the other common source,

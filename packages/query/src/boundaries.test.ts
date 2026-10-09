@@ -13,9 +13,8 @@ import {
 const SRC = dirname(fileURLToPath(import.meta.url));
 
 /**
- * @repowiki/query is the one retrieval the eval, the MCP server and the Ask sidebar share (C3):
- * core and zod only, so the sidebar loads no engine through it. Its sources read files at most;
- * they spawn no process, open no socket and call no model.
+ * @repowiki/query is the one retrieval the eval and the MCP server share (C3): core and zod
+ * only. Its sources read files at most; they spawn no process, open no socket and call no model.
  */
 describe("@repowiki/query's boundaries", () => {
   const sources = sourceImports(SRC);

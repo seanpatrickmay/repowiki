@@ -60,7 +60,7 @@ const requirePrice = (model: string) => {
 export const MAX_DIRECT_JUDGE_CALLS = 4;
 
 /** Runs `tasks` with at most `limit` in flight, and settles them all, in order. */
-export async function settleAll<T>(
+async function settleAll<T>(
   tasks: readonly (() => Promise<T>)[],
   limit: number,
 ): Promise<PromiseSettledResult<T>[]> {
