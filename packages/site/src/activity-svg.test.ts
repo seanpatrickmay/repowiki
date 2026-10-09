@@ -87,7 +87,12 @@ describe("barChart (R21)", () => {
     );
     expect(html.match(/<a href="#activity-2026">/g)).toHaveLength(3);
     expect(html).toContain("<title>January 2026: 2 commits, +80 −0 lines</title>");
-    expect(html).toContain('<table class="visually-hidden"><caption>Commits by month</caption>');
+    // The hiding class sits on a wrapper: a table ignores width and overflow, so a hidden table
+    // would still be laid out at full width and scroll a phone sideways (#612).
+    expect(html).toContain(
+      '<div class="visually-hidden"><table><caption>Commits by month</caption>',
+    );
+    expect(html).not.toContain('<table class="visually-hidden">');
     expect(html).toContain(
       '<tr><th scope="row">March 2026</th><td>1</td><td>10</td><td>10</td></tr>',
     );
@@ -154,6 +159,8 @@ describe("repositorySeries", () => {
 describe("heatmap and sparkline", () => {
   it("draws every day of the year in weekday rows, levelled by commits", () => {
     const html = heatmap(2026, ada.activity, "Ada Lovelace's commits in 2026");
+    expect(html).toContain('<div class="visually-hidden"><table><caption>');
+    expect(html).toMatch(/<\/table><\/div><\/figure>$/);
     expect(html.match(/<rect /g)).toHaveLength(365);
     // 1 January 2026 is a Thursday: row 3 of the first week.
     expect(html).toContain(

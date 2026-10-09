@@ -114,6 +114,8 @@ input:focus-visible {
 
 code {
   font-family: var(--font-mono);
+  /* Long paths would otherwise widen a phone screen (#612). */
+  overflow-wrap: anywhere;
   font-size: 0.875em;
   background: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
@@ -281,6 +283,8 @@ code {
   padding: 0.25rem 0.5rem;
   text-align: left;
   vertical-align: top;
+  /* An alias like /deliverables/{deliverable_id} has no break point. */
+  overflow-wrap: anywhere;
 }
 
 .infobox th {
@@ -363,7 +367,9 @@ a.external::after {
 @media (max-width: 720px) {
   .infobox {
     float: none;
+    box-sizing: border-box;
     width: 100%;
+    max-width: 100%;
     margin: 0 0 1rem;
   }
 }
@@ -631,6 +637,12 @@ ins {
 }
 
 /* Work in progress (spec v2 #9 §6.2): GitHub's text, plainly set apart. */
+/* A wide table scrolls inside its own box instead of widening the page (#612). */
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .wikitable {
   border-collapse: collapse;
   margin: 1rem 0;

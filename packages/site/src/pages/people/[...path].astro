@@ -37,14 +37,14 @@ const targetName =
     <p class="tagline">From the {site.wiki.repo} wiki</p>
     <p>Everyone whose commits built {site.wiki.repo}, computed from its git history.</p>
     <Fragment set:html={index.chart} />
-    <table class="wikitable people-table">
+    <div class="table-scroll"><table class="wikitable people-table">
       <thead><tr><th scope="col">Name</th><th scope="col">Active</th><th scope="col">Commits</th><th scope="col">Current lines</th><th scope="col">Activity</th></tr></thead>
       <tbody>
         {index.people.map((p) => (
           <tr><td><a href={p.href}>{p.name}</a></td><td>{p.active}</td><td>{p.commits}</td><td>{p.share}</td><td set:html={p.sparkline} /></tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
     {index.bots.length > 0 && (
       <section aria-labelledby="automated">
         <h2 id="automated">Automated contributors</h2>
@@ -96,14 +96,14 @@ const targetName =
       <section aria-labelledby="areas">
         <h2 id="areas">Areas of work</h2>
         {person.areasHtml !== null && <div class="section-body" set:html={person.areasHtml} />}
-        <table class="wikitable" data-pagefind-ignore="all">
+        <div class="table-scroll"><table class="wikitable" data-pagefind-ignore="all">
           <thead><tr><th scope="col">Feature</th><th scope="col">Commits</th><th scope="col">Current lines</th><th scope="col">Share of the feature</th></tr></thead>
           <tbody>
             {person.areas.map((a) => (
               <tr><td set:html={a.feature} /><td>{a.commits}</td><td>{a.lines}</td><td>{a.share}</td></tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
       {person.pulls.length > 0 && (
         <section aria-labelledby="pull-requests">

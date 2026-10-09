@@ -311,7 +311,7 @@ function chartTable(
       `<tr><th scope="row">${escapeHtml(bucketLabel(total.start, options.bucket))}</th>${per}<td>${formatNumber(total.commits)}</td><td>${formatNumber(total.added)}</td><td>${formatNumber(total.deleted)}</td></tr>`,
     ];
   });
-  return `<table class="visually-hidden"><caption>${htmlText(options.label)}</caption><thead><tr><th scope="col">Period</th>${head}<th scope="col">Lines added</th><th scope="col">Lines removed</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  return `<div class="visually-hidden"><table><caption>${htmlText(options.label)}</caption><thead><tr><th scope="col">Period</th>${head}<th scope="col">Lines added</th><th scope="col">Lines removed</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 
 const CELL = 12;
@@ -349,7 +349,7 @@ export function heatmap(year: number, activity: readonly ActivityDay[], label: s
       (d) =>
         `<tr><th scope="row">${escapeHtml(bucketLabel(d.day, "day"))}</th><td>${formatNumber(d.commits)}</td><td>${formatNumber(d.added)}</td><td>${formatNumber(d.deleted)}</td></tr>`,
     );
-  const table = `<table class="visually-hidden"><caption>${htmlText(label)}</caption><thead><tr><th scope="col">Day</th><th scope="col">Commits</th><th scope="col">Lines added</th><th scope="col">Lines removed</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  const table = `<div class="visually-hidden"><table><caption>${htmlText(label)}</caption><thead><tr><th scope="col">Day</th><th scope="col">Commits</th><th scope="col">Lines added</th><th scope="col">Lines removed</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
   return `<figure class="activity">${svg}${table}</figure>`;
 }
 
