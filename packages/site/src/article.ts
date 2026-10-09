@@ -5,6 +5,7 @@ import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
+import { ARTICLE_LAYOUTS, sectionHtml } from "./section-layout.ts";
 import { peopleFeatureUrl, personUrl } from "./urls.ts";
 
 export const SECTION_TITLES: Record<Exclude<SectionKey, "lead">, string> = {
@@ -93,20 +94,18 @@ export function articleView(
     for (const claim of section.claims) if (claim.staleSince !== null) stale.add(claim.id);
   }
   const anchored = new Set<string>();
-  const paragraph = (claims: Revision["sections"][number]["claims"]): string =>
-    claims
-      .map((claim) =>
-        anchoredClaim(
-          claim.id,
-          renderInline(claim.text, links) +
-            markersHtml(refs.markers.get(claim.id) ?? []) +
-            (inflight?.markers.get(claim.id) ?? ""),
-          anchored,
-        ),
-      )
-      .join(" ");
-
+  type RevisionClaim = Revision["sections"][number]["claims"][number];
+  const claimHtml = (claim: RevisionClaim): string =>
+    anchoredClaim(
+      claim.id,
+      renderInline(claim.text, links) +
+        markersHtml(refs.markers.get(claim.id) ?? []) +
+        (inflight?.markers.get(claim.id) ?? ""),
+      anchored,
+    );
+  // The lead stays one inline run: it sits in `<p class="lead">` and on the Main Page.
   const lead = revision.sections.find((section) => section.key === "lead")?.claims ?? [];
+  const leadHtml = lead.map(claimHtml).join(" ");
   const sections: SectionView[] = revision.sections.flatMap((section) =>
     section.key === "lead"
       ? []
@@ -114,7 +113,7 @@ export function articleView(
           {
             anchor: section.key,
             title: SECTION_TITLES[section.key],
-            html: paragraph(section.claims),
+            html: sectionHtml(ARTICLE_LAYOUTS[section.key], section.claims, claimHtml),
             stale: section.claims.some((claim) => stale.has(claim.id)),
           },
         ],
@@ -145,7 +144,7 @@ export function articleView(
     featureId: revision.featureId,
     title,
     notice,
-    leadHtml: paragraph(lead),
+    leadHtml,
     leadStale: lead.some(
       (claim) => stale.has(claim.id) || claim.supports.some((id) => stale.has(id)),
     ),

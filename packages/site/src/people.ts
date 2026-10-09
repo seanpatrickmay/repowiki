@@ -23,6 +23,7 @@ import { formatDate, formatNumber, shortSha } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
+import { listHtml } from "./section-layout.ts";
 import { activityUrl, personUrl } from "./urls.ts";
 
 /** Every /people/<path>/ page: the index, a person, or a merged-away id's redirect. */
@@ -177,7 +178,7 @@ export interface PersonView {
   years: { anchor: string; year: string; html: string }[];
   /** Trusted HTML, one entry per chronicle claim; empty with no narrative. */
   chronicle: string[];
-  /** Trusted HTML: the narrative's areas claims. */
+  /** Trusted block markup: a `<ul class="claim-list">`, or null with no areas claims. */
   areasHtml: string | null;
   /** The computed areas table; `feature` is trusted HTML. */
   areas: { feature: string; commits: string; lines: string; share: string }[];
@@ -278,7 +279,7 @@ export function personView(site: SiteModel, people: PeopleExport, personId: stri
       html: heatmap(Number(year), p.activity, `${p.name}'s commits in ${year}`),
     })),
     chronicle: claims("chronicle").map(claimHtml),
-    areasHtml: claims("areas").length > 0 ? claims("areas").map(claimHtml).join(" ") : null,
+    areasHtml: claims("areas").length > 0 ? listHtml(claims("areas").map(claimHtml)) : null,
     areas: p.features.map((f) => ({
       feature: featureHtml(site, f.featureId),
       commits: formatNumber(f.commits),

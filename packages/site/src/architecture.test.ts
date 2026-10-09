@@ -60,3 +60,31 @@ describe("architectureView", () => {
     );
   });
 });
+
+describe("architectureView section layout", () => {
+  const view = architectureView(site);
+  const body = (key: string) => view?.sections.find((s) => s.anchor === key)?.html ?? "";
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+  it("lists the layers, request paths and dependencies, and paragraphs the purpose", () => {
+    for (const key of ["layers", "request-paths", "dependencies"]) {
+      expect(body(key).startsWith('<ul class="claim-list"><li>')).toBe(true);
+    }
+    expect(body("purpose").startsWith("<p>")).toBe(true);
+    expect(body("purpose")).not.toContain("<ul");
+  });
+
+  it("ends each dependencies item with its (see ...) span", () => {
+    const deps = body("dependencies");
+    const items = deps.split("<li>").slice(1);
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items)
+      expect(item).toMatch(/<span class="page-ref">\(see .*\)<\/span><\/span><\/li>/);
+  });
+
+  it("anchors every claim once, and leaves the lead inline", () => {
+    const all = [view?.leadHtml, ...(view?.sections.map((s) => s.html) ?? [])].join("");
+    for (const id of ["c1", "c2", "c3", "c4", "c5"]) expect(count(all, `id="claim-${id}"`)).toBe(1);
+    expect(view?.leadHtml).not.toMatch(/<(p|ul|li)[ >]/);
+  });
+});

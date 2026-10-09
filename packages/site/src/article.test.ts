@@ -280,3 +280,75 @@ describe("claim anchors (spec v2 #4 R17)", () => {
     expect(all.split('id="claim-dup"')).toHaveLength(2);
   });
 });
+
+describe("articleView section layout", () => {
+  const withSections = (sections: { key: string; claims: ReturnType<typeof bodyClaim>[] }[]) => {
+    const revision = page("signals");
+    const lead = revision.sections.filter((s) => s.key === "lead");
+    return articleView(site, {
+      ...revision,
+      sections: [...lead, ...sections] as typeof revision.sections,
+    });
+  };
+  const cite = (path: string) => [codeCitation({ path })];
+  const html = (view: ReturnType<typeof articleView>, key: string) =>
+    view.sections.find((s) => s.anchor === key)?.html ?? "";
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+  it("starts a new paragraph in how-it-works where the cited files change", () => {
+    const view = withSections([
+      {
+        key: "how-it-works",
+        claims: [
+          bodyClaim({ id: "w1", text: "First.", citations: cite("src/a.py") }),
+          bodyClaim({ id: "w2", text: "Second.", citations: cite("src/a.py") }),
+          bodyClaim({ id: "w3", text: "Third.", citations: cite("src/b.py") }),
+          bodyClaim({ id: "w4", text: "Fourth.", citations: cite("src/b.py") }),
+        ],
+      },
+    ]);
+    const body = html(view, "how-it-works");
+    expect(count(body, "<p>")).toBe(2);
+    expect(body).toMatch(/^<p><span class="claim" id="claim-w1">First\./);
+    expect(body).toContain('</span></p><p><span class="claim" id="claim-w3">');
+  });
+
+  it("lists history, one item per claim, and anchors each claim once", () => {
+    const view = withSections([
+      {
+        key: "history",
+        claims: [
+          bodyClaim({ id: "h1", text: "One." }),
+          bodyClaim({ id: "h2", text: "Two." }),
+          bodyClaim({ id: "h3", text: "Three." }),
+        ],
+      },
+    ]);
+    const body = html(view, "history");
+    expect(body.startsWith('<ul class="claim-list"><li>')).toBe(true);
+    expect(count(body, "<li>")).toBe(3);
+    expect(count(body, "<p>")).toBe(0);
+    for (const id of ["h1", "h2", "h3"]) expect(count(body, `id="claim-${id}"`)).toBe(1);
+  });
+
+  it("lists known-limitations from two claims, and prints one claim as a paragraph", () => {
+    const one = withSections([
+      { key: "known-limitations", claims: [bodyClaim({ id: "k1", text: "Only." })] },
+    ]);
+    const lone = html(one, "known-limitations");
+    expect(lone.startsWith('<p><span class="claim" id="claim-k1">Only.')).toBe(true);
+    expect(lone.endsWith("</span></p>")).toBe(true);
+    expect(html(one, "known-limitations")).not.toContain("<ul");
+    const two = withSections([
+      {
+        key: "known-limitations",
+        claims: [bodyClaim({ id: "k1", text: "A." }), bodyClaim({ id: "k2", text: "B." })],
+      },
+    ]);
+    expect(count(html(two, "known-limitations"), "<li>")).toBe(2);
+  });
+
+  it("keeps the lead one inline run, with no block tags", () => {
+    expect(withSections([]).leadHtml).not.toMatch(/<(p|ul|li)[ >]/);
+  });
+});

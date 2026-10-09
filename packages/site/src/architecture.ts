@@ -5,6 +5,7 @@ import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
 import { backlinksHtml, citationHtml, collectReferences, markersHtml } from "./references.ts";
+import { ARCHITECTURE_LAYOUTS, sectionHtml } from "./section-layout.ts";
 
 export const ARCHITECTURE_SECTION_TITLES: Record<
   Exclude<ArchitectureSectionKey, "lead">,
@@ -48,24 +49,21 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
   const refs = collectReferences(article);
   const links = inlineOptions(site);
   const anchored = new Set<string>();
-  const paragraph = (claims: readonly ArchitectureClaim[]): string =>
-    claims
-      .map((claim) => {
-        const backing = claim.pages.flatMap((id) => {
-          const page = featureLink(site, id);
-          return page === null
-            ? []
-            : [`<a class="wikilink" href="${escapeHtml(page.href)}">${escapeHtml(page.title)}</a>`];
-        });
-        const pages =
-          backing.length === 0 ? "" : ` <span class="page-ref">(see ${backing.join(", ")})</span>`;
-        return anchoredClaim(
-          claim.id,
-          renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []) + pages,
-          anchored,
-        );
-      })
-      .join(" ");
+  const claimHtml = (claim: ArchitectureClaim): string => {
+    const backing = claim.pages.flatMap((id) => {
+      const page = featureLink(site, id);
+      return page === null
+        ? []
+        : [`<a class="wikilink" href="${escapeHtml(page.href)}">${escapeHtml(page.title)}</a>`];
+    });
+    const pages =
+      backing.length === 0 ? "" : ` <span class="page-ref">(see ${backing.join(", ")})</span>`;
+    return anchoredClaim(
+      claim.id,
+      renderInline(claim.text, links) + markersHtml(refs.markers.get(claim.id) ?? []) + pages,
+      anchored,
+    );
+  };
   const sections: SectionView[] = article.sections.flatMap((section) =>
     section.key === "lead"
       ? []
@@ -73,7 +71,7 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
           {
             anchor: section.key,
             title: ARCHITECTURE_SECTION_TITLES[section.key],
-            html: paragraph(section.claims),
+            html: sectionHtml(ARCHITECTURE_LAYOUTS[section.key], section.claims, claimHtml),
             stale: section.claims.some((claim) => claim.staleSince !== null),
           },
         ],
@@ -85,7 +83,9 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
   }));
   return {
     title: article.title,
-    leadHtml: paragraph(article.sections.find((s) => s.key === "lead")?.claims ?? []),
+    leadHtml: (article.sections.find((s) => s.key === "lead")?.claims ?? [])
+      .map(claimHtml)
+      .join(" "),
     diagram: article.diagram,
     toc: [
       ...sections.map(({ anchor, title }) => ({ anchor, title })),

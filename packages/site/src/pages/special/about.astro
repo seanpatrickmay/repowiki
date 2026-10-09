@@ -45,7 +45,7 @@ const view = architectureView(site);
           <section aria-labelledby={section.anchor}>
             <h2 id={section.anchor}>{section.title}</h2>
             {section.stale && <div class="ambox ambox-stale" role="note">{STALE_NOTICE}</div>}
-            <p set:html={section.html} />
+            <div class="section-body" set:html={section.html} />
           </section>
         ))}
         {view.references.length > 0 && (
