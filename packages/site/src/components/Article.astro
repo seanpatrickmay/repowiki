@@ -1,7 +1,7 @@
 ---
 import { type ArticleView, STALE_NOTICE } from "../article.ts";
 import { getSite } from "../site.ts";
-import { IN_PROGRESS_URL } from "../urls.ts";
+import { inProgressUrl } from "../urls.ts";
 import Diagram from "./Diagram.astro";
 import InflightSection from "./InflightSection.astro";
 import PageTabs from "./PageTabs.astro";
@@ -36,7 +36,7 @@ const { wiki } = getSite();
   </table>
   {view.leadStale && <div class="ambox ambox-stale" role="note">{STALE_NOTICE}</div>}{view.inflight?.notice != null && (
     <div class="ambox ambox-inflight" role="note" data-pagefind-ignore="all">
-      {view.inflight.notice} <a href={IN_PROGRESS_URL}>Work in progress</a>
+      {view.inflight.notice} <a href={inProgressUrl()}>Work in progress</a>
     </div>
   )}
   <p class="lead" set:html={view.leadHtml} />

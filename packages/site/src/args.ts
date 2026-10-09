@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
+import { isBasePath } from "./base-path.ts";
 import { resolveExportFile } from "./load.ts";
 
 /**
@@ -22,6 +23,8 @@ export interface SiteArgs {
   repoUrl: string | null;
   /** False with `build --no-inflight`: the site and its export copy carry no work in flight. */
   inflight: boolean;
+  /** The path the site is served under, "/" or "/seg/.../" (`--base`, issue #610). */
+  base: string;
 }
 
 export class UsageError extends Error {
@@ -29,10 +32,10 @@ export class UsageError extends Error {
 }
 
 export const USAGE =
-  "usage: site build --export <file|dir> [--out <dir>] [--repo-url <https-url>] [--no-inflight]\n" +
-  "       site preview (--export <file|dir> | --out <dir>)";
+  "usage: site build --export <file|dir> [--out <dir>] [--repo-url <https-url>] [--base <path>] [--no-inflight]\n" +
+  "       site preview (--export <file|dir> | --out <dir>) [--base <path>]";
 
-const FLAGS = new Set(["--export", "--out", "--repo-url"]);
+const FLAGS = new Set(["--export", "--out", "--repo-url", "--base"]);
 
 /** Parses `build|preview` plus flags. The default --out is a `site` directory next to the export. */
 export function parseSiteArgs(argv: readonly string[]): SiteArgs {
@@ -76,7 +79,24 @@ export function parseSiteArgs(argv: readonly string[]): SiteArgs {
     outDir,
     repoUrl: parseRepoUrl(flags.get("--repo-url")),
     inflight: noInflight === 0,
+    base: parseBase(flags.get("--base") ?? "/"),
   };
+}
+
+/**
+ * Normalizes a base path to "/seg/.../" (`wiki/ncos` is `/wiki/ncos/`) and refuses anything but
+ * segments of [A-Za-z0-9._~-]: no dot segment, empty segment, query, fragment, `%`, quote, space,
+ * backslash or scheme. The base is spliced into HTML attributes, CSS and scripts unescaped, so
+ * this is the guard against injecting markup or code through it.
+ */
+export function parseBase(value: string, name = "--base"): string {
+  const base = `${value.startsWith("/") ? "" : "/"}${value}${value.endsWith("/") ? "" : "/"}`;
+  if (value === "" || !isBasePath(base)) {
+    throw new UsageError(
+      `${name} must be a path of segments of letters, digits and . _ ~ - (like wiki/ncos), got ${JSON.stringify(value)}`,
+    );
+  }
+  return base;
 }
 
 /**

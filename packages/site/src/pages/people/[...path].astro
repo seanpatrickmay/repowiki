@@ -2,7 +2,7 @@
 import Layout from "../../layouts/Layout.astro";
 import { type PeopleRoute, peopleIndexView, peopleRoutes, personView } from "../../people.ts";
 import { getSite } from "../../site.ts";
-import { personUrl } from "../../urls.ts";
+import { peopleUrl, personUrl } from "../../urls.ts";
 
 /** Generated only when the export has People (spec v2 #6 §11): no route otherwise. */
 export function getStaticPaths() {
@@ -138,6 +138,6 @@ const targetName =
       <meta name="robots" content="noindex" />
     </Fragment>
     <h1 class="page-title">{route.path}</h1>
-    <p class="redirect-target">Redirect to: <a href={target ?? "/people/"}>{targetName}</a></p>
+    <p class="redirect-target">Redirect to: <a href={target ?? peopleUrl()}>{targetName}</a></p>
   </Layout>
 )}

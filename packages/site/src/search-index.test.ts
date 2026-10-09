@@ -65,7 +65,7 @@ describe("writeSearchIndex", () => {
       createIndex: async () => ({ errors: [], index }),
       close: async () => {},
     };
-    await writeSearchIndex(dir, fake);
+    await writeSearchIndex(dir, "/", fake);
     expect(readFileSync(join(dir, "pagefind", "pagefind-entry.json"))).toEqual(entry);
     await Promise.all(lateWrites);
   });
@@ -100,7 +100,7 @@ describe("writeSearchIndex", () => {
       createIndex: async () => ({ errors: [], index }),
       close: async () => {},
     };
-    await expect(writeSearchIndex(dir, fake)).rejects.toThrow(
+    await expect(writeSearchIndex(dir, "/", fake)).rejects.toThrow(
       `pagefind: refusing to write outside the output directory: "${path}"`,
     );
     expect(existsSync(join(dir, "escape.txt"))).toBe(false);
@@ -119,7 +119,7 @@ describe("writeSearchIndex", () => {
       createIndex: async () => ({ errors: [], index }),
       close: async () => {},
     };
-    await writeSearchIndex(dir, fake);
+    await writeSearchIndex(dir, "/", fake);
     expect(readFileSync(join(dir, "pagefind", "..foo", "..bar.json"), "utf8")).toBe("{}");
   });
 
@@ -138,7 +138,35 @@ describe("writeSearchIndex", () => {
         closed = true;
       },
     };
-    await expect(writeSearchIndex(dir, fake)).rejects.toThrow("pagefind: no html");
+    await expect(writeSearchIndex(dir, "/", fake)).rejects.toThrow("pagefind: no html");
     expect(closed).toBe(true);
+  });
+
+  it("points the bundle scripts' fallback bundle path under the base, and changes nothing else", async () => {
+    const script = 'try{u=x()}catch{u="/pagefind/"}let b=o.basePath||"/pagefind/";';
+    const files = [
+      { path: "pagefind-ui.js", content: Buffer.from(script) },
+      { path: "pagefind-ui.css", content: Buffer.from('a{content:"/pagefind/"}') },
+      { path: "wasm.en.pagefind", content: Buffer.from('\0"/pagefind/"\xff') },
+    ];
+    const fake: SearchIndexApi = {
+      createIndex: async () => ({
+        errors: [],
+        index: {
+          addDirectory: async () => ({ errors: [], page_count: 1 }),
+          getFiles: async () => ({ errors: [], files }),
+        },
+      }),
+      close: async () => {},
+    };
+    await writeSearchIndex(dir, "/wiki/demo/", fake);
+    expect(readFileSync(join(dir, "pagefind", "pagefind-ui.js"), "utf8")).toBe(
+      'try{u=x()}catch{u="/wiki/demo/pagefind/"}let b=o.basePath||"/wiki/demo/pagefind/";',
+    );
+    for (const file of files.slice(1)) {
+      expect(readFileSync(join(dir, "pagefind", file.path))).toEqual(file.content);
+    }
+    await writeSearchIndex(dir, "/", fake);
+    expect(readFileSync(join(dir, "pagefind", "pagefind-ui.js"), "utf8")).toBe(script);
   });
 });

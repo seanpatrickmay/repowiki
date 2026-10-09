@@ -2,6 +2,7 @@
 import Layout from "../layouts/Layout.astro";
 import { randomTargets } from "../main-page.ts";
 import { getSite } from "../site.ts";
+import { withBase } from "../urls.ts";
 
 const urls = randomTargets(getSite());
 ---
@@ -9,7 +10,7 @@ const urls = randomTargets(getSite());
   <h1 class="page-title">Random article</h1>
   <p id="random-status">
     Choosing a random article... If nothing happens, pick one from
-    <a href="/special/all-pages/">All articles</a>.
+    <a href={withBase("/special/all-pages/")}>All articles</a>.
   </p>
   <script type="application/json" id="random-targets" set:html={JSON.stringify(urls).replace(/</g, "\\u003c")} />
   <script>

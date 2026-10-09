@@ -5,7 +5,7 @@ import { renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
 import { leadSummary } from "./summary.ts";
-import { ARCHITECTURE_URL, articleUrl, IN_PROGRESS_URL, pullUrl } from "./urls.ts";
+import { architectureUrl, articleUrl, inProgressUrl, pullUrl } from "./urls.ts";
 
 export const DID_YOU_KNOW_COUNT = 5;
 export const RECENT_COUNT = 5;
@@ -162,7 +162,7 @@ export function mainPageView(site: SiteModel): MainPageView {
     site.architecture === null
       ? null
       : {
-          href: ARCHITECTURE_URL,
+          href: architectureUrl(),
           title: site.architecture.title,
           leadHtml: lead.map((claim) => renderInline(claim.text, links)).join(" "),
         };
@@ -172,7 +172,7 @@ export function mainPageView(site: SiteModel): MainPageView {
     inflight === null
       ? null
       : {
-          href: IN_PROGRESS_URL,
+          href: inProgressUrl(),
           status: inflightStatus(site, inflight).line,
           pulls: [...inflight.pulls]
             .sort(

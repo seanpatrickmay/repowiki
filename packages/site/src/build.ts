@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import type { WikiExport } from "@repowiki/core";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
-import { UsageError } from "./args.ts";
+import { parseBase, UsageError } from "./args.ts";
 import { loadExport } from "./load.ts";
 import { writeSearchIndex } from "./search-index.ts";
 import { siteMarker } from "./site-format.ts";
@@ -74,20 +74,24 @@ function validateOutDir(exportFile: string, outDir: string): void {
 }
 
 /**
- * Environment the Astro pages read (see site.ts). Telemetry is off: builds never touch the network.
- * REPOWIKI_BUILD is new on every call, so a second build in the same process loads its own export.
+ * Environment the Astro pages read (see site.ts, and urls.ts for REPOWIKI_BASE). Telemetry is
+ * off: builds never touch the network. REPOWIKI_BUILD is new on every call, so a second build in
+ * the same process loads its own export.
  */
-function setBuildEnv(exportFile: string, repoUrl: string | null): void {
+function setBuildEnv(exportFile: string, repoUrl: string | null, base: string): void {
   process.env.ASTRO_TELEMETRY_DISABLED = "1";
   process.env.REPOWIKI_BUILD = randomUUID();
   process.env.REPOWIKI_EXPORT = exportFile;
   process.env.REPOWIKI_REPO_URL = repoUrl ?? "";
+  process.env.REPOWIKI_BASE = base;
 }
 
-function astroConfig(outDir: string): AstroInlineConfig {
+/** `base` is the path the site is served under; Astro puts it on the /_astro/ asset URLs. */
+function astroConfig(outDir: string, base: string): AstroInlineConfig {
   return {
     root: ROOT,
     outDir,
+    base,
     configFile: false,
     logLevel: "warn",
     compressHTML: false,
@@ -116,8 +120,9 @@ export async function buildSite(
   exportFile: string,
   outDir: string,
   repoUrl: string | null,
-  options: { inflight?: boolean } = {},
+  options: { inflight?: boolean; base?: string } = {},
 ): Promise<BuildResult> {
+  const base = parseBase(options.base ?? "/");
   const loaded = loadExport(exportFile);
   validateOutDir(exportFile, outDir);
   // Without the work in flight, the pages are built from, and the root's export is, a copy of
@@ -128,7 +133,7 @@ export async function buildSite(
   try {
     // Inside the try, so a failed write (a full disk) still removes the scratch directory.
     if (scratch !== null) writeFileSync(pages, `${JSON.stringify(wiki)}\n`);
-    return await render(pages, outDir, repoUrl, wiki);
+    return await render(pages, outDir, repoUrl, wiki, base);
   } finally {
     if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
   }
@@ -140,8 +145,9 @@ async function render(
   outDir: string,
   repoUrl: string | null,
   wiki: WikiExport,
+  base: string,
 ): Promise<BuildResult> {
-  setBuildEnv(exportFile, repoUrl);
+  setBuildEnv(exportFile, repoUrl, base);
   const marker = siteMarker();
 
   // Astro puts a static build's server chunks in <cwd>/.astro/ when the out dir is outside the
@@ -153,7 +159,7 @@ async function render(
   const buildCwd = mkdtempSync(join(ROOT, ".astro", "build-"));
   try {
     process.chdir(buildCwd);
-    await build(astroConfig(outDir));
+    await build(astroConfig(outDir, base));
   } finally {
     process.chdir(previousCwd);
     rmSync(buildCwd, { recursive: true, force: true });
@@ -163,13 +169,13 @@ async function render(
   // build cut short (a half-written Pagefind index) is never taken for a current one.
   writeFileSync(`${outDir}/.repowiki-site`, "");
   writeSiteRoot(outDir, wiki);
-  const result = await writeSearchIndex(outDir);
+  const result = await writeSearchIndex(outDir, base);
   writeFileSync(`${outDir}/.repowiki-site`, marker);
   return result;
 }
 
-/** Serves a built site on http://127.0.0.1:4321/ until the process is stopped. */
-export async function previewSite(outDir: string): Promise<void> {
+/** Serves a built site on http://127.0.0.1:4321<base> until the process is stopped. */
+export async function previewSite(outDir: string, base = "/"): Promise<void> {
   if (!existsSync(`${outDir}/.repowiki-site`)) {
     throw new UsageError(
       `no built site in ${outDir}; run \`pnpm site:build --export <file>\` first`,
@@ -179,7 +185,7 @@ export async function previewSite(outDir: string): Promise<void> {
   const previousCwd = process.cwd();
   try {
     process.chdir(ROOT);
-    await preview(astroConfig(outDir));
+    await preview(astroConfig(outDir, parseBase(base)));
   } finally {
     process.chdir(previousCwd);
   }

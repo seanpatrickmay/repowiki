@@ -1,6 +1,6 @@
 ---
 import { type ArticleInflight, IN_PROGRESS_ANCHOR } from "../inflight-article.ts";
-import { IN_PROGRESS_URL } from "../urls.ts";
+import { inProgressUrl } from "../urls.ts";
 
 interface Props {
   view: ArticleInflight;
@@ -10,7 +10,7 @@ const { view } = Astro.props;
 ---
 <section aria-labelledby={IN_PROGRESS_ANCHOR} data-pagefind-ignore="all">
   <h2 id={IN_PROGRESS_ANCHOR}>In progress</h2>
-  <p class="inflight-more">{view.status.line} <a href={IN_PROGRESS_URL}>All work in progress</a></p>
+  <p class="inflight-more">{view.status.line} <a href={inProgressUrl()}>All work in progress</a></p>
   {view.status.stale !== null && <div class="ambox ambox-stale" role="note">{view.status.stale}</div>}
   {view.pulls.length > 0 && (
     <>

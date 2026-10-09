@@ -52,14 +52,16 @@ function fakeElement(tag: string, allowInnerHtml = false) {
 type Handler = (event: { target: unknown; key?: string }) => void;
 type FakeElement = ReturnType<typeof fakeElement>;
 
-function setup(options: { hover?: boolean; response?: (url: string) => Promise<unknown> } = {}) {
+function setup(
+  options: { hover?: boolean; response?: (url: string) => Promise<unknown>; base?: string } = {},
+) {
   const handlers = new Map<string, Handler>();
   const created: FakeElement[] = [];
   const body = fakeElement("body");
   const fetched: string[] = [];
   const doc = {
     body,
-    documentElement: { clientWidth: 1000 },
+    documentElement: { clientWidth: 1000, dataset: { base: options.base } },
     createElement: (tag: string) => {
       // The card and the preview body take site-built html; the title link must not.
       const element = fakeElement(tag, tag === "div");
@@ -125,6 +127,19 @@ describe("installPreviews", () => {
     expect(text?.innerHtml).toBe("<p><b>Deliverables</b> are records.</p>");
     expect(link.attributes.get("aria-describedby")).toBe("preview-card");
     expect(card.style).toMatchObject({ width: "352px", left: "40px", top: "606px" });
+  });
+
+  it("fetches the preview from under the page's base, and from the root without one", async () => {
+    for (const [base, url] of [
+      ["/wiki/demo/", "/wiki/demo/api/preview/deliverables.json"],
+      [undefined, "/api/preview/deliverables.json"],
+      ['/x" onload="', "/api/preview/deliverables.json"],
+    ] as const) {
+      const { fire, fetched } = setup({ hover: false, base });
+      fire("focusin", fakeLink("deliverables"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetched).toEqual([url]);
+    }
   });
 
   it("shows on keyboard focus at once, and Escape hides it", async () => {

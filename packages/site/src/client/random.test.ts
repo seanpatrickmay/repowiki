@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { goToRandomArticle } from "./random.ts";
 
 /** Just enough of a document and location to see where the reader is sent. */
-function fakeEnv(targets: string | null) {
+function fakeEnv(targets: string | null, base?: string) {
   const replaced: string[] = [];
   const doc = {
     getElementById: (id: string) =>
       id === "random-targets" && targets !== null ? { textContent: targets } : null,
+    documentElement: { dataset: { base } },
   };
   const location = { replace: (url: string) => replaced.push(url) };
   return { doc, location, replaced };
@@ -53,5 +54,17 @@ describe("goToRandomArticle", () => {
     const mixed = fakeEnv(JSON.stringify([...hostile, "/wiki/ok-1/"]));
     goToRandomArticle(mixed.doc, mixed.location, () => 0.99);
     expect(mixed.replaced).toEqual(["/wiki/ok-1/"]);
+  });
+
+  it("takes only article URLs under the page's base", () => {
+    const urls = ["/wiki/a/", "/wiki/demo/wiki/b/", "/wiki/demo/wiki/../x/", "/wiki/demo/other/"];
+    for (const [random, expected] of [
+      [0, "/wiki/demo/wiki/b/"],
+      [0.99, "/wiki/demo/wiki/b/"],
+    ] as const) {
+      const { doc, location, replaced } = fakeEnv(JSON.stringify(urls), "/wiki/demo/");
+      goToRandomArticle(doc, location, () => random);
+      expect(replaced).toEqual([expected]);
+    }
   });
 });

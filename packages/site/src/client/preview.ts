@@ -1,7 +1,10 @@
 /// <reference lib="dom" />
 // Wikipedia-style page previews: hovering (or focusing) a link with data-preview shows the
-// target's lead and key facts, fetched from /api/preview/<id>.json (a Wikipedia article's summary
-// from /api/preview/wp/<hash>.json). Everything is precomputed at build time and same-origin.
+// target's lead and key facts, fetched from <base>api/preview/<id>.json (a Wikipedia article's
+// summary from <base>api/preview/wp/<hash>.json). Everything is precomputed at build time and
+// same-origin; <base> is the path the site is served under, from the page (base-path.ts).
+
+import { pageBase } from "../base-path.ts";
 
 interface Preview {
   title: string;
@@ -21,6 +24,7 @@ const HIDE_DELAY_MS = 250;
 
 export function installPreviews({ document, window, fetch }: PreviewEnv): void {
   const cache = new Map<string, Promise<Preview | null>>();
+  const base = pageBase(document.documentElement);
   const card = document.createElement("div");
   card.className = "preview-card";
   card.id = "preview-card";
@@ -42,7 +46,7 @@ export function installPreviews({ document, window, fetch }: PreviewEnv): void {
   function load(id: string): Promise<Preview | null> {
     let pending = cache.get(id);
     if (pending === undefined) {
-      pending = fetch(`/api/preview/${previewPath(id)}.json`)
+      pending = fetch(`${base}api/preview/${previewPath(id)}.json`)
         .then((response) => (response.ok ? (response.json() as Promise<Preview | null>) : null))
         .catch(() => null);
       cache.set(id, pending);
