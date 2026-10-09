@@ -289,3 +289,18 @@ describe("summarizeClusters edge cases", () => {
     ]);
   });
 });
+
+describe("summarizeClusters on Rust", () => {
+  it("names a Rust use path's crate as its external package", () => {
+    const rust = makeIndex(["src/lib.rs"]);
+    rust.unresolved = [
+      { from: "src/lib.rs", specifier: "serde::Serialize", line: 1, external: true },
+      { from: "src/lib.rs", specifier: "std::collections::HashMap", line: 2, external: true },
+      { from: "src/lib.rs", specifier: "serde", line: 3, external: true },
+    ];
+    const [summary] = summarizeClusters(rust, buildFileGraph(rust), [
+      { id: "c01", files: ["src/lib.rs"] },
+    ]);
+    expect(summary?.externalImports).toEqual(["serde", "std"]);
+  });
+});

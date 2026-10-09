@@ -1,5 +1,5 @@
 import type { Node } from "web-tree-sitter";
-import type { RawImport } from "./imports.ts";
+import { type RawImport, rustImports } from "./imports.ts";
 import { languageForPath, type SourceLanguage } from "./languages.ts";
 
 /**
@@ -36,7 +36,17 @@ export interface CallSite {
 const lineOf = (node: Node): number => node.startPosition.row + 1;
 
 export function extractBindings(language: SourceLanguage, root: Node): ImportBinding[] {
+  if (language === "rust") return rustBindings(root);
   return language === "python" ? pythonBindings(root) : esBindings(root);
+}
+
+/** A Rust `use` binds its last segment or alias; `mod a;` binds the module a. Globs bind nothing. */
+function rustBindings(root: Node): ImportBinding[] {
+  return rustImports(root).flatMap(({ raw, local }) =>
+    local === null
+      ? []
+      : [{ local, imported: raw.kind === "rust-use" ? (raw.path.at(-1) ?? null) : null, raw }],
+  );
 }
 
 function pythonBindings(root: Node): ImportBinding[] {
@@ -226,13 +236,19 @@ export interface SymbolSpan {
  * submodule: a target whose path ends in `<module>/<name>.py` or `<module>/<name>/__init__.py`
  * (just `<name>` for `from . import name`). The module's own file never counts, so
  * `from .util import util` imports the symbol `util`. Otherwise the binding names a symbol of the
- * first target. Null when nothing resolved.
+ * first target. Null when nothing resolved. A Rust `use` binds a module when its target file is
+ * named after its last segment (`a.rs`, `a/mod.rs`), and a symbol of the target otherwise.
  */
 export function resolveBinding(
   binding: ImportBinding,
   targets: readonly string[],
 ): ResolvedBinding | null {
   const { local, imported, raw } = binding;
+  const first = targets[0];
+  if (raw.kind === "rust-use" && first !== undefined) {
+    const module = /([^/]+?)(?:\/mod)?\.rs$/.exec(first)?.[1] === imported;
+    return { local, imported: module ? null : imported, target: first };
+  }
   if (raw.kind === "python" && imported !== null) {
     const stem = [...raw.module.split("."), imported].filter((s) => s !== "").join("/");
     const submodule = targets.find(
@@ -258,7 +274,9 @@ export function resolveBinding(
  *
  * In Rust, `self.m()` and `Self::m()` inside the method T::n resolve as T::m, `super::f()` inside an
  * inline module as f of the module around it, and a name or `T::f()` inside inline modules to the
- * innermost module of the file that has it (`tests::helper`, then `helper`).
+ * innermost module of the file that has it (`tests::helper`, then `helper`). Otherwise a name
+ * resolves through its `use` binding, `m::f()` through a module binding m, and `T::f()` through a
+ * binding of the symbol T to T::f of its file.
  */
 export function resolveCalls(
   file: { id: string; path: string; symbols: readonly SymbolSpan[] },
@@ -294,7 +312,14 @@ export function resolveCalls(
     }
     if (call.receiver === "super") return inScope(scopes(call.line).slice(1), call.name);
     const name = call.receiver === null ? call.name : `${call.receiver}::${call.name}`;
-    return inScope(scopes(call.line), name);
+    const own = inScope(scopes(call.line), name);
+    const binding = byLocal.get(call.receiver ?? call.name);
+    if (own !== undefined || binding === undefined) return own;
+    if (call.receiver === null) {
+      return binding.imported === null ? undefined : find(binding.target, binding.imported);
+    }
+    const member = binding.imported === null ? call.name : `${binding.imported}::${call.name}`;
+    return find(binding.target, member);
   };
 
   const callee = (call: CallSite): SymbolSpan | undefined => {

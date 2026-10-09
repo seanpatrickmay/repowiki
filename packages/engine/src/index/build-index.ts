@@ -8,6 +8,7 @@ import {
   resolveBinding,
   resolveCalls,
 } from "./calls.ts";
+import { type CargoManifest, parseCargoManifest } from "./cargo.ts";
 import { type CoChange, computeCoChange, DEFAULT_MAX_FILES_PER_COMMIT } from "./cochange.ts";
 import {
   commitFiles,
@@ -106,6 +107,8 @@ async function* withContents(
 }
 
 function specifierOf(raw: RawImport): string {
+  if (raw.kind === "rust-use") return raw.path.join("::");
+  if (raw.kind === "rust-mod") return `mod ${raw.name}`;
   return raw.kind === "es" ? raw.specifier : `${".".repeat(raw.level)}${raw.module}`;
 }
 
@@ -130,23 +133,31 @@ export async function indexRepo(
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   // Pass 1: the manifests alone, parsed whole (they are read in full whatever their size), because
-  // the resolver needs every workspace package before any file is resolved.
+  // the resolver needs every workspace package and Cargo crate before any file is resolved.
+  const isManifest = (path: string, name: string) => path === name || path.endsWith(`/${name}`);
   const manifests = blobs.filter(
-    (blob) => blob.path === "package.json" || blob.path.endsWith("/package.json"),
+    (blob) => isManifest(blob.path, "package.json") || isManifest(blob.path, "Cargo.toml"),
   );
   const packages: WorkspacePackage[] = [];
+  const cargo: CargoManifest[] = [];
   for await (const [blob, data] of withContents(
     repo,
     manifests,
     Number.POSITIVE_INFINITY,
     gitOptions,
   )) {
-    const parsed = parseWorkspacePackage(blob.path, data.content?.toString("utf8") ?? "");
+    const text = data.content?.toString("utf8") ?? "";
+    if (isManifest(blob.path, "Cargo.toml")) {
+      cargo.push(parseCargoManifest(blob.path, text));
+      continue;
+    }
+    const parsed = parseWorkspacePackage(blob.path, text);
     if (parsed !== null) packages.push(parsed);
   }
   const resolver = createResolver(
     blobs.map((blob) => blob.path),
     packages,
+    cargo,
   );
   const parser = await createSourceParser();
 

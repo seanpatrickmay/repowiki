@@ -77,8 +77,9 @@ const PYTHON_MODULE = /^[A-Za-z_]\w*$/;
 function packageOf(from: string, rawSpecifier: string): string | null {
   const specifier = rawSpecifier.replace(/[?#][\s\S]*$/, "");
   let root: string;
-  if (from.endsWith(".py")) {
-    root = specifier.split(".")[0] ?? "";
+  if (from.endsWith(".py") || from.endsWith(".rs")) {
+    // A Rust use path names its crate first: "serde::Serialize" is "serde".
+    root = specifier.split(from.endsWith(".rs") ? "::" : ".")[0] ?? "";
     if (!PYTHON_MODULE.test(root)) return null;
   } else if (specifier.startsWith("node:")) {
     if (!NODE_BUILTIN.test(specifier)) return null;
