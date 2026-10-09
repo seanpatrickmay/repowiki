@@ -262,7 +262,7 @@ describe("writePeople (spec v2 #6 §8.4)", () => {
     expect(request({ parent: full(29), append: true }).append).toBe(true);
     const whole = request({ parent: full(30), append: true });
     expect(whole.append).toBe(false);
-    expect(whole.pack.text).toContain("## Episodes, oldest first");
+    expect(whole.pack.text).toContain("## Work, oldest first");
   });
 
   it("appends: keeps the stored chronicle word for word and asks only for new episodes (R25)", async () => {
@@ -329,7 +329,7 @@ describe("writePeople (spec v2 #6 §8.4)", () => {
     const turn = requests[0]?.messages[0]?.content ?? "";
     expect(turn).toContain("# Stored chronicle\n");
     expect(requests[0]?.system).toContain("This call is an append.");
-    expect(turn).toContain("## New episodes, oldest first");
+    expect(turn).toContain("## New work, oldest first");
     expect(turn).not.toContain("PR #3");
   });
 });
@@ -446,7 +446,7 @@ describe("writePeople's append and outcome rules (the Task 20 and Task 22 ruling
   it("writes whole an append whose basis left the history (R19)", () => {
     const gone = request({ parent: makePersonRevision({ basis: "f".repeat(40) }), append: true });
     expect(gone.append).toBe(false);
-    expect(gone.pack.text).toContain("## Episodes, oldest first");
+    expect(gone.pack.text).toContain("## Work, oldest first");
     expect(gone.pack.text).toContain("PR #3");
   });
 

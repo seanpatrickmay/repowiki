@@ -68,6 +68,45 @@ function expectSound(revision: PersonRevision, request: PersonRequest) {
   expect(new Set(told).size).toBe(told.length);
 }
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** The months a revision's chronicle claims state: each month name with the year after it. */
+function chronicleMonths(revision: PersonRevision): Set<string> {
+  const months = new Set<string>();
+  for (const claim of revision.sections.find((s) => s.key === "chronicle")?.claims ?? []) {
+    const named = [...claim.text.matchAll(new RegExp(`\\b(${MONTHS.join("|")})\\b`, "g"))];
+    for (const m of named) {
+      const year = claim.text.slice(m.index).match(/\b(\d{4})\b/)?.[1];
+      if (year !== undefined) months.add(`${year}-${MONTHS.indexOf(m[1] ?? "")}`);
+    }
+  }
+  return months;
+}
+
+/** Every month from `first` to `last` (UTC), as chronicleMonths names them. */
+function activeMonths(first: string, last: string): string[] {
+  const out: string[] = [];
+  const end = new Date(last);
+  for (let d = new Date(first); ; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1))) {
+    out.push(`${d.getUTCFullYear()}-${d.getUTCMonth()}`);
+    if (d.getUTCFullYear() === end.getUTCFullYear() && d.getUTCMonth() === end.getUTCMonth())
+      return out;
+  }
+}
+
 /** The features a revision's areas claims link. */
 const areasOf = (revision: PersonRevision) =>
   (revision.sections.find((s) => s.key === "areas")?.claims ?? []).flatMap((c) =>
@@ -89,6 +128,11 @@ describe("writePeople with Claude (cassette)", () => {
       const revision = built.outcome.revision as PersonRevision;
       expectSound(revision, first);
       expect(revision.reason).toBe("build");
+      // The chronicle covers the whole span, not just the newest work (#616).
+      const ada = fx.refreshed.snapshot.people.find((p) => p.id === "ada-lovelace");
+      const active = activeMonths(ada?.firstCommit ?? "", ada?.lastCommit ?? "");
+      const told = chronicleMonths(revision);
+      expect(active.filter((m) => told.has(m)).length).toBeGreaterThanOrEqual(0.8 * active.length);
 
       // An append whose stored narrative stops at the PR #6 merge: only February is new.
       const parent = { ...revision, basis: fx.pr6 };
