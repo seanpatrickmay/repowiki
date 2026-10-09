@@ -8,13 +8,15 @@ export type SymbolKind =
   | "variable"
   | "interface"
   | "type"
-  | "enum";
+  | "enum"
+  | "module"
+  | "macro";
 
 export interface SymbolDef {
-  /** Dotted path inside the file: "K.m" for a method m of class K. */
+  /** Dotted path inside the file: "K.m" for a method m of class K; "T::m" and "m::f" in Rust. */
   qualifiedName: string;
   kind: SymbolKind;
-  /** 1-based inclusive line span, including decorators and an `export` keyword. */
+  /** 1-based inclusive line span, including decorators, Rust attributes and an `export` keyword. */
   startLine: number;
   endLine: number;
   exported: boolean;
@@ -59,24 +61,33 @@ export function extractSymbols(
 
 function collectStatements(language: SourceLanguage, statements: Node[], out: SymbolDef[]): void {
   if (language === "python") collectPython(statements, null, out);
+  else if (language === "rust") collectRust(statements, "", out);
   else collectTypeScript(statements, out);
 }
 
 /** A column-0 line where a top-level declaration can start. */
 const DECLARATION_START = {
   python: /^(?:@|(?:async\s+)?def\b|class\b)/,
+  rust: /^(?:#\[|macro_rules!|(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe|extern(?:\s+"[^"]*")?)\s+)*(?:fn|struct|enum|union|trait|type|const|static|mod|impl)\b)/,
   typescript:
     /^(?:@|(?:export|declare|async|function|class|abstract|interface|type|enum|const|let|var)\b)/,
 };
 
-/** A line that belongs to the declaration on the next start line: a decorator or a bare `export`. */
-const ATTACHED = /^(?:@|export(?:\s+default)?\s*$)/;
+/** A line that belongs to the declaration on the next start line: a decorator, a Rust attribute or a bare `export`. */
+const ATTACHED = /^(?:@|#\[|export(?:\s+default)?\s*$)/;
 
 interface Chunk {
   text: string;
   /** 0-based row of the chunk's first line in the file. */
   row: number;
 }
+
+/** Text nodes of Python, TS and TSX, then Rust's. */
+const TEXT_NODES = ["comment", "string", "template_string", "jsx_text"].concat([
+  "block_comment",
+  "string_literal",
+  "raw_string_literal",
+]);
 
 /**
  * Rows that start inside a multi-line comment, string, template literal or JSX text. The full
@@ -87,7 +98,7 @@ function rowsInsideText(node: Node): Set<number> {
   // Document order: a node nested in a text node comes after it and is covered by it, so each
   // row is added once and the walk stays linear however deeply templates nest.
   let covered = -1;
-  for (const text of node.descendantsOfType(["comment", "string", "template_string", "jsx_text"])) {
+  for (const text of node.descendantsOfType(TEXT_NODES)) {
     const last = text.endPosition.column > 0 ? text.endPosition.row : text.endPosition.row - 1;
     for (let row = Math.max(text.startPosition.row + 1, covered + 1); row <= last; row++)
       rows.add(row);
@@ -101,7 +112,7 @@ function rowsInsideText(node: Node): Set<number> {
  * decorator or a bare `export` stays with its declaration: no split until that declaration's line.
  */
 function splitAtDeclarations(language: SourceLanguage, node: Node): Chunk[] {
-  const start = DECLARATION_START[language === "python" ? "python" : "typescript"];
+  const start = DECLARATION_START[language === "tsx" ? "typescript" : language];
   const inside = rowsInsideText(node);
   const row = node.startPosition.row;
   const lines = node.text.split("\n");
@@ -167,7 +178,8 @@ function recover(
         for (const s of found)
           if (s.startLine <= last) out.push({ ...s, endLine: Math.min(s.endLine, last) });
       } else if (language !== "python" && closesOuterBlock(parsed.root)) {
-        pending = namespaced ? [] : pending.filter((s) => s.exported);
+        // Rust has no export statement that only a top-level item can carry: drop them all.
+        pending = namespaced || language === "rust" ? [] : pending.filter((s) => s.exported);
         namespaced = false;
       }
     } finally {
@@ -297,5 +309,93 @@ function collectDeclaration(
         else if (exported) out.push(symbol(id.text, "variable", span, true));
       }
       return;
+  }
+}
+
+/** Rust items by node type; a struct or union is a class, a trait an interface. */
+const RUST_KINDS: Record<string, SymbolKind> = {
+  function_item: "function",
+  struct_item: "class",
+  union_item: "class",
+  enum_item: "enum",
+  trait_item: "interface",
+  type_item: "type",
+  const_item: "variable",
+  static_item: "variable",
+  mod_item: "module",
+  macro_definition: "macro",
+};
+
+/** The outer attributes (`#[...]`) right before a Rust item, first to last. */
+function attributesOf(item: Node): Node[] {
+  const found: Node[] = [];
+  for (
+    let at = item.previousNamedSibling;
+    at?.type === "attribute_item";
+    at = at.previousNamedSibling
+  )
+    found.unshift(at);
+  return found;
+}
+
+/** A Rust symbol whose span starts at its first attribute, as a Python span starts at a decorator. */
+function rustSymbol(qualifiedName: string, kind: SymbolKind, item: Node, exported: boolean) {
+  const start = attributesOf(item)[0] ?? item;
+  return { ...symbol(qualifiedName, kind, item, exported), startLine: start.startPosition.row + 1 };
+}
+
+/** Any `pub`, `pub(crate)` or `pub(super)` counts as exported. */
+const isPub = (item: Node): boolean =>
+  item.namedChildren.some((c) => c.type === "visibility_modifier");
+
+/** The type an `impl` is for, by its last path segment without generics; null for `&T`, tuples, etc. */
+function implTypeName(type: Node | null): string | null {
+  if (type?.type === "type_identifier") return type.text;
+  if (type?.type === "generic_type") return implTypeName(type.childForFieldName("type"));
+  if (type?.type === "scoped_type_identifier") return type.childForFieldName("name")?.text ?? null;
+  return null;
+}
+
+/**
+ * Rust items, with the methods of `impl` and `trait` blocks as `Type::method` (`impl Trait for
+ * Type` too) and the members of an inline `mod m { ... }` as `m::item`. A macro is `name!`, exported
+ * when it has `#[macro_export]`. `mod m;` declares a file, so it is an import, not a symbol.
+ */
+function collectRust(items: readonly Node[], prefix: string, out: SymbolDef[]): void {
+  for (const item of items) {
+    const body = item.childForFieldName("body");
+    if (item.type === "impl_item") {
+      const owner = implTypeName(item.childForFieldName("type"));
+      // A trait impl's methods are as visible as the trait they implement.
+      const traitImpl = item.childForFieldName("trait") !== null;
+      if (owner !== null)
+        collectRustMethods(body, `${prefix}${owner}`, (m) => traitImpl || isPub(m), out);
+      continue;
+    }
+    const kind = RUST_KINDS[item.type];
+    const name = item.childForFieldName("name")?.text;
+    if (kind === undefined || !name || (kind === "module" && body === null)) continue;
+    const qualifiedName = `${prefix}${name}${kind === "macro" ? "!" : ""}`;
+    const exported =
+      kind === "macro"
+        ? attributesOf(item).some((a) => /^#\[\s*macro_export\b/.test(a.text))
+        : isPub(item);
+    out.push(rustSymbol(qualifiedName, kind, item, exported));
+    if (kind === "interface") collectRustMethods(body, qualifiedName, () => exported, out);
+    if (kind === "module" && body !== null)
+      collectRust(body.namedChildren, `${qualifiedName}::`, out);
+  }
+}
+
+function collectRustMethods(
+  body: Node | null,
+  owner: string,
+  exported: (method: Node) => boolean,
+  out: SymbolDef[],
+): void {
+  for (const member of body?.namedChildren ?? []) {
+    if (member.type !== "function_item" && member.type !== "function_signature_item") continue;
+    const name = member.childForFieldName("name")?.text;
+    if (name) out.push(rustSymbol(`${owner}::${name}`, "method", member, exported(member)));
   }
 }

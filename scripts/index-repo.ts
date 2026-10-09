@@ -25,6 +25,7 @@ const summary = {
     python: count((f) => f.language === "python"),
     typescript: count((f) => f.language === "typescript"),
     tsx: count((f) => f.language === "tsx"),
+    rust: count((f) => f.language === "rust"),
     fileLevel: count((f) => f.language === null),
   },
   skipped: {

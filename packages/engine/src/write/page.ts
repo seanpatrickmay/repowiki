@@ -92,6 +92,7 @@ const LANGUAGE_NAMES: Record<SourceLanguage, string> = {
   python: "Python",
   typescript: "TypeScript",
   tsx: "TSX",
+  rust: "Rust",
 };
 /** Names for file-level languages, by extension; other extensions are left out. */
 const EXTENSION_NAMES: Record<string, string> = {
