@@ -228,6 +228,21 @@ describe("coverageGaps", () => {
     ]);
   });
 
+  it("leaves out Rust members (Type::method, module::item) as it leaves out K.m", () => {
+    const board = indexedFile("src/signals/board.rs", [
+      ["Board", 1, 3],
+      ["Board::new", 5, 7],
+      ["tests::works", 9, 10],
+    ]);
+    board.language = "rust";
+    const index = indexOf([ingest, board, crud]);
+    const placed = new Map([["src/signals/board.rs", "signals"]]);
+    const membership = nextMembership(previous, index, [], noGraph, placed);
+    expect(coverageGaps(previous, index, [], membership, new Map()).get("signals")).toEqual([
+      { path: "src/signals/board.rs", symbol: "Board", startLine: 1, endLine: 3 },
+    ]);
+  });
+
   it("gives each feature its gaps in path, then line order", () => {
     const index = indexOf([
       indexedFile("src/signals/ingest.py", [
