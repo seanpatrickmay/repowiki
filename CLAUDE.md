@@ -11,18 +11,19 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm manifest:build <repo> [rev] [--out dir]` — index, cluster, and build the manifest live (Haiku 4.5 via the Batches API); writes only under `~/.repowiki/<repo>/` or `--out`
 - `pnpm wiki:build <repo> [rev] [--out dir] [--dry-run]` — write, verify and link every page from the stored manifest, then the project's About article (Haiku 4.5 via the Batches API), and write `export.json`; prints the cost estimate first; writes only under `~/.repowiki/<repo>/` or `--out`
 - `pnpm wiki:check <repo> [--out dir]` — check the stored wiki and its About article: every citation resolves with a matching hash, no link points nowhere
-- `pnpm wiki:serve <repo> [--out dir] [--port N] [--question-usd N] [--max-usd N]` — serve the built wiki and the Ask sidebar's `/api/ask` on `127.0.0.1` only (rebuilds a stale site first); each question is one live Haiku 4.5 tool loop under the per-question and session caps; prints its estimate first
-- `pnpm ask:eval <repo> --questions <file> [--set dev] [--max-usd N] [--dry-run]` — ask the dev set through the Ask sidebar's loop and judge it (live; prints its estimate first; never the held-out set); writes `<out>/eval/ask-<time>/`; `pnpm ask:eval tally <support.md>` counts the owner's marks
+- `pnpm wiki:update <repo> <rev> [--out dir] [--dry-run]` — move a stored wiki to a newer commit, rewriting only pages with stale claims, coverage gaps or changed files (live; prints its estimate first)
+- `pnpm site:build --export <export.json> [--out dir] [--base path] [--repo-url url]` · `pnpm site:preview` · `pnpm site:demo` — build and serve the static reader; no API key
+- `pnpm eval:run` · `pnpm eval:report` · `pnpm eval:accuracy` — the Q&A harness in `packages/eval`
 - `pnpm cassettes:record <test files>` — re-record LLM cassettes live (needs `ANTHROPIC_API_KEY` in `.env`; costs money; review the diff)
 
 ## Layout
 - `packages/core` — zod schemas and types shared by every package; no I/O besides hashing
 - `packages/engine` — pipeline modules (`store/` first; later `index/`, `cluster/`, `manifest/`, `write/`, `verify/`, `link/`, `freshness/`). Modules import each other only through their own `index.ts`.
-- `packages/query` — the wiki as text an agent reads (search, page rendering, tool helpers, as-of views); shared by eval, mcp and the Ask sidebar; depends on `core` and `zod` only: no engine, LLM, process or network
-- `packages/mcp` — the stdio MCP server over one wiki (JSON-RPC by hand, ADR-0004), its client and the git reads it needs; makes no LLM call and writes nothing
-- `packages/ask` — the Ask sidebar's answering (turn-1 pack, bounded tool loop, answer validation, answer cache, session caps) and its `/api/ask` handler; depends on `core`, `llm`, `query` and `zod`: no engine, eval or site
+- `packages/query` — the wiki as text an agent reads (search, page rendering, tool helpers, as-of views); used by eval; depends on `core` and `zod` only: no engine, LLM, process or network
 - `packages/llm` — the `Provider` interface, the Claude implementation (structured output, prompt caching, Message Batches), the `TokenLedger`, and record/replay cassettes
-- `site`, `cli`, `eval` — added in later milestones
+- `packages/site` — the Astro static reader built from `export.json`
+- `packages/eval` — the Q&A harness comparing an agent reading the wiki with one reading the repo
+- The Ask sidebar and the MCP server are shelved on the `ask/restore` and `mcp/restore` branches (ADR-0009)
 - `scripts/tracker` — seeds GitHub labels and issues from `seed.json`
 - `docs/decisions` — ADRs
 
