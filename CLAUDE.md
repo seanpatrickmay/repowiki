@@ -21,6 +21,7 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `packages/engine` — pipeline modules (`store/` first; later `index/`, `cluster/`, `manifest/`, `write/`, `verify/`, `link/`, `freshness/`). Modules import each other only through their own `index.ts`.
 - `packages/query` — the wiki as text an agent reads (search, page rendering, tool helpers, as-of views); used by eval; depends on `core` and `zod` only: no engine, LLM, process or network
 - `packages/hosted` — the hosted product's rules as pure functions (entities, state transitions, authorization, URL rules, plan limits, refusals; Contract spec `2026-10-14-repowiki-hosted-contract-design.md`); depends on `core` and `zod` only: no I/O, clock or randomness
+- `packages/server` — the hosted web app, the worker's internal API and the LLM proxy (spec 2 `2026-10-14-repowiki-hosted-slice-design.md`): `node:http`, Postgres through `Db` (PGlite in tests and dev), every rule a call into `@repowiki/hosted`
 - `packages/llm` — the `Provider` interface, the Claude implementation (structured output, prompt caching, Message Batches), the `TokenLedger`, and record/replay cassettes
 - `packages/site` — the Astro static reader built from `export.json`
 - `packages/eval` — the Q&A harness comparing an agent reading the wiki with one reading the repo
