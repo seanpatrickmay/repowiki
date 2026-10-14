@@ -39,6 +39,19 @@ export {
   WithdrawReason,
 } from "./entities.ts";
 export {
+  cancelJob,
+  createJob,
+  failJob,
+  heartbeatJob,
+  isTerminal,
+  leaseJob,
+  type NewJob,
+  recordSpend,
+  recoverJob,
+  retryJob,
+  succeedJob,
+} from "./jobs.ts";
+export {
   DAY_MS,
   isFrozen,
   jobCap,
