@@ -52,7 +52,7 @@ Goals, in priority order:
 | C4 | Immutability | Ruling: `Generation`, `DraftRevision`, `Review` and `PublishedVersion` are immutable once created. Changes create new rows; a project points at its latest revision and its current published version. — Publish, preview and audit all refer to exact versions, so nothing they point to may change underneath them. — Cost if wrong: storage, which is small (§8 overrides are kilobytes; sites are object storage). |
 | C5 | Optimistic concurrency | Ruling: every mutation of a draft names the revision number it was made against (`baseRevision`) and every publish names the published version the author saw (`expectedVersion`). A mismatch is refusal `stale-revision` or `stale-publication` (409). — Two tabs or a refresh landing mid-edit must never silently overwrite the author's work or publish something they did not see. |
 | C6 | Preview is the publication | Ruling: publishing promotes the **exact rendered site** the author previewed: the publish request carries the preview's content hash, which must equal the stored render of that revision. — "Show the exact public version for review" is only true if the bytes are the same. — Cost if wrong: a render per preview, which is the static build the engine already does. |
-| C7 | Live checks | Ruling: actions that spend money or make something public (create a job, refresh, publish, restore) need an eligibility check made **at that moment**. Actions that only change private state (save, review) accept a check at most **1 hour** old. Unpublish, export and account deletion need no check. — The brief requires rechecking authorization at publication; GitHub rate limits make a live call on every keystroke wasteful. — Cost if wrong: an author whose access was revoked can keep editing a private draft for up to an hour, but cannot publish it. |
+| C7 | Live checks | Ruling: actions that spend money or make something public (create a job, refresh, publish, restore) need an eligibility check made **at that moment**. Actions that only change private state (save, review) accept a check at most **1 hour** old. The policy enforces both: a "live" check must be at most 60 seconds old when the policy reads it. Unpublish, export and account deletion need no check. — The brief requires rechecking authorization at publication; GitHub rate limits make a live call on every keystroke wasteful. — Cost if wrong: an author whose access was revoked can keep editing a private draft for up to an hour, but cannot publish it. |
 | C8 | Quota is charged on success | Ruling: a job reserves its cost estimate against the account's monthly ceiling when created, records actual spend as it goes, and counts against the generation or refresh quota **only when it succeeds**. Retries of the same job share one cost cap and one quota charge. — "Failed and interrupted jobs use no quota" (D3) and "retries avoid duplicate charging" (brief). The platform, not the author, absorbs the cost of failures, bounded by the per-job cap. |
 | C9 | Frozen | Ruling: a project is **frozen** when the account has more active projects (draft or published) than its plan allows (§10). A frozen project allows only unpublish and export; withdrawing projects until the count fits unfreezes the rest. — This turns D4's downgrade rule into one computed predicate instead of a state that has to be kept in sync. |
 | C10 | Not found, not forbidden | Ruling: a request for another account's draft, job, preview or revision is refused as `not-found` (404), identical to a missing id. Public pages answer 410 when withdrawn and 404 when the slug never existed. — Probing must not reveal which private drafts exist. |
@@ -180,7 +180,7 @@ Eligible means `tokenValid`, `public`, not a fork, permission in {`admin`, `main
 A `Generation` carries:
 
 - `suggestions`: `tagline` (≤ 90 characters), `summary` (≤ 900 characters, about 120 words; what the project does, for whom, why it matters), `contributionDraft` (≤ 1,200 characters, written only from the author's own commits), `highlightCandidates` (up to 6 feature ids).
-- `facts`: `languages` (name and share of indexed lines), `indexedFiles`, `featureCount`, and `author`: `{ commits, totalCommits, currentLines, totalLines, features: [{ featureId, commits, currentLines }] }` at `commitSha`, taken from the People snapshot for the person whose commits GitHub attributes to the account.
+- `facts`: `languages` (name and share of indexed lines), `indexedFiles`, `featureIds` (the wiki's feature ids at `commitSha`, which refresh flags compare), and `author`: `{ commits, totalCommits, currentLines, totalLines, features: [{ featureId, commits, currentLines }] }` at `commitSha`, taken from the People snapshot for the person whose commits GitHub attributes to the account.
 
 A `DraftRevision` carries `overrides`:
 
@@ -211,14 +211,15 @@ PLANS = {
           refreshesPerMonth: 30, maxIndexedFiles: 3000, monthlyUsdMicros: 4_000_000 },
 }
 PLATFORM = { dailyUsdMicros: 25_000_000, freeAccountMinAgeDays: 30, jobMaxAttempts: 3,
-             jobCapMultiplier: 1.5, eligibilityMaxAgeMs: 3_600_000, repositoryGraceDays: 30 }
+             jobCapMultiplier: 1.5, liveCheckMaxAgeMs: 60_000, eligibilityMaxAgeMs: 3_600_000,
+             repositoryGraceDays: 30 }
 ```
 
 A job's cap is `min(estimate × jobCapMultiplier, monthly ceiling − month's reserved and spent)`; a job whose estimate exceeds the remaining ceiling is refused as `monthly-cost-ceiling` before it starts. Months are calendar months in UTC.
 
 ## 11. Refusals
 
-Every refusal has a stable code, an HTTP status, whether a retry can help, and one plain sentence for the author. These are the complete set:
+Every refusal has a stable code, an HTTP status, whether a retry can help, and one plain sentence for the author. These are the complete set (30 codes):
 
 | Code | Status | Retryable | Message |
 |---|---|---|---|
@@ -247,6 +248,7 @@ Every refusal has a stable code, an HTTP status, whether a retry can help, and o
 | `needs-review-flags` | 409 | no | Some generated text under your edits changed. Check the flagged fields and save. |
 | `contribution-missing` | 422 | no | Write your contribution statement before review. |
 | `frozen` | 402 | no | Your plan no longer covers this project. You can unpublish or export it. |
+| `withdrawn` | 410 | no | This project page is no longer available. |
 | `restore-expired` | 410 | no | This project can no longer be restored. |
 | `invalid-input` | 400 | no | Some of what you sent isn't valid. (the field and rule follow) |
 | `invalid-transition` | 409 | no | That isn't possible right now. Reload to see the current state. |
@@ -290,8 +292,8 @@ Each task is one PR under ~300 changed lines.
 
 1. **M13.1** Spec and ADR-0010 (docs only).
 2. **M13.2** `packages/hosted` scaffold with its `CLAUDE.md` layout entry, boundary test, primitives, plan limits (§10) and refusals (§11).
-3. **M13.3** Entity schemas (§5) and content model (§8).
-4. **M13.4** URL, handle and slug rules (§9).
+3. **M13.3** URL, handle and slug rules (§9).
+4. **M13.4** Entity schemas (§5) and content model (§8).
 5. **M13.5** Job transitions (§6.1).
 6. **M13.6** Project and draft-revision transitions and publish (§6.2–6.4).
 7. **M13.7** Authorization policy and eligibility (§7), with the frozen predicate (C9).
