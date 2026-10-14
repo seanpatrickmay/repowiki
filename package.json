@@ -36,6 +36,7 @@
     "@repowiki/core": "workspace:*",
     "@repowiki/engine": "workspace:*",
     "@repowiki/eval": "workspace:*",
+    "@repowiki/hosted": "workspace:*",
     "@repowiki/llm": "workspace:*",
     "@repowiki/query": "workspace:*",
     "@types/node": "24.19.0",

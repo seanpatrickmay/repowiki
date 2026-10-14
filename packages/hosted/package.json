@@ -1,0 +1,16 @@
+{
+  "name": "@repowiki/hosted",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repowiki/core": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@repowiki/query": "workspace:*"
+  }
+}

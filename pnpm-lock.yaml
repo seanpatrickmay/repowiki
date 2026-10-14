@@ -23,6 +23,9 @@ importers:
       '@repowiki/eval':
         specifier: workspace:*
         version: link:packages/eval
+      '@repowiki/hosted':
+        specifier: workspace:*
+        version: link:packages/hosted
       '@repowiki/llm':
         specifier: workspace:*
         version: link:packages/llm
@@ -96,6 +99,19 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+
+  packages/hosted:
+    dependencies:
+      '@repowiki/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@repowiki/query':
+        specifier: workspace:*
+        version: link:../query
 
   packages/llm:
     dependencies:
