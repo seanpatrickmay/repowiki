@@ -62,6 +62,13 @@ export {
   type PlanLimits,
 } from "./limits.ts";
 export {
+  authorize,
+  type Caller,
+  checkEligibility,
+  type PolicyContext,
+  type Usage,
+} from "./policy.ts";
+export {
   accountDeleted,
   type NewProject,
   newProject,
