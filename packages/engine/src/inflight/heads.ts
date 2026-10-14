@@ -131,7 +131,10 @@ export function inflightGit(
     timeout: limit,
     input: options.input,
   });
-  if (out.error !== undefined) {
+  // EPIPE with an exit status: git stopped before reading all its input (it failed early, as
+  // update-ref does on a locked ref). Its own status and message are the answer, not the pipe.
+  const earlyExit = (out.error as NodeJS.ErrnoException | undefined)?.code === "EPIPE";
+  if (out.error !== undefined && !(earlyExit && out.status !== null)) {
     const timedOut = (out.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
     return {
       status: null,

@@ -494,6 +494,21 @@ describe("INFLIGHT_GIT and inflightGit's time limit", () => {
       expect([out.status, out.timedOut]).toEqual([null, true]);
     });
   });
+
+  it("reports git's own exit and message when git stops before reading all its input", async () => {
+    const dir = ensureInflightRepo(fx.out, fx.repo.dir);
+    // An input far past a pipe buffer: git exits at once, so writing the rest always fails EPIPE.
+    script(join(fx.out, "bin"), "git", 'echo "fatal: cannot lock ref" >&2; exit 128');
+    await withEnv({ PATH: `${join(fx.out, "bin")}:${process.env.PATH ?? ""}` }, () => {
+      const out = inflightGit(dir, ["update-ref", "--stdin"], { input: "x".repeat(1 << 20) });
+      expect(out).toEqual({
+        status: 128,
+        stdout: "",
+        stderr: "fatal: cannot lock ref\n",
+        timedOut: false,
+      });
+    });
+  });
 });
 
 describe("isMissingObject", () => {
