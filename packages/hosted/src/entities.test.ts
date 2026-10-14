@@ -74,7 +74,14 @@ describe("entities (Contract spec §5)", () => {
     expect(ok(Project, aProject({ state: "withdrawn" }))).toBe(false);
     const withdrawn = aProject({ state: "withdrawn", withdrawReason: "author", withdrawnAt: T0 });
     expect(ok(Project, withdrawn)).toBe(true);
-    expect(ok(Project, { ...withdrawn, state: "purged", withdrawReason: "repository" })).toBe(true);
+    expect(
+      ok(Project, {
+        ...withdrawn,
+        state: "purged",
+        withdrawReason: "repository",
+        unavailableSince: T0,
+      }),
+    ).toBe(true);
     expect(ok(Project, aProject({ withdrawReason: "author", withdrawnAt: T0 }))).toBe(false);
   });
 
@@ -150,5 +157,21 @@ describe("entities (Contract spec §5)", () => {
     expect(ok(AuditEvent, { ...event, outcome: "frozen" })).toBe(true);
     expect(ok(AuditEvent, { ...event, outcome: "maybe" })).toBe(false);
     expect(ok(AuditEvent, { ...event, action: "job.lease" })).toBe(true);
+  });
+});
+
+describe("when a project's repository went away (final review I10b)", () => {
+  it("is set exactly for repository withdrawals, optionally for withdrawn or purged projects", () => {
+    const at = { withdrawnAt: T0, unavailableSince: T0 };
+    expect(ok(Project, aProject({ state: "withdrawn", withdrawReason: "repository", ...at }))).toBe(
+      true,
+    );
+    expect(ok(Project, aProject({ state: "withdrawn", withdrawReason: "author", ...at }))).toBe(
+      true,
+    );
+    expect(
+      ok(Project, aProject({ state: "withdrawn", withdrawReason: "repository", withdrawnAt: T0 })),
+    ).toBe(false);
+    expect(ok(Project, aProject({ unavailableSince: T0 }))).toBe(false);
   });
 });

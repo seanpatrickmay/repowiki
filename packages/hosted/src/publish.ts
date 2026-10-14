@@ -7,6 +7,7 @@ import type {
   Review,
 } from "./entities.ts";
 import { ok, type Result, refused } from "./result.ts";
+import { fromAnotherProject } from "./revisions.ts";
 import { siteKey } from "./urls.ts";
 
 export interface PublishInput {
@@ -43,6 +44,9 @@ export function publish(
   if (input.authorization.githubRepoId !== project.githubRepoId) {
     return refused("invalid-input", "authorization is for another repository");
   }
+  if (fromAnotherProject(project, latest, review, preview, current)) {
+    return refused("invalid-input", "records from another project");
+  }
   if (
     project.state === "published" &&
     current !== null &&
@@ -77,6 +81,7 @@ export function publish(
       state: "published",
       withdrawReason: null,
       withdrawnAt: null,
+      unavailableSince: null,
       currentVersion: number,
     },
     version,

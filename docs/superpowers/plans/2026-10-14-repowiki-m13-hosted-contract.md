@@ -1219,8 +1219,8 @@ describe("plain text (Contract spec §8)", () => {
     expect(ok(text, "x".repeat(21))).toBe(false);
     expect(ok(text, "a\n\nb\n\nc\n \nd")).toBe(false);
     expect(ok(text, "a\rb")).toBe(false);
-    expect(ok(text, "a‮b")).toBe(false);
-    expect(ok(text, "a​b")).toBe(false);
+    expect(ok(text, "a\u202eb")).toBe(false);
+    expect(ok(text, "a\u200bb")).toBe(false);
     expect(ok(text, "<b>x</b>")).toBe(false);
     expect(ok(text, "<!-- x")).toBe(false);
     expect(ok(text, "a < b")).toBe(true);

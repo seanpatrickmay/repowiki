@@ -112,3 +112,31 @@ describe("publish (Contract spec §6.4)", () => {
     }
   });
 });
+
+describe("records from another project (final review I8)", () => {
+  const elsewhere = { projectId: ids.other };
+  const foreign = { ok: false, code: "invalid-input", detail: "records from another project" };
+
+  it("refuses another project's revision, review, preview or current version", () => {
+    expect(publish(input({ latest: { ...ready, ...elsewhere } }))).toEqual(foreign);
+    expect(publish(input({ review: aReview(elsewhere) }))).toEqual(foreign);
+    expect(publish(input({ preview: aPreview(elsewhere) }))).toEqual(foreign);
+    const project = aProject({ latestRevision: 1, state: "published", currentVersion: 1 });
+    const current = aPublishedVersion(elsewhere);
+    expect(publish(input({ project, current, expectedVersion: 1 }))).toEqual(foreign);
+  });
+
+  it("stops the purge clock when an author-withdrawn project is published again", () => {
+    const project = aProject({
+      latestRevision: 1,
+      state: "withdrawn",
+      withdrawReason: "author",
+      withdrawnAt: T0,
+      unavailableSince: T0,
+      currentVersion: 1,
+    });
+    expect(publish(input({ project, expectedVersion: 1 }))).toMatchObject({
+      value: { project: { state: "published", unavailableSince: null } },
+    });
+  });
+});

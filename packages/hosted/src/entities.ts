@@ -59,6 +59,8 @@ export const Project = z
     state: ProjectState,
     withdrawReason: WithdrawReason.nullable(),
     withdrawnAt: IsoDateTime.nullable(),
+    /** When the daily check found the repository gone; the 30-day purge clock runs from here. */
+    unavailableSince: IsoDateTime.nullable(),
     latestRevision: Count,
     currentVersion: Count,
     createdAt: IsoDateTime,
@@ -67,6 +69,12 @@ export const Project = z
     const gone = p.state === "withdrawn" || p.state === "purged";
     return gone === (p.withdrawReason !== null) && gone === (p.withdrawnAt !== null);
   }, "a reason and time exactly when withdrawn or purged")
+  .refine(
+    (p) =>
+      (p.unavailableSince === null || p.state === "withdrawn" || p.state === "purged") &&
+      (p.withdrawReason !== "repository" || p.unavailableSince !== null),
+    "unavailableSince only on withdrawn or purged projects, and always on repository withdrawals",
+  )
   .refine((p) => p.state !== "published" || p.currentVersion > 0, "published without a version");
 export type Project = z.infer<typeof Project>;
 
