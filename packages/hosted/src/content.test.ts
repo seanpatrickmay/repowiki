@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import { ATTESTATIONS, EMPTY_OVERRIDES, Facts, Overrides, plainText } from "./content.ts";
+import { aGeneration } from "./test-fixtures.ts";
+
+const ok = (schema: { safeParse(v: unknown): { success: boolean } }, value: unknown) =>
+  schema.safeParse(value).success;
+
+describe("plain text (Contract spec §8)", () => {
+  const text = plainText(20);
+
+  it("accepts up to the limit, newlines and tabs, and up to three paragraphs", () => {
+    expect(ok(text, "")).toBe(true);
+    expect(ok(text, "x".repeat(20))).toBe(true);
+    expect(ok(text, "a\tb\nc")).toBe(true);
+    expect(ok(text, "a\n\nb\n\nc")).toBe(true);
+  });
+
+  it("refuses too long, four paragraphs, control or invisible characters, and HTML", () => {
+    expect(ok(text, "x".repeat(21))).toBe(false);
+    expect(ok(text, "a\n\nb\n\nc\n \nd")).toBe(false);
+    expect(ok(text, "a\rb")).toBe(false);
+    expect(ok(text, "a\u202eb")).toBe(false);
+    expect(ok(text, "a\u200bb")).toBe(false);
+    expect(ok(text, "<b>x</b>")).toBe(false);
+    expect(ok(text, "<!-- x")).toBe(false);
+    expect(ok(text, "a < b")).toBe(true);
+  });
+});
+
+describe("overrides (Contract spec §8)", () => {
+  it("start empty and accept up to four distinct highlights", () => {
+    expect(ok(Overrides, EMPTY_OVERRIDES)).toBe(true);
+    const four = ["a", "b", "c", "d"].map((featureId) => ({ featureId, blurb: "x" }));
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: four })).toBe(true);
+    const five = [...four, { featureId: "e", blurb: "x" }];
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: five })).toBe(false);
+  });
+
+  it("refuse a duplicate, a hidden highlight, a long blurb and unknown fields", () => {
+    const h = (featureId: string, blurb = "x") => ({ featureId, blurb });
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a"), h("a")] })).toBe(false);
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, hiddenFeatureIds: ["a", "a"] })).toBe(false);
+    expect(
+      ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a")], hiddenFeatureIds: ["a"] }),
+    ).toBe(false);
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a", "x".repeat(141))] })).toBe(
+      false,
+    );
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, html: "<b>" })).toBe(false);
+  });
+});
+
+describe("facts (Contract spec §8)", () => {
+  const facts = aGeneration().facts;
+
+  it("accept a generation's facts", () => {
+    expect(ok(Facts, facts)).toBe(true);
+  });
+
+  it("refuse an author share above the total, languages over 100% and unknown features", () => {
+    expect(ok(Facts, { ...facts, author: { ...facts.author, commits: 621 } })).toBe(false);
+    expect(ok(Facts, { ...facts, author: { ...facts.author, currentLines: 41_001 } })).toBe(false);
+    const languages = [
+      { name: "A", share: 0.6 },
+      { name: "B", share: 0.6 },
+    ];
+    expect(ok(Facts, { ...facts, languages })).toBe(false);
+    const features = [{ featureId: "elsewhere", commits: 1, currentLines: 1 }];
+    expect(ok(Facts, { ...facts, author: { ...facts.author, features } })).toBe(false);
+  });
+});
+
+it("keeps attestation 1's wording (Contract spec §8)", () => {
+  expect(ATTESTATIONS[1]).toBe(
+    "I reviewed this version. The contribution statement describes my own work accurately, and I checked the summary and highlights against the project.",
+  );
+});
