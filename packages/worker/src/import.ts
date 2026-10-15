@@ -1,7 +1,13 @@
-import type { PeopleSnapshot, WikiExport } from "@repowiki/core";
-import { Facts } from "@repowiki/hosted";
+import { readFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
+import { type PeopleSnapshot, WikiExport } from "@repowiki/core";
+import { Facts, type JobStep } from "@repowiki/hosted";
+import { z } from "zod";
+import { ApiError, type WorkerApi, workerApi } from "./api.ts";
 import { authorFacts, type FileFacts, languageShares, pageFeatureIds } from "./facts.ts";
 import { AUTHOR_ID } from "./people-file.ts";
+import { HEARTBEAT_MS, heartbeater } from "./run.ts";
+import { fallbackSuggestions } from "./suggestions.ts";
 
 /**
  * The worker's `import` mode (M14g, local testing only): instead of cloning and building, it
@@ -14,6 +20,25 @@ export interface Author {
   login: string;
   name: string | null;
 }
+
+/** What import needs of the server's `LocalProfile`. */
+export const ImportProfile = z.object({
+  user: z.object({ login: z.string().min(1), name: z.string().nullable() }),
+  repos: z.array(
+    z.object({ repo: z.object({ full_name: z.string() }), export: z.string().nullable() }),
+  ),
+});
+export type ImportProfile = z.infer<typeof ImportProfile>;
+
+const STEPS: readonly JobStep[] = [
+  "fetch",
+  "index",
+  "manifest",
+  "write",
+  "people",
+  "facts",
+  "render",
+];
 
 /** `Sean May`, `sean-may` and `SEAN_MAY` all give `sean-may`; empty for a name with no letters. */
 const slug = (text: string) =>
@@ -71,4 +96,102 @@ export function exportFacts(exp: WikiExport, author: Author): Facts {
       featureIds,
     ),
   });
+}
+
+/** Why an import cannot go on; the message is the whole log line (no secret is in it). */
+class Refused extends Error {}
+
+function localWiki(profile: ImportProfile, fullName: string, sha: string): WikiExport {
+  const entry = profile.repos.find(
+    (r) => r.repo.full_name.toLowerCase() === fullName.toLowerCase(),
+  );
+  const missing = `no local wiki for ${fullName}; build it with pnpm wiki:build`;
+  if (entry?.export == null) throw new Refused(missing);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(entry.export, "utf8"));
+  } catch {
+    throw new Refused(missing);
+  }
+  const parsed = WikiExport.safeParse(raw);
+  if (!parsed.success) throw new Refused(`the local wiki for ${fullName} does not parse`);
+  if (parsed.data.head !== sha) {
+    throw new Refused(`the local wiki for ${fullName} changed; take the profile snapshot again`);
+  }
+  return parsed.data;
+}
+
+/** A 401 or 409: the token is spent or the lease is gone, so there is no job left to fail. */
+const leaseLost = (error: unknown) =>
+  error instanceof ApiError && (error.status === 401 || error.status === 409);
+
+/** Leases the job, then uploads the repository's local wiki as its generation. */
+export async function runImport(
+  api: WorkerApi,
+  profile: ImportProfile,
+  options: { stepMs?: number; heartbeatMs?: number; log?: (line: object) => void } = {},
+): Promise<boolean> {
+  const log = options.log ?? (() => {});
+  const beats = heartbeater(api, options.heartbeatMs ?? HEARTBEAT_MS, log);
+  try {
+    const spec = await api.lease();
+    const exp = localWiki(profile, spec.repo.fullName, spec.commitSha);
+    const facts = exportFacts(exp, profile.user);
+    for (const step of STEPS) {
+      await beats.step(step);
+      if (step === "index" && (await api.indexed(facts.indexedFiles)) === "too-large") return false;
+      if ((options.stepMs ?? 150) > 0) await sleep(options.stepMs ?? 150);
+    }
+    await api.putExport(new TextEncoder().encode(JSON.stringify(exp)));
+    await api.succeed({
+      suggestions: fallbackSuggestions(exp, facts),
+      facts,
+      engineVersion: "import",
+      models: ["none"],
+    });
+    return true;
+  } catch (error) {
+    log(
+      error instanceof Refused
+        ? { import: error.message }
+        : { import: "failed", error: errorName(error) },
+    );
+    if (!leaseLost(error)) await api.fail("job-failed").catch(() => {});
+    return false;
+  } finally {
+    beats.stop();
+  }
+}
+
+const errorName = (error: unknown) => (error instanceof Error ? error.name : "unknown");
+
+const ImportEnv = z.object({
+  REPOWIKI_API_URL: z.string().regex(/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?$/),
+  REPOWIKI_JOB_TOKEN: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  REPOWIKI_PROFILE: z.string().min(1),
+});
+
+/**
+ * `REPOWIKI_WORKER_MODE=import`: reads its own environment (a loopback server, the token and the
+ * profile) and deletes the token and URL from it, like the other modes.
+ */
+export async function importMain(log: (line: object) => void): Promise<boolean> {
+  const parsed = ImportEnv.safeParse(process.env);
+  delete process.env.REPOWIKI_JOB_TOKEN;
+  delete process.env.REPOWIKI_API_URL;
+  if (!parsed.success) {
+    log({ worker: "bad environment", fields: parsed.error.issues.map((i) => i.path.join(".")) });
+    return false;
+  }
+  const env = parsed.data;
+  const api = workerApi(env.REPOWIKI_API_URL, env.REPOWIKI_JOB_TOKEN);
+  let profile: ImportProfile;
+  try {
+    profile = ImportProfile.parse(JSON.parse(readFileSync(env.REPOWIKI_PROFILE, "utf8")));
+  } catch {
+    log({ import: "REPOWIKI_PROFILE does not name a profile snapshot" });
+    await api.fail("job-failed").catch(() => {});
+    return false;
+  }
+  return runImport(api, profile, { log });
 }
