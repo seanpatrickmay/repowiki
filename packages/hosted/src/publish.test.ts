@@ -73,7 +73,7 @@ describe("publish (Contract spec §6.4)", () => {
 
   it("refuses each failed condition on its own", () => {
     expect(publish(input({ revision: 2 }))).toMatchObject({ code: "stale-revision" });
-    expect(publish(input({ latest: { ...ready, flags: ["hidden-missing:x"] } }))).toMatchObject({
+    expect(publish(input({ latest: { ...ready, flags: ["highlight-missing:x"] } }))).toMatchObject({
       code: "needs-review-flags",
     });
     expect(publish(input({ latest: aRevision() }))).toMatchObject({

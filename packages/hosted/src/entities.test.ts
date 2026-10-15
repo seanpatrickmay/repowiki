@@ -105,17 +105,16 @@ describe("entities (Contract spec §5)", () => {
     expect(ok(Generation, { ...g, suggestions })).toBe(false);
   });
 
-  it("accept only the three kinds of revision flag", () => {
+  it("accept only the two kinds of revision flag (no hidden features, ADR-0012)", () => {
     for (const flag of [
       "suggestion-changed:tagline",
       "suggestion-changed:summary",
       "suggestion-changed:contribution",
       "highlight-missing:indexing",
-      "hidden-missing:site",
     ]) {
       expect(ok(DraftRevision, aRevision({ flags: [flag] })), flag).toBe(true);
     }
-    for (const flag of ["suggestion-changed:title", "highlight-missing:", "stale"]) {
+    for (const flag of ["suggestion-changed:title", "highlight-missing:", "hidden-missing:site"]) {
       expect(ok(DraftRevision, aRevision({ flags: [flag] })), flag).toBe(false);
     }
   });

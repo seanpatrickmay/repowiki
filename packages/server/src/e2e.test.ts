@@ -41,10 +41,10 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
       "Portfolio (revision 1)",
     );
 
-    const features = [...page.text.matchAll(/name="hidden" value="([^"]+)"/g)].map((m) => m[1]);
-    const [hidden, shown] = features;
-    expect(hidden).toBeDefined();
-    expect(shown).toBeDefined();
+    // Every wiki page is public (ADR-0012): there is nothing to hide.
+    expect(page.text).not.toContain('name="hidden"');
+    const features = [...page.text.matchAll(/name="highlight" value="([^"]+)"/g)].map((m) => m[1]);
+    expect(features.length).toBeGreaterThan(1);
     const saved = await me.go(`${projectPath}/revisions`, {
       form: {
         csrf,
@@ -52,7 +52,6 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
         tagline: field(page.text, "tagline"),
         summary: "A small project the demo documents.",
         contribution: "I wrote the ingest code.",
-        hidden: hidden ?? "",
       },
     });
     expect(saved.status, saved.text).toBe(303);
@@ -88,11 +87,9 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     // Search (Pagefind's WebAssembly) and the diagrams need the site's own policy.
     expect(wiki.csp).toContain("'wasm-unsafe-eval'");
     expect((await reader.go("/demo-dev/demo-repo/docs/pagefind/pagefind.js")).status).toBe(200);
-    expect((await reader.go(`/demo-dev/demo-repo/docs/wiki/${shown}/`)).status).toBe(200);
-    expect((await reader.go(`/demo-dev/demo-repo/docs/wiki/${hidden}/`)).status).toBe(404);
-    // The home links the shown page, so the hidden page's absence is not an empty home's.
-    expect(wiki.text).toContain(`/wiki/${shown}/`);
-    expect(wiki.text).not.toContain(`/wiki/${hidden}/`);
+    for (const feature of features) {
+      expect((await reader.go(`/demo-dev/demo-repo/docs/wiki/${feature}/`)).status).toBe(200);
+    }
     const profile = await reader.go("/demo-dev");
     expect(profile.status).toBe(200);
     expect(profile.text).toContain('href="/demo-dev/demo-repo"');

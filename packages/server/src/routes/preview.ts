@@ -72,7 +72,6 @@ function previewData(
   generation: Generation,
   revision: DraftRevision,
   exp: Parameters<typeof portfolioData>[0]["exp"],
-  full: Parameters<typeof portfolioData>[0]["full"],
   repo: string,
 ) {
   const written = revision.overrides.contribution.trim() !== "";
@@ -80,7 +79,7 @@ function previewData(
     ? revision.overrides.contribution
     : generation.suggestions.contributionDraft || "Not written yet.";
   const shown = { ...revision, overrides: { ...revision.overrides, contribution } };
-  return portfolioData({ generation, revision: shown, exp, full, repoFullName: repo });
+  return portfolioData({ generation, revision: shown, exp, repoFullName: repo });
 }
 
 /** Building a revision's exact site and serving it privately to its owner (spec 2 S13, §7). */
@@ -109,8 +108,8 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
     if (generation === null || exp === null) return refused("invalid-transition");
     const repo =
       (await repoFullName(deps.db, project.githubRepoId)) ?? `${session.account.login}/${exp.repo}`;
-    const hosted = hostedExport(exp, latest.overrides.hiddenFeatureIds);
-    const data = previewData(generation, latest, hosted, exp, repo);
+    const hosted = hostedExport(exp);
+    const data = previewData(generation, latest, hosted, repo);
     const tree = await build({
       exp: hosted,
       base: `${siteBase(await handleOf(session), project.slug)}docs/`,

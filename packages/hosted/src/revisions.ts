@@ -34,7 +34,7 @@ export function firstRevision(project: Project, generation: Generation, now: str
 
 /**
  * A refresh landed: the latest overrides carry forward onto the new generation, flagged where
- * the generated text under an override changed or a chosen feature disappeared (§6.3).
+ * the generated text under an override changed or a highlighted feature disappeared (§6.3).
  */
 export function refreshRevision(
   project: Project,
@@ -64,9 +64,6 @@ export function refreshRevision(
     ...overrides.highlights
       .filter((h) => !features.has(h.featureId))
       .map((h) => `highlight-missing:${h.featureId}`),
-    ...overrides.hiddenFeatureIds
-      .filter((id) => !features.has(id))
-      .map((id) => `hidden-missing:${id}`),
   ];
   return next(project, {
     projectId: project.id,
@@ -99,11 +96,7 @@ export function saveRevision(
     return refused("invalid-input", `${issue?.path.join(".") || "overrides"}: ${issue?.message}`);
   }
   const features = new Set(generation.facts.featureIds);
-  const chosen = [
-    ...parsed.data.highlights.map((h) => h.featureId),
-    ...parsed.data.hiddenFeatureIds,
-  ];
-  const unknown = chosen.find((id) => !features.has(id));
+  const unknown = parsed.data.highlights.map((h) => h.featureId).find((id) => !features.has(id));
   if (unknown !== undefined) return refused("invalid-input", `unknown feature ${unknown}`);
   return next(project, {
     projectId: project.id,

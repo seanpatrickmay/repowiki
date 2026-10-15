@@ -34,7 +34,7 @@ beforeAll(async () => {
   const tagline = encodeURIComponent('A "tiny" demo & <3 more');
   await post(
     `/projects/${p.projectId}/revisions`,
-    `baseRevision=1&contribution=Mine.&tagline=${tagline}&hidden=deliverables`,
+    `baseRevision=1&contribution=Mine.&tagline=${tagline}`,
   );
   await post(`/projects/${p.projectId}/review`, "revision=2&attest=yes");
 }, 300_000);
@@ -79,7 +79,7 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     const stored = await deps.objects.get(`${version?.siteKey}docs/index.html`);
     expect(home.body).toEqual(stored?.body);
     expect((await get(`${PAGE}/docs/wiki/signals/`)).status).toBe(200);
-    expect((await get(`${PAGE}/docs/wiki/deliverables/`)).status).toBe(404);
+    expect((await get(`${PAGE}/docs/wiki/deliverables/`)).status).toBe(200);
     expect((await get(`${PAGE}/docs/nope.html`)).status).toBe(404);
     expect((await get(`${PAGE}/portfolio.json`)).status).toBe(404);
     expect((await get("/demo-dev/nope")).status).toBe(404);

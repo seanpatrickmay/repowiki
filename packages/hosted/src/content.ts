@@ -84,20 +84,13 @@ export const Overrides = z
     summary: plainText(900).optional(),
     contribution: plainText(1200),
     highlights: z.array(z.strictObject({ featureId: FeatureId, blurb: plainText(140) })).max(4),
-    hiddenFeatureIds: z.array(FeatureId).max(500),
   })
-  .refine((o) => distinct(o.highlights.map((h) => h.featureId)), "duplicate highlight")
-  .refine((o) => distinct(o.hiddenFeatureIds), "duplicate hidden feature")
-  .refine(
-    (o) => o.highlights.every((h) => !o.hiddenFeatureIds.includes(h.featureId)),
-    "a highlighted feature cannot be hidden",
-  );
+  .refine((o) => distinct(o.highlights.map((h) => h.featureId)), "duplicate highlight");
 export type Overrides = z.infer<typeof Overrides>;
 
 export const EMPTY_OVERRIDES: Overrides = {
   contribution: "",
   highlights: [],
-  hiddenFeatureIds: [],
 };
 
 /** The review declaration's wording by version; a Review records which one the author accepted. */

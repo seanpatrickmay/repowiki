@@ -99,10 +99,8 @@ function editor(v: ProjectView): string {
   const rows = generation.facts.featureIds
     .map((id) => {
       const lit = o.highlights.find((h) => h.featureId === id);
-      const hidden = o.hiddenFeatureIds.includes(id);
       return `<tr><td>${e(titles.get(id) ?? id)}</td>
-<td><input type="checkbox" name="highlight" value="${e(id)}"${lit ? " checked" : ""} aria-label="Highlight"> <input name="blurb:${e(id)}" maxlength="140" value="${e(lit?.blurb ?? "")}" aria-label="Highlight text"></td>
-<td><input type="checkbox" name="hidden" value="${e(id)}"${hidden ? " checked" : ""} aria-label="Hide"></td></tr>`;
+<td><input type="checkbox" name="highlight" value="${e(id)}"${lit ? " checked" : ""} aria-label="Highlight"> <input name="blurb:${e(id)}" maxlength="140" value="${e(lit?.blurb ?? "")}" aria-label="Highlight text"></td></tr>`;
     })
     .join("");
   const inner = `${field("baseRevision", revision.number)}
@@ -110,7 +108,7 @@ function editor(v: ProjectView): string {
 <label for="summary">Summary</label><textarea id="summary" name="summary" maxlength="900">${e(o.summary ?? s.summary)}</textarea>
 <label for="contribution">Your contribution</label><p class="muted">Required to publish. Describe your own work; the suggestion is only a start.</p>
 <textarea id="contribution" name="contribution" maxlength="1200">${e(o.contribution || s.contributionDraft)}</textarea>
-<table><thead><tr><th>Feature</th><th>Highlight (up to 4)</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table>
+<table><thead><tr><th>Feature</th><th>Highlight (up to 4)</th></tr></thead><tbody>${rows}</tbody></table>
 <button>Save</button>`;
   return `<section class="card"><h2>Portfolio (revision ${revision.number})</h2>${flags}${form(`/projects/${project.id}/revisions`, session, inner)}</section>`;
 }

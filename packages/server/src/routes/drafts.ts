@@ -69,7 +69,6 @@ export function overridesFrom(form: URLSearchParams, generation: Generation): un
     highlights: [...new Set(form.getAll("highlight"))]
       .slice(0, 10)
       .map((featureId) => ({ featureId, blurb: text(`blurb:${featureId}`) })),
-    hiddenFeatureIds: [...new Set(form.getAll("hidden"))].slice(0, 500),
   };
 }
 
