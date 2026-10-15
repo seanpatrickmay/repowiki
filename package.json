@@ -33,7 +33,8 @@
     "hosted:serve": "REPOWIKI_MODE=production node packages/server/src/main.ts",
     "hosted:dev": "REPOWIKI_MODE=development node --env-file-if-exists=.env packages/server/src/main.ts",
     "hosted:demo": "REPOWIKI_MODE=demo node packages/server/src/main.ts",
-    "hosted:worker": "node packages/worker/src/main.ts"
+    "hosted:worker": "node packages/worker/src/main.ts",
+    "hosted:profile": "node scripts/hosted-profile.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
