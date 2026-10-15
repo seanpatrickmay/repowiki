@@ -47,13 +47,22 @@ const unreachable = (error: unknown) =>
   error instanceof TypeError ||
   (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name));
 
+/** How long a stored avatar is used before sign-in fetches it again (review I2). */
+const AVATAR_MAX_AGE_MS = 7 * 86_400_000;
+
 /**
- * The account's GitHub avatar, fetched and stored when its URL is new (ADR-0013). Never throws:
- * a failure keeps the avatar the account had, and the sign-in goes on.
+ * The account's GitHub avatar, fetched and stored when its URL is new or the stored copy is a
+ * week old (ADR-0013). Never throws: a failure keeps the avatar the account had, and the sign-in
+ * goes on.
  */
 async function refreshAvatar(deps: Deps, account: Account, url: string | undefined) {
   const source = avatarSource(url);
-  if (source === null || account.avatar?.source === source) return;
+  const now = deps.now();
+  const kept = account.avatar;
+  // GitHub's URL stays the same when the picture changes, so the copy's age decides (review I2).
+  const fresh =
+    kept?.source === source && Date.parse(now) - Date.parse(kept.fetchedAt) < AVATAR_MAX_AGE_MS;
+  if (source === null || fresh) return;
   const fetched = await fetchAvatar(deps.fetch, source);
   if (fetched === null) {
     logOf(deps)({ event: "avatar.fetch", outcome: "failed" });
@@ -61,8 +70,12 @@ async function refreshAvatar(deps: Deps, account: Account, url: string | undefin
   }
   try {
     const sha256 = createHash("sha256").update(fetched.bytes).digest("hex");
-    await deps.objects.put(avatarKey(sha256), fetched.bytes, fetched.contentType);
-    await saveAvatar(deps.db, account.id, { sha256, contentType: fetched.contentType, source });
+    // The same bytes are already stored under their hash: only the fetch time moves.
+    if (kept?.sha256 !== sha256) {
+      await deps.objects.put(avatarKey(sha256), fetched.bytes, fetched.contentType);
+    }
+    const avatar = { sha256, contentType: fetched.contentType, source, fetchedAt: now };
+    await saveAvatar(deps.db, account.id, avatar);
   } catch (error) {
     logOf(deps)({ event: "avatar.store", outcome: "failed", error: nameOf(error) });
   }

@@ -107,6 +107,22 @@ describe("trees stored before ADR-0013 (migration 0009)", () => {
     // The review stands: it attested to the same generated content.
     expect(await reviewOf(deps.db, projectId, 1)).not.toBeNull();
   });
+
+  it("take a repository withdrawal with a version back to draft, so restoring cannot serve it (review I3)", async () => {
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"withdrawn","withdrawReason":"repository","withdrawnAt":"2026-10-14T12:00:00.000Z","unavailableSince":"2026-10-14T12:00:00.000Z","currentVersion":1}'::jsonb WHERE id = $1`,
+      [projectId],
+    );
+    await deps.db.query("DELETE FROM schema_migrations WHERE version = 9");
+    await migrate(deps.db);
+    expect(await projectById(deps.db, projectId)).toMatchObject({
+      state: "draft",
+      currentVersion: 1,
+      withdrawReason: null,
+      withdrawnAt: null,
+      unavailableSince: null,
+    });
+  });
 });
 
 describe("revisions stored before ADR-0013 (migration 0010)", () => {

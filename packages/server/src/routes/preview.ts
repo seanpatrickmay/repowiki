@@ -257,7 +257,9 @@ export function previewPageRoutes(deps: Deps): Route[] {
           status: 301,
           headers: { ...PREVIEW_HEADERS, location },
         });
-        const handle = (await activeHandle(deps.db, project.accountId)) ?? "";
+        // With no active handle there is no public path to show or rewrite (review M4).
+        const handle = await activeHandle(deps.db, project.accountId);
+        if (handle === null) return notFound;
         if (rest === "") {
           if (!request.path.endsWith("/")) return moved(base);
           const entry = await storedEntry(deps.objects, preview.siteKey);

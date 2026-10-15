@@ -13,6 +13,7 @@ import {
   form,
   generatedProject,
   otherCookie,
+  publishedStub,
   refreshed,
   testDeps,
 } from "./test-app.ts";
@@ -222,6 +223,20 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     });
     expect(foreign.status).toBe(403);
     expect(await deps.db.query("SELECT 1 FROM preview_tokens")).toHaveLength(0);
+  }, 300_000);
+
+  it("links the account's other projects to their public wikis, and needs a handle (review M3, M4)", async () => {
+    await publishedStub(deps, p.accountId, "other", 777);
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    const opened = await post(`/projects/${p.projectId}/preview/open`, "revision=1");
+    const base = String(opened.headers?.location).slice(deps.config.publicOrigin.length);
+    const bio = String((await call(pages, { path: base })).body);
+    expect(bio).toContain('href="/demo-dev/other/">Read the wiki</a>');
+    expect(bio).toContain(`href="${base}demo-repo/">Read the wiki</a>`);
+    // With no active handle there is no public path to rewrite from: no preview at all.
+    await deps.db.query("UPDATE handles SET body = jsonb_set(body, '{state}', '\"tombstoned\"')");
+    expect((await call(pages, { path: base })).status).toBe(404);
+    expect((await call(pages, { path: `${base}demo-repo/` })).status).toBe(404);
   }, 300_000);
 
   it("allows one preview build in flight per account (A3)", async () => {

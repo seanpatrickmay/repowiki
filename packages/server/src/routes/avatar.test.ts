@@ -22,6 +22,7 @@ beforeEach(async () => {
     sha256: SHA,
     contentType: "image/png" as const,
     source: "https://avatars.githubusercontent.com/u/1",
+    fetchedAt: deps.now(),
   };
   await saveAvatar(deps.db, accountId, avatar);
 });

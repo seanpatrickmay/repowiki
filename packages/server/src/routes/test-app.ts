@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import type { Suggestions } from "@repowiki/hosted";
+import { BiographyEntry, type Suggestions } from "@repowiki/hosted";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { createApp, type Deps } from "../app.ts";
 import { loadConfig } from "../config.ts";
@@ -17,7 +17,7 @@ import { fsObjectStore } from "../objects/fs-store.ts";
 import { fakeAnthropicFetch } from "../proxy/fake-anthropic.ts";
 import { recordingRunner } from "../runner/runner.ts";
 import { signIn } from "../store/accounts.ts";
-import { latestRevision, saveRevision } from "../store/drafts.ts";
+import { latestRevision, saveRevision, saveVersion } from "../store/drafts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { projectById, saveProject } from "../store/projects.ts";
 import { createSession } from "../store/sessions.ts";
@@ -221,4 +221,69 @@ export async function auditOutcomes(db: Db, action: string, projectId: string): 
     .map((r) => r.body)
     .filter((b) => b.action === action && b.target.id === projectId)
     .map((b) => b.outcome);
+}
+
+/**
+ * Test-only: another published project of `accountId`, with a version and its biography entry
+ * stored but no built site (enough for a biography, not for its wiki). Returns its id.
+ */
+export async function publishedStub(
+  deps: Deps,
+  accountId: string,
+  slug: string,
+  githubRepoId: number,
+): Promise<string> {
+  const id = deps.newId();
+  const now = deps.now();
+  await saveProject(deps.db, {
+    id,
+    accountId,
+    githubRepoId,
+    slug,
+    state: "published",
+    withdrawReason: null,
+    withdrawnAt: null,
+    unavailableSince: null,
+    latestRevision: 1,
+    currentVersion: 1,
+    createdAt: now,
+  });
+  const siteKey = `sites/${id}/v1/`;
+  await saveVersion(deps.db, {
+    projectId: id,
+    version: 1,
+    revision: 1,
+    siteKey,
+    siteHash: "a".repeat(64),
+    authorization: {
+      checkedAt: now,
+      githubUserId: FAKE_USER.id,
+      githubRepoId,
+      fullName: `demo-dev/${slug}`,
+      visibility: "public",
+      isFork: false,
+      permission: "admin",
+      authoredCommits: 3,
+      indexedFiles: 2,
+      tokenValid: true,
+    },
+    publishedAt: now,
+  });
+  const entry = BiographyEntry.parse({
+    title: `Stub ${slug}`,
+    repo: { fullName: `demo-dev/${slug}`, commitSha: "f".repeat(40) },
+    firstCommitAt: "2025-01-01T00:00:00Z",
+    lastCommitAt: "2025-06-01T00:00:00Z",
+    articles: 2,
+    lead: `Stub ${slug} is a made-up project.`,
+    contribution: "Developer wrote 3 of the repository's 3 commits.",
+    facts: {
+      languages: [{ name: "Go", share: 1 }],
+      indexedFiles: 2,
+      featureIds: [],
+      author: { commits: 3, totalCommits: 3, currentLines: 5, totalLines: 5, features: [] },
+    },
+  });
+  await deps.objects.put(`${siteKey}entry.json`, JSON.stringify(entry), "application/json");
+  return id;
 }

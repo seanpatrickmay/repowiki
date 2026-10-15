@@ -71,9 +71,15 @@ export function accountDeleted(project: Project, now: string): Result<Project> {
 
 /**
  * The repository is eligible again within the grace period. A repository withdrawal goes back
- * to where it was; an author withdrawal stays withdrawn with its purge clock stopped.
+ * to where it was; an author withdrawal stays withdrawn with its purge clock stopped. A current
+ * version that cannot be served (stored before ADR-0013, with no biography entry) restores to
+ * draft, so the author publishes again; the caller says which with `current.servable`.
  */
-export function restore(project: Project, now: string): Result<Project> {
+export function restore(
+  project: Project,
+  now: string,
+  current: { servable: boolean },
+): Result<Project> {
   if (project.state !== "withdrawn" || project.unavailableSince === null) return invalid();
   if (project.withdrawReason !== "repository" && project.withdrawReason !== "author") {
     return invalid();
@@ -82,7 +88,7 @@ export function restore(project: Project, now: string): Result<Project> {
   if (project.withdrawReason === "author") return ok({ ...project, unavailableSince: null });
   return ok({
     ...project,
-    state: project.currentVersion > 0 ? "published" : "draft",
+    state: project.currentVersion > 0 && current.servable ? "published" : "draft",
     withdrawReason: null,
     withdrawnAt: null,
     unavailableSince: null,
