@@ -27,21 +27,29 @@ export function encodeRfc3986(text: string): string {
 
 const reencode = (component: string) => encodeRfc3986(decodeURIComponent(component));
 
-/** The Authorization header for an S3 request (AWS Signature Version 4, signed payload). */
-export function signV4(input: SignInput): string {
-  const path = input.url.pathname.split("/").map(reencode).join("/");
-  const query = input.url.search
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** A URL's query as SigV4 signs it: each part re-encoded, pairs sorted by key, then value. */
+export function canonicalQuery(search: string): string {
+  return search
     .slice(1)
     .split("&")
     .filter((pair) => pair !== "")
     .map((pair) => {
       const at = pair.indexOf("=");
       return at === -1
-        ? `${reencode(pair)}=`
-        : `${reencode(pair.slice(0, at))}=${reencode(pair.slice(at + 1))}`;
+        ? ([reencode(pair), ""] as const)
+        : ([reencode(pair.slice(0, at)), reencode(pair.slice(at + 1))] as const);
     })
-    .sort()
+    .sort(([a, x], [b, y]) => (a === b ? compare(x, y) : compare(a, b)))
+    .map(([key, value]) => `${key}=${value}`)
     .join("&");
+}
+
+/** The Authorization header for an S3 request (AWS Signature Version 4, signed payload). */
+export function signV4(input: SignInput): string {
+  const path = input.url.pathname.split("/").map(reencode).join("/");
+  const query = canonicalQuery(input.url.search);
   const headers = new Map<string, string>([["host", input.url.host]]);
   for (const [name, value] of Object.entries(input.headers)) {
     headers.set(name.toLowerCase(), value.trim().replace(/\s+/g, " "));

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { signV4 } from "./sigv4.ts";
+import { canonicalQuery, signV4 } from "./sigv4.ts";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -75,5 +75,14 @@ describe("SigV4 for R2 requests (spec 2 S12)", () => {
     expect(r2("DELETE", "/repowiki/sites/a/v1/a%20b.html")).toBe(
       "fbde1558d9653320f70506eab46eb16f5fe7bae0f37a95c0bafc7de80fb00fd1",
     );
+  });
+});
+
+describe("the canonical query (spec 2 S12)", () => {
+  it("sorts by key and then value, not by the joined pair", () => {
+    expect(canonicalQuery("?a-b=1&a=2")).toBe("a=2&a-b=1");
+    expect(canonicalQuery("?b=2&b=1&a")).toBe("a=&b=1&b=2");
+    expect(canonicalQuery("?prefix=a%20b%2F&list-type=2")).toBe("list-type=2&prefix=a%20b%2F");
+    expect(canonicalQuery("")).toBe("");
   });
 });
