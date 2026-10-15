@@ -1,6 +1,7 @@
 export {
   ApiError,
   type FailCode,
+  leaseGone,
   type Succeeded,
   type WorkerApi,
   WorkerSpec,
@@ -41,6 +42,9 @@ export {
   type PhaseDeps,
   phase1,
   phase2,
+  redact,
+  WIKI_BATCH_ROUNDS,
+  WIKI_DEADLINE_MINUTES,
 } from "./run.ts";
 export {
   cleanSuggestions,

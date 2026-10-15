@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { WikiExport } from "@repowiki/core";
 import type { JobStep } from "@repowiki/hosted";
 import { createClaudeProvider, createLedger, type Provider, resolveModels } from "@repowiki/llm";
-import { ApiError, type FailCode, type WorkerApi, type WorkerSpec } from "./api.ts";
+import { ApiError, type FailCode, leaseGone, type WorkerApi, type WorkerSpec } from "./api.ts";
 import { type CloneResult, cloneBare } from "./clone.ts";
 import { CLI, type CliRun, engineEnv, ROOT, rebasedFetch, runCli } from "./engine.ts";
 import { buildFacts, type FileFacts, indexedCount } from "./facts.ts";
@@ -11,8 +11,16 @@ import { countTree, indexInChild, TREE_FACTOR } from "./indexing.ts";
 import { authorEmails, peopleFile } from "./people-file.ts";
 import { suggest } from "./suggestions.ts";
 
-/** One CLI may run this long; wiki-build's batches get an 80-minute deadline inside it. */
+/** One CLI may run this long. */
 export const CLI_TIMEOUT_MS = 90 * 60_000;
+/**
+ * wiki-build's `--deadline`, which cancels each Message Batch still running after that many
+ * minutes (scripts/wiki-cli.ts): per batch, not per run. A build waits on at most four batches in
+ * turn (the pages, their retry, the About article, its retry), so four deadlines, 80 minutes,
+ * fit inside CLI_TIMEOUT_MS with 10 minutes left for packing, verifying, linking and the export.
+ */
+export const WIKI_DEADLINE_MINUTES = 20;
+export const WIKI_BATCH_ROUNDS = 4;
 /** A quarter of the server's 120-second lease. */
 export const HEARTBEAT_MS = 30_000;
 
@@ -62,6 +70,35 @@ export function heartbeater(api: WorkerApi, everyMs: number, log: (line: object)
   };
 }
 
+/**
+ * `text` with every whole `token` replaced, and a start that is the token's end (8 characters or
+ * more, where a cut fell inside it) replaced too.
+ */
+export function redact(text: string, token: string): string {
+  let out = text.split(token).join("[token]");
+  for (let n = token.length - 1; n >= 8; n--) {
+    if (out.startsWith(token.slice(-n))) {
+      out = `[token]${out.slice(n)}`;
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * The lease (spec 2 §6); null after reporting a refusal or a bad spec as job-failed, unless the
+ * token itself was refused.
+ */
+async function leased(deps: PhaseDeps, phase: 1 | 2): Promise<WorkerSpec | null> {
+  try {
+    return await deps.api.lease();
+  } catch (error) {
+    deps.log({ phase, failed: "lease", ...why(error) });
+    if (!leaseGone(error)) await reportFailure(deps, "job-failed");
+    return null;
+  }
+}
+
 /** What a log line may say about an error: its class and an API status, never its message. */
 const why = (error: unknown) => ({
   error: error instanceof Error ? error.name : "unknown",
@@ -84,7 +121,8 @@ async function reportFailure(deps: PhaseDeps, code: FailCode): Promise<false> {
 
 /** Phase 1, with the network open (spec 2 S9): lease, then clone under heartbeats (A1). */
 export async function phase1(deps: PhaseDeps): Promise<boolean> {
-  const spec = await deps.api.lease();
+  const spec = await leased(deps, 1);
+  if (spec === null) return false;
   const where = paths(deps.workDir, spec);
   const beat = heartbeater(deps.api, deps.heartbeatMs ?? HEARTBEAT_MS, deps.log);
   try {
@@ -121,13 +159,22 @@ function defaultProvider(spec: WorkerSpec, token: string): Provider {
   });
 }
 
+/** Whether the export holds a page for every active feature and an About article. */
+function complete(exp: WikiExport): boolean {
+  const paged = new Set(exp.pages.map((p) => p.featureId));
+  const active = exp.manifest.features.filter((f) => f.status.kind === "active");
+  return exp.architecture.length > 0 && active.every((f) => paged.has(f.id));
+}
+
 /** Phase 2, with the network locked to the server (spec 2 S9): the engine, facts and upload. */
 export async function phase2(deps: PhaseDeps): Promise<boolean> {
-  const spec = await deps.api.lease();
+  const spec = await leased(deps, 2);
+  if (spec === null) return false;
   const where = paths(deps.workDir, spec);
   const beat = heartbeater(deps.api, deps.heartbeatMs ?? HEARTBEAT_MS, deps.log);
   const env = engineEnv({ home: where.home, llmUrl: spec.llmUrl, token: deps.token });
-  const hidden = (text: string) => text.split(deps.token).join("[token]");
+  // Whether a CLI that exited 0 showed the cost refusal: trusted only if the wiki is incomplete.
+  let capped = false;
   const cli = async (script: string, args: string[]) => {
     const run: CliRun = await (deps.runCli ?? runCli)({
       script: join(ROOT, script),
@@ -135,13 +182,15 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
       env,
       timeoutMs: CLI_TIMEOUT_MS,
     });
-    if (run.status === 0 && !run.costCapped) return;
+    capped ||= run.costCapped;
+    if (run.status === 0) return;
     deps.log({
       cli: script,
       status: run.status,
       timedOut: run.timedOut,
       costCapped: run.costCapped,
-      stderr: hidden(run.stderrTail.slice(-1000)),
+      // Redacted before the cut, so the cut never leaves part of the token behind.
+      stderr: redact(run.stderrTail, deps.token).slice(-1000),
     });
     throw new CliFailed(run.costCapped ? "job-cost-cap" : "job-failed", `${script} failed`);
   };
@@ -162,7 +211,14 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
     await beat.step("manifest");
     await cli(CLI.manifest, [where.repo, spec.commitSha, "--out", where.out]);
     await beat.step("write");
-    await cli(CLI.wiki, [where.repo, spec.commitSha, "--out", where.out, "--deadline", "80"]);
+    await cli(CLI.wiki, [
+      where.repo,
+      spec.commitSha,
+      "--out",
+      where.out,
+      "--deadline",
+      `${WIKI_DEADLINE_MINUTES}`,
+    ]);
     await beat.step("people");
     const emails = (deps.emails ?? authorEmails)(where.repo, spec.author.commitShas, where.home);
     writeFileSync(where.people, JSON.stringify(peopleFile(spec.author.login, emails)));
@@ -177,6 +233,10 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
     await beat.step("facts");
     const bytes = readFileSync(join(where.out, "export.json"));
     const exp = WikiExport.parse(JSON.parse(bytes.toString("utf8")));
+    if (!complete(exp)) {
+      deps.log({ phase: 2, incomplete: true, costCapped: capped });
+      throw new CliFailed(capped ? "job-cost-cap" : "job-failed", "the wiki is incomplete");
+    }
     const facts = buildFacts(index.files, exp);
     const provider = (deps.provider ?? defaultProvider)(spec, deps.token);
     const { suggestions, model } = await suggest(provider, exp, facts, spec.author.login);
@@ -191,6 +251,7 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
   } catch (error) {
     const code = error instanceof CliFailed ? error.code : "job-failed";
     deps.log({ phase: 2, failed: code, ...why(error) });
+    if (leaseGone(error)) return false;
     return reportFailure(deps, code);
   } finally {
     beat.stop();
