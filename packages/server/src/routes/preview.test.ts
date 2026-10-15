@@ -51,11 +51,11 @@ describe("serveTreeFile (spec 2 S13)", () => {
     await deps.objects.put("previews/p/r1/h/docs/a.png", new Uint8Array([1, 2]), "image/png");
     const prefix = "previews/p/r1/h/";
     const from = "/demo-dev/demo-repo/docs/";
-    const page = await serveTreeFile(deps.objects, prefix, "docs/", from, "/preview/p/1/docs/");
+    const page = await serveTreeFile(deps.objects, prefix, "docs/", [[from, "/preview/p/1/docs/"]]);
     expect(String(page?.body)).toContain('href="/preview/p/1/docs/wiki/x/"');
     expect(String(page?.body)).toContain('href="https://github.com/demo-dev/demo-repo/docs/a"');
     expect((await serveTreeFile(deps.objects, prefix, "docs/wiki/x"))?.body).toBeDefined();
-    const png = await serveTreeFile(deps.objects, prefix, "docs/a.png", "/a/", "/b/");
+    const png = await serveTreeFile(deps.objects, prefix, "docs/a.png", [["/a/", "/b/"]]);
     expect(png?.body).toEqual(new Uint8Array([1, 2]));
     const asStored = await serveTreeFile(deps.objects, prefix, "docs/");
     expect(new TextDecoder().decode(asStored?.body as Uint8Array)).toBe(html);
@@ -111,6 +111,9 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect(wiki.headers?.["x-robots-tag"]).toBe("noindex");
     expect(String(wiki.body)).toContain(`${at}wiki/`);
     expect(String(wiki.body)).not.toContain('"/demo-dev/demo-repo/');
+    // Its link to the author's biography goes to the preview's biography (ADR-0013).
+    expect(String(wiki.body)).toContain(`<a href="${base}">Demo Developer</a>`);
+    expect(String(wiki.body)).not.toContain('href="/demo-dev"');
     expect(String(wiki.body)).not.toContain("github.com/_preview/");
     // Every wiki page is public (ADR-0012).
     expect((await call(pages, { path: `${at}wiki/${first}/` })).status).toBe(200);

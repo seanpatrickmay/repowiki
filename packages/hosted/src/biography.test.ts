@@ -11,6 +11,7 @@ import {
   type BiographyProject,
   biography,
   biographyEntry,
+  biographyName,
   nounPhrase,
   type Run,
   surnameOf,
@@ -197,6 +198,13 @@ describe("nounPhrase", () => {
   it("is null when the lead does not start with the title", () => {
     expect(nounPhrase("A tool that writes wikis.", "RepoWiki")).toBeNull();
     expect(nounPhrase("", "RepoWiki")).toBeNull();
+  });
+});
+
+describe("biographyName", () => {
+  it("is the display name made plain, or the login", () => {
+    expect(biographyName("Ada **Lovelace**", "ada")).toBe("Ada Lovelace");
+    expect(biographyName(" ", "ada")).toBe("ada");
   });
 });
 

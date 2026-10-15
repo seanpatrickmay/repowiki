@@ -1,4 +1,10 @@
-import { authorize, biographyEntry, type Project, type RefusalCode } from "@repowiki/hosted";
+import {
+  authorize,
+  biographyEntry,
+  biographyName,
+  type Project,
+  type RefusalCode,
+} from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
@@ -26,22 +32,23 @@ export const previewKey = (projectId: string, revision: number, siteHash: string
 
 /** The path a project's wiki is served under (ADR-0013). */
 export const siteBase = (handle: string, slug: string) => `/${handle}/${slug}/`;
+/** The path of an author's biography, which each of their wikis links to (ADR-0013). */
+export const authorUrl = (handle: string) => `/${handle}`;
 
 const TEXT = /^(text\/|application\/(json|javascript|xml))/;
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * One file of a stored tree; a directory serves its index.html. Text files have the path `from`
- * (the public wiki base) rewritten to `to` wherever it starts a path, not inside another URL such
- * as the GitHub link `github.com/<owner>/<repo>/…`, so a preview's links stay inside the preview
- * (spec 2 S13); an empty `from` serves the bytes as stored.
+ * One file of a stored tree; a directory serves its index.html. Text files have each `[from, to]`
+ * of `rewrites` applied wherever `from` starts a path, not inside another URL such as the GitHub
+ * link `github.com/<owner>/<repo>/…`, so a preview's links stay inside the preview (spec 2 S13);
+ * with none, the bytes are served as stored.
  */
 export async function serveTreeFile(
   objects: ObjectStore,
   prefix: string,
   rest: string,
-  from = "",
-  to = "",
+  rewrites: readonly (readonly [string, string])[] = [],
 ): Promise<{ body: string | Uint8Array; contentType: string } | null> {
   const path = rest === "" || rest.endsWith("/") ? `${rest}index.html` : rest;
   const key = `${prefix}${path}`;
@@ -55,11 +62,13 @@ export async function serveTreeFile(
     (await objects.get(key)) ??
     (last.includes(".") ? null : await objects.get(`${key}/index.html`));
   if (object === null) return null;
-  if (from === "" || !TEXT.test(object.contentType)) {
+  if (rewrites.length === 0 || !TEXT.test(object.contentType)) {
     return { body: object.body, contentType: object.contentType };
   }
-  const at = new RegExp(`(?<![A-Za-z0-9.:_~-])${escapeRe(from)}`, "g");
-  const text = new TextDecoder().decode(object.body).replace(at, to);
+  let text = new TextDecoder().decode(object.body);
+  for (const [from, to] of rewrites) {
+    text = text.replace(new RegExp(`(?<![A-Za-z0-9.:_~-])${escapeRe(from)}`, "g"), to);
+  }
   return { body: text, contentType: object.contentType };
 }
 
@@ -96,11 +105,14 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
       exp: hosted,
       repoFullName: repo,
     });
+    const handle = await handleOf(session);
+    const { login, displayName } = session.account;
     const tree = await build({
       exp: hosted,
-      base: siteBase(await handleOf(session), project.slug),
+      base: siteBase(handle, project.slug),
       repoUrl: `https://github.com/${repo}`,
       entry: new TextEncoder().encode(JSON.stringify(entry)),
+      author: { name: biographyName(displayName, login), url: authorUrl(handle) },
     });
     const prefix = previewKey(project.id, revision, tree.hash);
     for (const file of tree.files) {
@@ -260,12 +272,15 @@ export function previewPageRoutes(deps: Deps): Route[] {
         }
         if (rest === project.slug) return moved(wiki);
         if (!rest.startsWith(`${project.slug}/`)) return notFound;
+        // The wiki's own paths, and its link to the biography (ADR-0013), stay in the preview.
         const file = await serveTreeFile(
           deps.objects,
           `${preview.siteKey}${SITE_DIR}`,
           rest.slice(project.slug.length + 1),
-          siteBase(handle, project.slug),
-          wiki,
+          [
+            [siteBase(handle, project.slug), wiki],
+            [`${authorUrl(handle)}"`, `${base}"`],
+          ],
         );
         if (file === null) return notFound;
         return {

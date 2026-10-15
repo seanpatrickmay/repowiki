@@ -57,6 +57,8 @@ export function buildTree(input: {
   base: string;
   repoUrl: string;
   entry: Uint8Array;
+  /** The wiki's link back to its author's biography (ADR-0013). */
+  author?: { name: string; url: string };
 }): Promise<{ files: TreeFile[]; hash: string }> {
   return renderQueue(async () => {
     const work = mkdtempSync(join(tmpdir(), "repowiki-render-"));
@@ -64,7 +66,8 @@ export function buildTree(input: {
       const exportFile = join(work, "export.json");
       const outDir = join(work, "site");
       writeFileSync(exportFile, JSON.stringify(input.exp));
-      await runChild([exportFile, outDir, input.repoUrl, input.base]);
+      const author = input.author === undefined ? [] : [input.author.name, input.author.url];
+      await runChild([exportFile, outDir, input.repoUrl, input.base, ...author]);
       const files = [...readTree(outDir, SITE_DIR), { path: ENTRY_FILE, bytes: input.entry }];
       return { files, hash: treeHash(files) };
     } finally {
