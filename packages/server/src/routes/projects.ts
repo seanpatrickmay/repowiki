@@ -5,13 +5,11 @@ import { readForm } from "../http/body.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
 import { checkMutation, currentSession, type Session } from "../http/session.ts";
-import { escapeHtml, type PageSession, page } from "../pages/layout.ts";
-import { refusalPage } from "../pages/refusal.ts";
+import { escapeHtml, page } from "../pages/layout.ts";
+import { pageSession, refusalPage } from "../pages/refusal.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
 import { projectsOf } from "../store/projects.ts";
 import { startGeneration } from "../store/start.ts";
-
-export const pageSession = (s: Session): PageSession => ({ csrf: s.csrf, login: s.account.login });
 
 function dashboard(session: Session, repos: GitHubRepo[], projects: string): string {
   const csrf = escapeHtml(session.csrf);
