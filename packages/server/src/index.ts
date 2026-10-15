@@ -90,6 +90,11 @@ export {
   reserveMicros,
 } from "./proxy/cost.ts";
 export {
+  type FakeAnthropic,
+  type FakeAnthropicOptions,
+  fakeAnthropicFetch,
+} from "./proxy/fake-anthropic.ts";
+export {
   BatchCreate,
   BETA_ALLOWLIST,
   MAX_OUTPUT,
@@ -105,6 +110,15 @@ export {
   type WorkerSpec,
 } from "./routes/internal.ts";
 export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
+export {
+  anthropicError,
+  anthropicShaped,
+  llmRoutes,
+  MESSAGE_LIMIT,
+  PER_SECOND,
+  proxyCore,
+  rateLimiter,
+} from "./routes/llm.ts";
 export { pageSession, projectRoutes } from "./routes/projects.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
 export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
