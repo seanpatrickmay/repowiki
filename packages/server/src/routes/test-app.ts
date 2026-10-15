@@ -11,6 +11,7 @@ import { HttpError } from "../http/body.ts";
 import type { Method, Reply, RouteRequest } from "../http/router.ts";
 import { type App, text } from "../http/server.ts";
 import { fsObjectStore } from "../objects/fs-store.ts";
+import { fakeAnthropicFetch } from "../proxy/fake-anthropic.ts";
 import { recordingRunner } from "../runner/runner.ts";
 import { signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
@@ -34,6 +35,7 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { 
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
     runner: recordingRunner().runner,
     objects: fsObjectStore(mkdtempSync(join(tmpdir(), "repowiki-objects-"))),
+    anthropic: { url: "https://api.anthropic.test", key: null, fetch: fakeAnthropicFetch().fetch },
     ...overrides,
   };
 }

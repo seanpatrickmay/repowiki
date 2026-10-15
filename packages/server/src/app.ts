@@ -22,6 +22,8 @@ export interface Deps {
   runner: JobRunner;
   /** Exports, previews and published sites (spec 2 S12). */
   objects: ObjectStore;
+  /** Where the LLM proxy forwards model calls; `key` null means no provider is configured. */
+  anthropic: { url: string; key: string | null; fetch: typeof fetch };
 }
 
 export const callbackUrl = (config: Config) => `${config.origin}/auth/github/callback`;
