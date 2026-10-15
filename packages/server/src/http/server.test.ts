@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { BODY_LIMIT, HttpError, readJson } from "./body.ts";
 import { createRouter, type RouteRequest } from "./router.ts";
-import { type AppServer, html, json, listen } from "./server.ts";
+import { type AppServer, html, json, listen, text } from "./server.ts";
 
 const logs: object[] = [];
 let server: AppServer;
@@ -77,14 +77,23 @@ describe("listen (spec 2 S2)", () => {
   });
 
   it("refuses dot segments and doubled slashes before routing", async () => {
-    // Each of these has /hello/:name's shape, so only the dot-segment check can refuse it.
-    for (const path of ["/hello/%2E%2E", "/hello/.", "/hello/..", "/hello/%2e"]) {
-      const raw = await rawRequest(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`);
-      expect(raw, path).toMatch(/^HTTP\/1\.1 404/);
+    // An app with no router that answers 200 to any path: only listen's own check can refuse.
+    const open = await listen(async () => text(200, "any path"), {
+      port: 0,
+      host: "127.0.0.1",
+      log: () => {},
+    });
+    try {
+      expect(await rawRequest("GET /hello/sean HTTP/1.1\r\nHost: x\r\n\r\n", open)).toMatch(
+        /^HTTP\/1\.1 200/,
+      );
+      for (const path of ["/hello/%2E%2E", "/hello/.", "/hello/..", "/hello/%2e", "//hello/sean"]) {
+        const raw = await rawRequest(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`, open);
+        expect(raw, path).toMatch(/^HTTP\/1\.1 404/);
+      }
+    } finally {
+      await open.close();
     }
-    expect(await rawRequest("GET //hello/sean HTTP/1.1\r\nHost: x\r\n\r\n")).toMatch(
-      /^HTTP\/1\.1 404/,
-    );
   });
 
   it("hides an unexpected error behind a generic 500 and logs only its name", async () => {
@@ -177,9 +186,9 @@ describe("a declared oversized body (spec 2 S2)", () => {
 });
 
 /** One raw HTTP/1.1 exchange, for requests fetch normalises away. */
-async function rawRequest(request: string): Promise<string> {
+async function rawRequest(request: string, to: AppServer = server): Promise<string> {
   const { connect } = await import("node:net");
-  const { port } = new URL(server.url);
+  const { port } = new URL(to.url);
   return new Promise((resolve, reject) => {
     const socket = connect(Number(port), "127.0.0.1", () => socket.end(request));
     let data = "";

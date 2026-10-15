@@ -94,6 +94,19 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
     expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
   });
 
+  it("refuses one flow's validly signed state with another flow's validly signed cookie", async () => {
+    const stateOf = async () => setCookie(await call(app, { path: "/auth/github" }), "oauth_state");
+    const a = (await stateOf()) ?? "";
+    const b = (await stateOf()) ?? "";
+    expect(a).not.toBe(b);
+    const crossed = await call(app, {
+      path: `/auth/github/callback?code=fake-code&state=${a}`,
+      headers: { cookie: `oauth_state=${encodeURIComponent(b)}` },
+    });
+    expect(crossed.status).toBe(400);
+    expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
+  });
+
   it("refuses a code GitHub will not exchange", async () => {
     const start = await call(app, { path: "/auth/github" });
     const state = setCookie(start, "oauth_state") ?? "";
