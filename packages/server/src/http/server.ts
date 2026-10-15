@@ -93,8 +93,21 @@ async function respond(
       }
     }
   }
-  res.writeHead(reply.status, { ...SECURITY_HEADERS, ...reply.headers });
-  res.end(method === "HEAD" ? undefined : reply.body);
+  try {
+    res.writeHead(reply.status, { ...SECURITY_HEADERS, ...reply.headers });
+    res.end(method === "HEAD" ? undefined : reply.body);
+  } catch (e) {
+    // A reply Node refuses to send (a header holding CR or LF) must not become an unhandled
+    // rejection, which would end the process for every user.
+    error = e instanceof Error ? e.name : "unknown";
+    reply = text(500, "Something went wrong.");
+    if (res.headersSent) {
+      res.destroy();
+    } else {
+      res.writeHead(reply.status, { ...SECURITY_HEADERS, ...reply.headers });
+      res.end(method === "HEAD" ? undefined : reply.body);
+    }
+  }
   log({
     method,
     route: path,

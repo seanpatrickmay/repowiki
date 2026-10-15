@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "./db.ts";
 import { isUniqueViolation, withRetries } from "./db.ts";
@@ -41,6 +44,23 @@ describe("openPglite (spec 2 S3)", () => {
     ).rejects.toThrow("boom");
     const ids = await db.query<{ id: number }>("SELECT id FROM things ORDER BY id");
     expect(ids.map((row) => row.id)).toEqual([1, 2]);
+  });
+});
+
+describe("openPglite on disk (spec 2 S3)", () => {
+  it("creates a data directory whose parents do not exist yet, and reopens it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "repowiki-pglite-"));
+    try {
+      const dataDir = join(root, "dev", "db");
+      const first = await openPglite(dataDir);
+      await first.exec("CREATE TABLE kept (id int)");
+      await first.close();
+      const again = await openPglite(dataDir);
+      expect(await again.query("SELECT * FROM kept")).toEqual([]);
+      await again.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
