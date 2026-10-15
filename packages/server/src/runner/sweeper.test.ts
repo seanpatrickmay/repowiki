@@ -1,11 +1,12 @@
 import { type Account, type Job, leaseJob } from "@repowiki/hosted";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Deps } from "../app.ts";
+import type { Db } from "../db/db.ts";
 import type { GitHubRepo } from "../github/api.ts";
 import { FAKE_REPO, FAKE_USER } from "../github/fake.ts";
 import { testDeps } from "../routes/test-app.ts";
 import { signIn } from "../store/accounts.ts";
-import { issueToken, jobById, saveJob, tokenJob } from "../store/jobs.ts";
+import { issueToken, jobById, openReservations, saveJob, tokenJob } from "../store/jobs.ts";
 import { startGeneration } from "../store/start.ts";
 import { recordingRunner, type StartRequest } from "./runner.ts";
 import { sweep } from "./sweeper.ts";
@@ -50,6 +51,7 @@ async function startOne(): Promise<void> {
   });
   if (!result.ok) throw new Error(result.code);
   job = result.value.job;
+  firstToken = result.value.token ?? "";
 }
 
 beforeEach(async () => {
@@ -58,11 +60,15 @@ beforeEach(async () => {
   clock = "2026-10-14T12:00:00.000Z";
   deps = await testDeps({ runner: recording.runner, now: () => clock });
   await startOne();
-  firstToken = await issueToken(deps.db, job.id, job.attempt, clock);
 });
 afterEach(async () => deps.db.close());
 
 const theJob = async () => jobById(deps.db, job.id);
+const reserve = (usd: number) =>
+  deps.db.query(
+    "INSERT INTO reservations (id, job_id, attempt, usd_micros) VALUES ($1, $2, 1, $3)",
+    [deps.newId(), job.id, usd],
+  );
 
 describe("the sweeper (spec 2 S16)", () => {
   it("leaves a fresh queued job and a live lease alone", async () => {
@@ -108,15 +114,59 @@ describe("the sweeper (spec 2 S16)", () => {
   });
 
   it("keeps sweeping when one start fails", async () => {
+    // A second queued job: the first start in the pass fails, the second must still happen.
+    const other = { ...job, id: "00000000-0000-4000-8000-0000000000aa", projectId: job.id };
+    await saveJob(deps.db, other);
+    await issueToken(deps.db, other.id, 1, clock);
+    const tried: string[] = [];
     deps = {
       ...deps,
       runner: {
-        start: async () => {
-          throw new Error("machine refused");
+        start: async (request) => {
+          tried.push(request.jobId);
+          if (tried.length === 1) throw new Error("machine refused");
+          started.push(request);
         },
       },
     };
     clock = "2026-10-14T12:06:00.000Z";
-    expect(await sweep(deps)).toMatchObject({ restarted: 1 });
+    expect(await sweep(deps)).toMatchObject({ restarted: 2 });
+    expect(tried).toHaveLength(2);
+    expect(started.map((s) => s.jobId)).toEqual([tried[1]]);
+  });
+
+  it("charges a recovered attempt's open reservations", async () => {
+    const leased = leaseJob(job, clock, 60_000);
+    if (!leased.ok) throw new Error("lease");
+    await saveJob(deps.db, leased.value);
+    await reserve(1234);
+    clock = "2026-10-14T12:05:00.000Z";
+    expect(await sweep(deps)).toMatchObject({ recovered: 1 });
+    expect(await theJob()).toMatchObject({ status: "queued", attempt: 2, spentUsdMicros: 1234 });
+    expect(await openReservations(deps.db, job.id)).toBe(0);
+  });
+
+  it("leaves a job's reservations open when a heartbeat renewed its lease before the lock", async () => {
+    // Staged by hand (PGlite runs one transaction at a time): the sweep's SELECT sees the expired
+    // lease, then a heartbeat lands before recover() locks the row.
+    const leased = leaseJob(job, clock, 60_000);
+    if (!leased.ok) throw new Error("lease");
+    await saveJob(deps.db, leased.value);
+    await reserve(1234);
+    clock = "2026-10-14T12:05:00.000Z";
+    const db = deps.db;
+    const racing: Db = {
+      ...db,
+      query: async (sql, params) => {
+        const rows = await db.query(sql, params);
+        if (sql.includes("lease_expires_at <=")) {
+          await saveJob(db, { ...leased.value, leaseExpiresAt: "2026-10-14T12:07:00.000Z" });
+        }
+        return rows as never;
+      },
+    };
+    expect(await sweep({ ...deps, db: racing })).toMatchObject({ recovered: 0 });
+    expect(await theJob()).toMatchObject({ status: "running", attempt: 1, spentUsdMicros: 0 });
+    expect(await openReservations(deps.db, job.id)).toBe(1234);
   });
 });

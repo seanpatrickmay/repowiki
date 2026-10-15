@@ -1,9 +1,10 @@
+import { type Job, recoverJob } from "@repowiki/hosted";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
 import { generationById, latestRevision } from "../store/drafts.ts";
-import { issueToken, jobById, jobSpec } from "../store/jobs.ts";
+import { issueToken, jobById, jobSpec, revokeTokens, saveJob } from "../store/jobs.ts";
 import { projectById } from "../store/projects.ts";
 import { internalRoutes } from "./internal.ts";
 import { call, startedJob, testDeps } from "./test-app.ts";
@@ -164,5 +165,20 @@ describe("the worker's internal API (spec 2 §6)", () => {
     );
     await post("/internal/job/fail", job.token, { code: "job-failed" });
     expect(await jobById(deps.db, job.jobId)).toMatchObject({ spentUsdMicros: 12345 });
+  });
+
+  it("refuses success on an earlier attempt's export", async () => {
+    await post("/internal/job/lease", job.token);
+    expect((await putExport(job.token, JSON.stringify(fixtureExport()))).status).toBe(204);
+    // The lease runs out and the sweeper moves the job to attempt 2 with a new token.
+    const running = (await jobById(deps.db, job.jobId)) as Job;
+    const recovered = recoverJob(running, "2026-10-14T13:00:00.000Z");
+    if (!recovered.ok) throw new Error(recovered.code);
+    await saveJob(deps.db, recovered.value);
+    await revokeTokens(deps.db, job.jobId);
+    const second = await issueToken(deps.db, job.jobId, 2, deps.now());
+    expect((await post("/internal/job/lease", second)).status).toBe(200);
+    expect((await post("/internal/job/succeed", second, success())).status).toBe(409);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ status: "running", attempt: 2 });
   });
 });

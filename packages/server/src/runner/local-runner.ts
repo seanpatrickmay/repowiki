@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JobRunner } from "./runner.ts";
@@ -11,6 +11,8 @@ export interface LocalRunnerOptions {
   internalUrl: string;
   mode: "fixture" | "engine";
   log: (line: object) => void;
+  /** The Node binary that runs the worker; this process's by default. */
+  execPath?: string;
 }
 
 /**
@@ -19,9 +21,10 @@ export interface LocalRunnerOptions {
  */
 export function localRunner(options: LocalRunnerOptions): JobRunner {
   return {
-    async start({ jobId, attempt, token }) {
+    start({ jobId, attempt, token }) {
       const home = mkdtempSync(join(tmpdir(), "repowiki-worker-"));
-      const child = spawn(process.execPath, [options.workerEntry], {
+      const cleanUp = () => rmSync(home, { recursive: true, force: true });
+      const child = spawn(options.execPath ?? process.execPath, [options.workerEntry], {
         env: {
           PATH: process.env.PATH ?? "/usr/bin:/bin",
           HOME: home,
@@ -35,10 +38,19 @@ export function localRunner(options: LocalRunnerOptions): JobRunner {
       child.stderr?.on("data", (chunk: Buffer) => {
         stderr = `${stderr}${chunk.toString("utf8")}`.slice(-2000);
       });
-      child.on("error", (error) => options.log({ worker: jobId, attempt, error: error.name }));
-      child.on("exit", (code) =>
-        options.log({ worker: jobId, attempt, exit: code, ...(code === 0 ? {} : { stderr }) }),
-      );
+      child.on("exit", (code) => {
+        cleanUp();
+        options.log({ worker: jobId, attempt, exit: code, ...(code === 0 ? {} : { stderr }) });
+      });
+      // Started means spawned: a child that could not be spawned rejects, so the caller knows.
+      return new Promise<void>((resolve, reject) => {
+        child.once("spawn", () => resolve());
+        child.once("error", (error) => {
+          cleanUp();
+          options.log({ worker: jobId, attempt, error: error.name });
+          reject(error);
+        });
+      });
     },
   };
 }

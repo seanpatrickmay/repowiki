@@ -19,8 +19,8 @@ import {
 import type { Db, Queryable } from "../db/db.ts";
 import type { GitHubRepo } from "../github/api.ts";
 import { appendAudit } from "./audit.ts";
-import { activeJob, saveJob, saveJobSpec } from "./jobs.ts";
-import { projectFor, saveProject, saveRepository, usageFor } from "./projects.ts";
+import { activeJob, issueToken, saveJob, saveJobSpec } from "./jobs.ts";
+import { projectById, projectFor, saveProject, saveRepository, usageFor } from "./projects.ts";
 
 /** Measured cost (owner's nine builds): about $0.09 per 100 indexed files, plus the About article. */
 const PER_FILE_MICROS = 900;
@@ -44,7 +44,13 @@ export interface StartInput {
   newId: () => string;
 }
 
-export type Started = Result<{ project: Project; job: Job; created: boolean }>;
+/** `token` is the new job's first token, issued in the same transaction; null when not created. */
+export type Started = Result<{
+  project: Project;
+  job: Job;
+  created: boolean;
+  token: string | null;
+}>;
 
 async function audit(
   tx: Queryable,
@@ -68,6 +74,18 @@ async function lockAccount(tx: Queryable, account: Account): Promise<void> {
   await tx.query("SELECT id FROM accounts WHERE id = $1 FOR UPDATE", [account.id]);
 }
 
+/** The account's project for a repository, locked after its active job: the order succeed uses. */
+async function lockedProject(
+  tx: Queryable,
+  accountId: string,
+  githubRepoId: number,
+): Promise<Project | null> {
+  const found = await projectFor(tx, accountId, githubRepoId);
+  if (found === null) return null;
+  await activeJob(tx, found.id, true);
+  return projectById(tx, found.id, true);
+}
+
 /** Authorize `action`, then create its job and the worker's spec (Contract §6.1, §7.1). */
 async function start(
   tx: Queryable,
@@ -78,7 +96,7 @@ async function start(
   const { account, repo, now } = input;
   const active = existing === null ? null : await activeJob(tx, existing.id, true);
   if (existing && active && active.kind === kind && active.commitSha === input.commitSha) {
-    return ok({ project: existing, job: active, created: false });
+    return ok({ project: existing, job: active, created: false, token: null });
   }
   const action = kind === "generate" ? "job.create" : "job.refresh";
   const usage = await usageFor(tx, account.id, now);
@@ -157,7 +175,9 @@ async function start(
     export: null,
   });
   await audit(tx, input, action, project.id, "allowed");
-  return ok({ project, job, created: true });
+  // In this transaction, so no sweep can see the job without a token and start a second runner.
+  const token = await issueToken(tx, job.id, job.attempt, now);
+  return ok({ project, job, created: true, token });
 }
 
 /**
@@ -167,7 +187,7 @@ async function start(
 export async function startGeneration(db: Db, input: StartInput): Promise<Started> {
   return db.transaction(async (tx) => {
     await lockAccount(tx, input.account);
-    const existing = await projectFor(tx, input.account.id, input.repo.id, true);
+    const existing = await lockedProject(tx, input.account.id, input.repo.id);
     return start(tx, input, "generate", existing);
   });
 }
@@ -179,7 +199,7 @@ export async function startRefresh(
 ): Promise<Started> {
   return db.transaction(async (tx) => {
     await lockAccount(tx, input.account);
-    const project = await projectFor(tx, input.account.id, input.project.githubRepoId, true);
+    const project = await lockedProject(tx, input.account.id, input.project.githubRepoId);
     if (project === null || project.id !== input.project.id) return refusedNotFound();
     return start(tx, input, "refresh", project);
   });

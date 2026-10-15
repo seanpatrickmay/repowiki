@@ -22,9 +22,12 @@ export async function heldJob(
   forUpdate: boolean,
 ): Promise<Held> {
   if (token === null) throw invalid();
-  const holder = await tokenJob(q, token);
-  if (holder === null) throw invalid();
-  const job = await jobById(q, holder.jobId, forUpdate);
+  const unlocked = await tokenJob(q, token);
+  if (unlocked === null) throw invalid();
+  const job = await jobById(q, unlocked.jobId, forUpdate);
+  // A token the sweeper revoked (or a lease marked) while this waited on the lock is read again.
+  const holder = forUpdate ? await tokenJob(q, token) : unlocked;
+  if (holder === null || holder.jobId !== unlocked.jobId) throw invalid();
   if (job === null || job.attempt !== holder.attempt || isTerminal(job.status)) throw invalid();
   if (job.status === "running" && !holder.leased) {
     throw new HttpError(409, "Another worker holds this job.");
