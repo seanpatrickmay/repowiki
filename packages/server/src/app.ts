@@ -25,7 +25,16 @@ export interface Deps {
   objects: ObjectStore;
   /** Where the LLM proxy forwards model calls; `key` null means no provider is configured. */
   anthropic: { url: string; key: string | null; fetch: typeof fetch };
+  /** One JSON line per event; never given a secret. Defaults to stderr. */
+  log?: (line: object) => void;
 }
+
+/** The deps' log, or one JSON line on stderr. */
+export const logOf = (deps: Pick<Deps, "log">) =>
+  deps.log ?? ((line: object) => process.stderr.write(`${JSON.stringify(line)}\n`));
+
+/** An error's name for a log line: never its message, which may carry a secret. */
+export const nameOf = (error: unknown) => (error instanceof Error ? error.name : "unknown");
 
 export const callbackUrl = (config: Config) => `${config.origin}/auth/github/callback`;
 

@@ -1,4 +1,4 @@
-import type { Deps } from "../app.ts";
+import { type Deps, logOf, nameOf } from "../app.ts";
 import { type GitHubRepo, githubApi, TokenRevoked } from "../github/api.ts";
 import { eligibilityFacts } from "../github/facts.ts";
 import { readForm } from "../http/body.ts";
@@ -8,7 +8,6 @@ import { checkMutation, currentSession, type Session } from "../http/session.ts"
 import { escapeHtml, type PageSession, page } from "../pages/layout.ts";
 import { refusalPage } from "../pages/refusal.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
-import { issueToken } from "../store/jobs.ts";
 import { projectsOf } from "../store/projects.ts";
 import { startGeneration } from "../store/start.ts";
 
@@ -65,13 +64,14 @@ export function projectRoutes(deps: Deps): Route[] {
       newId: deps.newId,
     });
     if (!started.ok) return refusalPage(started.code, shown);
-    const { project, job, created } = started.value;
-    if (created) {
-      const jobToken = await issueToken(deps.db, job.id, job.attempt, now);
+    const { project, job, token: jobToken } = started.value;
+    if (jobToken !== null) {
       // A failed start leaves the job queued with its token; the sweeper restarts it (S16).
       await deps.runner
         .start({ jobId: job.id, attempt: job.attempt, token: jobToken })
-        .catch(() => undefined);
+        .catch((error: unknown) =>
+          logOf(deps)({ runner: "start-failed", job: job.id, error: nameOf(error) }),
+        );
     }
     return redirect(`/projects/${project.id}`);
   }

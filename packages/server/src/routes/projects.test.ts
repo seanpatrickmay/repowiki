@@ -123,6 +123,25 @@ describe("POST /projects (spec 2 §7)", () => {
     expect(reply.status).toBe(303);
   });
 
+  it("logs a failing start by its error's name only", async () => {
+    const lines: object[] = [];
+    deps = {
+      ...deps,
+      log: (line) => lines.push(line),
+      runner: {
+        start: async () => {
+          throw new RangeError("secret detail sk-live");
+        },
+      },
+    };
+    app = createApp(deps, projectRoutes(deps));
+    const { cookie, csrf } = await signedInCookie(deps);
+    await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    expect(lines).toEqual([
+      { runner: "start-failed", job: expect.any(String), error: "RangeError" },
+    ]);
+  });
+
   it("refuses a missing CSRF token and a bad repository id", async () => {
     const { cookie, csrf } = await signedInCookie(deps);
     expect((await build(cookie, `githubRepoId=${FAKE_REPO.id}`)).status).toBe(403);

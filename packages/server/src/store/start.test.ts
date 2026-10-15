@@ -4,7 +4,7 @@ import type { Db } from "../db/db.ts";
 import type { GitHubRepo } from "../github/api.ts";
 import { FAKE_REPO, FAKE_USER } from "../github/fake.ts";
 import { signIn } from "./accounts.ts";
-import { jobSpec } from "./jobs.ts";
+import { jobSpec, tokenJob } from "./jobs.ts";
 import { projectFor, usageFor } from "./projects.ts";
 import { estimateFor, type StartInput, startGeneration, startRefresh } from "./start.ts";
 import { freshDb } from "./test-db.ts";
@@ -85,10 +85,20 @@ describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
     expect(audit.map((a) => [a.body.action, a.body.outcome])).toEqual([["job.create", "allowed"]]);
   });
 
+  it("issues the first job token in the same transaction", async () => {
+    const started = await startGeneration(db, input());
+    if (!started.ok) throw new Error(started.code);
+    expect(await tokenJob(db, started.value.token ?? "")).toEqual({
+      jobId: started.value.job.id,
+      attempt: 1,
+      leased: false,
+    });
+  });
+
   it("returns the running job for a second click instead of a second project", async () => {
     const first = await startGeneration(db, input());
     const second = await startGeneration(db, input());
-    expect(second).toMatchObject({ ok: true, value: { created: false } });
+    expect(second).toMatchObject({ ok: true, value: { created: false, token: null } });
     if (first.ok && second.ok) expect(second.value.job.id).toBe(first.value.job.id);
     expect(await db.query("SELECT * FROM projects")).toHaveLength(1);
     expect(await db.query("SELECT * FROM jobs")).toHaveLength(1);
@@ -136,6 +146,33 @@ describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
   it("refuses a refresh on Free", async () => {
     await startGeneration(db, input());
     const project = (await projectFor(db, account.id, FAKE_REPO.id)) as Project;
-    expect(await startRefresh(db, { ...input(), project })).toMatchObject({ ok: false });
+    expect(await startRefresh(db, { ...input(), project })).toEqual({
+      ok: false,
+      code: "plan-refresh-limit",
+    });
+  });
+
+  it("locks the job before the project, as succeed does, so the two cannot deadlock", async () => {
+    // Tested on the statements' order: PGlite runs one transaction at a time.
+    await startGeneration(db, input());
+    const project = (await projectFor(db, account.id, FAKE_REPO.id)) as Project;
+    const locks: string[] = [];
+    const recording: Db = {
+      ...db,
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn({
+            ...tx,
+            query: (sql, params) => {
+              const table = / FOR UPDATE/.test(sql) ? /FROM (\w+)/.exec(sql)?.[1] : undefined;
+              if (table === "jobs" || table === "projects") locks.push(table);
+              return tx.query(sql, params);
+            },
+          }),
+        ),
+    };
+    await startRefresh(recording, { ...input(), project });
+    expect(locks.indexOf("jobs")).toBeGreaterThanOrEqual(0);
+    expect(locks.indexOf("jobs")).toBeLessThan(locks.indexOf("projects"));
   });
 });
