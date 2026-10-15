@@ -36,11 +36,11 @@ Goals, in priority order:
 | # | Topic | Ruling |
 |---|---|---|
 | D1 | Eligibility | Ruling: a user may build a page for a repository that is **public, not a fork**, on which GitHub reports that user has **push access or above**, and which has **at least one commit attributed to their GitHub account**. All four are checked when a job is created and again at publish. Several co-authors may each publish their own page about the same repository. — Ownership and write access are not authorship; the commit requirement stops a team member with write access from claiming a repository they never worked on, and the fork rule stops a copy from passing as the original. — Cost if wrong: contributors without push access (merged PRs to someone else's open-source project) cannot use the product; widening to them later is an additive rule. |
-| D2 | Contribution | Ruling: the page shows the author's own **contribution statement** (pre-drafted from their commits, edited and approved by them) **beside git-history facts the author cannot hide**: their current lines and share by blame, their commits and share, and the features they touched, labelled "from git history at `<sha>`". — A reader can check the claim against facts; facts are not a judgement of skill. — Cost if wrong: work that leaves no lines (design, review, pairing) looks small; the statement is where the author explains it. |
+| D2 | Contribution | Ruling: the page shows the author's own **contribution statement** (pre-drafted from their commits, edited and approved by them) **beside git-history facts the author cannot hide**: their current lines and share by blame, their commits and share, and the features they touched, labelled "from git history at `<sha>`". — A reader can check the claim against facts; facts are not a judgement of skill. — Cost if wrong: work that leaves no lines (design, review, pairing) looks small; the statement is where the author explains it.  **Amended by ADR-0012:** the contribution is a generated paragraph, labelled as such, beside the same facts. |
 | D3 | Pricing and limits | Ruling: **Free**: 1 project, 1 generation per account (lifetime, so withdrawing and recreating a project gives no new one), no refreshes, repositories up to 1,000 indexed files. **Pro ($5/month)**: 10 projects, 10 generations and 30 refreshes a month, up to 3,000 files, and a hard $4.00 monthly model-cost ceiling. A **$25/day** platform-wide spend cap pauses new Free jobs; Free sign-up needs a GitHub account at least **30 days** old. Failed and interrupted jobs use no quota. — Measured full builds cost $0.08–$0.70 for 38–735 files and refreshes $0.05–$0.35 (owner's nine stored builds, Haiku 4.5 via Batches); Stripe takes about $0.45 of $5. — Cost if wrong: numbers are data in `limits.ts` (§10); changing them is a one-line change plus a pricing-page edit. |
 | D4 | Lifecycle | Ruling: after a downgrade or cancellation, **published pages stay live and frozen** (no edits, refreshes or republishing; unpublish and export still work). Unpublish returns **410** at the same URL and keeps the slug for that author. A repository made private, deleted or turned into a fork is caught by a daily check and its pages become 410 stubs; the draft is kept **30 days** for a one-click restore, then everything derived from source is purged. Revoked push access blocks edit, refresh and republish but leaves the page live. Account deletion withdraws every page at once and deletes all data within 30 days, backups included. **Handles and slugs are never reassigned.** Export (`export.json` plus a static site zip) is always available. Source clones are deleted when their job ends. — Resume links are the product, so the rules keep links working and never let them be hijacked. — Cost if wrong: a grace period or retention window is a constant. |
 | D5 | Hosting and generation | Ruling: **Fly.io** (app and one throwaway Machine per job), **Neon** Postgres, **Cloudflare R2** behind Cloudflare's CDN, all under RepoWiki's own domain. A fetcher makes a bare clone and a `git bundle`; the analysis Machine runs the engine with **no secrets**, behind an nftables firewall set before it drops root, reaching only the LLM proxy and the bundle. The **LLM proxy** holds the Anthropic key, filters secrets from prompts and enforces each job's cost cap. Generation keeps the engine's Haiku 4.5 + Message Batches setup. The code keeps four seams (plain Postgres, the S3 API, a `JobRunner` interface, own-domain URLs) so moving to AWS is a matter of days. — About $0–10/month fixed at launch; AWS with real network isolation was costed at $15–70/month depending on layout. — Cost if wrong: the move to AWS, which the seams keep small. |
-| D6 | Content and updates | Ruling: the project page has seven parts (§8). Authors edit only the **portfolio layer** (tagline, summary, contribution statement, highlights, hidden pages), never wiki prose; author overrides survive a refresh, with a notice when the generated text under an override changed. Refresh is **manual only** (Pro). — Wiki claims stay citation-backed, and the hard merge problem of F18 stays deferred. — Cost if wrong: authors wanting to fix a wiki sentence must hide the page or wait for F18. |
+| D6 | Content and updates | Ruling: the project page has seven parts (§8). Authors edit only the **portfolio layer** (tagline, summary, contribution statement, highlights, hidden pages), never wiki prose; author overrides survive a refresh, with a notice when the generated text under an override changed. Refresh is **manual only** (Pro). — Wiki claims stay citation-backed, and the hard merge problem of F18 stays deferred. — Cost if wrong: authors wanting to fix a wiki sentence must hide the page or wait for F18.  **Amended by ADR-0012:** authors edit nothing; every page is the generated content and every wiki page is public. |
 
 ## 4. Rulings for the contract
 
@@ -58,6 +58,8 @@ Goals, in priority order:
 | C10 | Not found, not forbidden | Ruling: a request for another account's draft, job, preview or revision is refused as `not-found` (404), identical to a missing id. Public pages answer 410 when withdrawn and 404 when the slug never existed. — Probing must not reveal which private drafts exist. |
 
 ## 5. Entities
+
+> Amended by ADR-0012: `DraftRevision` carries generated `content` instead of `overrides` and `flags`, and has no `source`; `Review.attestationVersion` is 2.
 
 All timestamps are `IsoDateTime`; all money is integer **micro-dollars** (`usdMicros`) so sums are exact.
 
@@ -120,6 +122,8 @@ Withdrawn by `operator` leaves only through an operator action (`reinstate`), wh
 
 ### 6.3 Draft revisions
 
+> Amended by ADR-0012: revisions carry generated content, have no flags and no author save; a revision is publishable when it is the latest, reviewed and previewed.
+
 - A succeeded `generate` job creates revision 1 with empty overrides.
 - A succeeded `refresh` job creates revision `latest + 1` with the new generation and the latest revision's overrides carried forward. It raises flags (below) by comparing the new generation with the generation of the revision it carries forward from.
 - An author `save` with `baseRevision = latest` creates revision `latest + 1` with the same generation and the new overrides, and clears all flags; any other `baseRevision` is `stale-revision`.
@@ -127,6 +131,8 @@ Withdrawn by `operator` leaves only through an operator action (`reinstate`), wh
 - A revision is publishable when it is the latest revision, has a review, has no flags, has a non-empty contribution statement, and has a preview.
 
 ### 6.4 Publish
+
+> Amended by ADR-0012: the flag and contribution checks are gone with the overrides.
 
 `publish(revision, expectedVersion, previewHash)` succeeds only if, in one transaction:
 
@@ -140,6 +146,8 @@ It then creates `PublishedVersion currentVersion + 1` with the eligibility facts
 ## 7. Authorization
 
 ### 7.1 Actors and actions
+
+> Amended by ADR-0012: `draft.save` is removed.
 
 Actors: `anonymous`, `author` (a signed-in account acting on its own resources), `other` (a signed-in account acting on someone else's), `system` (worker, scheduler) and `operator` (the service owner).
 
@@ -179,6 +187,8 @@ EligibilityFacts = {
 Eligible means `tokenValid`, `public`, not a fork, permission in {`admin`, `maintain`, `push`} and `authoredCommits ≥ 1`. The first failing condition gives the refusal code (§11), in that order. `indexedFiles` is checked against the plan once known; a job whose pinned tree is too large fails at `fetch` with `repo-too-large` before any model call.
 
 ## 8. Content model (the portfolio layer)
+
+> Amended by ADR-0012: no overrides and no hidden pages; the content, its generated contribution label and attestation 2 are ADR-0012's.
 
 A `Generation` carries:
 
@@ -221,6 +231,8 @@ PLATFORM = { dailyUsdMicros: 25_000_000, freeAccountMinAgeDays: 30, jobMaxAttemp
 A job's cap is `min(estimate × jobCapMultiplier, monthly ceiling − month's reserved and spent)`; a job whose estimate exceeds the remaining ceiling is refused as `monthly-cost-ceiling` before it starts. Months are calendar months in UTC.
 
 ## 11. Refusals
+
+> Amended by ADR-0012: `needs-review-flags` and `contribution-missing` are removed (28 codes).
 
 Every refusal has a stable code, an HTTP status, whether a retry can help, and one plain sentence for the author. These are the complete set (30 codes):
 
