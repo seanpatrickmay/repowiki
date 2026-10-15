@@ -1,0 +1,153 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { GitSha, WikiExport } from "@repowiki/core";
+import { z } from "zod";
+import { GitHubError, GitHubRepo, GitHubUser, githubApi } from "./api.ts";
+import { GITHUB } from "./endpoints.ts";
+
+const MAX_SHAS = 100;
+const MAX_REPO_PAGES = 10;
+const OWNER = { admin: true, maintain: true, push: true, triage: true, pull: true };
+
+/**
+ * A snapshot of one GitHub user's public repositories for local testing (M14g), beside the
+ * local wiki export each one maps to. It lives outside the repository.
+ */
+export const LocalProfile = z.strictObject({
+  takenAt: z.iso.datetime(),
+  user: z.strictObject({
+    id: z.int().positive(),
+    login: z.string().min(1).max(39),
+    name: z.string().nullable(),
+    created_at: z.iso.datetime({ offset: true }),
+  }),
+  repos: z.array(
+    z.strictObject({
+      repo: GitHubRepo,
+      /** Commits authored by the user, capped at 1000 (`countCommits`). */
+      commits: z.int().nonnegative(),
+      commitShas: z.array(GitSha).max(MAX_SHAS),
+      /** The export's head when one is mapped, else the default branch's; null when neither. */
+      head: GitSha.nullable(),
+      githubHead: GitSha.nullable(),
+      /** Absolute path of the mapped export.json. */
+      export: z.string().min(1).nullable(),
+    }),
+  ),
+});
+export type LocalProfile = z.infer<typeof LocalProfile>;
+
+export interface ExportChoice {
+  path: string;
+  pages: number;
+  people: boolean;
+  head: string;
+}
+
+/** Whether `a` is the better export for one repository: People first, then more pages. */
+const better = (a: ExportChoice, b: ExportChoice) =>
+  a.people !== b.people ? a.people : a.pages > b.pages;
+
+/**
+ * The best `<dir>/<name>/export.json` for each repository, keyed by the export's `repo`
+ * lowercased. Files that do not parse as a wiki export are skipped.
+ */
+export function chooseExports(dir: string): Map<string, ExportChoice> {
+  const chosen = new Map<string, ExportChoice>();
+  if (!existsSync(dir)) return chosen;
+  const names = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  for (const name of names) {
+    const path = join(dir, name, "export.json");
+    if (!existsSync(path)) continue;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+    const parsed = WikiExport.safeParse(raw);
+    if (!parsed.success) continue;
+    const exp = parsed.data;
+    const choice = { path, pages: exp.pages.length, people: exp.people !== null, head: exp.head };
+    const key = exp.repo.toLowerCase();
+    const current = chosen.get(key);
+    if (current === undefined || better(choice, current)) chosen.set(key, choice);
+  }
+  return chosen;
+}
+
+export interface TakeProfileOptions {
+  login: string;
+  fetch: typeof fetch;
+  /** Sent as a bearer token when set; the snapshot works unauthenticated within GitHub's limit. */
+  token?: string;
+  exportsDir: string;
+  api?: string;
+  now?: () => Date;
+}
+
+/** Reads `login`'s public, non-fork repositories from GitHub's REST API (the script only). */
+export async function takeProfile(options: TakeProfileOptions): Promise<LocalProfile> {
+  const api = options.api ?? GITHUB.api;
+  const token = options.token ?? "";
+  // githubApi always sends a bearer token; send the real one, or none for an anonymous snapshot.
+  const authed: typeof fetch = (input, init) => {
+    const headers = new Headers(init?.headers);
+    if (token) headers.set("authorization", `Bearer ${token}`);
+    else headers.delete("authorization");
+    return options.fetch(input, { ...init, headers });
+  };
+  const gh = githubApi(authed, { web: GITHUB.web, api });
+
+  async function read<T>(path: string, schema: z.ZodType<T>): Promise<T | null> {
+    const response = await authed(`${api}${path}`, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "RepoWiki" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new GitHubError(`GitHub answered ${response.status} for ${path}`);
+    const parsed = schema.safeParse(await response.json().catch(() => undefined));
+    if (!parsed.success) throw new GitHubError(`GitHub sent something unexpected for ${path}`);
+    return parsed.data;
+  }
+
+  const login = encodeURIComponent(options.login);
+  const user = await read(`/users/${login}`, GitHubUser);
+  if (user === null) throw new GitHubError(`GitHub has no user ${options.login}`);
+
+  const repos: GitHubRepo[] = [];
+  for (let page = 1; page <= MAX_REPO_PAGES; page++) {
+    const batch = await read(
+      `/users/${login}/repos?type=owner&sort=pushed&per_page=100&page=${page}`,
+      z.array(GitHubRepo),
+    );
+    if (batch === null) break;
+    repos.push(...batch.filter((repo) => !repo.fork && !repo.private));
+    if (batch.length < 100) break;
+  }
+
+  const exports = chooseExports(options.exportsDir);
+  const entries: LocalProfile["repos"] = [];
+  for (const repo of repos) {
+    const mapped = exports.get(repo.name.toLowerCase());
+    const githubHead = await gh.headSha(token, repo.full_name, repo.default_branch);
+    entries.push({
+      repo: { ...repo, permissions: OWNER },
+      commits: await gh.countCommits(token, repo.full_name, user.login),
+      commitShas: await gh.commitShas(token, repo.full_name, user.login, MAX_SHAS),
+      head: mapped?.head ?? githubHead,
+      githubHead,
+      export: mapped?.path ?? null,
+    });
+  }
+  const now = options.now ?? (() => new Date());
+  return LocalProfile.parse({ takenAt: now().toISOString(), user, repos: entries });
+}
+
+/** The snapshot at `path`, parsed. */
+export function loadProfile(path: string): LocalProfile {
+  return LocalProfile.parse(JSON.parse(readFileSync(path, "utf8")));
+}
