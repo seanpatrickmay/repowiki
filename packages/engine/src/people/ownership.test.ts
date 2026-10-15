@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, GitError, type TestRepo } from "../index/index.ts";
+import { createTestRepo, GitError, GitTimeoutError, type TestRepo } from "../index/index.ts";
 import { openStore, type Store } from "../store/index.ts";
 import { blameTree, ignoreRevsFrom, isLockfile } from "./ownership.ts";
 
@@ -97,11 +97,15 @@ describe("blameTree (spec v2 #6 R1, R3, R20)", () => {
 
   it("reports a file whose blame timed out, with its lines, and caches nothing for it", async () => {
     const { head } = tree();
+    // A blame that always times out: a real 1 ms limit raced git, which can finish first.
+    const timingOut = async (): Promise<never> => {
+      throw new GitTimeoutError("git blame timed out");
+    };
     const owned = await blameTree(repo.dir, head, store, {
       ignoreRevs: [],
       maxFileBytes: 1000,
-      timeoutMs: 1,
       concurrency: 1,
+      blame: timingOut,
     });
     expect(owned.timedOut).toEqual([
       { path: "a.py", lines: 2 },
