@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { COST_CAP_MARK } from "@repowiki/engine";
 import type { FetchLike } from "@repowiki/llm";
 
 /** The repository root, where the engine's CLIs live. */
@@ -12,9 +13,12 @@ export const CLI = {
 
 /**
  * The proxy's cost refusal as an engine CLI prints it: the Anthropic SDK puts the error body,
- * `{"type":"rate_limit_error","message":"job-cost-cap"}`, in its message, and the engine keeps it.
+ * `{"type":"rate_limit_error","message":"job-cost-cap"}`, in its message; the engine's failure
+ * line keeps an LlmError's message whole (a batched call) and shows this mark alone of any other
+ * error's (a direct call).
  */
-export const COST_CAP_MARK = '"message":"job-cost-cap"';
+export { COST_CAP_MARK };
+
 const TAIL_BYTES = 4096;
 
 export interface CliRun {

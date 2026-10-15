@@ -3,7 +3,7 @@ import { makeFeature } from "@repowiki/core/test-fixtures";
 import { CassetteMissError, LlmError, LlmOutputError } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import { LIMITATION_EVIDENCE_PROBLEM } from "../verify/index.ts";
-import { type WritePagesOptions, writeCacheKey, writePages } from "./build.ts";
+import { COST_CAP_MARK, type WritePagesOptions, writeCacheKey, writePages } from "./build.ts";
 import { memoryWikipediaCache } from "./test-cache.ts";
 import {
   type Answer,
@@ -450,6 +450,20 @@ describe("writePages", () => {
     const { pages } = await written;
     expect(pages[1]?.failure).toBe("the write call failed: ApiError");
     expect(lines).toEqual(["signals: not written: the write call failed: ApiError"]);
+  });
+
+  it("names the LLM proxy's cost refusal in a failed call's line, and nothing else of it", async () => {
+    class RateLimitError extends Error {}
+    const { written, lines } = run((featureId) =>
+      featureId === "signals"
+        ? new RateLimitError(
+            '429 {"type":"error","error":{"type":"rate_limit_error","message":"job-cost-cap"},"private":"x"}',
+          )
+        : answers(featureId),
+    );
+    const { pages } = await written;
+    expect(pages[1]?.failure).toBe(`the write call failed: RateLimitError: ${COST_CAP_MARK}`);
+    expect(lines.join("\n")).not.toContain("private");
   });
 
   it("asks again when an answer has no lead claim or no body claim, and writes the retry", async () => {

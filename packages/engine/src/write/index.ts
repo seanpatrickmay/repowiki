@@ -9,6 +9,7 @@ export { DEFAULT_ARCHITECTURE_BUDGET_TOKENS, EDGE_WINDOW_SHARE } from "./archite
 export { architectureSystemPrompt } from "./architecture-prompt.ts";
 export {
   addTokens,
+  COST_CAP_MARK,
   callFailure,
   checkTitles,
   errorClass,

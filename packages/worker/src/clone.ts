@@ -4,6 +4,9 @@ import { join } from "node:path";
 
 export const MAX_REPO_BYTES = 512 * 1024 * 1024;
 export const CLONE_TIMEOUT_MS = 5 * 60_000;
+/** How often a running clone's size is checked against the limit. */
+export const CLONE_POLL_MS = 2_000;
+const NO_SPACE = /No space left on device|ENOSPC/i;
 const CHECK_TIMEOUT_MS = 60_000;
 const CLONE_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/;
 
@@ -31,42 +34,83 @@ export function dirBytes(dir: string): number {
   return total;
 }
 
+/** The bytes under `dir`, or 0 while it does not exist yet (a clone that has not started). */
+function bytesSoFar(dir: string): number {
+  try {
+    return dirBytes(dir);
+  } catch {
+    return 0;
+  }
+}
+
+interface GitRun {
+  /** Git's exit status; null when it could not start or was killed. */
+  status: number | null;
+  timedOut: boolean;
+  /** Killed because `watch.over()` said so. */
+  stopped: boolean;
+  /** The last 4 KB of stderr, only ever matched, never logged. */
+  stderr: string;
+}
+
 /**
- * Runs git in its own process group with no output, resolving to its exit status; past
- * `timeoutMs` the whole group (git and the helpers it started) is killed and "timeout" returned.
- * Never rejects: a git that cannot start is status null.
+ * Runs git in its own process group with no stdout, keeping the end of stderr; past `timeoutMs`,
+ * or when `watch.over()` turns true on one of its checks every `watch.everyMs`, the whole group
+ * (git and the helpers it started) is killed. Never rejects.
  */
 function runGit(
   git: string,
   args: readonly string[],
   env: Record<string, string>,
   timeoutMs: number,
-): Promise<number | null | "timeout"> {
+  watch?: { everyMs: number; over: () => boolean },
+): Promise<GitRun> {
   return new Promise((resolve) => {
-    const child = spawn(git, args, { env, stdio: "ignore", detached: true });
+    const child = spawn(git, args, { env, stdio: ["ignore", "ignore", "pipe"], detached: true });
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
+    let stopped = false;
+    let stderr = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr = `${stderr}${chunk}`.slice(-4096);
+    });
+    const kill = () => {
       try {
         if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
       } catch {
         child.kill("SIGKILL");
       }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
     }, timeoutMs);
-    child.on("error", () => {
+    const poll =
+      watch === undefined
+        ? undefined
+        : setInterval(() => {
+            if (!stopped && watch.over()) {
+              stopped = true;
+              kill();
+            }
+          }, watch.everyMs);
+    let settled = false;
+    const done = (status: number | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve(null);
-    });
-    child.on("exit", (status) => {
-      clearTimeout(timer);
-      resolve(timedOut ? "timeout" : status);
-    });
+      clearInterval(poll);
+      resolve({ status, timedOut, stopped, stderr });
+    };
+    child.on("error", () => done(null));
+    child.on("close", (status) => done(status));
   });
 }
 
 /**
  * Phase 1's only use of the network (spec 2 S9): a bare, tagless clone of a public GitHub
- * repository over HTTPS, refused when GitHub's size or the clone's passes the limit. Async, so
+ * repository over HTTPS, refused when GitHub's size passes the limit, when the clone grows past
+ * it (checked every `pollMs` while git runs, and once after), or when the disk fills. Async, so
  * the worker's heartbeats keep the lease while it runs (amendment A1).
  */
 export async function cloneBare(input: {
@@ -78,6 +122,7 @@ export async function cloneBare(input: {
   git?: string;
   timeoutMs?: number;
   maxBytes?: number;
+  pollMs?: number;
 }): Promise<CloneResult> {
   const maxBytes = input.maxBytes ?? MAX_REPO_BYTES;
   const git = input.git ?? "git";
@@ -109,16 +154,21 @@ export async function cloneBare(input: {
     ],
     env,
     input.timeoutMs ?? CLONE_TIMEOUT_MS,
+    { everyMs: input.pollMs ?? CLONE_POLL_MS, over: () => bytesSoFar(input.dir) > maxBytes },
   );
-  if (cloned !== 0) {
+  if (cloned.stopped || (cloned.status !== 0 && NO_SPACE.test(cloned.stderr))) {
+    rmSync(input.dir, { recursive: true, force: true });
+    return { ok: false, code: "repo-too-large", detail: "the clone passed the size limit" };
+  }
+  if (cloned.status !== 0) {
     rmSync(input.dir, { recursive: true, force: true });
     return {
       ok: false,
       code: "job-failed",
-      detail: cloned === "timeout" ? "clone timed out" : "clone failed",
+      detail: cloned.timedOut ? "clone timed out" : "clone failed",
     };
   }
-  if (dirBytes(input.dir) > maxBytes) {
+  if (bytesSoFar(input.dir) > maxBytes) {
     rmSync(input.dir, { recursive: true, force: true });
     return { ok: false, code: "repo-too-large", detail: "the clone is over the size limit" };
   }
@@ -128,6 +178,8 @@ export async function cloneBare(input: {
     env,
     CHECK_TIMEOUT_MS,
   );
-  if (has !== 0) return { ok: false, code: "job-failed", detail: "the commit is not in the clone" };
+  if (has.status !== 0) {
+    return { ok: false, code: "job-failed", detail: "the commit is not in the clone" };
+  }
   return { ok: true };
 }
