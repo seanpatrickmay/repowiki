@@ -1,9 +1,18 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { WikiExport } from "@repowiki/core";
 import { takeProfile } from "@repowiki/server";
+import { matchAuthor } from "@repowiki/worker";
 
 export const PROFILE_USAGE = "usage: pnpm hosted:profile <login> [--out file] [--exports dir]";
 
@@ -52,6 +61,36 @@ export function parseProfileArgs(
   return { login, out, exports };
 }
 
+interface Entry {
+  repo: { name: string };
+  commits: number;
+  export: string | null;
+  head: string | null;
+  githubHead: string | null;
+}
+
+/**
+ * One repository of the snapshot: its commits, its export, and the People id whose numbers the
+ * import worker will show as the user's (matched the worker's way), or none and why.
+ */
+export function repoLine(entry: Entry, user: { login: string; name: string | null }): string {
+  const head = `${entry.repo.name}  ${entry.commits}  ${entry.export ?? "none"}`;
+  if (entry.export === null) return head;
+  const exp = WikiExport.parse(JSON.parse(readFileSync(entry.export, "utf8")));
+  const snapshot = exp.people?.snapshot ?? null;
+  const person = snapshot === null ? null : matchAuthor(snapshot, user);
+  const names = [user.login, user.name].filter((n) => n !== null).join(" or ");
+  const author =
+    person !== null
+      ? `author: ${person.id}`
+      : snapshot === null
+        ? "author: none (no People)"
+        : `author: none (People does not name ${names})`;
+  const drift =
+    entry.githubHead !== null && entry.head !== entry.githubHead ? "  (export behind GitHub)" : "";
+  return `${head}  ${author}${drift}`;
+}
+
 async function main(): Promise<void> {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const args = parseProfileArgs(process.argv.slice(2), { home: homedir(), repoRoot });
@@ -62,13 +101,7 @@ async function main(): Promise<void> {
     exportsDir: args.exports,
     ...(token ? { token } : {}),
   });
-  for (const entry of profile.repos) {
-    const drift =
-      entry.export !== null && entry.githubHead !== null && entry.head !== entry.githubHead
-        ? "  (export behind GitHub)"
-        : "";
-    console.log(`${entry.repo.name}  ${entry.commits}  ${entry.export ?? "none"}${drift}`);
-  }
+  for (const entry of profile.repos) console.log(repoLine(entry, profile.user));
   mkdirSync(dirname(resolve(args.out)), { recursive: true });
   writeFileSync(args.out, `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 });
   chmodSync(args.out, 0o600);
