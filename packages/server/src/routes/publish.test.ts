@@ -1,4 +1,4 @@
-import { isReservedHandle, REFUSALS } from "@repowiki/hosted";
+import { isReservedHandle, REFUSALS, siteKey } from "@repowiki/hosted";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
@@ -52,6 +52,20 @@ beforeEach(async () => {
 afterEach(async () => deps.db.close());
 
 describe("publish (Contract §6.4)", () => {
+  it("publishes only the previewed files when an earlier attempt left some behind (fresh review I2)", async () => {
+    const hash = await ready();
+    const target = siteKey(p.projectId, 1);
+    await deps.objects.put(
+      `${target}docs/never-previewed.html`,
+      Buffer.from("<p>stale</p>"),
+      "text/html",
+    );
+    expect((await publishing(hash)).status).toBe(303);
+    const preview = await previewOf(deps.db, p.projectId, 2);
+    expect(await tree(target)).toEqual(await tree(preview?.siteKey ?? ""));
+    expect((await tree(target)).has("docs/never-previewed.html")).toBe(false);
+  }, 300_000);
+
   it("copies the previewed tree byte for byte to version 1 and marks the project published", async () => {
     const hash = await ready();
     const page = String(
