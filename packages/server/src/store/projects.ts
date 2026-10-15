@@ -32,6 +32,20 @@ export async function projectFor(
   );
 }
 
+/** The account's project with this slug; slugs are unique per account. */
+export async function projectBySlug(
+  q: Queryable,
+  accountId: string,
+  slug: string,
+): Promise<Project | null> {
+  return parsed(
+    await q.query<{ body: unknown }>(
+      "SELECT body FROM projects WHERE account_id = $1 AND slug = $2",
+      [accountId, slug],
+    ),
+  );
+}
+
 export async function projectsOf(q: Queryable, accountId: string): Promise<Project[]> {
   const rows = await q.query<{ body: unknown }>(
     "SELECT body FROM projects WHERE account_id = $1 ORDER BY body->>'createdAt' DESC, id",

@@ -84,6 +84,7 @@ export {
   type ObjectStore,
 } from "./objects/store.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
+export { type ProfileEntry, profilePage } from "./pages/profile.ts";
 export { type ProjectView, projectPage } from "./pages/project.ts";
 export { PUBLIC_STYLE, PUBLIC_STYLE_PATH } from "./pages/public-style.ts";
 export { pageSession, refusalPage } from "./pages/refusal.ts";
@@ -146,6 +147,7 @@ export {
 export { previewKey, previewRoutes, SITE_CSP, serveTreeFile, siteBase } from "./routes/preview.ts";
 export { jobRoutes } from "./routes/project-jobs.ts";
 export { projectRoutes } from "./routes/projects.ts";
+export { publicRoutes } from "./routes/public.ts";
 export { copyTree, publishRoutes } from "./routes/publish.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
 export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
