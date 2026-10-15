@@ -9,7 +9,9 @@ export interface LocalRunnerOptions {
   workerEntry: string;
   /** The server's URL as the worker reaches it. */
   internalUrl: string;
-  mode: "fixture" | "engine";
+  mode: "fixture" | "engine" | "import";
+  /** The local profile snapshot import mode reads (M14g); passed only in that mode. */
+  profile?: string | null;
   log: (line: object) => void;
   /** The Node binary that runs the worker; this process's by default. */
   execPath?: string;
@@ -31,6 +33,9 @@ export function localRunner(options: LocalRunnerOptions): JobRunner {
           REPOWIKI_API_URL: options.internalUrl,
           REPOWIKI_JOB_TOKEN: token,
           REPOWIKI_WORKER_MODE: options.mode,
+          ...(options.mode === "import" && options.profile
+            ? { REPOWIKI_PROFILE: options.profile }
+            : {}),
         },
         stdio: ["ignore", "ignore", "pipe"],
       });

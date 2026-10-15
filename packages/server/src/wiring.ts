@@ -35,10 +35,12 @@ const WORKER_PATH = /^\/(?:internal|llm)(?:\/|$)/;
 const stdoutLog = (line: object) => process.stdout.write(`${JSON.stringify(line)}\n`);
 
 /**
- * What a local worker runs: the engine only with real GitHub (a repository to clone) and a model
- * key; otherwise the fixture, which uploads core's test export (S18).
+ * What a local worker runs: with a local profile, the wiki built for each repository (M14g); the
+ * engine only with real GitHub (a repository to clone) and a model key; otherwise the fixture,
+ * which uploads core's test export (S18).
  */
-export function workerMode(config: Config): "fixture" | "engine" {
+export function workerMode(config: Config): "fixture" | "engine" | "import" {
+  if (config.localProfile !== null) return "import";
   const real =
     config.mode !== "demo" && config.github.kind === "oauth" && config.anthropicApiKey !== null;
   return real ? "engine" : "fixture";
@@ -54,6 +56,7 @@ function runnerFor(config: Config, log: (line: object) => void): JobRunner {
     workerEntry: WORKER_ENTRY,
     internalUrl: config.runner.internalUrl,
     mode: workerMode(config),
+    profile: config.localProfile,
     log,
   });
 }

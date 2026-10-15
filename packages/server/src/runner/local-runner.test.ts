@@ -43,6 +43,37 @@ describe("localRunner (spec 2 S16)", () => {
     expect(lines).toEqual([{ worker: "job-1", attempt: 1, exit: 0 }]);
   });
 
+  it("passes the profile in import mode only (M14g)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "repowiki-runner-test-"));
+    const envFile = join(dir, "env.json");
+    const entry = join(dir, "worker.mjs");
+    writeFileSync(
+      entry,
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(envFile)}, JSON.stringify(process.env));\n`,
+    );
+    const run = async (mode: "fixture" | "import") => {
+      let exited: () => void = () => undefined;
+      const exit = new Promise<void>((resolve) => {
+        exited = resolve;
+      });
+      const runner = localRunner({
+        workerEntry: entry,
+        internalUrl: "http://127.0.0.1:1",
+        mode,
+        profile: "/profiles/ada.json",
+        log: (line) => ("exit" in line ? exited() : undefined),
+      });
+      await runner.start(request);
+      await exit;
+      return JSON.parse(readFileSync(envFile, "utf8")) as Record<string, string>;
+    };
+    expect(await run("import")).toMatchObject({
+      REPOWIKI_WORKER_MODE: "import",
+      REPOWIKI_PROFILE: "/profiles/ada.json",
+    });
+    expect((await run("fixture")).REPOWIKI_PROFILE).toBeUndefined();
+  });
+
   it("rejects when the child cannot be spawned", async () => {
     const runner = localRunner({
       workerEntry: "worker.mjs",
