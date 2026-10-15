@@ -1,13 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { WikiExport } from "@repowiki/core";
-import { indexRepo } from "@repowiki/engine";
 import type { JobStep } from "@repowiki/hosted";
 import { createClaudeProvider, createLedger, type Provider, resolveModels } from "@repowiki/llm";
 import { ApiError, type FailCode, type WorkerApi, type WorkerSpec } from "./api.ts";
 import { type CloneResult, cloneBare } from "./clone.ts";
 import { CLI, type CliRun, engineEnv, ROOT, rebasedFetch, runCli } from "./engine.ts";
 import { buildFacts, type FileFacts, indexedCount } from "./facts.ts";
+import { indexInChild } from "./indexing.ts";
 import { authorEmails, peopleFile } from "./people-file.ts";
 import { suggest } from "./suggestions.ts";
 
@@ -26,7 +26,8 @@ export interface PhaseDeps {
   heartbeatMs?: number;
   clone?: (input: Parameters<typeof cloneBare>[0]) => Promise<CloneResult>;
   runCli?: typeof runCli;
-  indexRepo?: (repo: string, rev: string) => Promise<{ files: readonly FileFacts[] }>;
+  /** Indexes in a child under time and heap limits (indexInChild). */
+  indexRepo?: (repo: string, rev: string, home: string) => Promise<{ files: readonly FileFacts[] }>;
   emails?: (repo: string, shas: readonly string[]) => string[];
   provider?: (spec: WorkerSpec, token: string) => Provider;
 }
@@ -145,7 +146,9 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
   try {
     mkdirSync(where.home, { recursive: true });
     await beat.step("index");
-    const index = await (deps.indexRepo ?? indexRepo)(where.repo, spec.commitSha);
+    const index = await (
+      deps.indexRepo ?? ((repo, sha, home) => indexInChild({ repo, sha, home }))
+    )(where.repo, spec.commitSha, where.home);
     if ((await deps.api.indexed(indexedCount(index.files))) === "too-large") return false;
     await beat.step("manifest");
     await cli(CLI.manifest, [where.repo, spec.commitSha, "--out", where.out]);
