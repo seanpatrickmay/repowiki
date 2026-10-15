@@ -32,6 +32,8 @@ printf '%s %s\n' "$addr" "$host" >> /etc/hosts
 node "$APP" phase1
 
 chown -R worker:worker "$WORK"
+# Neighbor Discovery is not conntrack-related traffic: without it the kernel cannot re-resolve the
+# server's link address after an idle gap. Hop limit 255 means it came from the link itself.
 nft -f - <<RULES
 flush ruleset
 table inet sandbox {
@@ -39,12 +41,14 @@ table inet sandbox {
     type filter hook output priority 0; policy drop;
     oif "lo" accept
     ct state established,related accept
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } ip6 hoplimit 255 accept
     ip6 daddr $addr tcp dport $port accept
   }
   chain input {
     type filter hook input priority 0; policy drop;
     iif "lo" accept
     ct state established,related accept
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } ip6 hoplimit 255 accept
   }
 }
 RULES

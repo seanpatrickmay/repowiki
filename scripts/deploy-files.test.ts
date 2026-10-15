@@ -41,7 +41,18 @@ describe("the worker entrypoint (spec 2 S9)", () => {
     expect(rules.match(/policy drop/g)?.length).toBe(2);
     expect(rules).toMatch(/ip6 daddr \$addr tcp dport \$port accept/);
     expect(rules).not.toMatch(/dport 53|udp|daddr 0|::\/0|policy accept/);
-    expect(rules.match(/accept/g)?.length).toBe(5);
+    // Loopback, replies and Neighbor Discovery in each chain, plus the server.
+    expect(rules.match(/accept/g)?.length).toBe(7);
+  });
+
+  it("lets IPv6 Neighbor Discovery through both chains, link-local only", () => {
+    // Without it the server's link address expires after an idle gap (EHOSTUNREACH).
+    const nd =
+      "icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } ip6 hoplimit 255 accept";
+    const output = rules.slice(rules.indexOf("chain output"), rules.indexOf("chain input"));
+    const input = rules.slice(rules.indexOf("chain input"));
+    expect(output).toContain(nd);
+    expect(input).toContain(nd);
   });
 
   it("puts only a checked address and port into the rules", () => {
