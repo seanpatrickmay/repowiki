@@ -135,6 +135,44 @@ async function signInOnce(
   });
 }
 
+/** The account's stored avatar, replaced (ADR-0013). */
+export async function saveAvatar(
+  db: Db,
+  accountId: string,
+  avatar: NonNullable<Account["avatar"]>,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const rows = await tx.query<{ body: unknown }>(
+      "SELECT body FROM accounts WHERE id = $1 FOR UPDATE",
+      [accountId],
+    );
+    if (rows[0] === undefined) return;
+    const account = parsedBody(
+      Account,
+      { ...parsedBody(Account, rows[0].body, "account"), avatar },
+      "account",
+    );
+    await tx.query("UPDATE accounts SET body = $2::jsonb WHERE id = $1", [
+      accountId,
+      asJson(account),
+    ]);
+  });
+}
+
+/**
+ * The image type of the avatar with this hash while an active account shows it, so it may be
+ * served; null otherwise. The type is the one checked by magic bytes when it was stored.
+ */
+export async function avatarInUse(db: Queryable, sha256: string): Promise<string | null> {
+  const rows = await db.query<{ body: unknown }>(
+    "SELECT body FROM accounts WHERE body -> 'avatar' ->> 'sha256' = $1 AND body ->> 'status' = 'active' LIMIT 1",
+    [sha256],
+  );
+  return rows[0] === undefined
+    ? null
+    : (parsedBody(Account, rows[0].body, "account").avatar?.contentType ?? null);
+}
+
 export async function accountById(db: Queryable, id: string): Promise<Account | null> {
   const rows = await db.query<{ body: unknown }>("SELECT body FROM accounts WHERE id = $1", [id]);
   return rows[0] === undefined ? null : parsedBody(Account, rows[0].body, "account");

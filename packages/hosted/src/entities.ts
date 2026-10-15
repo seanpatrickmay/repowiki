@@ -21,6 +21,14 @@ export const Account = z.strictObject({
   plan: Plan,
   status: z.enum(["active", "deleting"]),
   createdAt: IsoDateTime,
+  /** The GitHub avatar the server stored at sign-in (ADR-0013); absent until one is. */
+  avatar: z
+    .strictObject({
+      sha256: Sha256Hex,
+      contentType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+      source: z.url({ protocol: /^https$/ }).max(500),
+    })
+    .optional(),
 });
 export type Account = z.infer<typeof Account>;
 

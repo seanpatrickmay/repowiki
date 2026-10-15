@@ -1,5 +1,6 @@
 import { type Account, BiographyEntry, type BiographyProject, biography } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
+import { avatarPath } from "../github/avatar.ts";
 import type { ObjectStore } from "../objects/store.ts";
 import { SILHOUETTE_PATH } from "../pages/biography-style.ts";
 import { biographyHtml } from "../render/biography.ts";
@@ -43,17 +44,21 @@ export async function publishedEntries(deps: Deps, accountId: string): Promise<P
   return found;
 }
 
+/** The account's stored avatar on the pages origin, or the silhouette (ADR-0013). */
+export const avatarUrl = (account: Pick<Account, "avatar">) =>
+  account.avatar === undefined ? SILHOUETTE_PATH : avatarPath(account.avatar.sha256);
+
 /** The biography page of `account` over `projects` (ADR-0013). */
 export function biographyPage(
   deps: Deps,
-  account: Pick<Account, "login" | "displayName">,
+  account: Pick<Account, "login" | "displayName" | "avatar">,
   projects: readonly BiographyProject[],
   options: { asOf: string; self: string; preview: boolean },
 ): string {
   const person = { login: account.login, displayName: account.displayName };
   return biographyHtml(biography({ person, projects, asOf: options.asOf }), {
     self: options.self,
-    avatarUrl: SILHOUETTE_PATH,
+    avatarUrl: avatarUrl(account),
     appOrigin: deps.config.appOrigin,
     preview: options.preview,
   });
