@@ -56,6 +56,16 @@ describe("signIn (spec 2 S7)", () => {
     });
   });
 
+  it("gives a new account the plan it is asked for, and keeps an existing one's", async () => {
+    const pro = { newAccountId: A1, allowNew: yes, now: T0, plan: "pro" as const };
+    expect((await signIn(db, sean, pro))?.account.plan).toBe("pro");
+    const grace = { ...sean, githubUserId: 102, login: "grace" };
+    expect(
+      (await signIn(db, grace, { newAccountId: A2, allowNew: yes, now: T0 }))?.account.plan,
+    ).toBe("free");
+    expect((await signIn(db, grace, { ...pro, newAccountId: A1 }))?.account.plan).toBe("free");
+  });
+
   it("refuses a new account the allowlist does not name", async () => {
     expect(await signIn(db, sean, { newAccountId: A1, allowNew: () => false, now: T0 })).toBeNull();
     expect(await db.query("SELECT * FROM accounts")).toEqual([]);

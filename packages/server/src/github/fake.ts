@@ -1,6 +1,7 @@
 import type { Route } from "../http/router.ts";
 import { redirect, text } from "../http/server.ts";
 import type { GitHubEndpoints } from "./endpoints.ts";
+import type { LocalProfile } from "./profile.ts";
 
 /** The demo's GitHub (spec 2 S18): one user, one public repository they own, 42 commits. */
 export const FAKE_TOKEN = "fake-token";
@@ -40,8 +41,40 @@ const json = (value: unknown, init: ResponseInit = {}) =>
 const urlOf = (input: string | URL | Request) =>
   new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
 
+/** What a fake GitHub holds: one user and their repositories, each with its commits and head. */
+interface FakeWorld {
+  user: { id: number; login: string; name: string | null; created_at: string };
+  repos: {
+    repo: { id: number; full_name: string; default_branch: string };
+    commits: number;
+    commitShas: string[];
+    head: string | null;
+  }[];
+}
+
 /** A `fetch` that answers the GitHub calls RepoWiki makes, for the demo and the tests. */
 export function fakeGitHubFetch(endpoints: GitHubEndpoints): typeof fetch {
+  const commitShas = Array.from({ length: FAKE_COMMITS }, (_, i) =>
+    (i + 1).toString(16).padStart(40, "0"),
+  );
+  return worldFetch(endpoints, {
+    user: FAKE_USER,
+    repos: [{ repo: FAKE_REPO, commits: FAKE_COMMITS, commitShas, head: FAKE_HEAD }],
+  });
+}
+
+/**
+ * The fake GitHub serving a local profile (M14g): the snapshot's user, repositories and commit
+ * counts, with each repository's head the mapped export's, so its citations resolve.
+ */
+export function profileGitHubFetch(
+  endpoints: GitHubEndpoints,
+  profile: LocalProfile,
+): typeof fetch {
+  return worldFetch(endpoints, profile);
+}
+
+function worldFetch(endpoints: GitHubEndpoints, world: FakeWorld): typeof fetch {
   return async (input, init) => {
     const url = urlOf(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -57,25 +90,35 @@ export function fakeGitHubFetch(endpoints: GitHubEndpoints): typeof fetch {
       return json({ message: "Bad credentials" }, { status: 401 });
     }
     const path = href.slice(endpoints.api.length);
-    if (path === "/user") return json(FAKE_USER);
+    if (path === "/user") return json(world.user);
     if (path === "/user/repos") {
-      return json(Number(url.searchParams.get("page") ?? 1) > 1 ? [] : [FAKE_REPO]);
+      return json(
+        Number(url.searchParams.get("page") ?? 1) > 1 ? [] : world.repos.map((r) => r.repo),
+      );
     }
-    if (path === `/repositories/${FAKE_REPO.id}`) return json(FAKE_REPO);
-    if (path === `/repos/${FAKE_REPO.full_name}/commits`) {
+    const byId = world.repos.find((r) => path === `/repositories/${r.repo.id}`);
+    if (byId !== undefined) return json(byId.repo);
+    const entry = world.repos.find((r) => path.startsWith(`/repos/${r.repo.full_name}/commits`));
+    if (entry === undefined) return json({ message: "Not Found" }, { status: 404 });
+    const commitsPath = `/repos/${entry.repo.full_name}/commits`;
+    if (path === commitsPath) {
       const author = url.searchParams.get("author") ?? "";
       const perPage = Number(url.searchParams.get("per_page") ?? 30);
-      if (author.toLowerCase() !== FAKE_USER.login) return json([]);
-      const commits = Array.from({ length: Math.min(perPage, FAKE_COMMITS) }, (_, i) => ({
-        sha: (i + 1).toString(16).padStart(40, "0"),
-      }));
-      const last = Math.ceil(FAKE_COMMITS / perPage);
+      if (author.toLowerCase() !== world.user.login.toLowerCase() || entry.commits === 0) {
+        return json([]);
+      }
+      const commits = entry.commitShas.slice(0, perPage).map((sha) => ({ sha }));
+      const last = Math.ceil(entry.commits / perPage);
       const page = (n: number) =>
         `<${endpoints.api}${path}?author=${author}&per_page=${perPage}&page=${n}>`;
       const link = last > 1 ? `${page(2)}; rel="next", ${page(last)}; rel="last"` : "";
       return json(commits, { headers: link ? { link } : {} });
     }
-    if (path === `/repos/${FAKE_REPO.full_name}/commits/main`) return json({ sha: FAKE_HEAD });
+    if (path === `${commitsPath}/${entry.repo.default_branch}`) {
+      return entry.head === null
+        ? json({ message: "Git Repository is empty." }, { status: 409 })
+        : json({ sha: entry.head });
+    }
     return json({ message: "Not Found" }, { status: 404 });
   };
 }

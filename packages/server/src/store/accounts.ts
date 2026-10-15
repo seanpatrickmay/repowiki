@@ -6,6 +6,7 @@ import {
   type HandleRecord,
   handleFor,
   lookupHandle,
+  type Plan,
 } from "@repowiki/hosted";
 import { type Db, isUniqueViolation, type Queryable } from "../db/db.ts";
 import { appendAudit } from "./audit.ts";
@@ -23,6 +24,8 @@ export interface SignInOptions {
   /** Whether a GitHub login with no account yet may create one (the sign-up allowlist, S7). */
   allowNew: (login: string) => boolean;
   now: string;
+  /** A new account's plan: Free unless local testing asks for Pro (REPOWIKI_LOCAL_PLAN). */
+  plan?: Plan;
 }
 
 export interface SignedIn {
@@ -85,7 +88,7 @@ async function signInOnce(
         login: profile.login,
         displayName: profile.displayName,
         githubCreatedAt: profile.githubCreatedAt,
-        plan: "free",
+        plan: options.plan ?? "free",
         status: "active",
         createdAt: options.now,
       },

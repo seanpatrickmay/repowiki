@@ -133,6 +133,7 @@ export function authRoutes(deps: Deps): Route[] {
             newAccountId: deps.newId(),
             allowNew: (login) => deps.config.mode === "demo" || allowlist.has(login),
             now: deps.now(),
+            plan: deps.config.localPlan,
           },
         );
         if (signedIn === null) {
