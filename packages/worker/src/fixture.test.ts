@@ -1,7 +1,7 @@
 import { WikiExport } from "@repowiki/core";
 import { Facts, Suggestions } from "@repowiki/hosted";
 import { describe, expect, it } from "vitest";
-import type { Succeeded, WorkerApi } from "./api.ts";
+import { ApiError, type Succeeded, type WorkerApi } from "./api.ts";
 import { runFixture } from "./fixture.ts";
 
 function fakeApi(indexed: "ok" | "too-large" = "ok") {
@@ -55,6 +55,21 @@ describe("fixture mode (spec 2 S18)", () => {
     expect(Suggestions.safeParse(succeeded?.suggestions).success).toBe(true);
     expect(succeeded?.facts.author.commits).toBeGreaterThan(0);
     expect(succeeded?.models.length).toBeGreaterThan(0);
+  });
+
+  it("fails the job, not the process, when a call throws, unless the token was refused", async () => {
+    const { api, calls } = fakeApi();
+    api.putExport = async () => {
+      throw new Error("upload refused");
+    };
+    expect(await runFixture(api, { stepMs: 0 })).toBe(false);
+    expect(calls.at(-1)).toBe("fail");
+    const refused = fakeApi();
+    refused.api.lease = async () => {
+      throw new ApiError(401, "lease: HTTP 401");
+    };
+    expect(await runFixture(refused.api, { stepMs: 0 })).toBe(false);
+    expect(refused.calls).toEqual([]);
   });
 
   it("stops when the server finds the repository too large", async () => {

@@ -42,6 +42,10 @@ export class ApiError extends Error {
   }
 }
 
+/** A 401 or 409 from the internal API: the token is spent or the lease is gone, so no fail call. */
+export const leaseGone = (error: unknown): boolean =>
+  error instanceof ApiError && (error.status === 401 || error.status === 409);
+
 export interface Succeeded {
   suggestions: Suggestions;
   facts: Facts;

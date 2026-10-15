@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WikiExport } from "@repowiki/core";
 import { Facts, type JobStep } from "@repowiki/hosted";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
-import type { WorkerApi } from "./api.ts";
+import { leaseGone, type WorkerApi } from "./api.ts";
 import { buildFacts, pageFeatureIds } from "./facts.ts";
 
 /** The steps an engine run reports, in order (phase 1 and phase 2). */
@@ -25,7 +25,16 @@ export async function runFixture(
   api: WorkerApi,
   options: { stepMs?: number } = {},
 ): Promise<boolean> {
-  const stepMs = options.stepMs ?? 400;
+  try {
+    return await walk(api, options.stepMs ?? 400);
+  } catch (error) {
+    // Failed as a job, never a crash; a refused token or a lost lease cannot report it.
+    if (!leaseGone(error)) await api.fail("job-failed").catch(() => {});
+    return false;
+  }
+}
+
+async function walk(api: WorkerApi, stepMs: number): Promise<boolean> {
   await api.lease();
   const exp = WikiExport.parse(fixtureExport());
   const featureIds = pageFeatureIds(exp);
