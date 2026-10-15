@@ -16,6 +16,7 @@ describe("buildTree (spec 2 S13)", () => {
       base: "/demo-dev/demo-repo/",
       repoUrl: "https://github.com/demo-dev/demo-repo",
       entry,
+      author: { name: "Demo Developer", url: "/demo-dev" },
     });
     const paths = out.files.map((f) => f.path);
     expect(paths).toContain("entry.json");
@@ -25,6 +26,14 @@ describe("buildTree (spec 2 S13)", () => {
     expect(paths.some((p) => p.includes(".repowiki-site"))).toBe(false);
     const file = (path: string) => text(out.files.find((f) => f.path === path)?.bytes);
     expect(file("site/index.html")).toContain("/demo-dev/demo-repo/wiki/");
+    // Each wiki links back to its author's biography (ADR-0013).
+    expect(file("site/index.html")).toContain('<li><a href="/demo-dev">Demo Developer</a></li>');
+    expect(file("site/index.html")).toContain(
+      'Part of <a href="/demo-dev">Demo Developer\'s projects</a>.',
+    );
+    expect(file("site/wiki/signals/index.html")).toContain(
+      '<a href="/demo-dev">Demo Developer</a>',
+    );
     // The site publishes the export and llms.txt; the hosted export drops People (M14e A4).
     for (const root of ["site/export.json", "site/llms.txt"]) expect(file(root)).not.toBe("");
     expect(file("site/export.json")).toMatch(/"people": ?null/);

@@ -147,6 +147,11 @@ export function nounPhrase(lead: string, title: string): string | null {
   return phrase === "" ? null : phrase;
 }
 
+/** The name a biography is titled with: the display name made plain, or else the login. */
+export function biographyName(displayName: string, login: string): string {
+  return plainWords(displayName, 120) || login;
+}
+
 /** The surname: the display name's last word, or the login when there is no display name. */
 export function surnameOf(displayName: string, login: string): string {
   const name = plainWords(displayName, 120);
@@ -198,8 +203,7 @@ export function biography(input: {
   asOf: string;
 }): Biography {
   const { login } = input.person;
-  const plainName = plainWords(input.person.displayName, 120);
-  const name = plainName === "" ? login : plainName;
+  const name = biographyName(input.person.displayName, login);
   const surname = surnameOf(input.person.displayName, login);
   const possessive = `${surname}'s`;
   const projects = [...input.projects].sort(

@@ -15,6 +15,7 @@ import type { WikiExport } from "@repowiki/core";
 import type { AstroInlineConfig } from "astro";
 import { build, preview } from "astro";
 import { parseBase, UsageError } from "./args.ts";
+import { authorEnv, type SiteAuthor } from "./author.ts";
 import { loadExport } from "./load.ts";
 import { writeSearchIndex } from "./search-index.ts";
 import { siteMarker } from "./site-format.ts";
@@ -78,12 +79,18 @@ function validateOutDir(exportFile: string, outDir: string): void {
  * off: builds never touch the network. REPOWIKI_BUILD is new on every call, so a second build in
  * the same process loads its own export.
  */
-function setBuildEnv(exportFile: string, repoUrl: string | null, base: string): void {
+function setBuildEnv(
+  exportFile: string,
+  repoUrl: string | null,
+  base: string,
+  author: string,
+): void {
   process.env.ASTRO_TELEMETRY_DISABLED = "1";
   process.env.REPOWIKI_BUILD = randomUUID();
   process.env.REPOWIKI_EXPORT = exportFile;
   process.env.REPOWIKI_REPO_URL = repoUrl ?? "";
   process.env.REPOWIKI_BASE = base;
+  process.env.REPOWIKI_AUTHOR = author;
 }
 
 /** `base` is the path the site is served under; Astro puts it on the /_astro/ asset URLs. */
@@ -120,9 +127,10 @@ export async function buildSite(
   exportFile: string,
   outDir: string,
   repoUrl: string | null,
-  options: { inflight?: boolean; base?: string } = {},
+  options: { inflight?: boolean; base?: string; author?: SiteAuthor } = {},
 ): Promise<BuildResult> {
   const base = parseBase(options.base ?? "/");
+  const author = authorEnv(options.author);
   const loaded = loadExport(exportFile);
   validateOutDir(exportFile, outDir);
   // Without the work in flight, the pages are built from, and the root's export is, a copy of
@@ -133,7 +141,7 @@ export async function buildSite(
   try {
     // Inside the try, so a failed write (a full disk) still removes the scratch directory.
     if (scratch !== null) writeFileSync(pages, `${JSON.stringify(wiki)}\n`);
-    return await render(pages, outDir, repoUrl, wiki, base);
+    return await render(pages, outDir, repoUrl, wiki, base, author);
   } finally {
     if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
   }
@@ -146,8 +154,9 @@ async function render(
   repoUrl: string | null,
   wiki: WikiExport,
   base: string,
+  author: string,
 ): Promise<BuildResult> {
-  setBuildEnv(exportFile, repoUrl, base);
+  setBuildEnv(exportFile, repoUrl, base, author);
   const marker = siteMarker();
 
   // Astro puts a static build's server chunks in <cwd>/.astro/ when the out dir is outside the

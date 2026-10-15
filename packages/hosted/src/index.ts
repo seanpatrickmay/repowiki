@@ -4,6 +4,7 @@ export {
   type BiographyProject,
   biography,
   biographyEntry,
+  biographyName,
   GENERATED_LABEL,
   nounPhrase,
   type Paragraph,

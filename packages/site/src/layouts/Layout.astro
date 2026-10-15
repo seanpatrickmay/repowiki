@@ -1,5 +1,6 @@
 ---
 import "../styles/wiki.css";
+import { siteAuthor } from "../author.ts";
 import { CONTENT_SECURITY_POLICY } from "../csp.ts";
 import { getSite } from "../site.ts";
 import { architectureUrl, inProgressUrl, peopleUrl, siteBase, withBase } from "../urls.ts";
@@ -13,6 +14,8 @@ const { title } = Astro.props;
 const { wiki, architecture } = getSite();
 // The client scripts read the base here (base-path.ts); the default "/" leaves pages unchanged.
 const base = siteBase();
+// A hosted wiki links back to its author's biography (ADR-0013); a standalone site has none.
+const author = siteAuthor();
 ---
 
 <!doctype html>
@@ -39,7 +42,7 @@ const base = siteBase();
     <div class="page">
       <nav class="site-nav" aria-label="Site">
         <ul>
-          <li><a href={withBase("/")}>Main page</a></li>
+          <li><a href={withBase("/")}>Main page</a></li>{author !== null && <li><a href={author.url}>{author.name}</a></li>}
           <li><a href={withBase("/random/")}>Random article</a></li>
           <li><a href={withBase("/special/all-pages/")}>All articles</a></li>
           {architecture !== null && (
