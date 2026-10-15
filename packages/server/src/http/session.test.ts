@@ -1,3 +1,4 @@
+import type { Account } from "@repowiki/hosted";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../config.ts";
 import type { Db } from "../db/db.ts";
@@ -85,5 +86,23 @@ describe("checkMutation (spec 2 S6)", () => {
     refuse(() => checkMutation(dev, { origin }, session, ""));
     refuse(() => checkMutation(dev, { origin }, session, null));
     refuse(() => checkMutation(dev, { origin }, null, "right"));
+  });
+});
+
+describe("the mutation limit (spec 2 §10, M14e A3)", () => {
+  it("allows 60 mutations a minute per session and answers the 61st 429", () => {
+    const config = loadConfig({ REPOWIKI_MODE: "demo" });
+    const headers = { origin: config.origin };
+    const session = {
+      account: {} as Account,
+      csrf: "c".repeat(43),
+      token: `limit-${Math.random()}`,
+    };
+    for (let i = 0; i < 60; i++) checkMutation(config, headers, session, session.csrf);
+    expect(() => checkMutation(config, headers, session, session.csrf)).toThrow(
+      expect.objectContaining({ status: 429 }),
+    );
+    const other = { ...session, token: `limit-${Math.random()}` };
+    expect(() => checkMutation(config, headers, other, other.csrf)).not.toThrow();
   });
 });

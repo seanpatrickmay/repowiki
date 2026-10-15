@@ -68,7 +68,27 @@ export function sessionSetCookie(config: Config, token: string, maxAgeSeconds: n
   });
 }
 
-/** A state-changing request: our Origin, a session, and that session's CSRF token (spec 2 S6). */
+/** Mutations one session may make in any minute (spec 2 §10, M14e A3). */
+export const MUTATIONS_PER_MINUTE = 60;
+const recent = new Map<string, number[]>();
+
+/** Whether this session is past its mutation limit; every call forgets sessions idle a minute. */
+function overLimit(token: string, at: number): boolean {
+  for (const [key, times] of recent) {
+    const kept = times.filter((t) => at - t < 60_000);
+    if (kept.length === 0) recent.delete(key);
+    else recent.set(key, kept);
+  }
+  const mine = recent.get(token) ?? [];
+  if (mine.length >= MUTATIONS_PER_MINUTE) return true;
+  recent.set(token, [...mine, at]);
+  return false;
+}
+
+/**
+ * A state-changing request: our Origin, a session, that session's CSRF token (spec 2 S6), and
+ * at most MUTATIONS_PER_MINUTE of them a minute (429 past it).
+ */
 export function checkMutation(
   config: Config,
   headers: Headers,
@@ -81,5 +101,8 @@ export function checkMutation(
   }
   if (session === null || !sentToken || !safeEqual(sentToken, session.csrf)) {
     throw new HttpError(403, "Your session has expired. Reload the page and try again.");
+  }
+  if (overLimit(session.token, Date.now())) {
+    throw new HttpError(429, "Too many changes in a minute. Wait a moment and try again.");
   }
 }

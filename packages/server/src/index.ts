@@ -65,6 +65,7 @@ export {
 export {
   checkMutation,
   currentSession,
+  MUTATIONS_PER_MINUTE,
   renewalCookie,
   type Session,
   type SessionRequest,
