@@ -2,6 +2,7 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db/db.ts";
 import type { GitHubEndpoints } from "./github/endpoints.ts";
 import { fakeAuthorizeRoute } from "./github/fake.ts";
+import { HttpError } from "./http/body.ts";
 import { createRouter, type Reply, type Route } from "./http/router.ts";
 import { type App, html, text } from "./http/server.ts";
 import { renewalCookie } from "./http/session.ts";
@@ -38,13 +39,23 @@ const styleRoute: Route = {
   }),
 };
 
-/** The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. */
+/**
+ * The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. A
+ * reply carrying a session cookie is never cached.
+ */
 function withRenewal(reply: Reply, cookie: string | undefined): Reply {
   if (cookie === undefined) return reply;
   const name = `${cookie.slice(0, cookie.indexOf("="))}=`;
   const set = [reply.headers?.["set-cookie"] ?? []].flat();
   if (set.some((c) => c.startsWith(name))) return reply;
-  return { ...reply, headers: { ...reply.headers, "set-cookie": [...set, cookie] } };
+  const headers = { ...reply.headers, "set-cookie": [...set, cookie] };
+  return { ...reply, headers: { ...headers, "cache-control": "private, no-store" } };
+}
+
+/** An HttpError as the reply `listen` would send for it. */
+function errorReply(error: HttpError): Reply {
+  const base = text(error.status, error.message);
+  return { ...base, headers: { ...base.headers, ...error.headers } };
 }
 
 /** The routes, the style sheet, and in fake mode the fake GitHub's authorize page. */
@@ -55,8 +66,15 @@ export function createApp(deps: Deps, routes: readonly Route[]): App {
   return async (request) => {
     const found = route(request.method, request.path);
     if ("handler" in found) {
-      const reply = await found.handler({ ...request, params: found.params });
-      return withRenewal(reply, renewalCookie(request.headers));
+      let reply: Reply;
+      try {
+        reply = await found.handler({ ...request, params: found.params });
+      } catch (error) {
+        // A refusal after the session slid still renews it; anything else is listen's to hide.
+        if (!(error instanceof HttpError)) throw error;
+        reply = errorReply(error);
+      }
+      return withRenewal(reply, renewalCookie(request));
     }
     if (found.status === 405) return text(405, "Method not allowed.");
     const body = `<h1>Not found</h1><p class="muted">${escapeHtml(request.path)} is not a page on RepoWiki.</p>`;

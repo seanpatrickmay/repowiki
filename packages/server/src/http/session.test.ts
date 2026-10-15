@@ -25,11 +25,25 @@ afterEach(async () => db.close());
 describe("currentSession (spec 2 S6)", () => {
   it("reads the session cookie for this origin's cookie name", async () => {
     const { token, csrf } = await createSession(db, A1, T0);
-    const session = await currentSession(db, dev, { cookie: `other=1; session=${token}` }, T0);
+    const session = await currentSession(
+      db,
+      dev,
+      { headers: { cookie: `other=1; session=${token}` }, raw: {} },
+      T0,
+    );
     expect(session).toMatchObject({ account: { id: A1 }, csrf, token });
-    expect(await currentSession(db, dev, { cookie: `__Host-session=${token}` }, T0)).toBeNull();
-    expect(await currentSession(db, dev, { cookie: "session=unknown" }, T0)).toBeNull();
-    expect(await currentSession(db, dev, {}, T0)).toBeNull();
+    expect(
+      await currentSession(
+        db,
+        dev,
+        { headers: { cookie: `__Host-session=${token}` }, raw: {} },
+        T0,
+      ),
+    ).toBeNull();
+    expect(
+      await currentSession(db, dev, { headers: { cookie: "session=unknown" }, raw: {} }, T0),
+    ).toBeNull();
+    expect(await currentSession(db, dev, { headers: {}, raw: {} }, T0)).toBeNull();
   });
 
   it("sets a Secure __Host- cookie only on an https origin", () => {

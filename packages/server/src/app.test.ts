@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "./app.ts";
+import { HttpError } from "./http/body.ts";
 import { text } from "./http/server.ts";
 import { currentSession } from "./http/session.ts";
 import { call, testDeps } from "./routes/test-app.ts";
@@ -74,7 +75,7 @@ describe("createApp (spec 2 §4)", () => {
         method: "GET",
         pattern: "/me",
         handler: async (r) => {
-          const session = await currentSession(reading.db, reading.config, r.headers, clock);
+          const session = await currentSession(reading.db, reading.config, r, clock);
           return text(200, session?.account.login ?? "nobody");
         },
       },
@@ -88,6 +89,47 @@ describe("createApp (spec 2 §4)", () => {
     expect(later.headers?.["set-cookie"]).toEqual([
       `session=${token}; Path=/; Max-Age=2592000; SameSite=Lax; HttpOnly`,
     ]);
+    expect(later.headers?.["cache-control"]).toBe("private, no-store");
     expect((await read()).headers?.["set-cookie"]).toBeUndefined();
+  });
+
+  it("re-issues a slid session's cookie even when the handler copies the request or throws", async () => {
+    const id = "00000000-0000-4000-8000-0000000000a2";
+    await signIn(
+      deps.db,
+      { githubUserId: 2, login: "u2", displayName: "U", githubCreatedAt: "2019-01-01T00:00:00Z" },
+      { newAccountId: id, allowNew: () => true, now: deps.now() },
+    );
+    const copied = await createSession(deps.db, id, deps.now());
+    const thrown = await createSession(deps.db, id, deps.now());
+    const clock = "2026-10-16T12:00:00.000Z";
+    const app = createApp({ ...deps, now: () => clock }, [
+      {
+        method: "GET",
+        pattern: "/copy",
+        handler: async (r) => {
+          const copy = { ...r, headers: { ...r.headers } };
+          await currentSession(deps.db, deps.config, copy, clock);
+          return text(200, "ok");
+        },
+      },
+      {
+        method: "GET",
+        pattern: "/throw",
+        handler: async (r) => {
+          await currentSession(deps.db, deps.config, r, clock);
+          throw new HttpError(409, "no");
+        },
+      },
+    ]);
+    const copy = await call(app, { path: "/copy", headers: { cookie: `session=${copied.token}` } });
+    expect(String(copy.headers?.["set-cookie"])).toContain(`session=${copied.token}`);
+    const fail = await call(app, {
+      path: "/throw",
+      headers: { cookie: `session=${thrown.token}` },
+    });
+    expect(fail.status).toBe(409);
+    expect(String(fail.headers?.["set-cookie"])).toContain(`session=${thrown.token}`);
+    expect(fail.headers?.["cache-control"]).toBe("private, no-store");
   });
 });

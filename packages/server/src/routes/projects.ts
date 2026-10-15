@@ -81,7 +81,7 @@ export function projectRoutes(deps: Deps): Route[] {
       method: "GET",
       pattern: "/dashboard",
       handler: async (request) => {
-        const session = await currentSession(deps.db, deps.config, request.headers, deps.now());
+        const session = await currentSession(deps.db, deps.config, request, deps.now());
         if (session === null) return redirect("/auth/github");
         const token = await readGitHubToken(deps.db, deps.config.tokenKey, session.account.id);
         if (token === null) return redirect("/auth/github");
@@ -106,7 +106,7 @@ export function projectRoutes(deps: Deps): Route[] {
       method: "POST",
       pattern: "/projects",
       handler: async (request) => {
-        const session = await currentSession(deps.db, deps.config, request.headers, deps.now());
+        const session = await currentSession(deps.db, deps.config, request, deps.now());
         const body = await readForm(request.raw);
         checkMutation(deps.config, request.headers, session, body.get("csrf"));
         const githubRepoId = Number(body.get("githubRepoId"));

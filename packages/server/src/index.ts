@@ -67,6 +67,7 @@ export {
   currentSession,
   renewalCookie,
   type Session,
+  type SessionRequest,
   secureCookies,
   sessionSetCookie,
 } from "./http/session.ts";

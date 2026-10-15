@@ -134,7 +134,7 @@ export function authRoutes(deps: Deps): Route[] {
       method: "POST",
       pattern: "/auth/signout",
       handler: async (request) => {
-        const session = await currentSession(deps.db, deps.config, request.headers, deps.now());
+        const session = await currentSession(deps.db, deps.config, request, deps.now());
         const form = await readForm(request.raw);
         checkMutation(deps.config, request.headers, session, form.get("csrf"));
         await endSession(deps.db, session.token);
