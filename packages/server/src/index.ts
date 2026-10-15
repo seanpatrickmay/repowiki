@@ -1,5 +1,5 @@
 export { type Config, ConfigError, loadConfig, type Mode } from "./config.ts";
-export { randomToken, safeEqual, sha256Hex } from "./crypto.ts";
+export { randomToken, type Sealed, safeEqual, seal, sha256Hex, unseal } from "./crypto.ts";
 export { type Db, isUniqueViolation, type Queryable, withRetries } from "./db/db.ts";
 export { type Migration, migrate, migrationFiles, openDatabase } from "./db/migrate.ts";
 export { openPg, type PoolLike, poolDb } from "./db/pg.ts";
@@ -32,6 +32,13 @@ export {
   text,
 } from "./http/server.ts";
 export {
+  checkMutation,
+  currentSession,
+  type Session,
+  secureCookies,
+  sessionSetCookie,
+} from "./http/session.ts";
+export {
   accountById,
   activeHandle,
   type GitHubProfile,
@@ -41,5 +48,6 @@ export {
   signIn,
 } from "./store/accounts.ts";
 export { appendAudit } from "./store/audit.ts";
+export { readGitHubToken, saveGitHubToken } from "./store/github-tokens.ts";
 export { parsedBody, StoreError } from "./store/rows.ts";
 export { createSession, endSession, readSession, SESSION_DAYS } from "./store/sessions.ts";
