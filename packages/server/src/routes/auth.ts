@@ -1,6 +1,6 @@
-import { z } from "zod";
 import { callbackUrl, type Deps } from "../app.ts";
 import { safeEqual } from "../crypto.ts";
+import { GitHubError, type GitHubUser, githubApi, TokenRevoked } from "../github/api.ts";
 import {
   authorizeUrl,
   displayNameFor,
@@ -19,13 +19,6 @@ import { escapeHtml, page } from "../pages/layout.ts";
 import { signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { createSession, endSession, SESSION_DAYS } from "../store/sessions.ts";
-
-const GitHubUser = z.object({
-  id: z.int().positive(),
-  login: z.string().min(1).max(39),
-  name: z.string().nullable(),
-  created_at: z.iso.datetime({ offset: true }),
-});
 
 const failure = (status: number, title: string, message: string) =>
   html(
@@ -50,6 +43,7 @@ export function authRoutes(deps: Deps): Route[] {
       ? deps.config.github
       : { clientId: "fake-client", clientSecret: "fake-secret" };
   const nowMs = () => Date.parse(deps.now());
+  const api = githubApi(deps.fetch, deps.github);
 
   return [
     {
@@ -91,28 +85,21 @@ export function authRoutes(deps: Deps): Route[] {
         if (token === null) {
           return failure(400, "Sign-in failed", "GitHub did not confirm the sign-in. Try again.");
         }
-        const response = await deps.fetch(`${deps.github.api}/user`, {
-          headers: {
-            authorization: `Bearer ${token}`,
-            accept: "application/vnd.github+json",
-            "user-agent": "RepoWiki",
-          },
-          signal: AbortSignal.timeout(10_000),
-        });
-        const user = GitHubUser.safeParse(
-          response.ok ? await response.json().catch(() => null) : null,
-        );
-        if (!user.success) {
+        let user: GitHubUser;
+        try {
+          user = await api.user(token);
+        } catch (error) {
+          if (!(error instanceof GitHubError || error instanceof TokenRevoked)) throw error;
           return failure(502, "Sign-in failed", "GitHub did not return your profile. Try again.");
         }
         const allowlist = new Set(deps.config.signupAllowlist);
         const signedIn = await signIn(
           deps.db,
           {
-            githubUserId: user.data.id,
-            login: user.data.login,
-            displayName: displayNameFor(user.data.name, user.data.login),
-            githubCreatedAt: new Date(user.data.created_at).toISOString(),
+            githubUserId: user.id,
+            login: user.login,
+            displayName: displayNameFor(user.name, user.login),
+            githubCreatedAt: new Date(user.created_at).toISOString(),
           },
           {
             newAccountId: deps.newId(),

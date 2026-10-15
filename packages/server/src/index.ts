@@ -5,6 +5,15 @@ export { type Db, isUniqueViolation, type Queryable, withRetries } from "./db/db
 export { type Migration, migrate, migrationFiles, openDatabase } from "./db/migrate.ts";
 export { openPg, type PoolLike, poolDb } from "./db/pg.ts";
 export { openPglite } from "./db/pglite.ts";
+export {
+  type GitHubApi,
+  GitHubError,
+  GitHubRepo,
+  GitHubUser,
+  githubApi,
+  lastPage,
+  TokenRevoked,
+} from "./github/api.ts";
 export { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
 export {
   FAKE_CODE,
