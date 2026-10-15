@@ -17,7 +17,7 @@
 - Tests never call the network, and none of the owner's data goes into fixtures; the six repositories were read once, during development, with `gh api`.
 - Stored rows and entries without `technologies` still parse (`[]`); no migration.
 - Every rendered string goes through `escapeHtml`; the templates never use a pronoun.
-- Stacked branches, each near ~300 changed lines (lockfiles, fixtures and cassettes excluded; the table is data), in this order: `m14/tech-docs`, `m14/tech-table`, `m14/tech-manifests`, `m14/tech-detect`, `m14/tech-facts`, `m14/tech-import`, `m14/tech-bio`, `m14/tech-render`.
+- Stacked branches, each near ~300 changed lines (lockfiles, fixtures and cassettes excluded; the table is data), in this order: `m14/tech-docs`, `m14/tech-table`, `m14/tech-toml`, `m14/tech-manifests`, `m14/tech-detect`, `m14/tech-facts`, `m14/tech-import`, `m14/tech-bio`, `m14/tech-render`.
 - `pnpm check` passes before every commit; commits use `git -c user.email=sean.may101@gmail.com commit`.
 
 ## Review Focus
@@ -55,13 +55,26 @@
 
 ---
 
-### Task 3: Manifest parsers
+### Task 3: The TOML subset
+
+**Files:**
+- Create: `packages/hosted/src/toml.ts`, `packages/hosted/src/toml.test.ts`
+
+**Interfaces:**
+- Produces: `tomlTables(text)` → `TomlTable[] | null` (each table's header path and its entries' key paths and values; inline tables keep their keys only).
+
+- [ ] **Step 1:** Failing tests: headers, quoted and dotted keys, multi-line strings and arrays, nested values; null for each unclosed form.
+- [ ] **Step 2:** Implement; `pnpm check`; commit `feat(hosted): read the TOML subset that manifests use`
+
+---
+
+### Task 3b: Manifest parsers
 
 **Files:**
 - Create: `packages/hosted/src/manifests.ts`, `packages/hosted/src/manifests.test.ts`
 
 **Interfaces:**
-- Produces: `Declared = { ecosystem: "npm" | "pypi" | "crates" | "go"; name: string }`, `declaredIn(path, text)` → `Declared[] | null` (null: did not parse), `composeImages(text)` → `string[] | null`, `tomlTables(text)` (the subset reader), `normalizedName(ecosystem, name)`.
+- Produces: `Declared = { ecosystem; name }`, `manifestKind(path)`, `readManifest(path, text)` → `{ declared, images } | null` (null: did not parse; compose files give images).
 
 - [ ] **Step 1:** Failing tests per format: package.json's three sections; pyproject PEP 621, optional, dependency groups, build-system, Poetry and its groups; requirements lines with extras, markers, options, URLs and comments; Cargo's sections, target tables and `[dependencies.x]`; `go.mod` single lines and blocks; compose images; each malformed input gives null.
 - [ ] **Step 2:** Implement; `pnpm check`; commit `feat(hosted): read declared dependencies from manifests by hand`
