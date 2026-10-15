@@ -1,6 +1,8 @@
 # The hosted server (spec 2 S1). Every secret is set with `fly secrets set`, never here.
-# Deploy from the repository root:
-#   fly deploy . --config deploy/fly.server.toml --dockerfile deploy/Dockerfile --ha=false
+# Deploy from the repository root, naming the commit as the engine version workers report
+# (production refuses to start without REPOWIKI_ENGINE_VERSION; it is not pinned below, where
+# it would go stale):
+#   fly deploy . --config deploy/fly.server.toml --dockerfile deploy/Dockerfile --ha=false --env REPOWIKI_ENGINE_VERSION=$(git rev-parse --short HEAD)
 # One machine only: the sweeper and the preview render queue live in the server's memory.
 app = "repowiki"
 primary_region = "iad"

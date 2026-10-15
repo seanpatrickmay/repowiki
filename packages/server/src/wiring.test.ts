@@ -22,6 +22,7 @@ const PRODUCTION = {
   FLY_WORKER_APP: "repowiki-workers",
   WORKER_IMAGE: "registry.fly.io/repowiki-workers:1",
   INTERNAL_URL: "http://repowiki.internal:8788",
+  REPOWIKI_ENGINE_VERSION: "abc1234",
 };
 
 const top = (routes: { pattern: string }[]) => new Set(routes.map((r) => r.pattern.split("/")[1]));

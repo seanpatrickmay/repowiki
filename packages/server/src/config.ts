@@ -46,8 +46,12 @@ export function loadConfig(env: Env): Config {
     return value ?? "";
   };
   const port = portOf(env.PORT, 8787, "PORT");
-  const engineVersion = env.REPOWIKI_ENGINE_VERSION?.trim() || "dev";
-  if (!ENGINE_VERSION.test(engineVersion)) {
+  // Production names the commit it runs (S17); a missing one is reported with the rest.
+  const engineVersion =
+    mode === "production"
+      ? need("REPOWIKI_ENGINE_VERSION")
+      : env.REPOWIKI_ENGINE_VERSION?.trim() || "dev";
+  if (engineVersion !== "" && !ENGINE_VERSION.test(engineVersion)) {
     throw new ConfigError("REPOWIKI_ENGINE_VERSION must be 1 to 64 letters, digits or ._+-.");
   }
 
@@ -94,7 +98,7 @@ export function loadConfig(env: Env): Config {
       throw new ConfigError("PUBLIC_ORIGIN must be RepoWiki's own https origin with no path.");
     }
     if (!reachesPort(config.runner.internalUrl, internalPort)) {
-      throw new ConfigError("INTERNAL_URL must be an http(s) URL naming INTERNAL_PORT.");
+      throw new ConfigError("INTERNAL_URL must be http://<host>:<INTERNAL_PORT>, with no path.");
     }
     config.tokenKey = tokenKey(key);
     return config;
@@ -139,11 +143,24 @@ function portOf(value: string | undefined, fallback: number, name: string): numb
 /** The worker's own check on its version (packages/worker env.ts), so a bad one fails here. */
 const ENGINE_VERSION = /^[A-Za-z0-9._+-]{1,64}$/;
 
-/** Workers must reach the worker listener, never the public one: the URL names its port. */
+/**
+ * Workers must reach the worker listener, never the public one: the URL names its port. It is
+ * plain http on Fly's private network (the listener has no TLS), and an origin only: the worker
+ * appends `/internal/...` and `/llm/...` to it, so a path or trailing slash would break them.
+ */
 function reachesPort(url: string, port: number): boolean {
   try {
     const parsed = new URL(url);
-    return ["http:", "https:"].includes(parsed.protocol) && parsed.port === String(port);
+    return (
+      parsed.protocol === "http:" &&
+      parsed.port === String(port) &&
+      parsed.pathname === "/" &&
+      !url.endsWith("/") &&
+      parsed.search === "" &&
+      parsed.hash === "" &&
+      parsed.username === "" &&
+      parsed.password === ""
+    );
   } catch {
     return false;
   }

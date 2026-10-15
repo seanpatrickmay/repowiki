@@ -19,6 +19,7 @@ const production = {
   FLY_WORKER_APP: "repowiki-workers",
   WORKER_IMAGE: "registry.fly.io/repowiki-worker:1",
   INTERNAL_URL: "http://repowiki.internal:8788",
+  REPOWIKI_ENGINE_VERSION: "abc1234",
 };
 
 describe("loadConfig (spec 2 S17)", () => {
@@ -53,15 +54,26 @@ describe("loadConfig (spec 2 S17)", () => {
       { INTERNAL_URL: "http://repowiki.internal" },
       { INTERNAL_URL: "ftp://repowiki.internal:8788" },
       { INTERNAL_URL: "not a url" },
+      // Plain http on Fly's private network, with nothing after the port.
+      { INTERNAL_URL: "https://repowiki.internal:8788" },
+      { INTERNAL_URL: "http://repowiki.internal:8788/" },
+      { INTERNAL_URL: "http://repowiki.internal:8788/a" },
+      { INTERNAL_URL: "http://repowiki.internal:8788?a" },
+      { INTERNAL_URL: "http://u:p@repowiki.internal:8788" },
     ]) {
       expect(() => loadConfig({ ...production, ...env }), JSON.stringify(env)).toThrow(ConfigError);
     }
   });
 
-  it("names the engine version workers report, dev by default", () => {
-    expect(loadConfig(production).engineVersion).toBe("dev");
-    const tagged = loadConfig({ ...production, REPOWIKI_ENGINE_VERSION: "abc1234" });
-    expect(tagged.engineVersion).toBe("abc1234");
+  it("names the engine version workers report: required in production, dev elsewhere (S17)", () => {
+    expect(loadConfig(production).engineVersion).toBe("abc1234");
+    const { REPOWIKI_ENGINE_VERSION, ...untagged } = production;
+    expect(REPOWIKI_ENGINE_VERSION).toBeTruthy();
+    expect(() => loadConfig(untagged)).toThrow(
+      /Missing environment variables: REPOWIKI_ENGINE_VERSION\./,
+    );
+    expect(() => loadConfig({ ...untagged, REPOWIKI_ENGINE_VERSION: " " })).toThrow(ConfigError);
+    expect(loadConfig({ REPOWIKI_MODE: "development" }).engineVersion).toBe("dev");
     expect(() => loadConfig({ ...production, REPOWIKI_ENGINE_VERSION: "a b" })).toThrow(
       ConfigError,
     );

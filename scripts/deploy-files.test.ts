@@ -119,11 +119,21 @@ describe("the image and the Fly configs (spec 2 §2)", () => {
 
   it("exposes only the public port on the server and no service on the worker app", () => {
     const server = read("deploy/fly.server.toml");
-    expect(server).toContain("internal_port = 8787");
-    expect(server).not.toContain("internal_port = 8788");
+    const ports = [...server.matchAll(/^[ \t]*internal_port[ \t]*=[ \t]*"?(\d+)"?/gm)];
+    expect(ports.map((m) => m[1])).toEqual(["8787"]);
+    expect(server).toMatch(/^[ \t]*PORT[ \t]*=[ \t]*"8787"/m);
     expect(server).toMatch(/path = "\/"/);
     expect(read("deploy/fly.worker.toml")).not.toContain("[[services]]");
     expect(read("deploy/fly.worker.toml")).not.toContain("[http_service]");
+  });
+
+  it("sets the engine version production requires at every server deploy (S17)", () => {
+    const server = read("deploy/fly.server.toml");
+    expect(server).toMatch(
+      /^#\s+fly deploy [^\n]*--env REPOWIKI_ENGINE_VERSION=\$\(git rev-parse --short HEAD\)/m,
+    );
+    // Set at deploy, never pinned in [env], where it would go stale.
+    expect(server).not.toMatch(/^[ \t]*REPOWIKI_ENGINE_VERSION[ \t]*=/m);
   });
 
   it("keeps secrets out of the image and the configs", () => {
