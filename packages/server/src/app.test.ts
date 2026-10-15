@@ -43,8 +43,10 @@ describe("createApp (spec 2 §4)", () => {
     expect(String(reply.body)).toContain("--accent");
   });
 
-  it("serves the public pages' style sheet", async () => {
-    const reply = await call(createApp(deps, []), { path: "/_app/portfolio.css" });
+  it("serves the public pages' style sheet on the pages host only (ADR-0012)", async () => {
+    expect((await call(createApp(deps, []), { path: "/_app/portfolio.css" })).status).toBe(404);
+    const pages = createApp(deps, [], { host: "pages" });
+    const reply = await call(pages, { path: "/_app/portfolio.css" });
     expect(reply.status).toBe(200);
     expect(reply.headers?.["content-type"]).toBe("text/css; charset=utf-8");
     expect(String(reply.body)).toContain(".cards");

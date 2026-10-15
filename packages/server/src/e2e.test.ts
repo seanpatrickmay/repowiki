@@ -61,8 +61,16 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     const previewHash = field(page.text, "previewHash");
     expect(previewHash).toMatch(/^[0-9a-f]{64}$/);
     const id = projectPath.split("/").at(-1) ?? "";
-    expect((await me.go(`/preview/${id}/1/`)).status).toBe(200);
-    expect((await browser(base).go(`/preview/${id}/1/`)).status).toBe(404);
+    // The preview opens on the pages origin at an expiring link, never on the app (ADR-0012).
+    const opened = await me.go(`${projectPath}/preview/open`, { form: { csrf, revision: "1" } });
+    expect(opened.status, opened.text).toBe(303);
+    const link = opened.location ?? "";
+    expect(link.startsWith(`${pages}/_preview/`)).toBe(true);
+    const shown = await browser(pages).go(link);
+    expect(shown.status).toBe(200);
+    expect(shown.text).toContain("Preview: a private link that expires within an hour");
+    expect((await browser(pages).go(`${link}docs/`)).status).toBe(200);
+    expect((await me.go(`/preview/${id}/1/`)).status).toBe(404);
 
     const published = await me.go(`${projectPath}/publish`, {
       form: {

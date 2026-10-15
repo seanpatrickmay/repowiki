@@ -8,6 +8,7 @@ export const SLUG_MAX_LENGTH = 64;
 
 /** Route names a handle may never take (Contract spec §9). */
 export const RESERVED_HANDLES: ReadonlySet<string> = new Set([
+  "_preview",
   "about",
   "account",
   "admin",

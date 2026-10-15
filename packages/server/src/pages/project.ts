@@ -131,7 +131,7 @@ function publishSection(v: ProjectView): string {
   );
   const ready =
     preview !== null && preview.revision === revision.number
-      ? `<p><a href="/preview/${e(project.id)}/${revision.number}/">Open the preview of revision ${revision.number}</a></p>${form(
+      ? `${form(`${base}/preview/open`, session, `${field("revision", revision.number)}<button class="secondary">Open the preview of revision ${revision.number}</button>`)}<p class="muted">The preview opens on the public pages' site at a private link that works for an hour.</p>${form(
           `${base}/publish`,
           session,
           `${field("revision", revision.number)}${field("expectedVersion", current?.version ?? project.currentVersion)}${field("previewHash", preview.siteHash)}<button>Publish revision ${revision.number}</button>`,

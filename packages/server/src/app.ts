@@ -48,8 +48,9 @@ const styleRoute = (pattern: string, body: string): Route => ({
     body,
   }),
 });
+/** The app's style sheet; public pages and previews use theirs, on the pages host (ADR-0012). */
+const appStyle = styleRoute(STYLE_PATH, STYLE);
 const publicStyle = styleRoute(PUBLIC_STYLE_PATH, PUBLIC_STYLE);
-const styles = [styleRoute(STYLE_PATH, STYLE), publicStyle];
 
 /**
  * The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. A
@@ -84,7 +85,7 @@ export function createApp(
     deps.config.github.kind === "fake" && !pages
       ? [fakeAuthorizeRoute(callbackUrl(deps.config))]
       : [];
-  const route = createRouter([...(pages ? [publicStyle] : styles), ...fake, ...routes]);
+  const route = createRouter([pages ? publicStyle : appStyle, ...fake, ...routes]);
   return async (request) => {
     const found = route(request.method, request.path);
     if ("handler" in found) {

@@ -6,7 +6,7 @@ import { buildTree } from "../render/build.ts";
 import { treeHash } from "../render/tree.ts";
 import { previewOf } from "../store/drafts.ts";
 import { draftRoutes } from "./drafts.ts";
-import { previewRoutes, serveTreeFile } from "./preview.ts";
+import { previewPageRoutes, previewRoutes, serveTreeFile } from "./preview.ts";
 import {
   auditOutcomes,
   call,
@@ -19,6 +19,7 @@ import {
 
 let deps: Deps;
 let app: App;
+let pages: App;
 let p: { projectId: string; cookie: string; csrf: string };
 const post = (path: string, body: string, who: { cookie: string; csrf: string } = p) =>
   call(app, {
@@ -32,6 +33,7 @@ const get = (path: string, cookie = p.cookie) => call(app, { path, headers: { co
 beforeEach(async () => {
   deps = await testDeps();
   app = createApp(deps, [...draftRoutes(deps), ...previewRoutes(deps)]);
+  pages = createApp(deps, previewPageRoutes(deps), { host: "pages" });
   p = await generatedProject(deps);
 });
 afterEach(async () => deps.db.close());
@@ -82,28 +84,51 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     );
     expect(treeHash(files)).toBe(preview?.siteHash);
 
-    const base = `/preview/${p.projectId}/1/`;
-    const home = await get(base);
+    // The app mints a link on the pages origin; the pages host serves it (ADR-0012).
+    const opened = await post(`/projects/${p.projectId}/preview/open`, "revision=1");
+    expect(opened.status).toBe(303);
+    const location = String(opened.headers?.location);
+    const prefix = `${deps.config.publicOrigin}/_preview/`;
+    expect(location.startsWith(prefix)).toBe(true);
+    const base = location.slice(deps.config.publicOrigin.length);
+    expect(base).toMatch(/^\/_preview\/[A-Za-z0-9_-]{43}\/$/);
+    const home = await call(pages, { path: base, headers: { cookie: p.cookie } });
     expect(home.status).toBe(200);
-    expect(String(home.body)).toContain("Preview: only you can see this page");
+    expect(String(home.body)).toContain("Preview: a private link that expires within an hour");
     expect(String(home.body)).toContain("I wrote the ingest code.");
-    expect(home.headers?.["cache-control"]).toBe("private, no-store");
-    const wiki = await get(`${base}docs/`);
+    expect(home.headers).toMatchObject({
+      "cache-control": "no-store",
+      "x-robots-tag": "noindex",
+      "referrer-policy": "no-referrer",
+    });
+    expect(home.headers?.["set-cookie"]).toBeUndefined();
+    const wiki = await call(pages, { path: `${base}docs/` });
     expect(wiki.status).toBe(200);
     expect(wiki.headers?.["content-security-policy"]).toContain("wasm-unsafe-eval");
+    expect(wiki.headers?.["x-robots-tag"]).toBe("noindex");
     expect(String(wiki.body)).toContain(`${base}docs/`);
     expect(String(wiki.body)).not.toContain('"/demo-dev/demo-repo/docs/');
-    expect(String(wiki.body)).not.toContain("github.com/preview/");
+    expect(String(wiki.body)).not.toContain("github.com/_preview/");
     // Every wiki page is public (ADR-0012).
-    expect((await get(`${base}docs/wiki/${first}/`)).status).toBe(200);
-    expect((await get(`${base}docs/wiki/signals/`)).status).toBe(200);
-    expect((await get(`${base}portfolio.json`)).status).toBe(404);
-    expect((await get(`/preview/${p.projectId}/1`)).status).toBe(301);
+    expect((await call(pages, { path: `${base}docs/wiki/${first}/` })).status).toBe(200);
+    expect((await call(pages, { path: `${base}docs/wiki/signals/` })).status).toBe(200);
+    expect((await call(pages, { path: `${base}portfolio.json` })).status).toBe(404);
+    expect((await call(pages, { path: base.slice(0, -1) })).status).toBe(301);
+    expect((await call(pages, { path: `/_preview/${"A".repeat(43)}/` })).status).toBe(404);
 
-    expect((await call(app, { path: base })).status).toBe(404);
+    // An hour on, the link is gone.
+    const hourLater = { ...deps, now: () => "2026-10-14T13:00:00.000Z" };
+    const laterPages = createApp(hourLater, previewPageRoutes(hourLater), { host: "pages" });
+    expect((await call(laterPages, { path: base })).status).toBe(404);
+
+    // The old session-read preview on the app origin is gone.
+    expect((await get(`/preview/${p.projectId}/1/`)).status).toBe(404);
     const other = await otherCookie(deps);
-    expect((await get(base, other.cookie)).status).toBe(404);
-    expect((await get(`/preview/${p.projectId}/2/`)).status).toBe(404);
+    expect((await post(`/projects/${p.projectId}/preview/open`, "revision=1", other)).status).toBe(
+      404,
+    );
+    // A revision with no preview has no link.
+    expect((await post(`/projects/${p.projectId}/preview/open`, "revision=2")).status).toBe(404);
     expect((await post(`/projects/${p.projectId}/preview`, "revision=1", other)).status).toBe(404);
   }, 300_000);
 

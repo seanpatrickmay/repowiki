@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../config.ts";
 import { call } from "../routes/test-app.ts";
-import { byHost, PAGES_CSP } from "./hosts.ts";
+import { appCsp, byHost, PAGES_CSP } from "./hosts.ts";
 import type { RouteRequest } from "./router.ts";
 import type { App } from "./server.ts";
 
@@ -42,6 +42,13 @@ describe("routing by Host (ADR-0012)", () => {
     const own = await call(app, { path: "/", headers: { ...APP, cookie: "session=secret" } });
     expect(String(own.body)).toBe("app session=secret");
     expect(own.headers?.["set-cookie"]).toBeDefined();
+  });
+
+  it("lets the app's forms lead to the pages origin, for the open-preview redirect", async () => {
+    const csp = (await call(app, { path: "/", headers: APP })).headers?.["content-security-policy"];
+    expect(csp).toBe(appCsp(config));
+    expect(appCsp(config)).toContain(`form-action 'self' ${config.publicOrigin}`);
+    expect(appCsp(config)).toContain("default-src 'self'");
   });
 
   it("gives pages their own policy unless a reply sets one (a built site's)", async () => {
