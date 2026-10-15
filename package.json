@@ -29,7 +29,8 @@
     "cassettes:record": "REPOWIKI_CASSETTE=record node --env-file=.env node_modules/vitest/vitest.mjs run",
     "site:build": "node packages/site/src/cli.ts build",
     "site:preview": "node packages/site/src/cli.ts preview",
-    "site:demo": "node packages/site/src/demo.ts"
+    "site:demo": "node packages/site/src/demo.ts",
+    "hosted:worker": "node packages/worker/src/main.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

@@ -32,6 +32,7 @@ export {
   pageFeatureIds,
   type SnapshotFacts,
 } from "./facts.ts";
+export { runFixture } from "./fixture.ts";
 export { AUTHOR_ID, authorEmails, peopleFile } from "./people-file.ts";
 export {
   CLI_TIMEOUT_MS,
