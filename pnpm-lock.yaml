@@ -187,6 +187,31 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  packages/worker:
+    dependencies:
+      '@repowiki/core':
+        specifier: workspace:*
+        version: link:../core
+      '@repowiki/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@repowiki/hosted':
+        specifier: workspace:*
+        version: link:../hosted
+      '@repowiki/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@repowiki/site':
+        specifier: workspace:*
+        version: link:../site
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@repowiki/query':
+        specifier: workspace:*
+        version: link:../query
+
 packages:
 
   '@antfu/install-pkg@2.1.0':
