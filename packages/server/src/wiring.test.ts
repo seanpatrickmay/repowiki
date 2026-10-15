@@ -72,6 +72,7 @@ describe("route sets (spec 2 S1)", () => {
     expect(await githubApi(deps.fetch, deps.github).user(FAKE_TOKEN)).toMatchObject({
       login: "ada",
     });
+    expect(workerMode(config)).toBe("import");
     await deps.db.close();
   });
 
