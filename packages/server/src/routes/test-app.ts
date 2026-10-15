@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { createApp, type Deps } from "../app.ts";
 import { loadConfig } from "../config.ts";
 import type { Db } from "../db/db.ts";
@@ -17,6 +18,7 @@ import { signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { createSession } from "../store/sessions.ts";
 import { freshDb } from "../store/test-db.ts";
+import { internalRoutes } from "./internal.ts";
 import { projectRoutes } from "./projects.ts";
 
 export const TEST_NOW = "2026-10-14T12:00:00.000Z";
@@ -123,4 +125,61 @@ export async function startedJob(
   const start = recording.started[0];
   if (start === undefined) throw new Error("no job started");
   return { jobId: start.jobId, token: start.token, projectId };
+}
+
+/** Test-only: the fixture export's feature ids, in page order. */
+export const FIXTURE_FEATURES = [...new Set(fixtureExport().pages.map((p) => p.featureId))];
+
+/** Test-only: a project whose first generation succeeded, so revision 1 exists; its owner signed in. */
+export async function generatedProject(
+  deps: Deps,
+): Promise<{ projectId: string; jobId: string; cookie: string; csrf: string; accountId: string }> {
+  const job = await startedJob(deps);
+  const app = createApp(deps, internalRoutes(deps));
+  const auth = { authorization: `Bearer ${job.token}` };
+  const json = { ...auth, "content-type": "application/json" };
+  await call(app, { method: "POST", path: "/internal/job/lease", headers: auth });
+  const body = JSON.stringify(fixtureExport());
+  await call(app, { method: "PUT", path: "/internal/job/export", headers: json, body });
+  const done = await call(app, {
+    method: "POST",
+    path: "/internal/job/succeed",
+    headers: json,
+    body: JSON.stringify({
+      suggestions: {
+        tagline: "A tiny demo",
+        summary: "It demonstrates RepoWiki.",
+        contributionDraft: "I wrote the ingest code.",
+        highlightCandidates: FIXTURE_FEATURES.slice(0, 1),
+      },
+      facts: {
+        languages: [{ name: "Python", share: 1 }],
+        indexedFiles: 3,
+        featureIds: FIXTURE_FEATURES,
+        author: { commits: 2, totalCommits: 3, currentLines: 10, totalLines: 20, features: [] },
+      },
+      engineVersion: "test",
+      models: ["claude-haiku-4-5"],
+    }),
+  });
+  if (done.status !== 204) throw new Error(`succeed answered ${done.status}`);
+  const { cookie, csrf, accountId } = await signedInCookie(deps);
+  return { projectId: job.projectId, jobId: job.jobId, cookie, csrf, accountId };
+}
+
+/** Test-only: a second GitHub user with an account and a session, who owns nothing. */
+export async function otherCookie(deps: Deps): Promise<{ cookie: string; csrf: string }> {
+  const signed = await signIn(
+    deps.db,
+    {
+      githubUserId: 990_001,
+      login: "someone-else",
+      displayName: "Someone Else",
+      githubCreatedAt: FAKE_USER.created_at,
+    },
+    { newAccountId: deps.newId(), allowNew: () => true, now: deps.now() },
+  );
+  if (signed === null) throw new Error("sign-in refused");
+  const session = await createSession(deps.db, signed.account.id, deps.now());
+  return { cookie: `session=${session.token}`, csrf: session.csrf };
 }
