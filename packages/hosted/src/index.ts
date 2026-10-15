@@ -71,6 +71,7 @@ export {
   takedown,
   unpublish,
 } from "./projects.ts";
+export { type PublishInput, publish } from "./publish.ts";
 export { REFUSAL_CODES, REFUSALS, RefusalCode, type RefusalInfo } from "./refusals.ts";
 export { type Ok, ok, type Refused, type Result, refused } from "./result.ts";
 export { firstRevision, refreshRevision, reviewRevision, saveRevision } from "./revisions.ts";
