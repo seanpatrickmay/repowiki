@@ -253,3 +253,51 @@ describe("GitHub sign-in failures clear the state cookie (spec 2 S7)", () => {
     expect(cleared(refused)).toBe(true);
   });
 });
+
+describe("the GitHub avatar at sign-in (ADR-0013)", () => {
+  const AVATAR = "https://avatars.githubusercontent.com/u/4242?v=4";
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]);
+
+  /** The fake GitHub, its user carrying `avatar_url`, and its avatar host answering `answer`. */
+  function avatarApp(answer: () => Response) {
+    let fetches = 0;
+    const github = deps.fetch;
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === AVATAR) {
+        fetches += 1;
+        return answer();
+      }
+      const reply = await github(input, init);
+      if (!url.endsWith("/user")) return reply;
+      return Response.json({ ...(await reply.json()), avatar_url: AVATAR });
+    };
+    const local = { ...deps, fetch: fetchFn };
+    return { app: createApp(local, authRoutes(local)), fetches: () => fetches };
+  }
+  const stored = async () =>
+    (await deps.db.query<{ body: { avatar?: unknown } }>("SELECT body FROM accounts"))[0]?.body
+      .avatar;
+
+  it("stores the avatar's bytes by hash, and fetches it again only when its URL changes", async () => {
+    const { app: on, fetches } = avatarApp(() => new Response(PNG));
+    expect((await signInFlow(on)).back.status).toBe(303);
+    const avatar = (await stored()) as { sha256: string };
+    expect(avatar).toMatchObject({ contentType: "image/png", source: AVATAR });
+    expect(avatar.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect((await deps.objects.get(`avatars/${avatar.sha256}`))?.body).toEqual(PNG);
+    await signInFlow(on);
+    expect(fetches()).toBe(1);
+  });
+
+  it("signs in without one when the avatar host fails, or sends something else", async () => {
+    for (const answer of [
+      () => new Response("down", { status: 500 }),
+      () => new Response("<svg xmlns='http://www.w3.org/2000/svg'/>"),
+    ]) {
+      const { app: on } = avatarApp(answer);
+      expect((await signInFlow(on)).back.status).toBe(303);
+      expect(await stored()).toBeUndefined();
+    }
+  });
+});

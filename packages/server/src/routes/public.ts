@@ -1,4 +1,5 @@
 import {
+  type Account,
   authorize,
   HANDLE_PATTERN,
   type Project,
@@ -6,9 +7,10 @@ import {
   Slug,
 } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
+import { avatarKey } from "../github/avatar.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { SITE_DIR } from "../render/build.ts";
-import { accountById, resolveHandle } from "../store/accounts.ts";
+import { accountById, avatarInUse, resolveHandle } from "../store/accounts.ts";
 import { versionOf } from "../store/drafts.ts";
 import { projectBySlug } from "../store/projects.ts";
 import { biographyPage, publishedEntries } from "./biography-page.ts";
@@ -30,6 +32,7 @@ type Owner =
       handle: string;
       login: string;
       displayName: string;
+      avatar: Account["avatar"];
       status: string;
       /** The name asked for is not the handle's canonical spelling (case, or a renamed handle). */
       moved: boolean;
@@ -64,6 +67,7 @@ export function publicRoutes(deps: Deps): Route[] {
       handle: found.handle,
       login: account.login,
       displayName: account.displayName,
+      avatar: account.avatar,
       status: account.status,
       moved: moved || name !== found.handle,
     };
@@ -102,6 +106,23 @@ export function publicRoutes(deps: Deps): Route[] {
   }
 
   return [
+    {
+      // An account's stored GitHub avatar, by content hash (ADR-0013): it never changes.
+      method: "GET",
+      pattern: "/_app/avatar/:sha",
+      handler: async (request) => {
+        const sha = request.params.sha ?? "";
+        const type = /^[0-9a-f]{64}$/.test(sha) ? await avatarInUse(deps.db, sha) : null;
+        const stored = type === null ? null : await deps.objects.get(avatarKey(sha));
+        if (type === null || stored === null) return notFound();
+        const headers = {
+          "content-type": type,
+          "cache-control": "public, max-age=31536000, immutable",
+          "x-content-type-options": "nosniff",
+        };
+        return { status: 200, headers, body: stored.body };
+      },
+    },
     {
       // The pages origin's root is the product's own front door (ADR-0012).
       method: "GET",

@@ -1,6 +1,9 @@
-import { callbackUrl, type Deps } from "../app.ts";
+import { createHash } from "node:crypto";
+import type { Account } from "@repowiki/hosted";
+import { callbackUrl, type Deps, logOf, nameOf } from "../app.ts";
 import { safeEqual } from "../crypto.ts";
 import { GitHubError, type GitHubUser, githubApi, TokenRevoked } from "../github/api.ts";
+import { avatarKey, avatarSource, fetchAvatar } from "../github/avatar.ts";
 import {
   authorizeUrl,
   displayNameFor,
@@ -16,7 +19,7 @@ import type { Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
 import { checkMutation, currentSession, secureCookies, sessionSetCookie } from "../http/session.ts";
 import { escapeHtml, page } from "../pages/layout.ts";
-import { signIn } from "../store/accounts.ts";
+import { saveAvatar, signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { createSession, endSession, SESSION_DAYS } from "../store/sessions.ts";
 
@@ -43,6 +46,27 @@ const unreachable = (error: unknown) =>
   error instanceof TokenRevoked ||
   error instanceof TypeError ||
   (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name));
+
+/**
+ * The account's GitHub avatar, fetched and stored when its URL is new (ADR-0013). Never throws:
+ * a failure keeps the avatar the account had, and the sign-in goes on.
+ */
+async function refreshAvatar(deps: Deps, account: Account, url: string | undefined) {
+  const source = avatarSource(url);
+  if (source === null || account.avatar?.source === source) return;
+  const fetched = await fetchAvatar(deps.fetch, source);
+  if (fetched === null) {
+    logOf(deps)({ event: "avatar.fetch", outcome: "failed" });
+    return;
+  }
+  try {
+    const sha256 = createHash("sha256").update(fetched.bytes).digest("hex");
+    await deps.objects.put(avatarKey(sha256), fetched.bytes, fetched.contentType);
+    await saveAvatar(deps.db, account.id, { sha256, contentType: fetched.contentType, source });
+  } catch (error) {
+    logOf(deps)({ event: "avatar.store", outcome: "failed", error: nameOf(error) });
+  }
+}
 
 /** Sign-in with GitHub and sign-out (spec 2 S6, S7). */
 export function authRoutes(deps: Deps): Route[] {
@@ -146,6 +170,7 @@ export function authRoutes(deps: Deps): Route[] {
         await deps.db.transaction((tx) =>
           saveGitHubToken(tx, deps.config.tokenKey, signedIn.account.id, token),
         );
+        await refreshAvatar(deps, signedIn.account, user.avatar_url);
         const session = await createSession(deps.db, signedIn.account.id, deps.now());
         return {
           status: 303,

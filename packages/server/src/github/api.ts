@@ -10,6 +10,8 @@ export const GitHubUser = z.object({
   login: z.string().min(1).max(39),
   name: z.string().nullable(),
   created_at: z.iso.datetime({ offset: true }),
+  /** Checked against GitHub's avatar host before it is fetched (ADR-0013). */
+  avatar_url: z.string().max(500).optional(),
 });
 export type GitHubUser = z.infer<typeof GitHubUser>;
 
