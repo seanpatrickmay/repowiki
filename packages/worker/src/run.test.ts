@@ -11,6 +11,7 @@ import type { CliRun } from "./engine.ts";
 import { AUTHOR_ID } from "./people-file.ts";
 import {
   CLI_TIMEOUT_MS,
+  heartbeater,
   type PhaseDeps,
   phase1,
   phase2,
@@ -213,7 +214,101 @@ describe("phase 1 (spec 2 S9)", () => {
   });
 });
 
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+const waitOrAbort = (ms: number, signal: AbortSignal | undefined) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
+describe("the heartbeater", () => {
+  it("never sends a heartbeat while one is still in flight", async () => {
+    let open = 0;
+    let most = 0;
+    let sent = 0;
+    const api = {
+      ...fakeApi().api,
+      heartbeat: async () => {
+        open++;
+        sent++;
+        most = Math.max(most, open);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        open--;
+      },
+    };
+    const beat = heartbeater(api, 5, () => {});
+    await beat.step("write");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    beat.stop();
+    expect(sent).toBeGreaterThan(2);
+    expect(most).toBe(1);
+  });
+});
+
+describe("a lost lease (401 or 409 on a heartbeat)", () => {
+  const losing = (status: number) => {
+    const fake = fakeApi();
+    let beats = 0;
+    fake.api.heartbeat = async (step: JobStep) => {
+      fake.calls.push(`heartbeat:${step}`);
+      if (++beats > 3) throw new ApiError(status, `heartbeat: HTTP ${status}`);
+    };
+    return fake;
+  };
+
+  it("stops phase 2's running CLI and ends the phase without a fail call", async () => {
+    const { api, calls } = losing(409);
+    const signals: (AbortSignal | undefined)[] = [];
+    const d = deps(api, okRun);
+    const run = d.runCli;
+    const lost = await phase2({
+      ...d,
+      heartbeatMs: 10,
+      runCli: async (input) => {
+        signals.push(input.signal);
+        if (input.script.endsWith("wiki-build.ts")) await waitOrAbort(10_000, input.signal);
+        return run?.(input) ?? okRun();
+      },
+    });
+    expect(lost).toBe(false);
+    expect(signals).toHaveLength(2);
+    expect(signals[1]?.aborted).toBe(true);
+    expect(calls.filter((c) => c.startsWith("fail") || c === "succeed")).toEqual([]);
+  });
+
+  it("stops phase 1's running clone and ends the phase without a fail call", async () => {
+    const { api, calls } = losing(401);
+    const lost = await phase1({
+      ...deps(api, okRun),
+      heartbeatMs: 10,
+      clone: async (input) => {
+        await waitOrAbort(10_000, input.signal);
+        return input.signal?.aborted
+          ? { ok: false as const, code: "job-failed" as const, detail: "clone stopped" }
+          : { ok: true as const };
+      },
+    });
+    expect(lost).toBe(false);
+    expect(calls.filter((c) => c.startsWith("fail"))).toEqual([]);
+  });
+});
+
 describe("phase 2 (spec 2 S9, §8)", () => {
+  it("keeps the lease with interval heartbeats while a long CLI runs", async () => {
+    const { api, calls } = fakeApi();
+    const d = deps(api, okRun);
+    const run = d.runCli;
+    const slow: typeof d.runCli = async (input) => {
+      if (input.script.endsWith("wiki-build.ts")) await new Promise((r) => setTimeout(r, 120));
+      return run?.(input) ?? okRun();
+    };
+    expect(await phase2({ ...d, heartbeatMs: 10, runCli: slow })).toBe(true);
+    expect(calls.filter((c) => c === "heartbeat:write").length).toBeGreaterThan(3);
+  });
+
   it("indexes, runs the three CLIs through the proxy, and succeeds with valid facts", async () => {
     const { api, calls, succeeded } = fakeApi();
     const d = deps(api, okRun);

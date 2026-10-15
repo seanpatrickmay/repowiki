@@ -46,6 +46,8 @@ export function runCli(input: {
   cwd?: string;
   nodeArgs?: readonly string[];
   stdoutBytes?: number;
+  /** Aborting it kills the group, as a timeout does (the lease was lost). */
+  signal?: AbortSignal;
 }): Promise<CliRun> {
   return new Promise((resolve) => {
     const keep = input.stdoutBytes;
@@ -86,8 +88,11 @@ export function runCli(input: {
       timedOut = true;
       killGroup();
     }, input.timeoutMs);
+    input.signal?.addEventListener("abort", killGroup);
+    if (input.signal?.aborted) killGroup();
     const done = (status: number | null) => {
       clearTimeout(timer);
+      input.signal?.removeEventListener("abort", killGroup);
       const stdout =
         keep === undefined
           ? {}
