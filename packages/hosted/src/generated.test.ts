@@ -158,3 +158,26 @@ describe("generatedContribution (ADR-0012)", () => {
     expect(generatedContribution(input)).toMatch(/^Ada Lovelace wrote 181 of/);
   });
 });
+
+describe("feature titles in the contribution paragraph (review fix)", () => {
+  it("are made plain and short, so the paragraph is always valid content", () => {
+    const hostile = [
+      "Option<T> helpers",
+      `Very ${"long ".repeat(60)}title`,
+      `Zero${String.fromCodePoint(0x200b)}width parser`,
+    ];
+    for (const title of hostile) {
+      const named = {
+        ...exp,
+        manifest: {
+          ...exp.manifest,
+          features: exp.manifest.features.map((f) => (f.id === "cli" ? { ...f, title } : f)),
+        },
+      };
+      const input = { suggestions: suggestions(), facts: facts(), exp: named, authorName: "Ada" };
+      const content = generatedContent(input);
+      expect(PortfolioContent.safeParse(content).success, title).toBe(true);
+      expect(content.contribution, title).toMatch(/most of all in .+, Bot arena and/);
+    }
+  });
+});

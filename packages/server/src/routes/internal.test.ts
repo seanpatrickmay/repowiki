@@ -143,6 +143,28 @@ describe("the worker's internal API (spec 2 §6)", () => {
     expect((await post("/internal/job/heartbeat", job.token, { step: "render" })).status).toBe(401);
   });
 
+  it("still creates the revision when a feature title is not plain text (review fix)", async () => {
+    await post("/internal/job/lease", job.token);
+    const exp = fixtureExport();
+    const title = "Option<T> helpers\u200B";
+    const features = exp.manifest.features.map((f) => (f.id === "signals" ? { ...f, title } : f));
+    const named = { ...exp, manifest: { ...exp.manifest, features } };
+    expect((await putExport(job.token, JSON.stringify(named))).status).toBe(204);
+    const author = {
+      ...facts().author,
+      features: [{ featureId: "signals", commits: 2, currentLines: 10 }],
+    };
+    const blank = {
+      ...success(),
+      suggestions: { ...suggestions, contributionDraft: "" },
+      facts: { ...facts(), author },
+    };
+    expect((await post("/internal/job/succeed", job.token, blank)).status).toBe(204);
+    expect((await latestRevision(deps.db, job.projectId))?.content.contribution).toContain(
+      "most of all in Option< T> helpers.",
+    );
+  });
+
   it("writes the contribution from the facts when the model wrote none (ADR-0012)", async () => {
     await post("/internal/job/lease", job.token);
     await putExport(job.token, JSON.stringify(fixtureExport()));

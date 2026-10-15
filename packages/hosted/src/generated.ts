@@ -13,6 +13,7 @@ const DOCS =
 const BLURB_MAX = 140;
 const HIGHLIGHTS = 4;
 const MOST_OF_ALL = 3;
+const TITLE_MAX = 80;
 
 const titlesOf = (exp: ContentExport) =>
   new Map(exp.manifest.features.map((f) => [f.id as string, f.title]));
@@ -90,7 +91,8 @@ export function contributionParagraph(
     facts,
   )
     .slice(0, MOST_OF_ALL)
-    .map((id) => titles.get(id) ?? id);
+    // A title is the model's words: made plain and short, so the paragraph is valid content.
+    .map((id) => plainWords(titles.get(id) ?? "", TITLE_MAX) || id);
   const where = busiest.length === 0 ? "" : `, most of all in ${listed(busiest)}`;
   return `${name} wrote ${a.commits} of the repository's ${total}${lines}${where}.`;
 }
