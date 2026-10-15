@@ -44,6 +44,13 @@ const send = (
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 const spent = async () => (await jobById(deps.db, job.jobId))?.spentUsdMicros;
+const actualOf = async (reservation: string) => {
+  const rows = await deps.db.query<{ actual_usd_micros: string }>(
+    "SELECT actual_usd_micros FROM reservations WHERE id = $1",
+    [reservation],
+  );
+  return Number(rows[0]?.actual_usd_micros);
+};
 const messageCalls = () => upstream.calls.filter((c) => c.url.endsWith("/v1/messages"));
 
 async function setUp(options: FakeAnthropicOptions = {}) {
@@ -272,12 +279,28 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     // The job's spend was final when it ended; the budgets see the real cost.
     expect(await spent()).toBe(1000);
     expect(await usageFor(deps.db, accountId, deps.now())).toMatchObject({ monthUsdMicros: 7000 });
-    await core.settle(reservation, 3000);
-    const again = await deps.db.query<{ actual_usd_micros: string }>(
-      "SELECT actual_usd_micros FROM reservations WHERE id = $1",
-      [reservation],
-    );
-    expect(Number(again[0]?.actual_usd_micros)).toBe(7000);
+  });
+
+  it("records a late message's real cost even below what its job's end charged (S11)", async () => {
+    const core = proxyCore(deps);
+    const reservation = await core.reserve(job.token, 1000, false);
+    if (reservation === null) throw new Error("reserve");
+    const accountId = await cancelAsOwner();
+    await core.settle(reservation, 300);
+    expect(await actualOf(reservation)).toBe(300);
+    expect(await spent()).toBe(1000);
+    expect(await usageFor(deps.db, accountId, deps.now())).toMatchObject({ monthUsdMicros: 300 });
+  });
+
+  it("never records a late batch below its reservation (S11)", async () => {
+    const core = proxyCore(deps);
+    const reservation = await core.reserve(job.token, 1000, true);
+    if (reservation === null) throw new Error("reserve");
+    await cancelAsOwner();
+    await core.settle(reservation, 300);
+    expect(await actualOf(reservation)).toBe(1000);
+    await core.settle(reservation, 7000);
+    expect(await actualOf(reservation)).toBe(7000);
   });
 
   it("refuses max_tokens past the engine's largest call (S11)", async () => {

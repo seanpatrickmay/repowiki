@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createApp, type Deps } from "./app.ts";
-import type { Config } from "./config.ts";
+import { type Config, ConfigError } from "./config.ts";
 import { openDatabase } from "./db/migrate.ts";
 import { fakeEndpoints, GITHUB } from "./github/endpoints.ts";
 import { fakeGitHubFetch } from "./github/fake.ts";
@@ -46,7 +46,8 @@ export function workerMode(config: Config): "fixture" | "engine" {
 function runnerFor(config: Config, log: (line: object) => void): JobRunner {
   if (config.runner.kind === "fly") {
     const { apiToken, app, image, internalUrl } = config.runner;
-    return flyRunner({ apiToken, app, image, internalUrl, engineVersion: config.engineVersion });
+    const { engineVersion } = config;
+    return flyRunner({ apiToken, app, image, internalUrl, engineVersion, log });
   }
   return localRunner({
     workerEntry: WORKER_ENTRY,
@@ -134,6 +135,21 @@ export interface RunningServer {
   deps: Deps;
   urls: string[];
   close(): Promise<void>;
+}
+
+/** A system code such as ECONNREFUSED or EADDRINUSE, or a Postgres SQLSTATE: never a value. */
+const ERROR_CODE = /^[A-Za-z0-9_]{1,32}$/;
+
+/**
+ * What `main.ts` prints when start-up fails (S17): a configuration error names the variable; any
+ * other error only its name and code, since a message can hold a connection string or key.
+ */
+export function startupFailure(error: unknown): string {
+  if (error instanceof ConfigError) return error.message;
+  if (!(error instanceof Error)) return "The server failed to start (unknown).";
+  const code: unknown = Reflect.get(error, "code");
+  const named = typeof code === "string" && ERROR_CODE.test(code) ? `, ${code}` : "";
+  return `The server failed to start (${error.name}${named}).`;
 }
 
 /** Start the listeners and the sweeper (S1, S16). */

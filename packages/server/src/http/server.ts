@@ -123,7 +123,12 @@ async function respond(
   });
 }
 
-/** Serve `app` on host:port (0 for any free port). */
+/** The URL a listener on host:port answers at; an IPv6 host is bracketed, as URLs need. */
+export function serverUrl(host: string, port: number): string {
+  return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+/** Serve `app` on host:port (0 for any free port); a bind error (EADDRINUSE) rejects. */
 export async function listen(
   app: App,
   options: { port: number; host: string; log?: (line: object) => void },
@@ -132,11 +137,17 @@ export async function listen(
   const server = createServer((raw, res) => {
     void respond(app, raw, res, log);
   });
-  await new Promise<void>((resolve) => server.listen(options.port, options.host, resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, options.host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : options.port;
   return {
-    url: `http://${options.host}:${port}`,
+    url: serverUrl(options.host, port),
     close: () =>
       new Promise((resolve, reject) => {
         server.closeAllConnections();

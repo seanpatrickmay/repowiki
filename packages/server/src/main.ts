@@ -1,9 +1,10 @@
-import { ConfigError, loadConfig } from "./config.ts";
-import { startServer } from "./wiring.ts";
+import { loadConfig } from "./config.ts";
+import { startServer, startupFailure } from "./wiring.ts";
 
 /**
  * `pnpm hosted:serve` (production, configured by the environment), `hosted:dev` and
- * `hosted:demo` (spec 2 §2). A configuration error names the variable, never its value.
+ * `hosted:demo` (spec 2 §2). A configuration error names the variable, never its value; any
+ * other start-up error prints only its name and code.
  */
 try {
   const config = loadConfig(process.env);
@@ -26,10 +27,6 @@ try {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
 } catch (error) {
-  const message =
-    error instanceof ConfigError
-      ? error.message
-      : `The server failed to start (${error instanceof Error ? error.name : "unknown"}).`;
-  process.stderr.write(`${message}\n`);
+  process.stderr.write(`${startupFailure(error)}\n`);
   process.exit(1);
 }
