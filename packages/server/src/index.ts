@@ -146,6 +146,7 @@ export {
 export { previewKey, previewRoutes, SITE_CSP, serveTreeFile, siteBase } from "./routes/preview.ts";
 export { jobRoutes } from "./routes/project-jobs.ts";
 export { projectRoutes } from "./routes/projects.ts";
+export { copyTree, publishRoutes } from "./routes/publish.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
 export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
 export {
