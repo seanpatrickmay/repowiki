@@ -186,6 +186,19 @@ describe("biographyEntry", () => {
 });
 
 describe("nounPhrase", () => {
+  it("cuts a long phrase at its first comma, never inside the list that follows (local feedback)", () => {
+    const lead =
+      "Life Dashboard is a self-hosted wellness application that aggregates health metrics from Garmin, tracks nutrition intake, and surfaces AI-generated insights through a Monet-inspired interface. More.";
+    expect(nounPhrase(lead, "Life Dashboard")).toBe(
+      "a self-hosted wellness application that aggregates health metrics from Garmin",
+    );
+    const repowiki =
+      "RepoWiki is a system that generates Wikipedia-style wiki articles documenting a git repository's architecture, features and contributors using large language models.";
+    expect(nounPhrase(repowiki, "RepoWiki")).toBe(
+      "a system that generates Wikipedia-style wiki articles documenting a git repository's architecture",
+    );
+  });
+
   it("drops the leading '<Title> is' and cuts at a clause within 110 characters", () => {
     expect(nounPhrase("RepoWiki is a tool that writes wikis. More.", "RepoWiki")).toBe(
       "a tool that writes wikis",
