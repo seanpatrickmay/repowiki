@@ -1,0 +1,20 @@
+{
+  "name": "@repowiki/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repowiki/core": "workspace:*",
+    "@repowiki/engine": "workspace:*",
+    "@repowiki/hosted": "workspace:*",
+    "@repowiki/llm": "workspace:*",
+    "@repowiki/site": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@repowiki/query": "workspace:*"
+  }
+}
