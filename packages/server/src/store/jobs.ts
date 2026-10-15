@@ -103,7 +103,7 @@ export async function tokenJob(
   token: string,
 ): Promise<{ jobId: string; attempt: number } | null> {
   const rows = await q.query<{ job_id: string; attempt: number }>(
-    "SELECT job_id, attempt FROM job_tokens WHERE token_hash = $1",
+    "SELECT job_id, attempt FROM job_tokens WHERE token_hash = $1 AND NOT revoked",
     [sha256Hex(token)],
   );
   const row = rows[0];
@@ -123,9 +123,12 @@ export async function tokensIssued(
   return { count: Number(rows[0]?.count ?? 0), last: rows[0]?.last ?? null };
 }
 
-/** Every token of the job stops working: it ended, or its attempt was recovered (spec 2 §6). */
+/**
+ * Every token of the job stops working: it ended, its attempt was recovered, or it is restarted
+ * (spec 2 §6). Rows stay, so `tokensIssued` still counts the attempt's starts.
+ */
 export async function revokeTokens(q: Queryable, jobId: string): Promise<void> {
-  await q.query("DELETE FROM job_tokens WHERE job_id = $1", [jobId]);
+  await q.query("UPDATE job_tokens SET revoked = true WHERE job_id = $1", [jobId]);
 }
 
 /** The job's reservations the proxy has not settled yet, in micro-dollars. */

@@ -7,6 +7,7 @@ import { fakeGitHubFetch } from "../github/fake.ts";
 import { HttpError } from "../http/body.ts";
 import type { Method, Reply, RouteRequest } from "../http/router.ts";
 import { type App, text } from "../http/server.ts";
+import { recordingRunner } from "../runner/runner.ts";
 import { freshDb } from "../store/test-db.ts";
 
 export const TEST_NOW = "2026-10-14T12:00:00.000Z";
@@ -23,6 +24,7 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { 
     github,
     now: () => TEST_NOW,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+    runner: recordingRunner().runner,
     ...overrides,
   };
 }
