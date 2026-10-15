@@ -58,7 +58,7 @@ export function loadConfig(env: Env): Config {
       database: { kind: "postgres", url: need("DATABASE_URL") },
       objects: {
         kind: "s3",
-        endpoint: need("R2_ENDPOINT"),
+        endpoint: need("R2_ENDPOINT").replace(/\/$/, ""),
         bucket: need("R2_BUCKET"),
         accessKeyId: need("R2_ACCESS_KEY_ID"),
         secretAccessKey: need("R2_SECRET_ACCESS_KEY"),

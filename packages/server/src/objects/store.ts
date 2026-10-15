@@ -3,7 +3,7 @@ export interface ObjectStore {
   put(key: string, body: Uint8Array | string, contentType: string): Promise<void>;
   get(key: string): Promise<{ body: Uint8Array; contentType: string } | null>;
   head(key: string): Promise<{ contentType: string; size: number } | null>;
-  /** Every key under `prefix` (a plain string prefix, not only whole segments), sorted. */
+  /** Every key under `prefix` (a plain string prefix: end it with "/" to list a tree), sorted. */
   list(prefix: string): Promise<string[]>;
   /** Deleting a key that is not there is not an error. */
   delete(keys: readonly string[]): Promise<void>;
@@ -51,6 +51,10 @@ export function contentTypeFor(key: string): string {
 
 /** Copy every object under `from` to the same relative key under `to`; returns how many. */
 export async function copyPrefix(store: ObjectStore, from: string, to: string): Promise<number> {
+  // A tree is a directory: "r1" would also match "r10/".
+  if (!from.endsWith("/") || !to.endsWith("/")) {
+    throw new Error("copyPrefix prefixes must end with /");
+  }
   let copied = 0;
   for (const key of await store.list(from)) {
     const object = await store.get(key);

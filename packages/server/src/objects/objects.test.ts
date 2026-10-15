@@ -91,4 +91,13 @@ describe("the filesystem store (spec 2 S12)", () => {
       "a",
     );
   });
+
+  it("copies only whole directories: both prefixes must end with a slash", async () => {
+    await store.put("previews/p/r1/index.html", "1", HTML);
+    await store.put("previews/p/r10/index.html", "10", HTML);
+    await expect(copyPrefix(store, "previews/p/r1", "sites/p/v1/")).rejects.toThrow("end with /");
+    await expect(copyPrefix(store, "previews/p/r1/", "sites/p/v1")).rejects.toThrow("end with /");
+    expect(await copyPrefix(store, "previews/p/r1/", "sites/p/v1/")).toBe(1);
+    expect(await store.list("sites/p/")).toEqual(["sites/p/v1/index.html"]);
+  });
 });
