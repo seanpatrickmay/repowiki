@@ -51,6 +51,9 @@ describe("suggestions (spec 2 §8)", () => {
     const result = await suggest(p, exp, facts, "demo-dev");
     expect(p.requests).toHaveLength(1);
     expect(p.requests[0]?.purpose).toBe("write");
+    // The model writes for the author's biography; there is no project page (review M9).
+    expect(p.requests[0]?.system).toContain("biography");
+    expect(p.requests[0]?.system).not.toContain("project page");
     const content = String(p.requests[0]?.messages[0]?.content);
     expect(content).toContain("demo-dev");
     expect(content).toContain(first);

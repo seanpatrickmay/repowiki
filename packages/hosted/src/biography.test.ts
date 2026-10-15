@@ -99,10 +99,12 @@ function allRuns(bio: Biography): Run[] {
     ...bio.technical.paragraph,
   ];
 }
+/** The template's own words: the subject's bold name (their own words) left out. */
+const templateWords = (runs: readonly Run[]) => words(runs.filter((r) => !("bold" in r)));
 /** All the prose the templates wrote, with the entries' own free text left out. */
 function templateText(bio: Biography): string {
   return [
-    ...bio.lead.map(words),
+    ...bio.lead.map(templateWords),
     ...bio.career.map((p) => words(p.intro)),
     words(bio.technical.paragraph),
     bio.infobox.yearsActive,
@@ -195,6 +197,20 @@ describe("nounPhrase", () => {
     expect(cut).toBe("a four-player Settlers of Catan bot that combines a Rust rules engine");
   });
 
+  it("ends without a full stop, question or exclamation mark (review M6)", () => {
+    expect(nounPhrase("RepoWiki is a tool?", "RepoWiki")).toBe("a tool");
+    expect(nounPhrase("RepoWiki is a tool! It works.", "RepoWiki")).toBe("a tool");
+  });
+
+  it("keeps an abbreviation's full stop inside the sentence (review M6)", () => {
+    expect(nounPhrase("RepoWiki is a tool, e.g. for mail. More.", "RepoWiki")).toBe(
+      "a tool, e.g. for mail",
+    );
+    expect(
+      nounPhrase("RepoWiki is a viewer, i.e. a reader, etc. for repos. More.", "RepoWiki"),
+    ).toBe("a viewer, i.e. a reader, etc. for repos");
+  });
+
   it("is null when the lead does not start with the title", () => {
     expect(nounPhrase("A tool that writes wikis.", "RepoWiki")).toBeNull();
     expect(nounPhrase("", "RepoWiki")).toBeNull();
@@ -213,6 +229,18 @@ describe("surnameOf", () => {
     expect(surnameOf("Ada King Lovelace", "ada")).toBe("Lovelace");
     expect(surnameOf("ada", "ada")).toBe("ada");
     expect(surnameOf("  ", "ada")).toBe("ada");
+  });
+
+  it("drops pronouns in brackets, what follows a comma, symbols and suffixes (review M1)", () => {
+    expect(surnameOf("Jane Doe (she/her)", "jd")).toBe("Doe");
+    expect(surnameOf("Jane Doe [they/them]", "jd")).toBe("Doe");
+    expect(surnameOf("John Smith Jr.", "js")).toBe("Smith");
+    expect(surnameOf("John Smith III", "js")).toBe("Smith");
+    expect(surnameOf("Ada Lovelace, PhD", "ada")).toBe("Lovelace");
+    expect(surnameOf("Grace Hopper MD", "gh")).toBe("Hopper");
+    expect(surnameOf("Sean May 🚀", "sean")).toBe("May");
+    expect(surnameOf("🚀 (he/him)", "sean")).toBe("sean");
+    expect(surnameOf("Jr.", "sean")).toBe("sean");
   });
 });
 
@@ -259,6 +287,47 @@ describe("biography", () => {
     expect(old.infobox.yearsActive).toBe("2025–2026");
     const one = biography({ person: ADA, projects: [three[0] as BiographyProject], asOf: AS_OF });
     expect(one.infobox.yearsActive).toBe("2025");
+  });
+
+  it("keeps Works by last commit, but groups the career and navbox by start year (review I1)", () => {
+    const longLived = project("Atlas", "2024-03-01T00:00:00Z", "2026-10-10T00:00:00Z");
+    const out = biography({ person: ADA, projects: [...three, longLived], asOf: AS_OF });
+    expect(out.works.map((w) => w.title)).toEqual(["Atlas", "Mailbox", "Planner", "Engine"]);
+    expect(out.career.map((p) => [p.heading, p.projects.map((x) => x.title)])).toEqual([
+      ["2026", ["Mailbox", "Planner"]],
+      ["Earlier projects (2024–2025)", ["Atlas", "Engine"]],
+    ]);
+    expect(out.navbox).toEqual([
+      {
+        group: "2026",
+        projects: [
+          expect.objectContaining({ title: "Mailbox" }),
+          expect.objectContaining({ title: "Planner" }),
+        ],
+      },
+      {
+        group: "Earlier",
+        projects: [
+          expect.objectContaining({ title: "Atlas" }),
+          expect.objectContaining({ title: "Engine" }),
+        ],
+      },
+    ]);
+  });
+
+  it("keeps an abbreviation inside the career's two sentences (review M6)", () => {
+    const out = biography({
+      person: ADA,
+      projects: [
+        project("Solo", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", {
+          lead: "Solo is a tool, e.g. for mail. It runs nightly. It logs.",
+        }),
+      ],
+      asOf: AS_OF,
+    });
+    expect(words(out.career[0]?.projects[0]?.lead ?? [])).toBe(
+      "Solo is a tool, e.g. for mail. It runs nightly.",
+    );
   });
 
   it("groups the career by first-commit year, latest year first", () => {
@@ -347,7 +416,16 @@ describe("biography", () => {
   it("never uses a pronoun, over many inputs", () => {
     const PRONOUN =
       /\b(?:he|she|they|him|his|her|hers|their|theirs|them|himself|herself|themselves)\b/i;
-    const names = ["Ada Lovelace", "ada-l", "Grace Brewster Hopper", "Q"];
+    const names = [
+      "Ada Lovelace",
+      "ada-l",
+      "Grace Brewster Hopper",
+      "Q",
+      "Jane Doe (she/her)",
+      "John Smith Jr.",
+      "Ada Lovelace, PhD",
+      "Sean May 🚀",
+    ];
     const languageSets: Facts["languages"][] = [
       [],
       [{ name: "Go", share: 1 }],

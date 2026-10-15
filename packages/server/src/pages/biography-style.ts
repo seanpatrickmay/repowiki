@@ -59,6 +59,7 @@ code { font-family: var(--font-mono); overflow-wrap: anywhere; background: var(-
 .page-tabs a[aria-current="page"] { color: var(--text); font-weight: 700; }
 .page-title { font-family: var(--font-serif); font-size: 1.8rem; font-weight: 400; line-height: 1.3; margin: 0 0 0.25rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--border); }
 .tagline { margin: 0 0 1rem; font-size: 0.875rem; color: var(--text-muted); }
+.article > h2 { clear: right; }
 .article h2 { font-family: var(--font-serif); font-size: 1.6rem; font-weight: 400; line-height: 1.3; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--border-subtle); }
 .article h3 { font-size: 1.2rem; margin: 1.4rem 0 0.3rem; }
 .article h4 { font-size: 1rem; margin: 1rem 0 0.2rem; }

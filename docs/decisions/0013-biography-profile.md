@@ -68,9 +68,11 @@ Each ruling is "Ruling: X — why — cost if wrong".
   costs nothing and every sentence traces to stored facts. A model-written lead may come later,
   as a generation of its own with its own review. — Cost if wrong: the prose reads stiffly; the
   templates are one module.
-- **The name.** Ruling: the title is the display name; the surname is its last word. With no
-  display name (GitHub's name empty, so the stored display name is the login) both are the
-  login. Names are made plain (`plainWords`) before use. — Wikipedia's style, and derivable. —
+- **The name.** Ruling: the title is the display name; the surname is its last word once
+  bracketed groups ("(she/her)"), everything after a comma, emoji and symbols, and a trailing Jr,
+  Sr, II, III, IV, PhD or MD (with or without a full stop) are removed. With no display name
+  (GitHub's name empty, so the stored display name is the login), or nothing left, the surname
+  is the login. Names are made plain (`plainWords`) before use. — Wikipedia's style, and derivable. —
   Cost if wrong: a name whose family name is not its last word reads oddly; an author-set
   surname would be an author-written field, which ADR-0012 ruled out.
 - **No pronouns.** Ruling: the templates never use he, she, they, him, his, her, hers, their or
@@ -79,14 +81,18 @@ Each ruling is "Ruling: X — why — cost if wrong".
   templates; the model is already asked for the third person and the name. — No pronoun has to be
   guessed. — Cost if wrong: repetitive prose; a model contribution may still say "his", which the
   later model-lead work can forbid in its prompt.
-- **Ordering.** Ruling: newest first by the project's last commit everywhere (Works, Career,
-  navbox, lead's "other projects"), ties by title. — One order a reader can predict. — Cost if
-  wrong: a long-lived project with one recent commit leads.
+- **Ordering.** Ruling: Works (and the lead's "other projects") is newest first by the project's
+  last commit, ties by title; Career and the navbox are grouped by start year (the first commit's
+  year), the groups newest first, newest first by last commit within each group. — A reader sees
+  the latest work first, and the career reads as a chronology. — Cost if wrong: a long-lived
+  project with one recent commit leads Works but sits under "Earlier projects".
 - **Lead.** Ruling: paragraph 1 is "<b>Name</b> is a software developer and the author of A, <A's
   noun phrase>, and B, <B's noun phrase>." with A and B the top two projects by the author's
   current lines (ties newest first) and a citation to each repository at its commit; the noun
   phrase is the About lead's first sentence without its leading "<Title> is|was|are ", cut by
-  `firstClause` at 110 characters, and left out when the sentence does not start that way.
+  `firstClause` at 110 characters, with no closing ".", "!" or "?", and left out when the sentence
+  does not start that way. Sentences split at ".", "!" or "?", but not after "e.g.", "i.e.",
+  "etc.", "vs.", "approx.", "cf." or "incl." when lowercase follows.
   Paragraph 2 is "<Surname>'s other public projects include X, Y and Z." (only with three or more
   projects) and "Across these N projects <Surname> has made C commits, written mostly in L1, L2
   and L3." (one project: "In this project…"; no languages: no "written" clause). — Rule 5 of the

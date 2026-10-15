@@ -63,7 +63,7 @@ export function cleanSuggestions(answer: Answer, exp: WikiExport, facts: Facts):
 }
 
 const SYSTEM = [
-  "You write the portfolio layer of a software project page from facts about the project.",
+  "You write about one software project for its author's RepoWiki biography, from facts about the project; the contribution draft is quoted there, labelled as generated.",
   "tagline: one line under 90 characters saying what the project is.",
   "summary: at most 120 words on what the project does, for whom, and why it matters.",
   "contributionDraft: at most 150 words in the third person, naming the author, describing only what the author's own commits show, from the per-feature counts; claim nothing the counts do not support. It is published labelled as generated, not as the author's words.",
