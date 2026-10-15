@@ -43,21 +43,19 @@ export function leadOf(exp: WikiExport): string {
 const titleOf = (exp: WikiExport) => exp.architecture.at(-1)?.title ?? exp.repo;
 
 const TAGLINE_MAX = 90;
-const CLAUSE = / (?:that|which|with|using|where) /g;
-const BREAK = /[,;:] | — /g;
+const BREAK = / (?:that|which|with|using|where|and|to|for) |[,;:] | — /g;
 
 /**
- * A tagline from prose: its first sentence without the full stop, cut when too long before a
- * clause ("… that …"), else at the last comma, colon or dash, else at a word with an ellipsis.
+ * A tagline from prose: its first sentence without the full stop, cut when too long at its last
+ * clause ("… that …", "… and …") or comma, colon or dash within the limit, else at a word with an
+ * ellipsis.
  */
 export function taglineFrom(text: string): string {
   const plain = plainWords(text, 4000).replace(/\s+/g, " ");
   const sentence = (plain.split(/(?<=[.!?])\s/)[0] ?? "").replace(/\.$/, "");
   if (sentence.length <= TAGLINE_MAX) return sentence;
   const head = sentence.slice(0, TAGLINE_MAX);
-  const clause = [...head.matchAll(CLAUSE)].find((m) => m.index >= 20);
-  if (clause !== undefined) return head.slice(0, clause.index);
-  const pause = [...head.matchAll(BREAK)].filter((m) => m.index >= 20).at(-1);
+  const pause = [...head.matchAll(BREAK)].filter((m) => m.index >= 30).at(-1);
   if (pause !== undefined) return head.slice(0, pause.index);
   const cut = head.slice(0, TAGLINE_MAX - 1);
   const space = cut.lastIndexOf(" ");

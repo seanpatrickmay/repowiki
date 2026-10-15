@@ -118,12 +118,22 @@ describe("taglineFrom (local feedback, 2026-10-15)", () => {
     );
   });
 
-  it("cuts a long sentence at a clause, never mid-clause", () => {
+  it("cuts a long sentence at its last clause or pause within the limit", () => {
     expect(
       taglineFrom(
         "AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search and a graph network.",
       ),
-    ).toBe("AlphaSettler is a four-player Settlers of Catan bot");
+    ).toBe("AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine");
+    expect(
+      taglineFrom(
+        "RotoText is a web application that uses eye tracking and geometric projection to let players align their gaze.",
+      ),
+    ).toBe("RotoText is a web application that uses eye tracking and geometric projection");
+    expect(
+      taglineFrom(
+        "Generates a cited, feature-by-feature wiki for a git repo and updates it as the code changes",
+      ),
+    ).toBe("Generates a cited, feature-by-feature wiki for a git repo");
   });
 
   it("takes the first sentence of a long description", () => {
