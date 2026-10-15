@@ -1,0 +1,12 @@
+.git
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+.repowiki
+.superpowers
+.claude
+coverage
+dist
+**/.astro

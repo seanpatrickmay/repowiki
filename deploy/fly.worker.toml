@@ -1,0 +1,11 @@
+# The worker app (spec 2 S9, S16). It has no services and no machines of its own: the server
+# creates one auto-destroying Machine per job attempt through the Machines API, from the image
+# named by its WORKER_IMAGE secret. Build and push that image from the repository root:
+#   fly deploy . --config deploy/fly.worker.toml --dockerfile deploy/Dockerfile \
+#     --build-only --push --image-label <label>
+app = "repowiki-workers"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+  build-target = "worker"
