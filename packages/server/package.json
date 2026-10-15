@@ -10,6 +10,7 @@
     "@electric-sql/pglite": "0.5.8",
     "@repowiki/core": "workspace:*",
     "@repowiki/hosted": "workspace:*",
+    "@repowiki/llm": "workspace:*",
     "@repowiki/site": "workspace:*",
     "pg": "8.23.1",
     "zod": "4.6.5"
