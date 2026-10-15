@@ -219,3 +219,12 @@ export {
   startGeneration,
   startRefresh,
 } from "./store/start.ts";
+export {
+  buildDeps,
+  type Listener,
+  listenersFor,
+  type RunningServer,
+  routeSets,
+  startServer,
+  workerMode,
+} from "./wiring.ts";

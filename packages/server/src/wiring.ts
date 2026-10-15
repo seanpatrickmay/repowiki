@@ -1,0 +1,166 @@
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { createApp, type Deps } from "./app.ts";
+import type { Config } from "./config.ts";
+import { openDatabase } from "./db/migrate.ts";
+import { fakeEndpoints, GITHUB } from "./github/endpoints.ts";
+import { fakeGitHubFetch } from "./github/fake.ts";
+import type { Route } from "./http/router.ts";
+import { type App, type AppServer, listen } from "./http/server.ts";
+import { objectStoreFor } from "./objects/open.ts";
+import { fakeAnthropicFetch } from "./proxy/fake-anthropic.ts";
+import { authRoutes } from "./routes/auth.ts";
+import { draftRoutes } from "./routes/drafts.ts";
+import { internalRoutes } from "./routes/internal.ts";
+import { landingRoutes } from "./routes/landing.ts";
+import { llmRoutes } from "./routes/llm.ts";
+import { previewRoutes } from "./routes/preview.ts";
+import { jobRoutes } from "./routes/project-jobs.ts";
+import { projectRoutes } from "./routes/projects.ts";
+import { publicRoutes } from "./routes/public.ts";
+import { publishRoutes } from "./routes/publish.ts";
+import { flyRunner } from "./runner/fly-runner.ts";
+import { localRunner } from "./runner/local-runner.ts";
+import type { JobRunner } from "./runner/runner.ts";
+import { startSweeper } from "./runner/sweeper.ts";
+
+const WORKER_ENTRY = fileURLToPath(new URL("../../worker/src/main.ts", import.meta.url));
+/** Where the worker's listener binds in production: Fly's private network is IPv6 (S1). */
+const WORKER_HOST = "::";
+const SWEEP_MS = 30_000;
+/** The worker's paths, which the public listener never routes (S1). */
+const WORKER_PATH = /^\/(?:internal|llm)(?:\/|$)/;
+
+const stdoutLog = (line: object) => process.stdout.write(`${JSON.stringify(line)}\n`);
+
+/**
+ * What a local worker runs: the engine only with real GitHub (a repository to clone) and a model
+ * key; otherwise the fixture, which uploads core's test export (S18).
+ */
+export function workerMode(config: Config): "fixture" | "engine" {
+  const real =
+    config.mode !== "demo" && config.github.kind === "oauth" && config.anthropicApiKey !== null;
+  return real ? "engine" : "fixture";
+}
+
+function runnerFor(config: Config, log: (line: object) => void): JobRunner {
+  if (config.runner.kind === "fly") {
+    const { apiToken, app, image, internalUrl } = config.runner;
+    return flyRunner({ apiToken, app, image, internalUrl, engineVersion: config.engineVersion });
+  }
+  return localRunner({
+    workerEntry: WORKER_ENTRY,
+    internalUrl: config.runner.internalUrl,
+    mode: workerMode(config),
+    log,
+  });
+}
+
+/**
+ * Every production seam, or its local stand-in in development and demo (spec 2 S17, S18). An
+ * override replaces a seam without building it (tests pass a database).
+ */
+export async function buildDeps(config: Config, overrides: Partial<Deps> = {}): Promise<Deps> {
+  const log = overrides.log ?? stdoutLog;
+  const github = config.github.kind === "fake" ? fakeEndpoints(config.origin) : GITHUB;
+  const fakeModel = config.mode === "demo" || config.anthropicApiKey === null;
+  return {
+    config,
+    db: overrides.db ?? (await openDatabase(config.database)),
+    fetch: config.github.kind === "fake" ? fakeGitHubFetch(github) : fetch,
+    github,
+    now: () => new Date().toISOString(),
+    newId: randomUUID,
+    runner: overrides.runner ?? runnerFor(config, log),
+    objects: overrides.objects ?? objectStoreFor(config.objects, fetch),
+    anthropic: fakeModel
+      ? {
+          url: "https://api.anthropic.test",
+          key: config.mode === "demo" ? "demo" : null,
+          fetch: fakeAnthropicFetch().fetch,
+        }
+      : { url: "https://api.anthropic.com", key: config.anthropicApiKey, fetch },
+    ...overrides,
+    log,
+  };
+}
+
+/** The public listener's routes and the worker listener's; handles stay last (S1, S14). */
+export function routeSets(deps: Deps): { public: Route[]; worker: Route[] } {
+  return {
+    public: [
+      ...landingRoutes(deps),
+      ...authRoutes(deps),
+      ...projectRoutes(deps),
+      ...draftRoutes(deps),
+      ...jobRoutes(deps),
+      ...previewRoutes(deps),
+      ...publishRoutes(deps),
+      ...publicRoutes(deps),
+    ],
+    worker: [...internalRoutes(deps), ...llmRoutes(deps)],
+  };
+}
+
+export interface Listener {
+  app: App;
+  port: number;
+  host: string;
+}
+
+/**
+ * Production: the public app on PORT, where `/internal/*` and `/llm/*` are 404 (not handles), and
+ * the worker's routes alone on INTERNAL_PORT, which Fly's proxy never exposes. Elsewhere: one
+ * loopback listener, worker routes first so `/internal/...` never reaches `/:handle/:slug/*`.
+ */
+export function listenersFor(deps: Deps): Listener[] {
+  const sets = routeSets(deps);
+  const { config } = deps;
+  if (config.internalPort === null) {
+    const app = createApp(deps, [...sets.worker, ...sets.public]);
+    return [{ app, port: config.port, host: config.host }];
+  }
+  const notFound = createApp(deps, []);
+  const site = createApp(deps, sets.public);
+  const publicApp: App = (request) =>
+    WORKER_PATH.test(request.path) ? notFound(request) : site(request);
+  return [
+    { app: publicApp, port: config.port, host: config.host },
+    { app: createApp(deps, sets.worker), port: config.internalPort, host: WORKER_HOST },
+  ];
+}
+
+export interface RunningServer {
+  deps: Deps;
+  urls: string[];
+  close(): Promise<void>;
+}
+
+/** Start the listeners and the sweeper (S1, S16). */
+export async function startServer(
+  config: Config,
+  overrides: Partial<Deps> = {},
+): Promise<RunningServer> {
+  const deps = await buildDeps(config, overrides);
+  const log = deps.log ?? stdoutLog;
+  const servers: AppServer[] = [];
+  try {
+    for (const { app, port, host } of listenersFor(deps)) {
+      servers.push(await listen(app, { port, host, log }));
+    }
+  } catch (error) {
+    await Promise.all(servers.map((s) => s.close()));
+    await deps.db.close();
+    throw error;
+  }
+  const stopSweeper = startSweeper(deps, SWEEP_MS);
+  return {
+    deps,
+    urls: servers.map((s) => s.url),
+    async close() {
+      stopSweeper();
+      await Promise.all(servers.map((s) => s.close()));
+      await deps.db.close();
+    },
+  };
+}

@@ -1,4 +1,5 @@
 import { mkdtempSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -182,4 +183,14 @@ export async function otherCookie(deps: Deps): Promise<{ cookie: string; csrf: s
   if (signed === null) throw new Error("sign-in refused");
   const session = await createSession(deps.db, signed.account.id, deps.now());
   return { cookie: `session=${session.token}`, csrf: session.csrf };
+}
+
+/** Test-only: a loopback port nothing listens on (amendment A2: the config refuses port 0). */
+export async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const address = probe.address();
+  await new Promise((resolve) => probe.close(resolve));
+  if (typeof address !== "object" || address === null) throw new Error("no port");
+  return address.port;
 }
