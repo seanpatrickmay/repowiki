@@ -68,8 +68,11 @@ describe("listen (spec 2 S2)", () => {
   });
 
   it("refuses dot segments and doubled slashes before routing", async () => {
-    const raw = await rawRequest("GET /hello/%2E%2E/boom HTTP/1.1\r\nHost: x\r\n\r\n");
-    expect(raw).toMatch(/^HTTP\/1\.1 404/);
+    // Each of these has /hello/:name's shape, so only the dot-segment check can refuse it.
+    for (const path of ["/hello/%2E%2E", "/hello/.", "/hello/..", "/hello/%2e"]) {
+      const raw = await rawRequest(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`);
+      expect(raw, path).toMatch(/^HTTP\/1\.1 404/);
+    }
     expect(await rawRequest("GET //hello/sean HTTP/1.1\r\nHost: x\r\n\r\n")).toMatch(
       /^HTTP\/1\.1 404/,
     );

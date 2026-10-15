@@ -25,6 +25,11 @@ describe("matchPattern (spec 2 S2)", () => {
     expect(matchPattern("/u/:name", "/u/")).toBeNull();
     expect(matchPattern("/u/:name", "/u/%E0%A4%A")).toBeNull();
     expect(matchPattern("/:a/*", "/x/a%2Fb")).toBeNull();
+    expect(matchPattern("/hello/:name", "/hello/%2E%2E")).toBeNull();
+    expect(matchPattern("/hello/:name", "/hello/.")).toBeNull();
+    expect(matchPattern("/hello/:name", "/hello/%2e")).toBeNull();
+    expect(matchPattern("/s/*", "/s/a/%2E%2E/b")).toBeNull();
+    expect(matchPattern("/hello/:name", "/hello/..x")).toEqual({ name: "..x" });
   });
 });
 
