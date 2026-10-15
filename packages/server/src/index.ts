@@ -85,6 +85,7 @@ export {
 } from "./objects/store.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 export { type ProjectView, projectPage } from "./pages/project.ts";
+export { PUBLIC_STYLE, PUBLIC_STYLE_PATH } from "./pages/public-style.ts";
 export { pageSession, refusalPage } from "./pages/refusal.ts";
 export {
   AnthropicUsage,
@@ -106,6 +107,12 @@ export {
   refusedBeta,
 } from "./proxy/request.ts";
 export { hostedExport } from "./render/hosted-export.ts";
+export {
+  CHECKED_STATEMENT,
+  PortfolioData,
+  portfolioData,
+  portfolioHtml,
+} from "./render/portfolio.ts";
 export { readTree, type TreeFile, treeHash } from "./render/tree.ts";
 export { authRoutes } from "./routes/auth.ts";
 export {
