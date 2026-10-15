@@ -43,6 +43,13 @@ describe("createApp (spec 2 §4)", () => {
     expect(String(reply.body)).toContain("--accent");
   });
 
+  it("serves the public pages' style sheet", async () => {
+    const reply = await call(createApp(deps, []), { path: "/_app/portfolio.css" });
+    expect(reply.status).toBe(200);
+    expect(reply.headers?.["content-type"]).toBe("text/css; charset=utf-8");
+    expect(String(reply.body)).toContain(".cards");
+  });
+
   it("mounts the fake GitHub's authorize page only when GitHub is fake", async () => {
     const path = "/_fake/github/login/oauth/authorize";
     expect((await call(createApp(deps, []), { path })).status).toBe(400);

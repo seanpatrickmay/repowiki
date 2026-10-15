@@ -8,6 +8,7 @@ import { type App, html, text } from "./http/server.ts";
 import { renewalCookie } from "./http/session.ts";
 import type { ObjectStore } from "./objects/store.ts";
 import { escapeHtml, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
+import { PUBLIC_STYLE, PUBLIC_STYLE_PATH } from "./pages/public-style.ts";
 import type { JobRunner } from "./runner/runner.ts";
 
 /** Everything a route needs from outside (spec 2 §4); tests pass fakes. */
@@ -38,15 +39,16 @@ export const nameOf = (error: unknown) => (error instanceof Error ? error.name :
 
 export const callbackUrl = (config: Config) => `${config.origin}/auth/github/callback`;
 
-const styleRoute: Route = {
+const styleRoute = (pattern: string, body: string): Route => ({
   method: "GET",
-  pattern: STYLE_PATH,
+  pattern,
   handler: async () => ({
     status: 200,
     headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300" },
-    body: STYLE,
+    body,
   }),
-};
+});
+const styles = [styleRoute(STYLE_PATH, STYLE), styleRoute(PUBLIC_STYLE_PATH, PUBLIC_STYLE)];
 
 /**
  * The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. A
@@ -67,11 +69,11 @@ function errorReply(error: HttpError): Reply {
   return { ...base, headers: { ...base.headers, ...error.headers } };
 }
 
-/** The routes, the style sheet, and in fake mode the fake GitHub's authorize page. */
+/** The routes, the style sheets, and in fake mode the fake GitHub's authorize page. */
 export function createApp(deps: Deps, routes: readonly Route[]): App {
   const fake =
     deps.config.github.kind === "fake" ? [fakeAuthorizeRoute(callbackUrl(deps.config))] : [];
-  const route = createRouter([styleRoute, ...fake, ...routes]);
+  const route = createRouter([...styles, ...fake, ...routes]);
   return async (request) => {
     const found = route(request.method, request.path);
     if ("handler" in found) {
