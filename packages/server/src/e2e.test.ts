@@ -6,13 +6,17 @@ import { type RunningServer, startServer } from "./wiring.ts";
 
 let server: RunningServer;
 let base: string;
+let pages: string;
 const logs: object[] = [];
 
 beforeAll(async () => {
   const port = await freePort();
   const config = loadConfig({ REPOWIKI_MODE: "demo", PORT: String(port) });
   server = await startServer(config, { log: (line) => logs.push(line) });
-  base = server.urls[0] ?? "";
+  // One port, two hosts (ADR-0012): the app on 127.0.0.1, public pages on localhost.
+  base = config.appOrigin;
+  pages = config.publicOrigin;
+  expect(server.urls).toEqual([base]);
 }, 60_000);
 afterAll(async () => server.close());
 
@@ -70,7 +74,7 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     });
     expect(published.status, published.text).toBe(303);
 
-    const reader = browser(base);
+    const reader = browser(pages);
     const project = await reader.go("/demo-dev/demo-repo");
     expect(project.status).toBe(200);
     expect(project.text).toContain("The author wrote most of the ingest and search code");
@@ -86,6 +90,13 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     const profile = await reader.go("/demo-dev");
     expect(profile.status).toBe(200);
     expect(profile.text).toContain('href="/demo-dev/demo-repo"');
+    expect(profile.text).toContain(`href="${base}/"`);
+    // Public pages are not on the app's origin, and the app's session means nothing on theirs.
+    expect((await browser(base).go("/demo-dev/demo-repo")).status).toBe(404);
+    const signedIn = await me.go(`${pages}/demo-dev/demo-repo`);
+    expect(signedIn.status).toBe(200);
+    expect(signedIn.text).not.toContain("Sign out");
+    expect((await reader.go("/dashboard")).status).toBe(404);
 
     const withdrawn = await me.go(`${projectPath}/unpublish`, { form: { csrf } });
     expect(withdrawn.status, withdrawn.text).toBe(303);

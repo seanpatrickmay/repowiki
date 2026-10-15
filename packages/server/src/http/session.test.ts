@@ -51,7 +51,7 @@ describe("currentSession (spec 2 S6)", () => {
     expect(sessionSetCookie(dev, "t", 60)).toBe(
       "session=t; Path=/; Max-Age=60; SameSite=Lax; HttpOnly",
     );
-    const prod = { ...dev, origin: "https://repowiki.dev" };
+    const prod = { ...dev, appOrigin: "https://app.repowiki.dev" };
     expect(sessionSetCookie(prod, "t", 60)).toBe(
       "__Host-session=t; Path=/; Max-Age=60; SameSite=Lax; HttpOnly; Secure",
     );
@@ -60,10 +60,15 @@ describe("currentSession (spec 2 S6)", () => {
 
 describe("checkMutation (spec 2 S6)", () => {
   const session: Session = { account: {} as never, csrf: "right", token: "t" };
-  const origin = dev.origin;
+  const origin = dev.appOrigin;
 
   it("passes our origin with the session's CSRF token", () => {
     expect(() => checkMutation(dev, { origin }, session, "right")).not.toThrow();
+  });
+
+  it("refuses a post from the public pages' origin, which is same-site (ADR-0012)", () => {
+    const pages = { origin: dev.publicOrigin };
+    expect(() => checkMutation(dev, pages, session, "right")).toThrow(HttpError);
   });
 
   it("refuses a foreign, missing or repeated Origin, a wrong token, or no session", () => {
@@ -92,7 +97,7 @@ describe("checkMutation (spec 2 S6)", () => {
 describe("the mutation limit (spec 2 §10, M14e A3)", () => {
   it("allows 60 mutations a minute per session and answers the 61st 429", () => {
     const config = loadConfig({ REPOWIKI_MODE: "demo" });
-    const headers = { origin: config.origin };
+    const headers = { origin: config.appOrigin };
     const session = {
       account: {} as Account,
       csrf: "c".repeat(43),

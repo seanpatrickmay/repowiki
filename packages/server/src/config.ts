@@ -11,7 +11,10 @@ export type Mode = "production" | "development" | "demo";
 
 export interface Config {
   mode: Mode;
-  origin: string;
+  /** The signed-in app: OAuth, dashboard, project and review pages (ADR-0012). */
+  appOrigin: string;
+  /** Public pages, their wikis and previews: `<publicOrigin>/<handle>/<slug>` (ADR-0012). */
+  publicOrigin: string;
   port: number;
   /** The worker listener's port (`/internal/*`, `/llm/*`); production only, null elsewhere (S1). */
   internalPort: number | null;
@@ -65,12 +68,14 @@ export function loadConfig(env: Env): Config {
     for (const name of ["REPOWIKI_PROFILE", "REPOWIKI_LOCAL_PLAN"]) {
       if (env[name] !== undefined) throw new ConfigError(`${name} is for local testing only.`);
     }
-    const origin = need("PUBLIC_ORIGIN");
+    const appOrigin = need("APP_ORIGIN");
+    const publicOrigin = need("PUBLIC_ORIGIN");
     const internalPort = portOf(env.INTERNAL_PORT, 8788, "INTERNAL_PORT");
     if (internalPort === port) throw new ConfigError("INTERNAL_PORT must differ from PORT.");
     const config: Config = {
       mode,
-      origin,
+      appOrigin,
+      publicOrigin,
       port,
       internalPort,
       host: env.HOST ?? "0.0.0.0",
@@ -105,9 +110,15 @@ export function loadConfig(env: Env): Config {
     if (missing.length > 0) {
       throw new ConfigError(`Missing environment variables: ${missing.join(", ")}.`);
     }
-    if (!Origin.safeParse(origin).success) {
-      throw new ConfigError("PUBLIC_ORIGIN must be RepoWiki's own https origin with no path.");
+    for (const [name, origin] of [
+      ["APP_ORIGIN", appOrigin],
+      ["PUBLIC_ORIGIN", publicOrigin],
+    ] as const) {
+      if (!Origin.safeParse(origin).success) {
+        throw new ConfigError(`${name} must be RepoWiki's own https origin with no path.`);
+      }
     }
+    apart(appOrigin, publicOrigin);
     if (!reachesPort(config.runner.internalUrl, internalPort)) {
       throw new ConfigError("INTERNAL_URL must be http://<host>:<INTERNAL_PORT>, with no path.");
     }
@@ -115,10 +126,18 @@ export function loadConfig(env: Env): Config {
     return config;
   }
 
-  const origin = env.PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`;
-  if (!LOOPBACK.test(origin)) {
-    throw new ConfigError("Outside production, PUBLIC_ORIGIN must be a loopback http origin.");
+  // Two loopback hosts on one port (ADR-0012): different origins, so host-only cookies stay apart.
+  const appOrigin = env.APP_ORIGIN ?? `http://127.0.0.1:${port}`;
+  const publicOrigin = env.PUBLIC_ORIGIN ?? `http://localhost:${port}`;
+  for (const [name, origin] of [
+    ["APP_ORIGIN", appOrigin],
+    ["PUBLIC_ORIGIN", publicOrigin],
+  ] as const) {
+    if (!LOOPBACK.test(origin)) {
+      throw new ConfigError(`Outside production, ${name} must be a loopback http origin.`);
+    }
   }
+  apart(appOrigin, publicOrigin);
   const dataDir = mode === "demo" ? null : (env.DATA_DIR ?? join(tmpdir(), "repowiki-dev"));
   const scratch = dataDir ?? join(tmpdir(), `repowiki-demo-${process.pid}`);
   const clientId = env.GITHUB_CLIENT_ID?.trim();
@@ -136,7 +155,8 @@ export function loadConfig(env: Env): Config {
   }
   return {
     mode,
-    origin,
+    appOrigin,
+    publicOrigin,
     port,
     internalPort: null,
     host: "127.0.0.1",
@@ -150,7 +170,7 @@ export function loadConfig(env: Env): Config {
     anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() || null,
     database: { kind: "pglite", dataDir: dataDir === null ? null : join(dataDir, "db") },
     objects: { kind: "fs", root: join(scratch, "objects") },
-    runner: { kind: "local", internalUrl: origin },
+    runner: { kind: "local", internalUrl: appOrigin },
     github:
       mode !== "demo" && clientId && clientSecret
         ? { kind: "oauth", clientId, clientSecret }
@@ -158,6 +178,13 @@ export function loadConfig(env: Env): Config {
     localProfile,
     localPlan: plan.data,
   };
+}
+
+/** The app and its public pages on different hosts: cookies are scoped by host, not port. */
+function apart(appOrigin: string, publicOrigin: string): void {
+  if (new URL(appOrigin).hostname === new URL(publicOrigin).hostname) {
+    throw new ConfigError("APP_ORIGIN and PUBLIC_ORIGIN must be on different hosts.");
+  }
 }
 
 /** The profile's login, lowercased like the allowlist; a snapshot that does not load is refused. */

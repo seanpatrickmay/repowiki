@@ -22,7 +22,7 @@ function header(headers: Headers, name: string): string | undefined {
 
 /** Cookies are Secure and `__Host-` exactly when the origin is https (spec 2 S6). */
 export function secureCookies(config: Config): boolean {
-  return config.origin.startsWith("https://");
+  return config.appOrigin.startsWith("https://");
 }
 
 /**
@@ -96,7 +96,7 @@ export function checkMutation(
   sentToken: string | null,
 ): asserts session is Session {
   const origin = header(headers, "origin");
-  if (origin === undefined || !safeEqual(origin, config.origin)) {
+  if (origin === undefined || !safeEqual(origin, config.appOrigin)) {
     throw new HttpError(403, "This request did not come from RepoWiki.");
   }
   if (session === null || !sentToken || !safeEqual(sentToken, session.csrf)) {

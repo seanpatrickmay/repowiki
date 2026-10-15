@@ -24,7 +24,7 @@ const post = (path: string, body: string, who: { cookie: string; csrf: string } 
   call(app, {
     method: "POST",
     path,
-    headers: form(who.cookie, deps.config.origin),
+    headers: form(who.cookie, deps.config.appOrigin),
     body: `csrf=${who.csrf}&${body}`,
   });
 const publishing = (hash: string, revision = 2) =>
@@ -83,6 +83,11 @@ describe("publish (Contract §6.4)", () => {
     expect(page).toContain(`name="previewHash" value="${hash}"`);
     expect((await publishing(hash)).status).toBe(303);
     expect(await project()).toMatchObject({ state: "published", currentVersion: 1 });
+    // The app shows the URL readers get, on the pages origin (ADR-0012).
+    const live = String(
+      (await call(app, { path: `/projects/${p.projectId}`, headers: { cookie: p.cookie } })).body,
+    );
+    expect(live).toContain(`href="${deps.config.publicOrigin}/demo-dev/demo-repo"`);
     const version = await versionOf(deps.db, p.projectId, 1);
     expect(version).toMatchObject({
       revision: 2,

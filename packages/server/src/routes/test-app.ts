@@ -30,7 +30,7 @@ export const TEST_NOW = "2026-10-14T12:00:00.000Z";
 /** Test-only: demo-mode dependencies over a fresh database, with a fixed clock and ids. */
 export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { db: Db }> {
   const config = loadConfig({ REPOWIKI_MODE: "demo" });
-  const github = fakeEndpoints(config.origin);
+  const github = fakeEndpoints(config.appOrigin);
   let n = 0;
   return {
     config,
@@ -122,7 +122,7 @@ export async function startedJob(
   const reply = await call(createApp(local, projectRoutes(local)), {
     method: "POST",
     path: "/projects",
-    headers: form(cookie, deps.config.origin),
+    headers: form(cookie, deps.config.appOrigin),
     body: `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`,
   });
   const projectId = String(reply.headers?.location).split("/").at(-1) ?? "";

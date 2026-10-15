@@ -12,13 +12,19 @@ try {
   const config = loadConfig(process.env);
   const server = await startServer(config);
   process.stdout.write(`${JSON.stringify({ started: config.mode, urls: server.urls })}\n`);
+  if (config.mode !== "production") {
+    // Two hosts on one port (ADR-0012): the app, and the public pages readers see.
+    process.stdout.write(
+      `App:          ${config.appOrigin}/\nPublic pages: ${config.publicOrigin}/\n`,
+    );
+  }
   if (config.localProfile !== null) {
     const { login } = loadProfile(config.localProfile).user;
-    process.stdout.write(`RepoWiki local: open ${config.origin}/ and sign in as ${login}.\n`);
+    process.stdout.write(`RepoWiki local: open ${config.appOrigin}/ and sign in as ${login}.\n`);
   }
   if (config.mode === "demo") {
     process.stdout.write(
-      `RepoWiki demo: open ${config.origin}/ and sign in (no GitHub account needed).\n`,
+      `RepoWiki demo: open ${config.appOrigin}/ and sign in (no GitHub account needed).\n`,
     );
   }
   let stopping = false;

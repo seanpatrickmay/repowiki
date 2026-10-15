@@ -4,6 +4,12 @@
 # it would go stale):
 #   fly deploy . --config deploy/fly.server.toml --dockerfile deploy/Dockerfile --ha=false --env REPOWIKI_ENGINE_VERSION=$(git rev-parse --short HEAD)
 # One machine only: the sweeper and the preview render queue live in the server's memory.
+# Two hostnames point at this app (ADR-0012), each with its own certificate (`fly certs add`):
+# APP_ORIGIN (https://app.repowiki.app: sign-in, dashboard, review) and PUBLIC_ORIGIN
+# (https://repowiki.app: public pages, their wikis and previews). Both are required in
+# production, on different hosts, and neither may be a *.fly.dev origin; routing is by Host,
+# and any other host gets a 404. The GitHub OAuth app's callback is
+# https://app.repowiki.app/auth/github/callback.
 app = "repowiki"
 primary_region = "iad"
 
@@ -26,12 +32,15 @@ primary_region = "iad"
   auto_start_machines = false
   min_machines_running = 1
 
+  # The check names the app host: the server answers 404 to any host it does not serve.
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
     grace_period = "20s"
     method = "GET"
     path = "/"
+    [http_service.checks.headers]
+      Host = "app.repowiki.app"
 
 [[vm]]
   size = "shared-cpu-2x"

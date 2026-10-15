@@ -11,7 +11,7 @@ let app: App;
 let p: { projectId: string; cookie: string; csrf: string; accountId: string };
 
 const post = (path: string, body: string, cookie = p.cookie) =>
-  call(app, { method: "POST", path, headers: form(cookie, deps.config.origin), body });
+  call(app, { method: "POST", path, headers: form(cookie, deps.config.appOrigin), body });
 const page = (cookie = p.cookie) =>
   call(app, { path: `/projects/${p.projectId}`, headers: { cookie } });
 

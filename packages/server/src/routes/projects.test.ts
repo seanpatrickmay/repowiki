@@ -24,7 +24,7 @@ const build = (cookie: string, body: string) =>
   call(app, {
     method: "POST",
     path: "/projects",
-    headers: form(cookie, deps.config.origin),
+    headers: form(cookie, deps.config.appOrigin),
     body,
   });
 

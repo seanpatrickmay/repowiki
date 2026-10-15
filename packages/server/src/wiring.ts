@@ -6,6 +6,7 @@ import { openDatabase } from "./db/migrate.ts";
 import { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
 import { fakeGitHubFetch, profileGitHubFetch } from "./github/fake.ts";
 import { loadProfile } from "./github/profile.ts";
+import { byHost } from "./http/hosts.ts";
 import type { Route } from "./http/router.ts";
 import { type App, type AppServer, listen } from "./http/server.ts";
 import { objectStoreFor } from "./objects/open.ts";
@@ -75,7 +76,7 @@ function githubFetch(config: Config, github: GitHubEndpoints): typeof fetch {
  */
 export async function buildDeps(config: Config, overrides: Partial<Deps> = {}): Promise<Deps> {
   const log = overrides.log ?? stdoutLog;
-  const github = config.github.kind === "fake" ? fakeEndpoints(config.origin) : GITHUB;
+  const github = config.github.kind === "fake" ? fakeEndpoints(config.appOrigin) : GITHUB;
   const fakeModel = config.mode === "demo" || config.anthropicApiKey === null;
   return {
     config,
@@ -98,10 +99,13 @@ export async function buildDeps(config: Config, overrides: Partial<Deps> = {}): 
   };
 }
 
-/** The public listener's routes and the worker listener's; handles stay last (S1, S14). */
-export function routeSets(deps: Deps): { public: Route[]; worker: Route[] } {
+/**
+ * The app host's routes, the pages host's (public pages, handles last; ADR-0012) and the worker
+ * listener's (S1, S14).
+ */
+export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: Route[] } {
   return {
-    public: [
+    app: [
       ...landingRoutes(deps),
       ...authRoutes(deps),
       ...projectRoutes(deps),
@@ -109,8 +113,8 @@ export function routeSets(deps: Deps): { public: Route[]; worker: Route[] } {
       ...jobRoutes(deps),
       ...previewRoutes(deps),
       ...publishRoutes(deps),
-      ...publicRoutes(deps),
     ],
+    pages: publicRoutes(deps),
     worker: [...internalRoutes(deps), ...llmRoutes(deps)],
   };
 }
@@ -122,19 +126,21 @@ export interface Listener {
 }
 
 /**
- * Production: the public app on PORT, where `/internal/*` and `/llm/*` are 404 (not handles), and
- * the worker's routes alone on INTERNAL_PORT, which Fly's proxy never exposes. Elsewhere: one
- * loopback listener, worker routes first so `/internal/...` never reaches `/:handle/:slug/*`.
+ * Production: the app and pages hosts on PORT, routed by Host (ADR-0012), where `/internal/*`
+ * and `/llm/*` are 404 (not handles), and the worker's routes alone on INTERNAL_PORT, which Fly's
+ * proxy never exposes. Elsewhere: one loopback listener for both hosts, the worker routes on the
+ * app host (the local runner's `INTERNAL_URL` is the app origin).
  */
 export function listenersFor(deps: Deps): Listener[] {
   const sets = routeSets(deps);
   const { config } = deps;
+  const pages = createApp(deps, sets.pages, { host: "pages" });
   if (config.internalPort === null) {
-    const app = createApp(deps, [...sets.worker, ...sets.public]);
+    const app = byHost(config, { app: createApp(deps, [...sets.worker, ...sets.app]), pages });
     return [{ app, port: config.port, host: config.host }];
   }
   const notFound = createApp(deps, []);
-  const site = createApp(deps, sets.public);
+  const site = byHost(config, { app: createApp(deps, sets.app), pages });
   const publicApp: App = (request) =>
     WORKER_PATH.test(request.path) ? notFound(request) : site(request);
   return [

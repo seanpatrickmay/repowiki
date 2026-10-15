@@ -16,7 +16,7 @@ const post = (path: string, body: string) =>
   call(app, {
     method: "POST",
     path,
-    headers: form(p.cookie, deps.config.origin),
+    headers: form(p.cookie, deps.config.appOrigin),
     body: `csrf=${p.csrf}&${body}`,
   });
 const get = (path: string) => call(app, { path });
@@ -61,6 +61,7 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     const body = String(reply.body);
     expect(body).toContain("Mine.");
     expect(body).toContain("Author-reviewed");
+    expect(body).toContain(`<a href="${deps.config.appOrigin}/">Made with RepoWiki</a>`);
     expect(body).toMatch(/Published 20\d\d-\d\d-\d\d/);
     expect(body).toContain("A &quot;tiny&quot; demo &amp; &lt;3 more");
     expect(body).not.toContain("<3");
@@ -93,6 +94,10 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     expect(String(reply.body)).toContain("&lt;3 more");
     expect(String(reply.body)).not.toContain("<3");
     expect(String(reply.body)).not.toContain("<style");
+    // Public pages point readers at the app on its own origin (ADR-0012).
+    expect(String(reply.body)).toContain(
+      `<a href="${deps.config.appOrigin}/">Made with RepoWiki</a>`,
+    );
   });
 
   it("never redirects off the site, and redirects only to canonical paths (fresh review I1)", async () => {

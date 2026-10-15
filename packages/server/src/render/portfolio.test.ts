@@ -56,6 +56,7 @@ const published = (d = data) =>
     base: "/demo-dev/demo-repo/",
     publishedAt: "2026-10-15T09:00:00.000Z",
     preview: false,
+    appOrigin: "http://127.0.0.1:8787",
   });
 
 describe("the portfolio layer (Contract §8)", () => {
@@ -150,7 +151,12 @@ describe("the portfolio layer (Contract §8)", () => {
   });
 
   it("says it is a preview, and gives no publish date, before publishing", () => {
-    const page = portfolioHtml(data, { base: "/preview/p/2/", publishedAt: null, preview: true });
+    const page = portfolioHtml(data, {
+      base: "/preview/p/2/",
+      publishedAt: null,
+      preview: true,
+      appOrigin: "http://127.0.0.1:8787",
+    });
     expect(page).toContain("Preview: only you can see this page");
     expect(page).toContain("/preview/p/2/docs/");
     expect(page).not.toContain("Published 20");

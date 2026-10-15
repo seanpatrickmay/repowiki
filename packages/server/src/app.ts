@@ -37,7 +37,7 @@ export const logOf = (deps: Pick<Deps, "log">) =>
 /** An error's name for a log line: never its message, which may carry a secret. */
 export const nameOf = (error: unknown) => (error instanceof Error ? error.name : "unknown");
 
-export const callbackUrl = (config: Config) => `${config.origin}/auth/github/callback`;
+export const callbackUrl = (config: Config) => `${config.appOrigin}/auth/github/callback`;
 
 const styleRoute = (pattern: string, body: string): Route => ({
   method: "GET",
@@ -48,7 +48,8 @@ const styleRoute = (pattern: string, body: string): Route => ({
     body,
   }),
 });
-const styles = [styleRoute(STYLE_PATH, STYLE), styleRoute(PUBLIC_STYLE_PATH, PUBLIC_STYLE)];
+const publicStyle = styleRoute(PUBLIC_STYLE_PATH, PUBLIC_STYLE);
+const styles = [styleRoute(STYLE_PATH, STYLE), publicStyle];
 
 /**
  * The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. A
@@ -69,11 +70,21 @@ function errorReply(error: HttpError): Reply {
   return { ...base, headers: { ...base.headers, ...error.headers } };
 }
 
-/** The routes, the style sheets, and in fake mode the fake GitHub's authorize page. */
-export function createApp(deps: Deps, routes: readonly Route[]): App {
+/**
+ * The routes, the style sheets, and in fake mode the fake GitHub's authorize page. The pages host
+ * (ADR-0012) gets only the public style sheet and answers an unknown path in plain text.
+ */
+export function createApp(
+  deps: Deps,
+  routes: readonly Route[],
+  options: { host: "app" | "pages" } = { host: "app" },
+): App {
+  const pages = options.host === "pages";
   const fake =
-    deps.config.github.kind === "fake" ? [fakeAuthorizeRoute(callbackUrl(deps.config))] : [];
-  const route = createRouter([...styles, ...fake, ...routes]);
+    deps.config.github.kind === "fake" && !pages
+      ? [fakeAuthorizeRoute(callbackUrl(deps.config))]
+      : [];
+  const route = createRouter([...(pages ? [publicStyle] : styles), ...fake, ...routes]);
   return async (request) => {
     const found = route(request.method, request.path);
     if ("handler" in found) {
@@ -88,6 +99,7 @@ export function createApp(deps: Deps, routes: readonly Route[]): App {
       return withRenewal(reply, renewalCookie(request));
     }
     if (found.status === 405) return text(405, "Method not allowed.");
+    if (pages) return text(404, "Not found.");
     const body = `<h1>Not found</h1><p class="muted">${escapeHtml(request.path)} is not a page on RepoWiki.</p>`;
     return html(404, page({ title: "Not found", body, session: null }));
   };
