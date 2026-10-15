@@ -36,13 +36,10 @@ describe("overrides (Contract spec §8)", () => {
     expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: five })).toBe(false);
   });
 
-  it("refuse a duplicate, a hidden highlight, a long blurb and unknown fields", () => {
+  it("refuse a duplicate, a long blurb, hidden features (ADR-0012) and unknown fields", () => {
     const h = (featureId: string, blurb = "x") => ({ featureId, blurb });
     expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a"), h("a")] })).toBe(false);
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, hiddenFeatureIds: ["a", "a"] })).toBe(false);
-    expect(
-      ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a")], hiddenFeatureIds: ["a"] }),
-    ).toBe(false);
+    expect(ok(Overrides, { ...EMPTY_OVERRIDES, hiddenFeatureIds: [] })).toBe(false);
     expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a", "x".repeat(141))] })).toBe(
       false,
     );

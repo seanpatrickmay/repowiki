@@ -145,7 +145,7 @@ export type Generation = z.infer<typeof Generation>;
 export const RevisionFlag = z
   .string()
   .regex(
-    /^(?:suggestion-changed:(?:tagline|summary|contribution)|(?:highlight|hidden)-missing:[a-z0-9]+(?:-[a-z0-9]+)*)$/,
+    /^(?:suggestion-changed:(?:tagline|summary|contribution)|highlight-missing:[a-z0-9]+(?:-[a-z0-9]+)*)$/,
     "unknown revision flag",
   );
 export type RevisionFlag = z.infer<typeof RevisionFlag>;

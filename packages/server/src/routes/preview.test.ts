@@ -59,10 +59,7 @@ describe("serveTreeFile (spec 2 S13)", () => {
 describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
   it("builds the latest revision's exact tree under its hash and serves it to the owner only", async () => {
     const first = "deliverables";
-    await post(
-      `/projects/${p.projectId}/revisions`,
-      `baseRevision=1&contribution=Mine.&hidden=${first}`,
-    );
+    await post(`/projects/${p.projectId}/revisions`, "baseRevision=1&contribution=Mine.");
     const stale = await post(`/projects/${p.projectId}/preview`, "revision=1");
     expect(stale.status).toBe(REFUSALS["stale-revision"].status);
     expect((await post(`/projects/${p.projectId}/preview`, "revision=2")).status).toBe(303);
@@ -90,7 +87,8 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect(String(wiki.body)).toContain(`${base}docs/`);
     expect(String(wiki.body)).not.toContain('"/demo-dev/demo-repo/docs/');
     expect(String(wiki.body)).not.toContain("github.com/preview/");
-    expect((await get(`${base}docs/wiki/${first}/`)).status).toBe(404);
+    // Every wiki page is public (ADR-0012).
+    expect((await get(`${base}docs/wiki/${first}/`)).status).toBe(200);
     expect((await get(`${base}docs/wiki/signals/`)).status).toBe(200);
     expect((await get(`${base}portfolio.json`)).status).toBe(404);
     expect((await get(`/preview/${p.projectId}/2`)).status).toBe(301);

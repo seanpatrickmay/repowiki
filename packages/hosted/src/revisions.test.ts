@@ -14,7 +14,6 @@ const edited: Overrides = {
   summary: "My summary",
   contribution: "I wrote it.",
   highlights: [{ featureId: "indexing", blurb: "Fast" }],
-  hiddenFeatureIds: ["site"],
 };
 
 describe("draft revisions (Contract spec §6.3)", () => {
@@ -46,7 +45,7 @@ describe("draft revisions (Contract spec §6.3)", () => {
     expect(
       saveRevision(project, aRevision(), aGeneration(), 1, { ...edited, tagline: "<b>" }, T1),
     ).toMatchObject({ code: "invalid-input" });
-    const unknown = { ...edited, hiddenFeatureIds: ["nowhere"] };
+    const unknown = { ...edited, highlights: [{ featureId: "nowhere", blurb: "x" }] };
     expect(saveRevision(project, aRevision(), aGeneration(), 1, unknown, T1)).toMatchObject({
       code: "invalid-input",
       detail: "unknown feature nowhere",
@@ -78,14 +77,14 @@ describe("draft revisions (Contract spec §6.3)", () => {
 
   it("raise no flag for a suggestion the author did not override, and keep old flags", () => {
     const project = aProject({ latestRevision: 1 });
-    const latest = aRevision({ flags: ["hidden-missing:old"] });
+    const latest = aRevision({ flags: ["highlight-missing:old"] });
     const previous = aGeneration();
     const next = aGeneration({
       id: ids.generation2,
       suggestions: { ...previous.suggestions, tagline: "Changed", contributionDraft: "Changed" },
     });
     expect(value(refreshRevision(project, latest, previous, next, T1)).revision.flags).toEqual([
-      "hidden-missing:old",
+      "highlight-missing:old",
     ]);
   });
 
@@ -104,7 +103,7 @@ describe("draft revisions (Contract spec §6.3)", () => {
     const ready = aRevision({ overrides: { ...EMPTY_OVERRIDES, contribution: "I wrote it." } });
     expect(reviewRevision(ready, 1, T0)).toEqual({ ok: true, value: aReview() });
     expect(reviewRevision(ready, 2, T0)).toEqual({ ok: false, code: "stale-revision" });
-    expect(reviewRevision({ ...ready, flags: ["hidden-missing:x"] }, 1, T0)).toMatchObject({
+    expect(reviewRevision({ ...ready, flags: ["highlight-missing:x"] }, 1, T0)).toMatchObject({
       code: "needs-review-flags",
     });
     expect(reviewRevision(aRevision(), 1, T0)).toMatchObject({ code: "contribution-missing" });

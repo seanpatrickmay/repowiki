@@ -37,7 +37,8 @@ describe("the project page (spec 2 §7)", () => {
     const body = String(reply.body);
     expect(body).toContain('value="A tiny demo"');
     expect(body).toContain("I wrote the ingest code.");
-    expect(body).toContain(`name="hidden" value="${first}"`);
+    // Every wiki page is public: there is no hide control (ADR-0012).
+    expect(body).not.toContain('name="hidden"');
     expect(body).toContain("I reviewed this version.");
     expect(body).not.toContain("style=");
     expect(body).not.toContain("<style");
@@ -86,7 +87,6 @@ describe("saving the portfolio layer (Contract §6.3)", () => {
         summary: "My own summary.",
         contribution: "I wrote the ingest step.",
         highlights: [{ featureId: first, blurb: "Reads the files." }],
-        hiddenFeatureIds: [],
       },
     });
     expect(latest?.overrides.tagline).toBeUndefined();

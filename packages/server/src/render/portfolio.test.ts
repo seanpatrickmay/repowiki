@@ -46,19 +46,12 @@ const revision = {
     summary: "My <summary> & more.",
     contribution: "I built it.",
     highlights: [{ featureId: ids[0] ?? "", blurb: "The core." }],
-    hiddenFeatureIds: [],
   },
   flags: [],
   source: "author",
   createdAt: "2026-10-14T12:00:00.000Z",
 } as DraftRevision;
-const data = portfolioData({
-  generation,
-  revision,
-  exp,
-  full: exp,
-  repoFullName: "demo-dev/demo-repo",
-});
+const data = portfolioData({ generation, revision, exp, repoFullName: "demo-dev/demo-repo" });
 const published = (d = data) =>
   portfolioHtml(d, {
     base: "/demo-dev/demo-repo/",
@@ -79,22 +72,7 @@ describe("the portfolio layer (Contract §8)", () => {
     });
   });
 
-  it("drops a hidden feature's highlight", () => {
-    const hidden = {
-      ...revision,
-      overrides: { ...revision.overrides, highlights: [], hiddenFeatureIds: [ids[0] ?? ""] },
-    };
-    const d = portfolioData({
-      generation,
-      revision: hidden,
-      exp,
-      full: exp,
-      repoFullName: "demo-dev/demo-repo",
-    });
-    expect(published(d)).not.toContain(`/docs/wiki/${ids[0]}/`);
-  });
-
-  it("names a hidden feature the author touched by its title: facts are never hidden (§8)", () => {
+  it("names a feature the author touched by its title (§8)", () => {
     const first = ids[0] ?? "";
     const title = exp.manifest.features.find((f) => f.id === first)?.title ?? "";
     expect(title).not.toBe("");
@@ -108,12 +86,10 @@ describe("the portfolio layer (Contract §8)", () => {
         },
       },
     } as Generation;
-    const hidden = { ...revision, overrides: { ...revision.overrides, hiddenFeatureIds: [first] } };
     const d = portfolioData({
       generation: touched,
-      revision: hidden,
-      exp: hostedExport(exp, [first]),
-      full: exp,
+      revision,
+      exp: hostedExport(exp),
       repoFullName: "demo-dev/demo-repo",
     });
     expect(published(d)).toContain(`<dt>${escapeHtml(title)}</dt><dd>2 commits`);
@@ -156,7 +132,6 @@ describe("the portfolio layer (Contract §8)", () => {
       generation,
       revision,
       exp: hostile,
-      full: hostile,
       repoFullName: "demo-dev/demo-repo",
     });
     expect(d.title).toBe(HOSTILE_ARCHITECTURE_TITLE);
