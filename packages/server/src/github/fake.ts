@@ -43,7 +43,7 @@ const urlOf = (input: string | URL | Request) =>
 
 /** What a fake GitHub holds: one user and their repositories, each with its commits and head. */
 interface FakeWorld {
-  user: { id: number; login: string; name: string | null; created_at: string };
+  user: { id: number; login: string; name: string | null; created_at: string; avatar_url?: string };
   repos: {
     repo: { id: number; full_name: string; default_branch: string };
     commits: number;
@@ -70,15 +70,24 @@ export function fakeGitHubFetch(endpoints: GitHubEndpoints): typeof fetch {
 export function profileGitHubFetch(
   endpoints: GitHubEndpoints,
   profile: LocalProfile,
+  avatar: Uint8Array | null = null,
 ): typeof fetch {
-  return worldFetch(endpoints, profile);
+  return worldFetch(endpoints, profile, avatar);
 }
 
-function worldFetch(endpoints: GitHubEndpoints, world: FakeWorld): typeof fetch {
+function worldFetch(
+  endpoints: GitHubEndpoints,
+  world: FakeWorld,
+  avatar: Uint8Array | null = null,
+): typeof fetch {
   return async (input, init) => {
     const url = urlOf(input);
     const method = (init?.method ?? "GET").toUpperCase();
     const href = `${url.origin}${url.pathname}`;
+    // The avatar saved beside a local profile, at the URL GitHub gave for it (ADR-0013).
+    if (method === "GET" && avatar !== null && url.href === world.user.avatar_url) {
+      return new Response(avatar as BodyInit);
+    }
     if (method === "POST" && href === `${endpoints.web}/login/oauth/access_token`) {
       const body = new URLSearchParams(String(init?.body ?? ""));
       return body.get("code") === FAKE_CODE

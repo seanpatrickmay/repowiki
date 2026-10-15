@@ -5,7 +5,14 @@ import { type WikiExport, WikiExport as WikiExportSchema } from "@repowiki/core"
 import { makePeopleSnapshot } from "@repowiki/core/test-fixtures";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chooseExports, LocalProfile, loadProfile, takeProfile } from "./profile.ts";
+import {
+  chooseExports,
+  LocalProfile,
+  loadAvatar,
+  loadProfile,
+  takeAvatar,
+  takeProfile,
+} from "./profile.ts";
 
 const API = "https://api.github.com";
 const EXPORT_HEAD = "e".repeat(40);
@@ -182,5 +189,38 @@ describe("loadProfile", () => {
     expect(loadProfile(path)).toEqual(profile);
     writeFileSync(path, JSON.stringify({ ...profile, extra: 1 }));
     expect(() => loadProfile(path)).toThrow();
+  });
+});
+
+describe("the snapshot's avatar (ADR-0013)", () => {
+  const AVATAR = "https://avatars.githubusercontent.com/u/77?v=4";
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5]);
+  /** GitHub as `adaFetch` has it, with an avatar URL on the user and the avatar host answering. */
+  const withAvatar: typeof fetch = async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url === AVATAR) return new Response(PNG);
+    const reply = await adaFetch([])(input, init);
+    if (!url.endsWith("/users/ada")) return reply;
+    return Response.json({ ...(await reply.json()), avatar_url: AVATAR });
+  };
+
+  it("keeps the avatar's URL, and its bytes beside the snapshot", async () => {
+    const profile = await takeProfile({ login: "ada", fetch: withAvatar, exportsDir: dir });
+    expect(profile.user.avatar_url).toBe(AVATAR);
+    const bytes = await takeAvatar(profile, withAvatar);
+    expect(bytes).toEqual(PNG);
+    const path = join(dir, "ada.json");
+    writeFileSync(path, JSON.stringify(profile));
+    expect(loadAvatar(path)).toBeNull();
+    writeFileSync(`${path}.avatar`, bytes ?? new Uint8Array());
+    expect(loadAvatar(path)).toEqual(PNG);
+    // Only an image is kept.
+    writeFileSync(`${path}.avatar`, "<svg/>");
+    expect(loadAvatar(path)).toBeNull();
+  });
+
+  it("has no avatar when GitHub names none", async () => {
+    const profile = await takeProfile({ login: "ada", fetch: adaFetch([]), exportsDir: dir });
+    expect(await takeAvatar(profile, withAvatar)).toBeNull();
   });
 });

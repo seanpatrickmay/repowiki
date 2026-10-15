@@ -37,11 +37,14 @@ export {
   stateValid,
 } from "./github/oauth.ts";
 export {
+  avatarFileOf,
   chooseExports,
   type ExportChoice,
   LocalProfile,
+  loadAvatar,
   loadProfile,
   type TakeProfileOptions,
+  takeAvatar,
   takeProfile,
 } from "./github/profile.ts";
 export { BODY_LIMIT, HttpError, readBody, readForm, readJson } from "./http/body.ts";

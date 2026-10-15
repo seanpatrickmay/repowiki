@@ -5,7 +5,7 @@ import { type Config, ConfigError } from "./config.ts";
 import { openDatabase } from "./db/migrate.ts";
 import { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
 import { fakeGitHubFetch, profileGitHubFetch } from "./github/fake.ts";
-import { loadProfile } from "./github/profile.ts";
+import { loadAvatar, loadProfile } from "./github/profile.ts";
 import { byHost } from "./http/hosts.ts";
 import type { Route } from "./http/router.ts";
 import { type App, type AppServer, listen } from "./http/server.ts";
@@ -67,7 +67,7 @@ function githubFetch(config: Config, github: GitHubEndpoints): typeof fetch {
   if (config.github.kind === "oauth") return fetch;
   return config.localProfile === null
     ? fakeGitHubFetch(github)
-    : profileGitHubFetch(github, loadProfile(config.localProfile));
+    : profileGitHubFetch(github, loadProfile(config.localProfile), loadAvatar(config.localProfile));
 }
 
 /**
