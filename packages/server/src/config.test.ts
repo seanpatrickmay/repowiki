@@ -113,10 +113,20 @@ describe("loadConfig (spec 2 S17)", () => {
     expect(() => loadConfig(noApp)).toThrow(/APP_ORIGIN/);
     const { PUBLIC_ORIGIN: __, ...noPages } = production;
     expect(() => loadConfig(noPages)).toThrow(/PUBLIC_ORIGIN/);
-    for (const APP_ORIGIN of ["https://repowiki.dev", "https://repowiki.dev:8443"]) {
+    for (const APP_ORIGIN of [
+      "https://repowiki.dev",
+      "https://repowiki.dev:8443",
+      "https://repowiki.dev.",
+    ]) {
       expect(() => loadConfig({ ...production, APP_ORIGIN }), APP_ORIGIN).toThrow(ConfigError);
     }
-    for (const origin of ["https://x.fly.dev", "http://app.repowiki.dev"]) {
+    for (const origin of [
+      "https://x.fly.dev",
+      "http://app.repowiki.dev",
+      "https://fly.dev",
+      "https://app.repowiki.dev:443",
+      "https://repowiki.fly.dev.",
+    ]) {
       expect(() => loadConfig({ ...production, APP_ORIGIN: origin }), origin).toThrow(ConfigError);
     }
   });

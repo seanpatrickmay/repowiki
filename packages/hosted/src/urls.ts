@@ -58,13 +58,23 @@ export const Slug = z
 
 /** Hostnames that belong to a hosting provider; nothing published may link to them (§9). */
 const PROVIDER_HOST =
-  /\.(?:fly\.dev|r2\.dev|r2\.cloudflarestorage\.com|workers\.dev|pages\.dev|neon\.tech)$/;
+  /(?:^|\.)(?:fly\.dev|r2\.dev|r2\.cloudflarestorage\.com|workers\.dev|pages\.dev|neon\.tech)$/;
 
-/** RepoWiki's own https origin, with no path: "https://repowiki.dev". */
+/**
+ * RepoWiki's own https origin, with no path, in its one spelling: "https://repowiki.dev". A
+ * trailing dot or the default port :443 would name the same host differently (review fix).
+ */
 export const Origin = z
   .string()
-  .regex(/^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/, "expected an https origin with no path")
-  .refine((origin) => !PROVIDER_HOST.test(origin.replace(/:\d+$/, "")), "a provider hostname");
+  .regex(
+    /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d{1,5})?$/,
+    "expected an https origin with no path or trailing dot",
+  )
+  .refine((origin) => !origin.endsWith(":443"), "the default port is implied")
+  .refine(
+    (origin) => !PROVIDER_HOST.test(origin.slice("https://".length).replace(/:\d+$/, "")),
+    "a provider hostname",
+  );
 
 /** `base`, else `base-2`, `base-3`, …, each cut to fit `max` without a trailing hyphen. */
 function firstFree(base: string, max: number, free: (candidate: string) => boolean): string {
