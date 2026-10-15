@@ -60,6 +60,9 @@ function lowercased(headers: Reply["headers"]): Record<string, string | string[]
   return Object.fromEntries(Object.entries(headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
 }
 
+/** A path as logged: a preview link's token is a capability, so it never reaches a log. */
+const loggedPath = (path: string) => path.replace(/^\/_preview\/[^/]*/, "/_preview/:token");
+
 async function respond(
   app: App,
   raw: IncomingMessage,
@@ -116,7 +119,7 @@ async function respond(
   }
   log({
     method,
-    route: path,
+    route: loggedPath(path),
     status: reply.status,
     ms: Date.now() - started,
     ...(error === undefined ? {} : { error }),

@@ -109,6 +109,13 @@ describe("listen (spec 2 S2)", () => {
     });
   });
 
+  it("never logs a preview link's token, which is a capability (ADR-0012)", async () => {
+    const token = "A".repeat(43);
+    await (await fetch(`${server.url}/_preview/${token}/docs/x`)).text();
+    expect(JSON.stringify(logs)).not.toContain(token);
+    expect(logs.at(-1)).toMatchObject({ route: "/_preview/:token/docs/x" });
+  });
+
   it("answers 500 for a reply it cannot send, and keeps serving", async () => {
     const response = await fetch(`${server.url}/bad-header`, { redirect: "manual" });
     expect(response.status).toBe(500);
