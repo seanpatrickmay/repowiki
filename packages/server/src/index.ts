@@ -98,7 +98,8 @@ export {
 export {
   BatchCreate,
   BETA_ALLOWLIST,
-  MAX_OUTPUT,
+  MAX_BATCH_REQUESTS,
+  MAX_PROXY_OUTPUT_TOKENS,
   MessageParams,
   refusedBeta,
 } from "./proxy/request.ts";

@@ -75,7 +75,7 @@ describe("settleOpen (spec 2 §6)", () => {
     await saveJob(db, running());
     await reserve(1200, 1);
     await reserve(300, 2);
-    const settled = await settleOpen(db, running());
+    const settled = await settleOpen(db, running(), "2026-10-14T12:00:00.000Z");
     expect(settled.spentUsdMicros).toBe(1500);
     expect(await db.query("SELECT * FROM reservations WHERE NOT settled")).toEqual([]);
   });
@@ -83,6 +83,8 @@ describe("settleOpen (spec 2 §6)", () => {
   it("never charges past the job's cap", async () => {
     await saveJob(db, running());
     await reserve(40_000, 1);
-    expect((await settleOpen(db, running())).spentUsdMicros).toBe(15_000);
+    expect((await settleOpen(db, running(), "2026-10-14T12:00:00.000Z")).spentUsdMicros).toBe(
+      15_000,
+    );
   });
 });

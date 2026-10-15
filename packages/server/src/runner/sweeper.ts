@@ -39,7 +39,7 @@ async function recover(
     if (job === null || job.status !== "running") return null;
     // A heartbeat may have renewed the lease since the sweep's SELECT: check before settling.
     if (!recoverJob(job, now).ok) return null;
-    const next = recoverJob(await settleOpen(tx, job), now);
+    const next = recoverJob(await settleOpen(tx, job, now), now);
     if (!next.ok) return null;
     await saveJob(tx, next.value);
     await revokeTokens(tx, id);
