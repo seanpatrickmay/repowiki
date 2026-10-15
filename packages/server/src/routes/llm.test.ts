@@ -198,3 +198,97 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     expect(String(reply.body)).not.toContain("job-cost-cap");
   });
 });
+
+describe("the LLM proxy's batch routes (spec 2 S11)", () => {
+  const batch = (n = 2, maxTokens = 2000) => ({
+    requests: Array.from({ length: n }, (_, i) => ({
+      custom_id: `r${i}`,
+      params: message(maxTokens),
+    })),
+  });
+  const open = async () =>
+    (
+      await deps.db.query<{ usd_micros: string; batch_id: string }>(
+        "SELECT usd_micros, batch_id FROM reservations WHERE NOT settled",
+      )
+    ).map((r) => ({ usd: Number(r.usd_micros), batchId: r.batch_id }));
+  const get = (path: string, token = job.token) => send(path, undefined, token, "GET");
+
+  it("reserves a batch at half price, rewrites its results_url, and settles once", async () => {
+    const created = await send("/llm/v1/messages/batches", batch());
+    expect(created.status).toBe(200);
+    const made = JSON.parse(String(created.body));
+    const results = `${deps.config.runner.internalUrl}/llm/v1/messages/batches/${made.id}/results`;
+    expect(made.results_url).toBe(results);
+    // Per request: (100 × 1.25 + 2000 × 0.25 × 5) / 2 = 1312.5, rounded up.
+    expect(await open()).toEqual([{ usd: 2626, batchId: made.id }]);
+    expect(
+      JSON.parse(String((await get(`/llm/v1/messages/batches/${made.id}`)).body)),
+    ).toMatchObject({
+      results_url: results,
+    });
+    const read = await get(`/llm/v1/messages/batches/${made.id}/results`);
+    expect(read.status).toBe(200);
+    expect(String(read.body).trim().split("\n")).toHaveLength(2);
+    expect(await spent()).toBe(2 * upstream.costOfBatchResult);
+    // The same results read again are not charged again (Review Focus 2).
+    expect((await get(`/llm/v1/messages/batches/${made.id}/results`)).status).toBe(200);
+    expect(await spent()).toBe(2 * upstream.costOfBatchResult);
+    expect(await open()).toEqual([]);
+  });
+
+  it("refuses another job's batch id without calling upstream", async () => {
+    expect((await get("/llm/v1/messages/batches/msgbatch_other")).status).toBe(404);
+    expect((await get("/llm/v1/messages/batches/msgbatch_other/results")).status).toBe(404);
+    const cancel = await send("/llm/v1/messages/batches/msgbatch_other/cancel", undefined);
+    expect(cancel.status).toBe(404);
+    expect(upstream.calls).toEqual([]);
+  });
+
+  it("refuses a batch whose reservation would pass the cap", async () => {
+    await setCap(2000);
+    expect((await send("/llm/v1/messages/batches", batch())).status).toBe(429);
+    expect(upstream.calls.filter((c) => c.url.endsWith("/batches"))).toEqual([]);
+  });
+
+  it("refuses a batch holding one request the engine would not send (A1)", async () => {
+    const bad = batch();
+    bad.requests.push({ custom_id: "x", params: message(1000, "claude-haiku-4-5", { tools: [] }) });
+    expect((await send("/llm/v1/messages/batches", bad)).status).toBe(400);
+    expect(upstream.calls).toEqual([]);
+  });
+
+  it("reads a batch body past the messages limit, up to its own (A3)", async () => {
+    const big = { "content-length": String(9 * 1024 * 1024) };
+    const declared = (path: string, body: unknown) =>
+      call(app, {
+        method: "POST",
+        path,
+        headers: { "x-api-key": job.token, "content-type": "application/json", ...big },
+        body: JSON.stringify(body),
+      });
+    expect((await declared("/llm/v1/messages", message())).status).toBe(413);
+    expect((await declared("/llm/v1/messages/batches", batch())).status).toBe(200);
+  });
+
+  it("refuses a recovered worker's old token on its batch (Review Focus 1)", async () => {
+    const made = JSON.parse(String((await send("/llm/v1/messages/batches", batch())).body));
+    await deps.db.query(
+      "UPDATE jobs SET body = jsonb_set(body, '{attempt}', to_jsonb(2)) WHERE id = $1",
+      [job.jobId],
+    );
+    expect((await get(`/llm/v1/messages/batches/${made.id}/results`)).status).toBe(401);
+  });
+
+  it("charges a batch still unread when the job ends (Review Focus 3)", async () => {
+    await send("/llm/v1/messages/batches", batch());
+    const fail = await call(app, {
+      method: "POST",
+      path: "/internal/job/fail",
+      headers: { authorization: `Bearer ${job.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ code: "job-failed" }),
+    });
+    expect(fail.status).toBe(204);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ spentUsdMicros: 2626 });
+  });
+});

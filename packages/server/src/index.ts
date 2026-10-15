@@ -113,6 +113,7 @@ export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
 export {
   anthropicError,
   anthropicShaped,
+  BATCH_LIMIT,
   llmRoutes,
   MESSAGE_LIMIT,
   PER_SECOND,
