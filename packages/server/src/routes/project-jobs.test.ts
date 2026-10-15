@@ -8,7 +8,15 @@ import { draftRoutes } from "./drafts.ts";
 import { internalRoutes } from "./internal.ts";
 import { jobRoutes } from "./project-jobs.ts";
 import { projectRoutes } from "./projects.ts";
-import { call, form, otherCookie, signedInCookie, startedJob, testDeps } from "./test-app.ts";
+import {
+  call,
+  form,
+  generatedProject,
+  otherCookie,
+  signedInCookie,
+  startedJob,
+  testDeps,
+} from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
@@ -111,5 +119,29 @@ describe("retry (M14e A2)", () => {
       404,
     );
     expect(await theJob()).toMatchObject({ status: "failed" });
+  });
+});
+
+describe("refresh (M14e A2)", () => {
+  it("is refused on Free", async () => {
+    const fresh = await testDeps();
+    const p = await generatedProject(fresh);
+    const freshApp = createApp(fresh, projectRoutes(fresh));
+    const reply = await call(freshApp, {
+      method: "POST",
+      path: `/projects/${p.projectId}/refresh`,
+      headers: form(p.cookie, fresh.config.origin),
+      body: `csrf=${p.csrf}`,
+    });
+    expect(reply.status).toBe(REFUSALS["plan-refresh-limit"].status);
+    const other = await otherCookie(fresh);
+    const theirs = await call(freshApp, {
+      method: "POST",
+      path: `/projects/${p.projectId}/refresh`,
+      headers: form(other.cookie, fresh.config.origin),
+      body: `csrf=${other.csrf}`,
+    });
+    expect(theirs.status).toBe(404);
+    await fresh.db.close();
   });
 });

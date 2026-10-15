@@ -1,3 +1,4 @@
+import type { Project } from "@repowiki/hosted";
 import { type Deps, logOf, nameOf } from "../app.ts";
 import { type GitHubRepo, githubApi, TokenRevoked } from "../github/api.ts";
 import { eligibilityFacts } from "../github/facts.ts";
@@ -9,7 +10,8 @@ import { escapeHtml, page } from "../pages/layout.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
 import { projectsOf } from "../store/projects.ts";
-import { startGeneration } from "../store/start.ts";
+import { startGeneration, startRefresh } from "../store/start.ts";
+import { ownedProject } from "./live.ts";
 
 function dashboard(session: Session, repos: GitHubRepo[], projects: string): string {
   const csrf = escapeHtml(session.csrf);
@@ -29,8 +31,15 @@ function dashboard(session: Session, repos: GitHubRepo[], projects: string): str
 export function projectRoutes(deps: Deps): Route[] {
   const api = githubApi(deps.fetch, deps.github);
 
-  /** `POST /projects` once the session and form are checked. */
-  async function build(session: Session, githubRepoId: number): Promise<Reply> {
+  /**
+   * `POST /projects` (a first generation) or `POST /projects/:id/refresh` (`refreshOf`) once the
+   * session and form are checked.
+   */
+  async function build(
+    session: Session,
+    githubRepoId: number,
+    refreshOf: Project | null = null,
+  ): Promise<Reply> {
     const shown = pageSession(session);
     const token = await readGitHubToken(deps.db, deps.config.tokenKey, session.account.id);
     if (token === null) return redirect("/auth/github");
@@ -52,16 +61,13 @@ export function projectRoutes(deps: Deps): Route[] {
       return refusalPage("invalid-input", shown, { detail });
     }
     const commitShas = await api.commitShas(token, repo.full_name, account.login, 100);
-    const started = await startGeneration(deps.db, {
-      account,
-      facts,
-      repo,
-      commitSha,
-      commitShas,
-      now,
-      newId: deps.newId,
-    });
-    if (!started.ok) return refusalPage(started.code, shown);
+    const input = { account, facts, repo, commitSha, commitShas, now, newId: deps.newId };
+    const started =
+      refreshOf === null
+        ? await startGeneration(deps.db, input)
+        : await startRefresh(deps.db, { ...input, project: refreshOf });
+    const back = refreshOf === null ? "/dashboard" : `/projects/${refreshOf.id}`;
+    if (!started.ok) return refusalPage(started.code, shown, { back });
     const { project, job, token: jobToken } = started.value;
     if (jobToken !== null) {
       // A failed start leaves the job queued with its token; the sweeper restarts it (S16).
@@ -113,6 +119,25 @@ export function projectRoutes(deps: Deps): Route[] {
         }
         try {
           return await build(session, githubRepoId);
+        } catch (error) {
+          if (error instanceof TokenRevoked) {
+            return refusalPage("github-token-revoked", pageSession(session));
+          }
+          throw error;
+        }
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/projects/:id/refresh",
+      handler: async (request) => {
+        const session = await currentSession(deps.db, deps.config, request, deps.now());
+        const body = await readForm(request.raw);
+        checkMutation(deps.config, request.headers, session, body.get("csrf"));
+        const project = await ownedProject(deps.db, session, request.params.id ?? "");
+        if (project === null) return refusalPage("not-found", pageSession(session));
+        try {
+          return await build(session, project.githubRepoId, project);
         } catch (error) {
           if (error instanceof TokenRevoked) {
             return refusalPage("github-token-revoked", pageSession(session));
