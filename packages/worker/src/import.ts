@@ -25,7 +25,10 @@ export interface Author {
 export const ImportProfile = z.object({
   user: z.object({ login: z.string().min(1), name: z.string().nullable() }),
   repos: z.array(
-    z.object({ repo: z.object({ full_name: z.string() }), export: z.string().nullable() }),
+    z.object({
+      repo: z.object({ full_name: z.string(), description: z.string().nullish() }),
+      export: z.string().nullable(),
+    }),
   ),
 });
 export type ImportProfile = z.infer<typeof ImportProfile>;
@@ -74,14 +77,36 @@ export function matchAuthor(snapshot: PeopleSnapshot, author: Author): Person | 
 }
 
 /**
- * A generation's facts from a built export: indexed files and languages from the page
- * infoboxes (each page's lines split evenly across its languages), the author's share from
- * People. Zeros when People is off or does not name the author.
+ * Prose and data formats an infobox can list; the languages line is about code, as it is in
+ * an engine run, which counts only the languages it parses.
+ */
+const NOT_CODE = new Set([
+  "CSV",
+  "INI",
+  "JSON",
+  "Markdown",
+  "reStructuredText",
+  "Text",
+  "TOML",
+  "XML",
+  "YAML",
+]);
+
+/**
+ * A generation's facts from a built export: indexed files and code languages from the page
+ * infoboxes (each page's lines split evenly across its code languages; a page with none is left
+ * out of the shares), the author's share from People. Zeros when People is off or does not
+ * name the author.
  */
 export function exportFacts(exp: WikiExport, author: Author): Facts {
   const files = exp.pages.flatMap(({ infobox }): FileFacts[] => {
-    const langs = infobox.languages;
-    if (langs.length === 0) return [{ language: null, loc: infobox.loc, skipped: null }];
+    const langs = infobox.languages
+      .filter((l) => !NOT_CODE.has(l))
+      .map((l) => (l === "TSX" ? "TypeScript" : l));
+    if (langs.length === 0) {
+      const skipped = infobox.languages.length > 0 ? "not-code" : null;
+      return [{ language: null, loc: infobox.loc, skipped }];
+    }
     return langs.map((language) => ({ language, loc: infobox.loc / langs.length, skipped: null }));
   });
   const featureIds = pageFeatureIds(exp);
@@ -101,10 +126,11 @@ export function exportFacts(exp: WikiExport, author: Author): Facts {
 /** Why an import cannot go on; the message is the whole log line (no secret is in it). */
 class Refused extends Error {}
 
+const entryFor = (profile: ImportProfile, fullName: string) =>
+  profile.repos.find((r) => r.repo.full_name.toLowerCase() === fullName.toLowerCase());
+
 function localWiki(profile: ImportProfile, fullName: string, sha: string): WikiExport {
-  const entry = profile.repos.find(
-    (r) => r.repo.full_name.toLowerCase() === fullName.toLowerCase(),
-  );
+  const entry = entryFor(profile, fullName);
   const missing = `no local wiki for ${fullName}; build it with pnpm wiki:build`;
   if (entry?.export == null) throw new Refused(missing);
   let raw: unknown;
@@ -144,7 +170,11 @@ export async function runImport(
     }
     await api.putExport(new TextEncoder().encode(JSON.stringify(exp)));
     await api.succeed({
-      suggestions: fallbackSuggestions(exp, facts),
+      suggestions: fallbackSuggestions(
+        exp,
+        facts,
+        entryFor(profile, spec.repo.fullName)?.repo.description ?? null,
+      ),
       facts,
       engineVersion: "import",
       models: ["none"],

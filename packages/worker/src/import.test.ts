@@ -38,6 +38,19 @@ describe("exportFacts", () => {
     });
   });
 
+  it("leaves prose and data formats out of the languages line, as an engine run does", () => {
+    const exp = peopleExport();
+    const pages = exp.pages.map((page, i) =>
+      i === 0
+        ? { ...page, infobox: { ...page.infobox, languages: ["Markdown", "TOML"], loc: 10_000 } }
+        : page,
+    );
+    const facts = exportFacts({ ...exp, pages }, ADA);
+    expect(facts.languages.map((l) => l.name)).not.toContain("Markdown");
+    expect(facts.languages.map((l) => l.name)).not.toContain("TOML");
+    expect(facts.languages.reduce((sum, l) => sum + l.share, 0)).toBeGreaterThan(0.99);
+  });
+
   it("gives zeros when People does not name the author, or there is no People", () => {
     const zeros = { commits: 0, currentLines: 0, features: [] };
     expect(exportFacts(peopleExport(), { login: "nobody", name: null }).author).toMatchObject({
@@ -144,6 +157,22 @@ describe("runImport", () => {
     ).toEqual(exp);
     expect(Facts.parse(succeeded?.facts)).toEqual(exportFacts(exp, ADA));
     expect(succeeded?.suggestions.highlightCandidates[0]).toBe("signals");
+  });
+
+  it("takes the tagline from the repository's own description when it has one", async () => {
+    const exp = peopleExport();
+    const path = join(mkdtempSync(join(tmpdir(), "repowiki-import-")), "export.json");
+    writeFileSync(path, JSON.stringify(exp));
+    const fake = fakeApi(exp.head);
+    const profile = profileWith(path);
+    const described = {
+      ...profile,
+      repos: [
+        { repo: { full_name: "ada/engine", description: "A difference engine." }, export: path },
+      ],
+    };
+    expect(await runImport(fake.api, described, { stepMs: 0 })).toBe(true);
+    expect(fake.result().succeeded?.suggestions.tagline).toBe("A difference engine");
   });
 
   it("fails the job when the repository has no local wiki, or it no longer matches", async () => {
