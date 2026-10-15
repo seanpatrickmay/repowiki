@@ -1,4 +1,5 @@
 export { type Config, ConfigError, loadConfig, type Mode } from "./config.ts";
+export { BODY_LIMIT, HttpError, readBody, readForm, readJson } from "./http/body.ts";
 export {
   createRouter,
   type Found,
