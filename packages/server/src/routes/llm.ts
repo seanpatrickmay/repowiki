@@ -81,6 +81,8 @@ export function proxyCore(deps: Deps) {
     const token = tokenFrom(request.headers["x-api-key"]);
     await runningJob(deps.db, token, false);
     if (token === null || limited(token)) throw new HttpError(429, "Too many requests.");
+    // Before any reservation: a request that cannot be forwarded must not be charged.
+    if (deps.anthropic.key === null) throw new HttpError(503, "No model provider is configured.");
     const beta = refusedBeta(request.headers["anthropic-beta"]);
     if (beta !== null) throw new HttpError(400, `The ${beta} beta is not allowed.`);
     return token;
