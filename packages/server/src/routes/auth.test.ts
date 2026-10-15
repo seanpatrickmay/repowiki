@@ -84,14 +84,13 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
     const [nonce, expires] = state.split(".");
     const forged = `${nonce}.${Number(expires) + 3600}.${"A".repeat(43)}`;
     expect((await back(`state=${forged}`, forged)).status).toBe(400);
-    const later = await testDeps({ now: () => "2026-10-14T12:10:01.000Z" });
+    const later = { ...deps, now: () => "2026-10-14T12:10:01.000Z" };
     const lateApp = createApp(later, authRoutes(later));
     const late = await call(lateApp, {
       path: `/auth/github/callback?code=fake-code&state=${state}`,
       headers: { cookie: `oauth_state=${encodeURIComponent(state)}` },
     });
     expect(late.status).toBe(400);
-    await later.db.close();
     expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
   });
 
@@ -107,34 +106,33 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
   });
 
   it("turns away a new user the allowlist does not name, outside the demo", async () => {
-    const strict = await testDeps({ config: { ...deps.config, mode: "development" } });
+    const strict = { ...deps, config: { ...deps.config, mode: "development" as const } };
     const { back } = await signInFlow(createApp(strict, authRoutes(strict)));
     expect(back.status).toBe(403);
     expect(String(back.body)).toContain("invite-only");
-    expect(await strict.db.query("SELECT * FROM github_tokens")).toEqual([]);
-    await strict.db.close();
-    const invited = await testDeps({
-      config: { ...deps.config, mode: "development", signupAllowlist: [FAKE_USER.login] },
-    });
+    expect(await deps.db.query("SELECT * FROM github_tokens")).toEqual([]);
+    const invited = {
+      ...strict,
+      config: { ...strict.config, signupAllowlist: [FAKE_USER.login] },
+    };
     expect((await signInFlow(createApp(invited, authRoutes(invited)))).back.status).toBe(303);
-    await invited.db.close();
   });
 
-  it("keeps a GitHub name that is missing or too long from breaking sign-in", async () => {
+  it("keeps a GitHub name that is missing or too long from breaking sign-in or a later one", async () => {
     for (const name of [null, "   ", "x".repeat(300)]) {
-      const odd = await testDeps();
-      const real = odd.fetch;
-      odd.fetch = async (input, init) => {
-        const reply = await real(input, init);
-        if (!String(input).endsWith("/user")) return reply;
-        return Response.json({ ...(await reply.json()), name });
+      const odd: Deps = {
+        ...deps,
+        fetch: async (input, init) => {
+          const reply = await deps.fetch(input, init);
+          if (!String(input).endsWith("/user")) return reply;
+          return Response.json({ ...(await reply.json()), name });
+        },
       };
       expect((await signInFlow(createApp(odd, authRoutes(odd)))).back.status).toBe(303);
-      const [row] = await odd.db.query<{ name: string }>(
+      const [row] = await deps.db.query<{ name: string }>(
         "SELECT body->>'displayName' AS name FROM accounts",
       );
       expect(row?.name).toBe(name?.trim() ? "x".repeat(120) : FAKE_USER.login);
-      await odd.db.close();
     }
   });
 
