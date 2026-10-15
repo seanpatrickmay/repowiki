@@ -15,7 +15,15 @@ export {
   fakeAuthorizeRoute,
   fakeGitHubFetch,
 } from "./github/fake.ts";
-export { authorizeUrl, exchangeCode } from "./github/oauth.ts";
+export {
+  authorizeUrl,
+  displayNameFor,
+  exchangeCode,
+  STATE_SECONDS,
+  signedState,
+  stateKey,
+  stateValid,
+} from "./github/oauth.ts";
 export { BODY_LIMIT, HttpError, readBody, readForm, readJson } from "./http/body.ts";
 export {
   type CookieOptions,
