@@ -9,11 +9,21 @@ export interface FakeAnthropicOptions {
   messageBody?: string;
   /** `count_tokens` answers 500, so the proxy falls back to the byte count. */
   countFails?: boolean;
+  /** `count_tokens` waits this long before answering. */
+  countDelayMs?: number;
+  /** `/v1/messages` and batch creates throw this instead of answering (a network failure). */
+  throws?: Error;
+  /** A raw 2xx body to answer a batch create with instead. */
+  batchBody?: string;
+  /** Each result line's type in turn (default all `succeeded`). */
+  resultTypes?: readonly ("succeeded" | "errored" | "canceled" | "expired")[];
 }
 
 export interface FakeAnthropic {
   fetch: typeof fetch;
   calls: { url: string; method: string; headers: Headers; body: string }[];
+  /** The most `count_tokens` calls that were ever in flight at once. */
+  maxCountsInFlight: () => number;
   /** What one message costs at the configured usage, in micro-dollars. */
   costOfMessage: number;
   /** What one succeeded batch result costs. */
@@ -29,6 +39,8 @@ export function fakeAnthropicFetch(options: FakeAnthropicOptions = {}): FakeAnth
   const calls: FakeAnthropic["calls"] = [];
   const batches = new Map<string, string[]>();
   let n = 0;
+  let counting = 0;
+  let maxCounting = 0;
   const batchReply = (id: string) =>
     Response.json({
       id,
@@ -42,9 +54,18 @@ export function fakeAnthropicFetch(options: FakeAnthropicOptions = {}): FakeAnth
     const body = typeof init?.body === "string" ? init.body : "";
     calls.push({ url: url.href, method, headers: new Headers(init?.headers), body });
     if (url.pathname === "/v1/messages/count_tokens" && method === "POST") {
+      counting++;
+      maxCounting = Math.max(maxCounting, counting);
+      if (options.countDelayMs !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, options.countDelayMs));
+      }
+      counting--;
       if (options.countFails) return Response.json({ type: "error" }, { status: 500 });
       return Response.json({ input_tokens: options.inputTokens ?? 100 });
     }
+    const creates =
+      method === "POST" && ["/v1/messages", "/v1/messages/batches"].includes(url.pathname);
+    if (creates && options.throws !== undefined) throw options.throws;
     if (url.pathname === "/v1/messages" && method === "POST") {
       if (options.messageBody !== undefined) return new Response(options.messageBody);
       return Response.json({
@@ -58,6 +79,7 @@ export function fakeAnthropicFetch(options: FakeAnthropicOptions = {}): FakeAnth
       });
     }
     if (url.pathname === "/v1/messages/batches" && method === "POST") {
+      if (options.batchBody !== undefined) return new Response(options.batchBody);
       const id = `msgbatch_${++n}`;
       const parsed = JSON.parse(body) as { requests: { custom_id: string }[] };
       batches.set(
@@ -70,12 +92,16 @@ export function fakeAnthropicFetch(options: FakeAnthropicOptions = {}): FakeAnth
     const ids = match ? batches.get(match[1] ?? "") : undefined;
     if (match?.[1] !== undefined && ids !== undefined) {
       if (match[2] !== "/results") return batchReply(match[1]);
-      const lines = ids.map((custom_id) =>
-        JSON.stringify({
-          custom_id,
-          result: { type: "succeeded", message: { model: MODEL, usage, content: [] } },
-        }),
-      );
+      const lines = ids.map((custom_id, i) => {
+        const type = options.resultTypes?.[i] ?? "succeeded";
+        const result =
+          type === "succeeded"
+            ? { type, message: { model: MODEL, usage, content: [] } }
+            : type === "errored"
+              ? { type, error: { type: "error", error: { type: "api_error", message: "x" } } }
+              : { type };
+        return JSON.stringify({ custom_id, result });
+      });
       return new Response(`${lines.join("\n")}\n`, {
         headers: { "content-type": "application/binary" },
       });
@@ -86,6 +112,7 @@ export function fakeAnthropicFetch(options: FakeAnthropicOptions = {}): FakeAnth
   return {
     fetch: fetchFn,
     calls,
+    maxCountsInFlight: () => maxCounting,
     costOfMessage: actualMicros(MODEL, usage, false) ?? 0,
     costOfBatchResult: actualMicros(MODEL, usage, true) ?? 0,
   };
