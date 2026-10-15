@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { MemberId } from "@repowiki/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { indexRepo } from "./build-index.ts";
+import { indexRepo, MAX_MANIFEST_BYTES } from "./build-index.ts";
 import { GitError } from "./git.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
 
@@ -175,6 +175,25 @@ describe("indexRepo", () => {
       expect(JSON.stringify(index.imports)).not.toContain("slash");
     } finally {
       odd.remove();
+    }
+  });
+
+  it("holds a manifest of at most 1 MiB whole, and reads a larger one as no package", async () => {
+    const ws = createTestRepo();
+    try {
+      const pkg = (name: string, pad: number) =>
+        JSON.stringify({ name, main: "index.ts", description: "x".repeat(pad) });
+      ws.write("packages/small/package.json", pkg("small", MAX_MANIFEST_BYTES - 100));
+      ws.write("packages/small/index.ts", "export const s = 1;\n");
+      ws.write("packages/big/package.json", pkg("big", MAX_MANIFEST_BYTES));
+      ws.write("packages/big/index.ts", "export const b = 1;\n");
+      ws.write("src/a.ts", 'import { s } from "small";\nimport { b } from "big";\n');
+      ws.commit("workspace");
+      const index = await indexRepo(ws.dir, "HEAD");
+      const from = index.imports.filter((e) => e.from === "src/a.ts").map((e) => e.to);
+      expect(from).toEqual(["packages/small/index.ts"]);
+    } finally {
+      ws.remove();
     }
   });
 

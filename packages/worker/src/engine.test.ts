@@ -34,6 +34,30 @@ describe("runCli (spec 2 S9)", () => {
     ]);
   });
 
+  it("gives node its own arguments, and keeps stdout only when asked, up to a limit", async () => {
+    const path = script(
+      `process.stdout.write(JSON.stringify({ execArgv: process.execArgv, size: Number(process.argv[2]) }) + "x".repeat(Number(process.argv[2])));`,
+    );
+    const nodeArgs = ["--max-old-space-size=64"];
+    const run = (size: number, stdoutBytes?: number) =>
+      runCli({
+        script: path,
+        args: [String(size)],
+        env: {},
+        timeoutMs: 10_000,
+        nodeArgs,
+        ...(stdoutBytes === undefined ? {} : { stdoutBytes }),
+      });
+    const kept = await run(10, 1000);
+    expect(kept.status).toBe(0);
+    expect(JSON.parse(String(kept.stdout).replace(/x+$/, ""))).toEqual({
+      execArgv: nodeArgs,
+      size: 10,
+    });
+    expect((await run(10)).stdout).toBeUndefined();
+    expect((await run(100_000, 1000)).stdout).toBeNull();
+  });
+
   it("kills a script that runs past its time limit", async () => {
     const run = await runCli({
       script: script("setTimeout(() => {}, 60_000);"),

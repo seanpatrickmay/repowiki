@@ -79,6 +79,12 @@ export interface IndexOptions {
 }
 
 export const DEFAULT_MAX_FILE_BYTES = 1_000_000;
+/**
+ * The most of one package.json or Cargo.toml that pass 1 holds (1 MiB): real manifests are a few
+ * KB, and a larger one, read as empty, is no workspace package or a nameless crate, so a planted
+ * huge manifest cannot make the index hold it whole.
+ */
+export const MAX_MANIFEST_BYTES = 1024 * 1024;
 
 /** The blobs paired with their streamed contents, in order; a blob git did not return is an error. */
 async function* withContents(
@@ -132,20 +138,15 @@ export async function indexRepo(
     .map((blob) => blob.path)
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
-  // Pass 1: the manifests alone, parsed whole (they are read in full whatever their size), because
-  // the resolver needs every workspace package and Cargo crate before any file is resolved.
+  // Pass 1: the manifests alone, parsed whole (up to MAX_MANIFEST_BYTES each), because the resolver
+  // needs every workspace package and Cargo crate before any file is resolved.
   const isManifest = (path: string, name: string) => path === name || path.endsWith(`/${name}`);
   const manifests = blobs.filter(
     (blob) => isManifest(blob.path, "package.json") || isManifest(blob.path, "Cargo.toml"),
   );
   const packages: WorkspacePackage[] = [];
   const cargo: CargoManifest[] = [];
-  for await (const [blob, data] of withContents(
-    repo,
-    manifests,
-    Number.POSITIVE_INFINITY,
-    gitOptions,
-  )) {
+  for await (const [blob, data] of withContents(repo, manifests, MAX_MANIFEST_BYTES, gitOptions)) {
     const text = data.content?.toString("utf8") ?? "";
     if (isManifest(blob.path, "Cargo.toml")) {
       cargo.push(parseCargoManifest(blob.path, text));

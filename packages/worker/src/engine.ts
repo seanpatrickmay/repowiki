@@ -19,6 +19,8 @@ const TAIL_BYTES = 4096;
 
 export interface CliRun {
   status: number | null;
+  /** Stdout, when the run asked for it (`stdoutBytes`); null past that many bytes. */
+  stdout?: string | null;
   /** The last 4 KB of stderr. */
   stderrTail: string;
   timedOut: boolean;
@@ -28,7 +30,9 @@ export interface CliRun {
 
 /**
  * Run one engine CLI with exactly `env`, in its own process group so a timeout kills the git
- * children too; stdout is dropped and the last 4 KB of stderr kept.
+ * children too; the last 4 KB of stderr kept. Stdout is dropped, or with `stdoutBytes` kept up to
+ * that many bytes (past them the group is killed and `stdout` is null). `nodeArgs` go to node
+ * before the script (a heap limit, say).
  */
 export function runCli(input: {
   script: string;
@@ -36,13 +40,34 @@ export function runCli(input: {
   env: Record<string, string>;
   timeoutMs: number;
   cwd?: string;
+  nodeArgs?: readonly string[];
+  stdoutBytes?: number;
 }): Promise<CliRun> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [input.script, ...input.args], {
-      env: input.env,
-      cwd: input.cwd ?? ROOT,
-      stdio: ["ignore", "ignore", "pipe"],
-      detached: true,
+    const keep = input.stdoutBytes;
+    const child = spawn(
+      process.execPath,
+      [...(input.nodeArgs ?? []), input.script, ...input.args],
+      {
+        env: input.env,
+        cwd: input.cwd ?? ROOT,
+        stdio: ["ignore", keep === undefined ? "ignore" : "pipe", "pipe"],
+        detached: true,
+      },
+    );
+    const killGroup = () => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    };
+    const out: Buffer[] = [];
+    let outBytes = 0;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      outBytes += chunk.length;
+      if (keep !== undefined && outBytes > keep) killGroup();
+      else out.push(chunk);
     });
     let tail = "";
     let costCapped = false;
@@ -55,15 +80,15 @@ export function runCli(input: {
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        child.kill("SIGKILL");
-      }
+      killGroup();
     }, input.timeoutMs);
     const done = (status: number | null) => {
       clearTimeout(timer);
-      resolve({ status, stderrTail: tail, timedOut, costCapped });
+      const stdout =
+        keep === undefined
+          ? {}
+          : { stdout: outBytes > keep ? null : Buffer.concat(out).toString("utf8") };
+      resolve({ status, stderrTail: tail, timedOut, costCapped, ...stdout });
     };
     child.on("error", () => done(null));
     child.on("close", (status) => done(status));
