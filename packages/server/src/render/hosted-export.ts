@@ -59,11 +59,15 @@ function keptManifest(manifest: Manifest, removed: ReadonlySet<string>): Manifes
   return { ...manifest, features, membership };
 }
 
-/** A Mermaid diagram without a line naming a removed feature or a node labelled with one. */
+/**
+ * A Mermaid diagram without a line naming a removed feature (in any case) or a node labelled
+ * with one.
+ */
 function scrubDiagram(source: string, names: readonly string[]): string | null {
   if (names.length === 0) return source;
   const lines = source.split("\n");
-  const named = (line: string) => names.some((n) => line.includes(n));
+  const lowered = names.map((n) => n.toLowerCase());
+  const named = (line: string) => lowered.some((n) => line.toLowerCase().includes(n));
   const nodes = lines.flatMap((line) => {
     const id = /^\s*([A-Za-z0-9_]+)\s*[[({>]/.exec(line)?.[1];
     return id !== undefined && named(line) ? [id] : [];
@@ -91,14 +95,18 @@ export function hostedExport(exp: WikiExport, hiddenFeatureIds: readonly string[
   const link =
     ids.length === 0
       ? null
-      : new RegExp(`\\[\\[(${ids.map(escapeRe).join("|")})(?:\\|([^\\]]+))?\\]\\]`, "g");
+      : // Spaces around the id are allowed, as the site's renderInline trims them.
+        new RegExp(`\\[\\[\\s*(${ids.map(escapeRe).join("|")})\\s*(?:\\|([^\\]]+))?\\]\\]`, "g");
 
   /** Strings lose links to removed pages; string lists lose removed ids; diagrams lose lines. */
   const scrub = (value: Json, key: string): Json => {
     if (typeof value === "string") {
       if (key === "diagram") return scrubDiagram(value, names);
       if (link === null) return value;
-      return value.replace(link, (_m, id: string, label?: string) => label ?? titles.get(id) ?? id);
+      return value.replace(
+        link,
+        (_m, id: string, label?: string) => label?.trim() || titles.get(id) || id,
+      );
     }
     if (Array.isArray(value)) {
       return value

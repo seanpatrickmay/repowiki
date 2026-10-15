@@ -1,4 +1,10 @@
-import { authorize, type DraftRevision, type Generation, type Project } from "@repowiki/hosted";
+import {
+  authorize,
+  type DraftRevision,
+  type Generation,
+  type Project,
+  type RefusalCode,
+} from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
@@ -66,6 +72,7 @@ function previewData(
   generation: Generation,
   revision: DraftRevision,
   exp: Parameters<typeof portfolioData>[0]["exp"],
+  full: Parameters<typeof portfolioData>[0]["full"],
   repo: string,
 ) {
   const written = revision.overrides.contribution.trim() !== "";
@@ -73,7 +80,7 @@ function previewData(
     ? revision.overrides.contribution
     : generation.suggestions.contributionDraft || "Not written yet.";
   const shown = { ...revision, overrides: { ...revision.overrides, contribution } };
-  return portfolioData({ generation, revision: shown, exp, repoFullName: repo });
+  return portfolioData({ generation, revision: shown, exp, full, repoFullName: repo });
 }
 
 /** Building a revision's exact site and serving it privately to its owner (spec 2 S13, §7). */
@@ -90,17 +97,20 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
   ): Promise<Reply> {
     const shown = pageSession(session);
     const back = `/projects/${project.id}`;
+    /** A refusal, audited in its own transaction (spec 2 S5). */
+    const refused = async (code: RefusalCode) => {
+      await deps.db.transaction((tx) => auditAuthor(tx, deps, "preview.build", project.id, code));
+      return refusalPage(code, shown, { back });
+    };
     const latest = await latestRevision(deps.db, project.id);
-    if (latest === null || latest.number !== revision)
-      return refusalPage("stale-revision", shown, { back });
+    if (latest === null || latest.number !== revision) return refused("stale-revision");
     const generation = await generationById(deps.db, latest.generationId);
     const exp = generation === null ? null : await storedExport(deps, generation);
-    if (generation === null || exp === null)
-      return refusalPage("invalid-transition", shown, { back });
+    if (generation === null || exp === null) return refused("invalid-transition");
     const repo =
       (await repoFullName(deps.db, project.githubRepoId)) ?? `${session.account.login}/${exp.repo}`;
     const hosted = hostedExport(exp, latest.overrides.hiddenFeatureIds);
-    const data = previewData(generation, latest, hosted, repo);
+    const data = previewData(generation, latest, hosted, exp, repo);
     const tree = await build({
       exp: hosted,
       base: `${siteBase(await handleOf(session), project.slug)}docs/`,
@@ -111,8 +121,16 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
     for (const file of tree.files) {
       await deps.objects.put(`${prefix}${file.path}`, file.bytes, contentTypeFor(file.path));
     }
-    await deps.db.transaction(async (tx) => {
+    // The build took a while: the policy and "still the latest" are checked again with the
+    // project locked, in the transaction that saves the preview.
+    const saved = await deps.db.transaction(async (tx): Promise<RefusalCode | null> => {
       const now = deps.now();
+      const locked = await ownedProject(tx, session, project.id, true);
+      if (locked === null) return "not-found";
+      const caller = { kind: "account" as const, account: session.account };
+      const verdict = authorize("preview.read", { now, caller, project: locked });
+      if (!verdict.ok) return verdict.code;
+      if ((await latestRevision(tx, project.id))?.number !== revision) return "stale-revision";
       await savePreview(tx, {
         projectId: project.id,
         revision,
@@ -121,8 +139,9 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
         createdAt: now,
       });
       await auditAuthor(tx, deps, "preview.build", project.id, "allowed");
+      return null;
     });
-    return redirect(back);
+    return saved === null ? redirect(back) : refused(saved);
   }
 
   const notFound: Reply = {
@@ -142,11 +161,18 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
         if (project === null) return refusalPage("not-found", shown);
         const caller = { kind: "account" as const, account: session.account };
         const verdict = authorize("preview.read", { now: deps.now(), caller, project });
-        if (!verdict.ok) return refusalPage(verdict.code, shown);
+        if (!verdict.ok) {
+          await deps.db.transaction((tx) =>
+            auditAuthor(tx, deps, "preview.build", project.id, verdict.code),
+          );
+          return refusalPage(verdict.code, shown);
+        }
         const account = session.account.id;
         if (building.has(account)) {
           const body = `<h1>Please wait</h1><p>A preview is already being built.</p><p><a href="/projects/${project.id}">Back</a></p>`;
-          return html(429, page({ title: "Please wait", body, session: shown }));
+          return html(429, page({ title: "Please wait", body, session: shown }), {
+            "cache-control": "private, no-store",
+          });
         }
         building.add(account);
         try {

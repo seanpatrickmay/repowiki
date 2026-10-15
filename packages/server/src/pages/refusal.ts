@@ -23,6 +23,8 @@ export function refusalPage(
       body: `<h1>That didn't work</h1><p>${escapeHtml(message)}</p>${detail}<p><a href="${escapeHtml(options.back ?? "/dashboard")}">Back</a></p>`,
       session,
     }),
+    // It names the signed-in account and carries its CSRF token: never stored by any cache.
+    { "cache-control": "private, no-store" },
   );
 }
 

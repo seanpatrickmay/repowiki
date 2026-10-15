@@ -9,6 +9,7 @@ import { internalRoutes } from "./internal.ts";
 import { jobRoutes } from "./project-jobs.ts";
 import { projectRoutes } from "./projects.ts";
 import {
+  auditOutcomes,
   call,
   form,
   generatedProject,
@@ -75,6 +76,19 @@ describe("cancel (Contract §6.1)", () => {
     expect((await post(wrong)).status).toBe(404);
     expect((await post(`/projects/${job.projectId}/jobs/not-a-uuid/cancel`)).status).toBe(404);
     expect(await theJob()).toMatchObject({ status: "running" });
+  });
+});
+
+describe("cancel refusals (spec 2 S5)", () => {
+  it("audits a refused cancel in its own transaction", async () => {
+    const path = `/projects/${job.projectId}/jobs/${job.jobId}/cancel`;
+    expect((await post(path)).status).toBe(303);
+    const again = await post(path);
+    expect(again.status).toBe(REFUSALS["invalid-transition"].status);
+    expect(await auditOutcomes(deps.db, "job.cancel", job.projectId)).toEqual([
+      "allowed",
+      "invalid-transition",
+    ]);
   });
 });
 

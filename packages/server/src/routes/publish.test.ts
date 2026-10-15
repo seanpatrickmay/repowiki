@@ -7,7 +7,7 @@ import { projectById } from "../store/projects.ts";
 import { draftRoutes } from "./drafts.ts";
 import { previewRoutes } from "./preview.ts";
 import { publishRoutes } from "./publish.ts";
-import { call, form, generatedProject, otherCookie, testDeps } from "./test-app.ts";
+import { auditOutcomes, call, form, generatedProject, otherCookie, testDeps } from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
@@ -117,6 +117,16 @@ describe("publish (Contract §6.4)", () => {
     expect(await deps.objects.list(`sites/${p.projectId}/`)).toEqual([]);
     expect((await project())?.state).toBe("draft");
   }, 300_000);
+
+  it("audits a refused unpublish (spec 2 S5)", async () => {
+    expect((await post(`/projects/${p.projectId}/unpublish`, "")).status).toBe(303);
+    const refused = await post(`/projects/${p.projectId}/unpublish`, "");
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    const outcomes = await auditOutcomes(deps.db, "project.unpublish", p.projectId);
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes[0]).toBe("allowed");
+    expect(outcomes[1]).not.toBe("allowed");
+  });
 
   it("unpublishes at once, for the owner only", async () => {
     await publishing(await ready());

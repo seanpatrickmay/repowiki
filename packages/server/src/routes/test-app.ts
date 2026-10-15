@@ -194,3 +194,14 @@ export async function freePort(): Promise<number> {
   if (typeof address !== "object" || address === null) throw new Error("no port");
   return address.port;
 }
+
+/** Test-only: the outcomes audited for `action` on a project, oldest first. */
+export async function auditOutcomes(db: Db, action: string, projectId: string): Promise<string[]> {
+  const rows = await db.query<{
+    body: { action: string; outcome: string; target: { id: string } };
+  }>("SELECT body FROM audit_events ORDER BY created_at, id");
+  return rows
+    .map((r) => r.body)
+    .filter((b) => b.action === action && b.target.id === projectId)
+    .map((b) => b.outcome);
+}

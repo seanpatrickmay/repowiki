@@ -5,11 +5,17 @@ import { hostedExport } from "./hosted-export.ts";
 
 const exp = WikiExport.parse(fixtureExport());
 
-/** Every way an id could still be named: a quoted value, a link token, a path segment. */
+/** Every way an id could still be named: a quoted value, a link token (spaced or not), a path. */
 function traces(out: WikiExport, id: string): string[] {
   const text = JSON.stringify(out);
-  return [`"${id}"`, `[[${id}]]`, `[[${id}|`, `/wiki/${id}/`].filter((t) => text.includes(t));
+  const plain = [`"${id}"`, `/wiki/${id}/`].filter((t) => text.includes(t));
+  const token = new RegExp(`\\[\\[\\s*${id}\\s*(?:\\||\\]\\])`).exec(text)?.[0];
+  return token === undefined ? plain : [...plain, token];
 }
+
+/** The fixture with its text rewritten, e.g. to space out link tokens. */
+const rewritten = (from: string, to: string) =>
+  WikiExport.parse(JSON.parse(JSON.stringify(fixtureExport()).replaceAll(from, to)));
 
 describe("the hosted export (spec 2 S10, S13; Contract §8; M14e A4)", () => {
   for (const hidden of ["deliverables", "signals"]) {
@@ -22,6 +28,23 @@ describe("the hosted export (spec 2 S10, S13; Contract §8; M14e A4)", () => {
       expect(traces(out, hidden)).toEqual([]);
     });
   }
+
+  it("finds link tokens with spaces in them, as the site's renderer reads them", () => {
+    const spaced = rewritten("[[deliverables]]", "[[ deliverables ]]");
+    const labelled = rewritten("[[deliverables|", "[[deliverables |");
+    expect(JSON.stringify(spaced)).toContain("[[ deliverables ]]");
+    expect(JSON.stringify(labelled)).toContain("[[deliverables |");
+    expect(traces(hostedExport(spaced, ["deliverables"]), "deliverables")).toEqual([]);
+    expect(traces(hostedExport(labelled, ["deliverables"]), "deliverables")).toEqual([]);
+    expect(JSON.stringify(hostedExport(spaced, ["deliverables"]))).toContain("Deliverables");
+  });
+
+  it("drops a diagram line naming a hidden feature's title in another case", () => {
+    const shouting = rewritten('[[\\"Deliverables\\"]]', '[[\\"DELIVERABLES\\"]]');
+    expect(shouting.architecture.at(-1)?.diagram).toContain("DELIVERABLES");
+    const out = hostedExport(shouting, ["deliverables"]);
+    expect(out.architecture.at(-1)?.diagram ?? "").not.toMatch(/deliverables/i);
+  });
 
   it("drops what pointed only at a hidden feature: its redirects and a disambiguation left with one", () => {
     const out = hostedExport(exp, ["signals"]);
