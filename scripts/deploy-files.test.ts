@@ -56,9 +56,37 @@ describe("the worker entrypoint (spec 2 S9)", () => {
   });
 
   it("puts only a checked address and port into the rules", () => {
-    const beforeRules = script.slice(0, start);
-    expect(beforeRules).toMatch(/\^\[0-9a-fA-F:\]\+\$/);
-    expect(beforeRules).toMatch(/\^\[0-9\]\+\$/);
+    const [, addr, port] = rules.match(/ip6 daddr \$(\w+) tcp dport \$(\w+) accept/) ?? [];
+    expect(addr && port).toBeTruthy();
+    const lines = script.slice(0, start).split("\n");
+    const guard = (pattern: string) => lines.findIndex((l) => l.includes(pattern));
+    const addrCheck = guard("grep -Eq '^[0-9a-fA-F:]+$'");
+    const portCheck = guard("grep -Eq '^[0-9]+$'");
+    expect(lines[addrCheck]).toMatch(new RegExp(`^printf '%s' "\\$${addr}" \\|`));
+    expect(lines[portCheck]).toMatch(new RegExp(`^printf '%s' "\\$${port}" \\|`));
+    // Nothing reassigns either variable between its check and the rules.
+    const reassigned = new RegExp(`^\\s*(?:${addr}|${port})=`);
+    expect(lines.slice(Math.min(addrCheck, portCheck)).some((l) => reassigned.test(l))).toBe(false);
+  });
+
+  it("hands the work directory to the worker user before the firewall and phase 2", () => {
+    const chown = script.indexOf('chown -R worker:worker "$WORK"');
+    expect(chown).toBeGreaterThan(0);
+    expect(start).toBeGreaterThan(chown);
+    expect(script.indexOf("exec setpriv")).toBeGreaterThan(chown);
+  });
+
+  it("closes what nftables cannot see before phase 2: the Machines API socket and user namespaces", () => {
+    // A Unix socket is not network traffic: /.fly/api would reach the Machines API unfiltered.
+    const setpriv = script.indexOf("exec setpriv");
+    for (const line of [
+      "chmod 000 /.fly/api 2>/dev/null || true",
+      "sysctl -w user.max_user_namespaces=0 2>/dev/null || true",
+    ]) {
+      const at = script.indexOf(`\n${line}\n`);
+      expect(at, line).toBeGreaterThan(script.indexOf("\nRULES", start));
+      expect(setpriv, line).toBeGreaterThan(at);
+    }
   });
 });
 
@@ -71,6 +99,8 @@ describe("the image and the Fly configs (spec 2 §2)", () => {
     expect(docker).toMatch(/FROM base AS server/);
     expect(docker).toMatch(/FROM base AS worker/);
     expect(docker).toContain("nftables");
+    // The entrypoint's sysctl: bookworm-slim has no procps, and the call's `|| true` would hide it.
+    expect(docker).toMatch(/apt-get install[^\n]* procps/);
     expect(docker).toContain("--frozen-lockfile");
   });
 
