@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { objectStoreFor } from "./open.ts";
-import { s3ObjectStore } from "./s3-store.ts";
+import { ObjectListTruncated, s3ObjectStore } from "./s3-store.ts";
+import { signV4 } from "./sigv4.ts";
 
 const HTML = "text/html; charset=utf-8";
 let calls: { method: string; url: string; headers: Headers; body: string }[];
@@ -13,6 +15,22 @@ const fake: typeof fetch = async (input, init) => {
   const headers = new Headers(init?.headers);
   const body = init?.body === undefined ? "" : Buffer.from(init.body as Uint8Array).toString();
   calls.push({ method, url: url.href, headers, body });
+  // Verify as S3 would: the signature recomputed from the request as received.
+  const signed = Object.fromEntries([...headers].filter(([name]) => name !== "authorization"));
+  const expected = signV4({
+    method,
+    url,
+    headers: signed,
+    accessKeyId: "id",
+    secretAccessKey: "secret",
+    region: "auto",
+    service: "s3",
+    amzDate: headers.get("x-amz-date") ?? "",
+  });
+  const digest = createHash("sha256").update(body).digest("hex");
+  if (headers.get("authorization") !== expected || headers.get("x-amz-content-sha256") !== digest) {
+    return new Response("<Error><Code>SignatureDoesNotMatch</Code></Error>", { status: 403 });
+  }
   const key = decodeURIComponent(url.pathname.replace(/^\/bucket\/?/, ""));
   if (method === "PUT") {
     objects.set(key, { body, type: headers.get("content-type") ?? "" });
@@ -90,6 +108,28 @@ describe("the S3 store (spec 2 S12)", () => {
     expect(second?.url).toContain("prefix=sites%2Fq%2F");
     await s3.delete(["sites/q/1.html"]);
     expect(await s3.list("sites/q/")).toEqual(["sites/q/2.html"]);
+  });
+
+  it("lists a prefix holding an ampersand", async () => {
+    await s3.put("sites/a&b/1.html", "1", HTML);
+    await s3.put("sites/a&b/2.html", "2", HTML);
+    await s3.put("sites/a/3.html", "3", HTML);
+    expect(await s3.list("sites/a&b/")).toEqual(["sites/a&b/1.html", "sites/a&b/2.html"]);
+  });
+
+  it("refuses to return a listing cut short by the page cap", async () => {
+    const endless = s3ObjectStore({
+      endpoint: "https://acct.r2.cloudflarestorage.com",
+      bucket: "bucket",
+      accessKeyId: "id",
+      secretAccessKey: "secret",
+      fetch: async () =>
+        new Response(
+          "<ListBucketResult><Contents><Key>k</Key></Contents><IsTruncated>true</IsTruncated><NextContinuationToken>t</NextContinuationToken></ListBucketResult>",
+        ),
+      now: () => new Date("2026-10-14T12:00:00Z"),
+    });
+    await expect(endless.list("k")).rejects.toBeInstanceOf(ObjectListTruncated);
   });
 
   it("refuses a bad key before any request", async () => {

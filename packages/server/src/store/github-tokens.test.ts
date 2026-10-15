@@ -46,8 +46,9 @@ describe("stored GitHub tokens (spec 2 S7)", () => {
   it("do not decrypt once moved to another account's row", async () => {
     await db.transaction((tx) => saveGitHubToken(tx, KEY, A1, "gho_first"));
     await db.query("UPDATE github_tokens SET account_id = $1", [A2]);
-    expect(await readGitHubToken(db, KEY, A2)).toBeNull();
-    expect(await readGitHubToken(db, KEY, A1)).toBeNull();
+    const quiet = () => {};
+    expect(await readGitHubToken(db, KEY, A2, quiet)).toBeNull();
+    expect(await readGitHubToken(db, KEY, A1, quiet)).toBeNull();
   });
 
   it("do not decrypt once a ciphertext byte is changed", async () => {
@@ -56,5 +57,15 @@ describe("stored GitHub tokens (spec 2 S7)", () => {
       "UPDATE github_tokens SET ciphertext = set_byte(ciphertext, 0, get_byte(ciphertext, 0) # 1)",
     );
     expect(await readGitHubToken(db, KEY, A1)).toBeNull();
+  });
+
+  it("log a token that no longer decrypts (a rotated TOKEN_KEY), never its value", async () => {
+    await db.transaction((tx) => saveGitHubToken(tx, KEY, A1, "gho_secret"));
+    const lines: object[] = [];
+    expect(await readGitHubToken(db, Buffer.alloc(32, 4), A1, (l) => lines.push(l))).toBeNull();
+    expect(lines).toEqual([{ githubToken: "undecryptable", error: "DecryptFailed" }]);
+    expect(JSON.stringify(lines)).not.toContain("gho_");
+    expect(await readGitHubToken(db, KEY, A2, (l) => lines.push(l))).toBeNull();
+    expect(lines).toHaveLength(1);
   });
 });
