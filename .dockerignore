@@ -1,12 +1,24 @@
+# Docker matches a bare pattern only at the context root, so every entry also has a `**/` form.
 .git
+**/.git
 node_modules
 **/node_modules
-.env
-.env.*
-!.env.example
 .repowiki
+**/.repowiki
 .superpowers
+**/.superpowers
 .claude
+**/.claude
 coverage
+**/coverage
 dist
+**/dist
 **/.astro
+**/*.db
+**/*.db-*
+.env
+**/.env
+.env.*
+**/.env.*
+!.env.example
+!**/.env.example

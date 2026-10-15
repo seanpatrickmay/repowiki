@@ -18,8 +18,11 @@ export function landingRoutes(deps: Deps): Route[] {
             ? `<p><a href="/auth/github">Sign in with GitHub</a> to build a page for one of your public repositories.</p>`
             : `<p><a href="/dashboard">Go to your projects</a>.</p>`;
         const body = `<h1>RepoWiki</h1><p>A project page for a public repository you worked on, with a cited wiki of the code and an account of your part in it, reviewed by you before anyone sees it.</p>${action}`;
-        const shown = session === null ? null : pageSession(session);
-        return html(200, page({ title: "Home", body, session: shown }));
+        if (session === null) return html(200, page({ title: "Home", body, session: null }));
+        // Signed in, the page names the visitor: no shared cache may keep it.
+        return html(200, page({ title: "Home", body, session: pageSession(session) }), {
+          "cache-control": "private, no-store",
+        });
       },
     },
   ];

@@ -26,7 +26,7 @@ CMD ["node", "packages/server/src/main.ts"]
 
 FROM base AS worker
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates nftables util-linux \
+  && apt-get install -y --no-install-recommends git ca-certificates nftables procps util-linux \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --system --create-home --shell /usr/sbin/nologin worker
 COPY deploy/worker-entrypoint.sh /usr/local/bin/worker-entrypoint

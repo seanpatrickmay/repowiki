@@ -118,7 +118,7 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     expect(previewHash).toMatch(/^[0-9a-f]{64}$/);
     const id = projectPath.split("/").at(-1) ?? "";
     expect((await me.go(`/preview/${id}/2/`)).status).toBe(200);
-    expect((await browser(base).go(`/preview/${id}/2/`)).status).not.toBe(200);
+    expect((await browser(base).go(`/preview/${id}/2/`)).status).toBe(404);
 
     const published = await me.go(`${projectPath}/publish`, {
       form: {
@@ -141,6 +141,8 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     expect((await reader.go("/demo-dev/demo-repo/docs/pagefind/pagefind.js")).status).toBe(200);
     expect((await reader.go(`/demo-dev/demo-repo/docs/wiki/${shown}/`)).status).toBe(200);
     expect((await reader.go(`/demo-dev/demo-repo/docs/wiki/${hidden}/`)).status).toBe(404);
+    // The home links the shown page, so the hidden page's absence is not an empty home's.
+    expect(wiki.text).toContain(`/wiki/${shown}/`);
     expect(wiki.text).not.toContain(`/wiki/${hidden}/`);
     const profile = await reader.go("/demo-dev");
     expect(profile.status).toBe(200);

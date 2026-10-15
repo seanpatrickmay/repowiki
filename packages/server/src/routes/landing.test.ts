@@ -24,5 +24,7 @@ describe("the landing page (spec 2 §7)", () => {
     });
     expect(reply.status).toBe(200);
     expect(String(reply.body)).toContain('href="/dashboard"');
+    // It names the visitor, so no shared cache may keep it.
+    expect(reply.headers?.["cache-control"]).toBe("private, no-store");
   });
 });

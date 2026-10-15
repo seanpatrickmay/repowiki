@@ -151,11 +151,6 @@ export async function openReservations(q: Queryable, jobId: string): Promise<num
   return Number(rows[0]?.usd ?? 0);
 }
 
-/**
- * A job about to stop: every open reservation becomes spend in full, because the real cost of a
- * batch whose results were never read is unknown (Contract C8; spec 2 §6). Each is recorded as
- * its real cost at `now`; the job's spend never passes the cap, which the Job schema forbids.
- */
 /** The upstream ids of a job's batches still open: what to cancel once the job ends (S11). */
 export async function openBatchIds(q: Queryable, jobId: string): Promise<string[]> {
   const rows = await q.query<{ batch_id: string }>(
@@ -166,6 +161,11 @@ export async function openBatchIds(q: Queryable, jobId: string): Promise<string[
   return rows.map((r) => r.batch_id);
 }
 
+/**
+ * A job about to stop: every open reservation becomes spend in full, because the real cost of a
+ * batch whose results were never read is unknown (Contract C8; spec 2 §6). Each is recorded as
+ * its real cost at `now`; the job's spend never passes the cap, which the Job schema forbids.
+ */
 export async function settleOpen(q: Queryable, job: Job, now: string): Promise<Job> {
   const open = await openReservations(q, job.id);
   await q.query(

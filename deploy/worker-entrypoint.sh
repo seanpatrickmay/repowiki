@@ -32,6 +32,8 @@ printf '%s %s\n' "$addr" "$host" >> /etc/hosts
 node "$APP" phase1
 
 chown -R worker:worker "$WORK"
+# Neighbor Discovery is not conntrack-related traffic: without it the kernel cannot re-resolve the
+# server's link address after an idle gap. Hop limit 255 means it came from the link itself.
 nft -f - <<RULES
 flush ruleset
 table inet sandbox {
@@ -39,15 +41,22 @@ table inet sandbox {
     type filter hook output priority 0; policy drop;
     oif "lo" accept
     ct state established,related accept
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } ip6 hoplimit 255 accept
     ip6 daddr $addr tcp dport $port accept
   }
   chain input {
     type filter hook input priority 0; policy drop;
     iif "lo" accept
     ct state established,related accept
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } ip6 hoplimit 255 accept
   }
 }
 RULES
+# What nftables cannot see: a Unix socket is not network traffic, and Fly's /.fly/api socket
+# reaches the Machines API. Phase 2's user may not open it, nor make a user namespace (where it
+# would hold capabilities again). Either may be absent; the firewall above is the boundary.
+chmod 000 /.fly/api 2>/dev/null || true
+sysctl -w user.max_user_namespaces=0 2>/dev/null || true
 
 exec setpriv --reuid=worker --regid=worker --init-groups --no-new-privs --bounding-set=-all \
   env HOME=/home/worker node "$APP" phase2
