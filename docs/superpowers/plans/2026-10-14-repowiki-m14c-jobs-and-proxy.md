@@ -26,6 +26,36 @@
 4. **Two "Build" clicks for the same repository**: one project, one job (the second returns the first). Pinned in Task 1.
 5. **A queued job whose worker never leased it** (the start failed, the server restarted): the sweeper restarts it, and gives up after three tries. Pinned in Task 2.
 
+## Amendments from the plan review (binding: where they conflict with a task below, they win)
+
+A fresh review of this plan found these defects. Each one needs a failing test first, in the task named.
+
+- **A1 (Task 4, Critical): a strict request shape, so the cap cannot be bypassed.** Read `packages/llm/src/claude.ts` and `batcher.ts` to list exactly what the engine sends. Typically that is `model`, `max_tokens`, `system` (a string or text blocks), `messages` with text content blocks only, `output_config`, `temperature`, `metadata`, and `cache_control: { type: "ephemeral" }` with no `ttl`. Validate `/v1/messages` bodies and each batch request's `params` against a `z.strictObject` of exactly that.
+  - Refuse with 400: `stream`, `tools`, `tool_choice`, `mcp_servers`, `container`, `service_tier`, image, document or any other non-text content block, and any `ttl`.
+  - Pass `anthropic-beta` through only if every value is in an allowlist of betas the engine sets (an empty allowlist if it sets none).
+  - Tests: one refusal each for stream, tools, an image block, a 1-hour TTL, an unknown beta.
+- **A2 (Task 4, Critical): count the input exactly, reserve a share of the output, and never charge less than reality.** The plan's worst case (bytes as tokens plus every `max_tokens`) puts any real batch over a Free job's $1 cap. The owner's measured builds cost $0.08–0.70, while a 70-page batch would reserve more than $6.
+  - **Input:** count it exactly with Anthropic's free `POST /v1/messages/count_tokens`, using the real key and the same body minus `max_tokens`. For a batch, count each request. If counting fails, fall back to the byte count, which is a true upper bound. Price input at the model's cache-write rate.
+  - **Output:** reserve `max_tokens × OUTPUT_RESERVE_SHARE`, a constant set to `0.25` in `proxy/cost.ts`.
+  - **Batch discount:** halve the reservation for batches.
+  - **Settlement:** charge the actual cost through `recordSpend`, never `min(actual, reserved)`. A 2xx reply whose usage cannot be parsed is charged the reservation. When spend reaches the cap, the same transaction fails the job with `job-cost-cap` (`failJob`, `revokeTokens`).
+  - **What the cap now means:** spend can pass it only by the unreserved output share of requests already in flight. Amend spec 2 S11's ruling to say exactly this, and that the share is the knob.
+  - Tests:
+    - `worstCaseMicros` becomes `reserveMicros(model, inputTokens, maxTokens, batch)`.
+    - A fake upstream `count_tokens` is used and its count drives the reservation.
+    - Usage above the reservation is charged in full and fails the job.
+    - An unparseable 2xx is charged the reservation.
+- **A3 (Task 4): a separate body limit for batches.** `/llm/v1/messages/batches` reads up to 64 MiB; `/v1/messages` keeps 8 MiB.
+- **A4 (Tasks 3 and 4): authenticate before reading a body.** Resolve and check the job token first, then read the body, so an unauthenticated request never makes the server buffer or parse 32 MiB.
+  - The per-token rate limiter keys only on valid tokens, and its map drops entries older than a second on every call.
+- **A5 (Tasks 2 and 3, Important): one worker per attempt.**
+  - When the sweeper restarts a queued job, `revokeTokens` runs before `issueToken`.
+  - Add migration with the next free number (`packages/server/src/db/migrations/0003-job-leases.sql` if M14a's review fixes added 0002): `ALTER TABLE job_tokens ADD COLUMN leased boolean NOT NULL DEFAULT false;`.
+  - The lease route marks the token that leases a queued job, and answers 409 to a lease, heartbeat or any other internal call from a different token while the job runs.
+  - Tests: two tokens for one attempt, the second refused once the first has leased.
+- **A6 (Task 1): GitHub errors on the head commit.** `headSha` returns null on GitHub's 409 (empty repository) and 422 (no such ref). The route answers `invalid-input` ("The repository has no commits on its default branch.") instead of a 500.
+- **A7 (Task 3): the worker's spec carries the clone directory name.** `WorkerSpec.repo.name` is used by the worker as the bare clone's directory name, so the wiki is named after the repository and not `repo.git` (see M14d A2). Nothing changes here except a comment saying so.
+
 ---
 
 ### Task 1: Project and job store, usage, and starting a generation
@@ -1205,7 +1235,7 @@ git -c user.email=sean.may101@gmail.com commit -m "feat(server): start jobs on a
 
 **Files:**
 - Create: `packages/server/src/store/drafts.ts` (revision and generation rows), `packages/server/src/routes/internal.ts`, `packages/server/src/routes/internal.test.ts`
-- Modify: `packages/server/src/app.ts` (`Deps` gains `objects: ObjectStore`), `packages/server/src/routes/test-app.ts` (fs objects under a temp dir; `startedJob(deps)` helper), `packages/server/src/index.ts`
+- Modify: `packages/site/package.json` (`exports`), `packages/server/package.json` (`@repowiki/site`), `packages/server/src/app.ts` (`Deps` gains `objects: ObjectStore`), `packages/server/src/routes/test-app.ts` (fs objects under a temp dir; `startedJob(deps)` helper), `packages/server/src/index.ts`
 
 **Interfaces:**
 - Consumes: Tasks 1–2; `ObjectStore` (M14b T4); core `WikiExport`; hosted `leaseJob`, `heartbeatJob`, `succeedJob`, `failJob`, `firstRevision`, `refreshRevision`, `Generation`, `DraftRevision`, `Suggestions`, `Facts`, `JobStep`, `PLANS`.
@@ -1266,7 +1296,7 @@ export async function startedJob(deps: Deps): Promise<{ jobId: string; token: st
 `packages/server/src/routes/internal.test.ts`:
 
 ```ts
-import { fixtureExport } from "@repowiki/core/test-fixtures";
+import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
@@ -1318,7 +1348,7 @@ describe("the worker's internal API (spec 2 §6)", () => {
       repo: { fullName: "demo-dev/demo-repo" },
       author: { login: "demo-dev" },
       limits: { maxIndexedFiles: 1000 },
-      llmUrl: `${deps.config.origin}/llm`,
+      llmUrl: `${deps.config.runner.internalUrl}/llm`,
     });
     expect((await post("/internal/job/lease", job.token)).status).toBe(200);
     expect(await jobById(deps.db, job.jobId)).toMatchObject({ status: "running", step: "fetch" });
@@ -1400,7 +1430,16 @@ describe("the worker's internal API (spec 2 §6)", () => {
 });
 ```
 
-(`@repowiki/core/test-fixtures` must be exported by core; if it is not, add `"./test-fixtures": "./src/test-fixtures.ts"` to `packages/core/package.json` `exports` — core already ships `test-fixtures.ts`.)
+(`fixtureExport()` lives in `packages/site/src/test-fixtures.ts` and imports only `@repowiki/core`. Give the site package an `exports` field so other packages can import it by name, and add `"@repowiki/site": "workspace:*"` to `packages/server/package.json` (M14e needs `buildSite` from it anyway):
+
+```json
+  "exports": {
+    ".": "./src/build.ts",
+    "./test-fixtures": "./src/test-fixtures.ts"
+  },
+```
+
+Run `pnpm install` after both edits.)
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
@@ -1555,7 +1594,7 @@ export function internalRoutes(deps: Deps): Route[] {
             repo: { fullName: spec.repo.fullName, name: spec.repo.name, cloneUrl: spec.repo.cloneUrl, sizeKb: spec.repo.sizeKb },
             author: spec.author,
             limits: { maxIndexedFiles: PLANS[spec.plan].maxIndexedFiles },
-            llmUrl: `${deps.config.origin}/llm`,
+            llmUrl: `${deps.config.runner.internalUrl}/llm`,
           };
           return json(200, reply);
         }),
@@ -1691,7 +1730,7 @@ export { generationById, latestRevision, saveGeneration, saveRevision } from "./
 ```bash
 pnpm format && node node_modules/vitest/vitest.mjs run packages/server
 pnpm check
-git add packages/server packages/core/package.json
+git add packages/server packages/site/package.json pnpm-lock.yaml
 git -c user.email=sean.may101@gmail.com commit -m "feat(server): give the worker a job-token API from lease to success"
 ```
 
@@ -1715,7 +1754,7 @@ Behaviour:
 - **Reserve** in one transaction locking the job: worst case = UTF-8 bytes of the request JSON (as input tokens) plus `max_tokens` (as output) at the model's price, halved for a batch (summed over its requests). Refuse with **429** `{ type: "error", error: { type: "rate_limit_error", message: "job-cost-cap" } }` if `spent + open reservations + worst > cap`.
 - **Forward** to `${anthropic.url}/v1/...` with the real key and `anthropic-version` / `anthropic-beta` passed through; nothing else from the worker.
 - **Settle**: a message settles at once from its `usage` (0 on an upstream error); a batch's reservation records its batch id and settles once, when its results are read, summed over succeeded results at batch price. Settled spend is `min(actual, reserved)` through `recordSpend`.
-- **Rewrite** `results_url` in batch create and retrieve replies to `${origin}/llm/v1/messages/batches/<id>/results`; refuse a batch id that is not this job's (404).
+- **Rewrite** `results_url` in batch create and retrieve replies to `${runner.internalUrl}/llm/v1/messages/batches/<id>/results` (the worker reaches the server only at its private address, and the SDK fetches `results_url` as given); refuse a batch id that is not this job's (404).
 - 10 requests a second per job token, in memory (429 past it).
 
 - [ ] **Step 1: Branch**
@@ -1831,7 +1870,7 @@ describe("the LLM proxy (spec 2 S11)", () => {
     });
     expect(created.status).toBe(200);
     const batch = JSON.parse(String(created.body));
-    expect(batch.results_url).toBe(`${deps.config.origin}/llm/v1/messages/batches/${batch.id}/results`);
+    expect(batch.results_url).toBe(`${deps.config.runner.internalUrl}/llm/v1/messages/batches/${batch.id}/results`);
     const open = await deps.db.query<{ usd_micros: string }>("SELECT usd_micros FROM reservations WHERE NOT settled");
     expect(open).toHaveLength(1);
     const status = await send(`/llm/v1/messages/batches/${batch.id}`, undefined, job.token, "GET");
@@ -2052,7 +2091,8 @@ export function llmRoutes(deps: Deps): Route[] {
     });
   };
 
-  const resultsUrl = (id: string) => `${deps.config.origin}/llm/v1/messages/batches/${encodeURIComponent(id)}/results`;
+  const resultsUrl = (id: string) =>
+    `${deps.config.runner.internalUrl}/llm/v1/messages/batches/${encodeURIComponent(id)}/results`;
   const rewrite = (batch: Record<string, unknown>) =>
     typeof batch.id === "string" && typeof batch.results_url === "string" ? { ...batch, results_url: resultsUrl(batch.id) } : batch;
 
