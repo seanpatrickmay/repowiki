@@ -33,3 +33,10 @@ export {
   type SnapshotFacts,
 } from "./facts.ts";
 export { AUTHOR_ID, authorEmails, peopleFile } from "./people-file.ts";
+export {
+  cleanSuggestions,
+  fallbackSuggestions,
+  leadOf,
+  plainWords,
+  suggest,
+} from "./suggestions.ts";
