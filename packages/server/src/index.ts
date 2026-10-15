@@ -1,4 +1,7 @@
 export { type Config, ConfigError, loadConfig, type Mode } from "./config.ts";
+export { type Db, isUniqueViolation, type Queryable, withRetries } from "./db/db.ts";
+export { openPg, type PoolLike, poolDb } from "./db/pg.ts";
+export { openPglite } from "./db/pglite.ts";
 export { BODY_LIMIT, HttpError, readBody, readForm, readJson } from "./http/body.ts";
 export {
   createRouter,
