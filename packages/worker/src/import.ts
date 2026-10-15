@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type PeopleSnapshot, WikiExport } from "@repowiki/core";
+import { pathLanguageName } from "@repowiki/engine";
 import { Facts, type JobStep } from "@repowiki/hosted";
 import { z } from "zod";
 import { ApiError, type WorkerApi, workerApi } from "./api.ts";
@@ -94,20 +95,40 @@ const NOT_CODE = new Set([
 
 /**
  * A generation's facts from a built export: indexed files and code languages from the page
- * infoboxes (each page's lines split evenly across its code languages; a page with none is left
- * out of the shares), the author's share from People. Zeros when People is off or does not
- * name the author.
+ * infoboxes (each page's lines split across its code languages by how many of its member files
+ * each has, evenly when none can be told; a page with no code language is left out of the
+ * shares), the author's share from People. Zeros when People is off or does not name the author.
  */
 export function exportFacts(exp: WikiExport, author: Author): Facts {
-  const files = exp.pages.flatMap(({ infobox }): FileFacts[] => {
-    const langs = infobox.languages
-      .filter((l) => !NOT_CODE.has(l))
-      .map((l) => (l === "TSX" ? "TypeScript" : l));
+  const counts = new Map<string, Map<string, number>>();
+  for (const [path, { featureId }] of Object.entries(exp.manifest.membership)) {
+    const raw = pathLanguageName(path);
+    if (raw === undefined) continue;
+    const name = raw === "TSX" ? "TypeScript" : raw;
+    const page = counts.get(featureId) ?? new Map<string, number>();
+    page.set(name, (page.get(name) ?? 0) + 1);
+    counts.set(featureId, page);
+  }
+  const files = exp.pages.flatMap(({ featureId, infobox }): FileFacts[] => {
+    const langs = [
+      ...new Set(
+        infobox.languages
+          .filter((l) => !NOT_CODE.has(l))
+          .map((l) => (l === "TSX" ? "TypeScript" : l)),
+      ),
+    ];
     if (langs.length === 0) {
       const skipped = infobox.languages.length > 0 ? "not-code" : null;
       return [{ language: null, loc: infobox.loc, skipped }];
     }
-    return langs.map((language) => ({ language, loc: infobox.loc / langs.length, skipped: null }));
+    const members = counts.get(featureId);
+    const weights = langs.map((l) => members?.get(l) ?? 0);
+    const total = weights.reduce((sum, w) => sum + w, 0);
+    return langs.map((language, i) => ({
+      language,
+      loc: total === 0 ? infobox.loc / langs.length : (infobox.loc * (weights[i] ?? 0)) / total,
+      skipped: null,
+    }));
   });
   const featureIds = pageFeatureIds(exp);
   const snapshot = exp.people?.snapshot ?? null;

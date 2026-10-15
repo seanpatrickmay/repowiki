@@ -211,6 +211,7 @@ export {
   MAX_PAGE_OUTPUT_TOKENS,
   MIN_ARCHITECTURE_PAGES,
   type PageOutcome,
+  pathLanguageName,
   updateSystemPrompt,
   type WikiBuild,
   WikiBuildError,

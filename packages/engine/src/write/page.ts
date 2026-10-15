@@ -9,7 +9,12 @@ import {
   type SectionKey,
   type TokenUsage,
 } from "@repowiki/core";
-import type { CommitInfo, RepoIndex, SourceLanguage } from "../index/index.ts";
+import {
+  type CommitInfo,
+  languageForPath,
+  type RepoIndex,
+  type SourceLanguage,
+} from "../index/index.ts";
 import {
   createPageLinker,
   isTestFile,
@@ -120,6 +125,11 @@ export function languageName(
 ): string | undefined {
   const extension = /\.[^./]+$/.exec(path)?.[0] ?? "";
   return language ? LANGUAGE_NAMES[language] : EXTENSION_NAMES[extension];
+}
+
+/** The language an infobox names for a file, from its path alone. */
+export function pathLanguageName(path: string): string | undefined {
+  return languageName(path, languageForPath(path));
 }
 const MAX_ENTRY_POINTS = 3;
 

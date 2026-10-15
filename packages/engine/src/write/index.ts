@@ -31,7 +31,7 @@ export {
   clip,
   DEFAULT_CONTEXT_BUDGET_TOKENS,
 } from "./pack.ts";
-export { createClaimLinker, orderedSections } from "./page.ts";
+export { createClaimLinker, orderedSections, pathLanguageName } from "./page.ts";
 export { featureDirectory, featureFiles, STYLE_GUIDE, writeSystemPrompt } from "./prompt.ts";
 export {
   MAX_UPDATE_OUTPUT_TOKENS,

@@ -51,6 +51,25 @@ describe("exportFacts", () => {
     expect(facts.languages.reduce((sum, l) => sum + l.share, 0)).toBeGreaterThan(0.99);
   });
 
+  it("weights a page's languages by how many of its member files each one has", () => {
+    const exp = peopleExport();
+    const [first] = exp.pages;
+    if (first === undefined) throw new Error("fixture has no pages");
+    const pages = [
+      { ...first, infobox: { ...first.infobox, languages: ["TypeScript", "HTML"], loc: 1000 } },
+    ];
+    const membership: Record<string, { featureId: string; weight: number }> = {
+      "web/index.html": { featureId: first.featureId, weight: 1 },
+    };
+    for (let i = 0; i < 9; i++)
+      membership[`src/m${i}.ts`] = { featureId: first.featureId, weight: 1 };
+    const facts = exportFacts({ ...exp, pages, manifest: { ...exp.manifest, membership } }, ADA);
+    expect(facts.languages).toEqual([
+      { name: "TypeScript", share: 0.9 },
+      { name: "HTML", share: 0.1 },
+    ]);
+  });
+
   it("gives zeros when People does not name the author, or there is no People", () => {
     const zeros = { commits: 0, currentLines: 0, features: [] };
     expect(exportFacts(peopleExport(), { login: "nobody", name: null }).author).toMatchObject({
