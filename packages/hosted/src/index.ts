@@ -61,6 +61,16 @@ export {
   Plan,
   type PlanLimits,
 } from "./limits.ts";
+export {
+  accountDeleted,
+  type NewProject,
+  newProject,
+  purge,
+  repositoryUnavailable,
+  restore,
+  takedown,
+  unpublish,
+} from "./projects.ts";
 export { REFUSAL_CODES, REFUSALS, RefusalCode, type RefusalInfo } from "./refusals.ts";
 export { type Ok, ok, type Refused, type Result, refused } from "./result.ts";
 export {
