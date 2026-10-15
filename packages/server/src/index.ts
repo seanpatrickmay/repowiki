@@ -134,7 +134,6 @@ export { authRoutes } from "./routes/auth.ts";
 export {
   auditAuthor,
   draftRoutes,
-  featureTitles,
   mutation,
   storedExport,
 } from "./routes/drafts.ts";

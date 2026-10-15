@@ -103,10 +103,7 @@ export const aGeneration = (patch: Partial<Generation> = {}): Generation => ({
 });
 
 export const aContent = (patch: Partial<PortfolioContent> = {}): PortfolioContent => ({
-  tagline: "A citation-backed wiki for a git repository",
-  summary: "RepoWiki turns a repository into a wiki whose every claim cites the code.",
   contribution: "I built the indexing and verification pipeline.",
-  highlights: [{ featureId: "indexing", blurb: "Indexes every file" }],
   ...patch,
 });
 

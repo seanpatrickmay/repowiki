@@ -25,7 +25,6 @@ export interface ProjectView {
   review: Review | null;
   preview: Preview | null;
   current: PublishedVersion | null;
-  titles: ReadonlyMap<string, string>;
   session: PageSession;
 }
 
@@ -89,21 +88,15 @@ function jobSection(v: ProjectView): string {
   return `<section class="card"><h2>${e(title)}</h2>${progress}<ol>${steps}</ol>${why}${jobActions(v)}</section>`;
 }
 
-/** The revision's generated content, read-only: the author reviews it and edits nothing (ADR-0012). */
+/**
+ * The revision's generated content, read-only: the author reviews it and edits nothing
+ * (ADR-0012). The biography quotes it beside the wiki's About lead (ADR-0013).
+ */
 function content(v: ProjectView): string {
-  const { revision, generation, titles } = v;
+  const { revision, generation } = v;
   if (revision === null || generation === null) return "";
-  const c = revision.content;
-  const highlights = c.highlights
-    .map(
-      (h) => `<li><strong>${e(titles.get(h.featureId) ?? h.featureId)}</strong> ${e(h.blurb)}</li>`,
-    )
-    .join("");
-  return `<section class="card"><h2>Portfolio (revision ${revision.number})</h2><p class="muted">Generated from the repository and its git history. Review it, preview it, and publish it as it is.</p>
-<h3>Tagline</h3><p>${e(c.tagline)}</p>
-<h3>Summary</h3><p>${e(c.summary)}</p>
-<h3>My contribution</h3><p>${e(c.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha))}</p>
-<h3>Highlights</h3>${highlights ? `<ul>${highlights}</ul>` : `<p class="muted">None.</p>`}</section>`;
+  return `<section class="card"><h2>Revision ${revision.number}</h2><p class="muted">Generated from the repository and its git history. Your biography quotes this contribution beside the first sentences of the wiki's About article; the preview shows both pages as readers will see them.</p>
+<h3>Contribution</h3><p>${e(revision.content.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha))}</p></section>`;
 }
 
 function reviewSection(v: ProjectView): string {

@@ -29,7 +29,6 @@ beforeAll(async () => {
     review: null,
     preview: null,
     current: null,
-    titles: new Map(),
     session: { csrf: "c", login: "demo-dev" },
   };
 });
@@ -50,5 +49,15 @@ describe("the project page's reloads (fresh review I4)", () => {
     expect(body).not.toContain(REFRESH);
     expect(body).toContain("Refreshing");
     expect(body).toContain(`href="/projects/${view.project.id}"`);
+  });
+});
+
+describe("the project page's content (ADR-0013)", () => {
+  it("shows the contribution the biography will quote, labelled, and nothing else generated", () => {
+    const body = projectPage(view);
+    expect(body).toContain("I wrote the ingest code.");
+    expect(body).toContain("not written by the author");
+    expect(body).toContain("biography");
+    for (const gone of ["Tagline", "Summary", "Highlights"]) expect(body).not.toContain(gone);
   });
 });

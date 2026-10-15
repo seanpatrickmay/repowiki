@@ -6,7 +6,6 @@ import {
   documentationFeatures,
   generatedContent,
   generatedContribution,
-  generatedHighlights,
 } from "./generated.ts";
 
 /** A made-up wiki: three code features, a docs page by language and one by name. */
@@ -72,26 +71,6 @@ describe("documentation-like features (ADR-0012)", () => {
   });
 });
 
-describe("generated highlights (ADR-0012)", () => {
-  it("take up to 4 candidates by the author's commits, skipping documentation", () => {
-    expect(generatedHighlights(suggestions(), facts(), exp)).toEqual([
-      { featureId: "cli", blurb: "The cli parses commands and runs a match between two bots" },
-      { featureId: "arena", blurb: "The arena pits bots against each other" },
-      { featureId: "perf", blurb: "Performance testing times every engine move" },
-    ]);
-  });
-
-  it("keep the candidates' order on equal commits and drop a candidate with no page", () => {
-    const even = facts({ features: [] });
-    const picked = generatedHighlights(
-      suggestions({ highlightCandidates: ["perf", "gone", "arena", "cli"] }),
-      { ...even, featureIds: [...even.featureIds, "gone"] },
-      exp,
-    );
-    expect(picked.map((h) => h.featureId)).toEqual(["perf", "arena", "cli"]);
-  });
-});
-
 describe("the generated contribution paragraph (ADR-0012)", () => {
   const docs = documentationFeatures(exp);
 
@@ -131,12 +110,7 @@ describe("generatedContent (ADR-0012)", () => {
       exp,
       authorName: "Ada Lovelace",
     });
-    expect(PortfolioContent.parse(content)).toEqual({
-      tagline: "A bot arena",
-      summary: "Bots play matches.",
-      contribution: draft,
-      highlights: generatedHighlights(suggestions(), facts(), exp),
-    });
+    expect(PortfolioContent.parse(content)).toEqual({ contribution: draft });
   });
 
   it("falls back to the facts paragraph, with the name made plain", () => {

@@ -110,7 +110,7 @@ describe("entities (Contract spec §5)", () => {
   it("hold generated content, and no overrides or flags (ADR-0012)", () => {
     expect(ok(DraftRevision, { ...aRevision(), flags: [] })).toBe(false);
     expect(ok(DraftRevision, { ...aRevision(), overrides: {} })).toBe(false);
-    const markup = aRevision({ content: { ...aRevision().content, tagline: "<b>x</b>" } });
+    const markup = aRevision({ content: { contribution: "<b>x</b>" } });
     expect(ok(DraftRevision, markup)).toBe(false);
   });
 

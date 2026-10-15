@@ -85,7 +85,7 @@ describe("local profile mode (M14g)", () => {
     const created = await me.go("/projects", { form: { csrf, githubRepoId: "8001" } });
     expect(created.status, created.text).toBe(303);
     const projectPath = created.location ?? "";
-    let page = await waitFor(me, projectPath, "Portfolio (revision 1)");
+    let page = await waitFor(me, projectPath, "<h2>Revision 1</h2>");
     const reviewed = await me.go(`${projectPath}/review`, {
       form: { csrf, revision: "1", attest: "yes" },
     });

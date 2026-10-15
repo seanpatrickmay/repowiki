@@ -8,7 +8,7 @@ const value = <T>(result: Result<T>): T => {
   if (!result.ok) throw new Error(`refused: ${result.code}`);
   return result.value;
 };
-const fresh = aContent({ summary: "A new summary.", highlights: [] });
+const fresh = aContent({ contribution: "A new contribution." });
 
 describe("draft revisions (Contract spec §6.3, ADR-0012)", () => {
   it("start at revision 1 with the generated content when the first generation lands", () => {

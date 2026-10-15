@@ -29,8 +29,12 @@ async function storedBefore(sql: string, from: number, attestationVersion = 1): 
     "INSERT INTO previews (project_id, revision, body) VALUES ($1, 1, $2::jsonb)",
     [projectId, JSON.stringify({ ...preview, createdAt: AT })],
   );
-  // Only the ADR-0012 row migrations run again; later ones (0008 creates a table) cannot.
-  await deps.db.query("DELETE FROM schema_migrations WHERE version BETWEEN $1 AND 7", [from]);
+  // Only the row migrations run again: ADR-0012's, then ADR-0013's content rewrite (0010).
+  // 0008 creates a table and cannot; 0009 drops every preview, so its own test runs it.
+  await deps.db.query(
+    "DELETE FROM schema_migrations WHERE version BETWEEN $1 AND 7 OR version = 10",
+    [from],
+  );
   await migrate(deps.db);
 }
 
@@ -59,12 +63,7 @@ describe("rows stored before ADR-0012 (migrations 0005 and 0007)", () => {
   it("hold their generation's content, the model's draft when it wrote one", async () => {
     await storedBefore(legacy({ contribution: "Mine.", highlights: [], tagline: "Mine" }), 7, 2);
     const latest = await latestRevision(deps.db, projectId);
-    expect(latest?.content).toEqual({
-      tagline: "A tiny demo",
-      summary: "It demonstrates RepoWiki.",
-      contribution: "I wrote the ingest code.",
-      highlights: [],
-    });
+    expect(latest?.content).toEqual({ contribution: "I wrote the ingest code." });
     // The review and preview were of the author's text, not of this content.
     expect(await reviewOf(deps.db, projectId, 1)).toBeNull();
     expect(await previewOf(deps.db, projectId, 1)).toBeNull();
@@ -107,5 +106,21 @@ describe("trees stored before ADR-0013 (migration 0009)", () => {
     expect(await deps.db.query("SELECT 1 FROM preview_tokens")).toHaveLength(0);
     // The review stands: it attested to the same generated content.
     expect(await reviewOf(deps.db, projectId, 1)).not.toBeNull();
+  });
+});
+
+describe("revisions stored before ADR-0013 (migration 0010)", () => {
+  it("keep only their contribution, and lose the review of the longer content", async () => {
+    await deps.db.query(
+      `UPDATE revisions SET body = jsonb_set(body, '{content}', body->'content' ||
+         '{"tagline":"A tiny demo","summary":"It demonstrates RepoWiki.","highlights":[]}'::jsonb)
+       WHERE project_id = $1`,
+      [projectId],
+    );
+    await storedBefore("SELECT $1::uuid", 8, 2);
+    expect((await latestRevision(deps.db, projectId))?.content).toEqual({
+      contribution: "I wrote the ingest code.",
+    });
+    expect(await reviewOf(deps.db, projectId, 1)).toBeNull();
   });
 });

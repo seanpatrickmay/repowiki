@@ -33,17 +33,14 @@ describe("plain text (Contract spec §8)", () => {
   });
 });
 
-describe("portfolio content (ADR-0012)", () => {
-  it("accepts up to four distinct highlights and a non-empty contribution", () => {
+describe("portfolio content (ADR-0012, ADR-0013)", () => {
+  it("is a non-empty contribution and nothing else", () => {
     const content = aContent();
     expect(ok(PortfolioContent, content)).toBe(true);
-    const four = ["a", "b", "c", "d"].map((featureId) => ({ featureId, blurb: "x" }));
-    expect(ok(PortfolioContent, { ...content, highlights: four })).toBe(true);
-    const five = [...four, { featureId: "e", blurb: "x" }];
-    expect(ok(PortfolioContent, { ...content, highlights: five })).toBe(false);
-    expect(ok(PortfolioContent, { ...content, highlights: [four[0], four[0]] })).toBe(false);
     expect(ok(PortfolioContent, { ...content, contribution: " " })).toBe(false);
-    expect(ok(PortfolioContent, { ...content, hiddenFeatureIds: [] })).toBe(false);
+    for (const gone of ["tagline", "summary", "highlights", "hiddenFeatureIds"]) {
+      expect(ok(PortfolioContent, { ...content, [gone]: [] }), gone).toBe(false);
+    }
   });
 });
 
