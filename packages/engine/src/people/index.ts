@@ -8,6 +8,7 @@ export {
 export {
   type IdentityGroup,
   type IdentityInput,
+  isPlaceholderEmail,
   type JoinReason,
   KNOWN_BOTS,
   noreplyLogin,

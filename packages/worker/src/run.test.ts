@@ -1,12 +1,14 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makePeopleSnapshot, makePersonFacts } from "@repowiki/core/test-fixtures";
 import { Facts, type JobStep, Suggestions } from "@repowiki/hosted";
 import type { Provider } from "@repowiki/llm";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { describe, expect, it } from "vitest";
 import type { FailCode, Succeeded, WorkerApi, WorkerSpec } from "./api.ts";
 import type { CliRun } from "./engine.ts";
+import { AUTHOR_ID } from "./people-file.ts";
 import { type PhaseDeps, phase1, phase2 } from "./run.ts";
 
 const TOKEN = "t".repeat(43);
@@ -92,14 +94,42 @@ function deps(
     runCli: async (input) => {
       runs.push(input);
       const run = cli(input.script);
+      const out = String(input.args[input.args.indexOf("--out") + 1]);
       if (run.status === 0 && input.script.endsWith("wiki-build.ts")) {
-        const out = String(input.args[input.args.indexOf("--out") + 1]);
         mkdirSync(out, { recursive: true });
         writeFileSync(join(out, "export.json"), JSON.stringify(fixtureExport()));
+      }
+      // wiki-people rewrites the export with the People snapshot, the author under AUTHOR_ID.
+      if (run.status === 0 && input.script.endsWith("wiki-people.ts")) {
+        writeFileSync(join(out, "export.json"), JSON.stringify(withPeople(fixtureExport())));
       }
       return run;
     },
   };
+}
+
+/** The export with a People snapshot: the author, a teammate, and the fixture's features. */
+function withPeople(exp: ReturnType<typeof fixtureExport>) {
+  const snapshot = makePeopleSnapshot({
+    commits: 9,
+    totalLines: 240,
+    unattributedLines: 0,
+    people: [
+      makePersonFacts({
+        id: AUTHOR_ID,
+        name: "Demo Dev",
+        commits: 5,
+        currentLines: 70,
+        features: [
+          { featureId: "signals", commits: 4, currentLines: 60 },
+          { featureId: "deliverables", commits: 1, currentLines: 10 },
+        ],
+      }),
+      makePersonFacts({ id: "grace-hopper", name: "Grace Hopper", commits: 4, currentLines: 170 }),
+    ],
+    redirects: [],
+  });
+  return { ...exp, people: { snapshot, pages: [] } };
 }
 
 const okRun = (): CliRun => ({ status: 0, stderrTail: "", timedOut: false, costCapped: false });
@@ -198,6 +228,16 @@ describe("phase 2 (spec 2 S9, §8)", () => {
     const body = succeeded();
     expect(Facts.safeParse(body?.facts).success).toBe(true);
     expect(body?.facts.indexedFiles).toBe(2);
+    expect(body?.facts.author).toEqual({
+      commits: 5,
+      totalCommits: 9,
+      currentLines: 70,
+      totalLines: 240,
+      features: [
+        { featureId: "signals", commits: 4, currentLines: 60 },
+        { featureId: "deliverables", commits: 1, currentLines: 10 },
+      ],
+    });
     expect(Suggestions.safeParse(body?.suggestions).success).toBe(true);
     expect(body?.engineVersion).toBe("test");
     expect(body?.models).toEqual(["claude-haiku-4-5"]);

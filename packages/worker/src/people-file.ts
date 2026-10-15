@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { isPlaceholderEmail } from "@repowiki/engine";
 
 /** The people-file id of the job's author; facts look this person up in the snapshot. */
 export const AUTHOR_ID = "author";
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 /**
- * The distinct author emails of `shas` in the bare clone `repo`. A sha the clone lacks (GitHub
- * attributes a commit on a branch the clone does not hold) is skipped, never fatal.
+ * The distinct author emails of `shas` in the bare clone `repo`, without shared placeholder
+ * addresses (a noreply@ address strangers share would claim their commits). A sha the clone lacks
+ * (GitHub attributes a commit on a branch the clone does not hold) is skipped, never fatal.
  */
 export function authorEmails(repo: string, shas: readonly string[], git = "git"): string[] {
   if (shas.length === 0) return [];
@@ -29,14 +31,16 @@ export function authorEmails(repo: string, shas: readonly string[], git = "git")
   const emails = (out.stdout ?? "")
     .split("\n")
     .map((line) => line.trim().toLowerCase())
-    .filter((line) => EMAIL.test(line));
+    .filter((line) => EMAIL.test(line) && !isPlaceholderEmail(line));
   return [...new Set(emails)];
 }
 
 /**
  * The people file for a hosted run (spec 2 §8): the author as one person matched by GitHub login
  * and the emails of the commits GitHub attributes to them; nobody is the owner, nobody gets a
- * narrative, and one commit is enough to be counted.
+ * narrative, and one commit is enough to be counted. The committed `.mailmap` and
+ * `.git-blame-ignore-revs` are the repository's content, not the author's word, so neither is
+ * read: either could move another person's commits or lines to the author.
  */
 export function peopleFile(login: string, emails: readonly string[]) {
   return {
@@ -49,5 +53,7 @@ export function peopleFile(login: string, emails: readonly string[]) {
     ],
     owner: [] as string[],
     minCommits: 1,
+    ignoreRevs: false,
+    mailmap: false,
   };
 }

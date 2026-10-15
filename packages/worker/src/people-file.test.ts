@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parsePeopleConfig } from "@repowiki/core";
+import { PeopleConfig, parsePeopleConfig } from "@repowiki/core";
+import { openStore, readPeople } from "@repowiki/engine";
+import { createTestRepo } from "@repowiki/engine/test-repo";
 import { describe, expect, it } from "vitest";
 import { AUTHOR_ID, authorEmails, peopleFile } from "./people-file.ts";
 
@@ -56,9 +58,13 @@ describe("the people file (spec 2 §8)", () => {
     expect(authorEmails("/repo.git", [], git)).toEqual([]);
   });
 
-  it("drops values that are not email addresses", () => {
+  it("drops values that are not email addresses, and shared placeholder addresses", () => {
     const a = "a".repeat(40);
+    const b = "b".repeat(40);
+    const c = "c".repeat(40);
     expect(authorEmails("/repo.git", [a], fakeGit({ [a]: "not an email" }))).toEqual([]);
+    const git = fakeGit({ [a]: "noreply@github.com", [b]: "no-reply@example.com", [c]: "d@e.io" });
+    expect(authorEmails("/repo.git", [a, b, c], git)).toEqual(["d@e.io"]);
   });
 
   it("reads a real clone, and a clone that lacks every listed sha gives no email (never HEAD's)", () => {
@@ -75,7 +81,32 @@ describe("the people file (spec 2 §8)", () => {
       ],
       owner: [],
       minCommits: 1,
+      ignoreRevs: false,
+      mailmap: false,
     });
     expect(parsePeopleConfig(file).problems).toEqual([]);
+  });
+
+  it("keeps a committed .mailmap or ignore list from giving the author anyone else's commits", () => {
+    const repo = createTestRepo();
+    const store = openStore(":memory:");
+    try {
+      repo.write("a.txt", "a\n");
+      repo.commit("one", "+0000", { name: "Me", email: "me@x.example" });
+      repo.write("b.txt", "b\n");
+      const alice = repo.commit("two", "+0000", { name: "Alice", email: "alice@y.example" });
+      repo.write(".mailmap", "Me <me@x.example> <alice@y.example>\n");
+      repo.write(".git-blame-ignore-revs", `${alice}\n`);
+      const head = repo.commit("three", "+0000", { name: "Me", email: "me@x.example" });
+      const config = PeopleConfig.parse(peopleFile("me", ["me@x.example"]));
+      const read = readPeople({ repo: repo.dir, sha: head, store, config, ownerEmail: null });
+      const author = read.identities.groups.find((g) => g.entry === 0);
+      expect(author?.identities.map((i) => i.email)).toEqual(["me@x.example"]);
+      expect(author?.commits).toBe(2);
+      expect(read.ignoreRevs).toEqual([]);
+    } finally {
+      store.close();
+      repo.remove();
+    }
   });
 });

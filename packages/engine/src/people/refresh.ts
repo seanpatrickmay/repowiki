@@ -18,6 +18,7 @@ import { type ComputedSnapshot, computeSnapshot } from "./snapshot.ts";
 export interface PeopleRead {
   sha: string;
   commits: AuthoredCommit[];
+  /** The committed `.mailmap`, or an empty one when the file says `mailmap: false`. */
   mailmap: Mailmap;
   identities: ResolvedIdentities;
   assigned: Assigned;
@@ -63,7 +64,9 @@ export function readPeople(input: ReadInput): PeopleRead {
   const commits = readAuthorship(repo, sha, {
     timeoutMs: input.timeouts?.logMs ?? AUTHORSHIP_TIMEOUT_MS,
   });
-  const mailmap = parseMailmap(readBlobAt(repo, sha, ".mailmap", read) ?? "");
+  const mailmap = parseMailmap(
+    config.mailmap ? (readBlobAt(repo, sha, ".mailmap", read) ?? "") : "",
+  );
   const identities = resolveIdentities({
     commits,
     mailmap,

@@ -9,7 +9,9 @@ import {
   withoutEmails,
 } from "@repowiki/core";
 import type { AuthoredCommit } from "../index/index.ts";
-import { applyMailmap, type Mailmap } from "./mailmap.ts";
+import { applyMailmap, type Mailmap, parseMailmap } from "./mailmap.ts";
+
+const NO_MAILMAP: Mailmap = parseMailmap("");
 
 /** Why two identities are one person (spec v2 #6 R7), as people:suggest shows it. */
 export type JoinReason = "same email" | "same login" | "name is login" | "same full name";
@@ -301,8 +303,9 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
       Date.parse(a.first) - Date.parse(b.first) ||
       (a.email < b.email ? -1 : a.email > b.email ? 1 : a.name < b.name ? -1 : 1),
   );
-  // 2. The mailmap, then each pair's keys.
-  const mapped = raws.map((raw) => applyMailmap(raw, input.mailmap));
+  // 2. The mailmap (unless the people file turns it off), then each pair's keys.
+  const mailmap = config.mailmap ? input.mailmap : NO_MAILMAP;
+  const mapped = raws.map((raw) => applyMailmap(raw, mailmap));
   const keys = raws.map((raw, i) => keysOf(raw, mapped[i] as { name: string; email: string }));
   raws.forEach((raw, i) => {
     raw.keys = [...(keys[i] as Set<string>)].map((k) => saltedKey(input.salt, k)).sort();

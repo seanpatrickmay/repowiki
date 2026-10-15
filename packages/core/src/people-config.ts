@@ -124,6 +124,11 @@ export const PeopleConfig = z
     minCommits: z.int().min(1).max(1_000_000).default(DEFAULT_MIN_COMMITS),
     maxNarratives: z.int().min(0).max(1000).default(DEFAULT_MAX_NARRATIVES),
     ignoreRevs: z.boolean().default(true),
+    /**
+     * Whether the committed `.mailmap` maps the commits' names and emails. A hosted run turns it
+     * off: the mailmap is repository content, so a line in it could claim another's commits.
+     */
+    mailmap: z.boolean().default(true),
     othersMinPeople: z.int().min(1).max(1000).default(DEFAULT_OTHERS_MIN_PEOPLE),
   })
   .superRefine((config, ctx) => {
