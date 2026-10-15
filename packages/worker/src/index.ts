@@ -15,6 +15,15 @@ export {
   MAX_REPO_BYTES,
 } from "./clone.ts";
 export {
+  CLI,
+  type CliRun,
+  COST_CAP_MARK,
+  engineEnv,
+  ROOT,
+  rebasedFetch,
+  runCli,
+} from "./engine.ts";
+export {
   authorFacts,
   buildFacts,
   type FileFacts,
