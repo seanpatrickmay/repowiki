@@ -15,6 +15,7 @@ export {
   TokenRevoked,
 } from "./github/api.ts";
 export { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
+export { eligibilityFacts, type FactsInput, permissionOf } from "./github/facts.ts";
 export {
   FAKE_CODE,
   FAKE_COMMITS,
