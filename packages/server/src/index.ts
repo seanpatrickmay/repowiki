@@ -133,6 +133,7 @@ export {
   type WorkerSpec,
 } from "./routes/internal.ts";
 export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
+export { landingRoutes } from "./routes/landing.ts";
 export { isUuid, type Live, liveEligibility, ownedProject, repoFullName } from "./routes/live.ts";
 export {
   anthropicError,
@@ -149,6 +150,7 @@ export { jobRoutes } from "./routes/project-jobs.ts";
 export { projectRoutes } from "./routes/projects.ts";
 export { publicRoutes } from "./routes/public.ts";
 export { copyTree, publishRoutes } from "./routes/publish.ts";
+export { FLY_API, type FlyRunnerOptions, flyRunner } from "./runner/fly-runner.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
 export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
 export {

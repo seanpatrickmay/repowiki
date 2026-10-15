@@ -18,7 +18,7 @@ const production = {
   FLY_API_TOKEN: "fly",
   FLY_WORKER_APP: "repowiki-workers",
   WORKER_IMAGE: "registry.fly.io/repowiki-worker:1",
-  INTERNAL_URL: "http://repowiki.internal:8787",
+  INTERNAL_URL: "http://repowiki.internal:8788",
 };
 
 describe("loadConfig (spec 2 S17)", () => {
@@ -35,6 +35,36 @@ describe("loadConfig (spec 2 S17)", () => {
       github: { kind: "oauth", clientId: "Iv1.abc" },
     });
     expect(config.tokenKey).toHaveLength(32);
+  });
+
+  it("listens for workers on INTERNAL_PORT, 8788 by default", () => {
+    expect(loadConfig(production).internalPort).toBe(8788);
+    const moved = { INTERNAL_PORT: "9000", INTERNAL_URL: "http://repowiki.internal:9000" };
+    expect(loadConfig({ ...production, ...moved }).internalPort).toBe(9000);
+    expect(loadConfig({ REPOWIKI_MODE: "demo" }).internalPort).toBeNull();
+  });
+
+  it("refuses a worker port that is the public port, invalid, or not INTERNAL_URL's", () => {
+    for (const env of [
+      { INTERNAL_PORT: "8787" },
+      { INTERNAL_PORT: "0" },
+      { INTERNAL_PORT: "x" },
+      { INTERNAL_URL: "http://repowiki.internal:8787" },
+      { INTERNAL_URL: "http://repowiki.internal" },
+      { INTERNAL_URL: "ftp://repowiki.internal:8788" },
+      { INTERNAL_URL: "not a url" },
+    ]) {
+      expect(() => loadConfig({ ...production, ...env }), JSON.stringify(env)).toThrow(ConfigError);
+    }
+  });
+
+  it("names the engine version workers report, dev by default", () => {
+    expect(loadConfig(production).engineVersion).toBe("dev");
+    const tagged = loadConfig({ ...production, REPOWIKI_ENGINE_VERSION: "abc1234" });
+    expect(tagged.engineVersion).toBe("abc1234");
+    expect(() => loadConfig({ ...production, REPOWIKI_ENGINE_VERSION: "a b" })).toThrow(
+      ConfigError,
+    );
   });
 
   it("strips one trailing slash from R2_ENDPOINT", () => {
