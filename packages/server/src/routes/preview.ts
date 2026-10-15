@@ -9,7 +9,7 @@ import { pageSession, refusalPage } from "../pages/refusal.ts";
 import { buildTree } from "../render/build.ts";
 import { hostedExport } from "../render/hosted-export.ts";
 import { PortfolioData, portfolioData, portfolioHtml } from "../render/portfolio.ts";
-import { activeHandle } from "../store/accounts.ts";
+import { accountById, activeHandle } from "../store/accounts.ts";
 import { generationById, latestRevision, previewOf, savePreview } from "../store/drafts.ts";
 import { mintPreviewToken, previewByToken } from "../store/preview-tokens.ts";
 import { projectById } from "../store/projects.ts";
@@ -169,9 +169,11 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
         const verdict = authorize("preview.read", { now: deps.now(), caller, project });
         if (!verdict.ok) return refusalPage(verdict.code, shown);
         const revision = Number(form.get("revision"));
-        const preview = Number.isSafeInteger(revision)
-          ? await previewOf(deps.db, project.id, revision)
-          : null;
+        // Only the latest revision is the one to review and publish (Contract §6.3).
+        if (revision !== project.latestRevision) {
+          return refusalPage("stale-revision", shown, { back: `/projects/${project.id}` });
+        }
+        const preview = await previewOf(deps.db, project.id, revision);
         if (preview === null) return refusalPage("not-found", shown);
         const token = await deps.db.transaction(async (tx) => {
           const minted = await mintPreviewToken(
@@ -187,6 +189,14 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
     },
   ];
 }
+
+/** A project whose preview may still be shown: not purged, taken down or being deleted. */
+const previewable = (project: Project) =>
+  project.state !== "purged" &&
+  !(
+    project.state === "withdrawn" &&
+    (project.withdrawReason === "operator" || project.withdrawReason === "account-deleted")
+  );
 
 /** What every preview reply carries: never cached, never indexed, never a referrer (ADR-0012). */
 const PREVIEW_HEADERS = {
@@ -219,6 +229,9 @@ export function previewPageRoutes(deps: Deps): Route[] {
           previewOf(deps.db, target.projectId, target.revision),
         ]);
         if (project === null || preview === null) return notFound;
+        // A link stops working the moment its project or its owner may no longer be shown.
+        const owner = await accountById(deps.db, project.accountId);
+        if (owner?.status !== "active" || !previewable(project)) return notFound;
         const base = `/_preview/${token}/`;
         const rest = request.params["*"] ?? "";
         const moved = (location: string): Reply => ({

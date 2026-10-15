@@ -20,7 +20,7 @@ import {
 let deps: Deps;
 let app: App;
 let pages: App;
-let p: { projectId: string; cookie: string; csrf: string };
+let p: { projectId: string; cookie: string; csrf: string; accountId: string };
 const post = (path: string, body: string, who: { cookie: string; csrf: string } = p) =>
   call(app, {
     method: "POST",
@@ -127,9 +127,10 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect((await post(`/projects/${p.projectId}/preview/open`, "revision=1", other)).status).toBe(
       404,
     );
-    // A revision with no preview has no link.
-    expect((await post(`/projects/${p.projectId}/preview/open`, "revision=2")).status).toBe(404);
     expect((await post(`/projects/${p.projectId}/preview`, "revision=1", other)).status).toBe(404);
+    // The latest revision with no preview yet has no link.
+    await refreshed(deps, p.projectId);
+    expect((await post(`/projects/${p.projectId}/preview/open`, "revision=2")).status).toBe(404);
   }, 300_000);
 
   it("audits a refused build, the stale-revision path included (spec 2 S5)", async () => {
@@ -160,6 +161,59 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect((await building).status).toBe(REFUSALS["stale-revision"].status);
     expect(await previewOf(deps.db, p.projectId, 1)).toBeNull();
     expect(await auditOutcomes(deps.db, "preview.build", p.projectId)).toEqual(["stale-revision"]);
+  }, 300_000);
+
+  it("opens only the latest revision's preview (review fix)", async () => {
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    await refreshed(deps, p.projectId);
+    const opened = await post(`/projects/${p.projectId}/preview/open`, "revision=1");
+    expect(opened.status).toBe(REFUSALS["stale-revision"].status);
+  }, 300_000);
+
+  it("closes a link once the project is taken down or its owner is being deleted (review fix)", async () => {
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    const link = async () => {
+      const opened = await post(`/projects/${p.projectId}/preview/open`, "revision=1");
+      return String(opened.headers?.location).slice(deps.config.publicOrigin.length);
+    };
+    const taken = await link();
+    const deleting = await link();
+    expect((await call(pages, { path: taken })).status).toBe(200);
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"withdrawn","withdrawReason":"operator","withdrawnAt":"2026-10-14T12:00:00.000Z"}'::jsonb WHERE id = $1`,
+      [p.projectId],
+    );
+    expect((await call(pages, { path: taken })).status).toBe(404);
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"draft","withdrawReason":null,"withdrawnAt":null}'::jsonb WHERE id = $1`,
+      [p.projectId],
+    );
+    expect((await call(pages, { path: deleting })).status).toBe(200);
+    await deps.db.query(
+      "UPDATE accounts SET body = jsonb_set(body, '{status}', '\"deleting\"') WHERE id = $1",
+      [p.accountId],
+    );
+    expect((await call(pages, { path: deleting })).status).toBe(404);
+  }, 300_000);
+
+  it("refuses to open a link without the CSRF token or from another origin (review fix)", async () => {
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    const path = `/projects/${p.projectId}/preview/open`;
+    const noToken = await call(app, {
+      method: "POST",
+      path,
+      headers: form(p.cookie, deps.config.appOrigin),
+      body: "revision=1",
+    });
+    expect(noToken.status).toBe(403);
+    const foreign = await call(app, {
+      method: "POST",
+      path,
+      headers: form(p.cookie, deps.config.publicOrigin),
+      body: `csrf=${p.csrf}&revision=1`,
+    });
+    expect(foreign.status).toBe(403);
+    expect(await deps.db.query("SELECT 1 FROM preview_tokens")).toHaveLength(0);
   }, 300_000);
 
   it("allows one preview build in flight per account (A3)", async () => {
