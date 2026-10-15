@@ -1,16 +1,22 @@
 import { spawnSync } from "node:child_process";
 import { isPlaceholderEmail } from "@repowiki/engine";
+import { gitEnv } from "./clone.ts";
 
 /** The people-file id of the job's author; facts look this person up in the snapshot. */
 export const AUTHOR_ID = "author";
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 /**
- * The distinct author emails of `shas` in the bare clone `repo`, without shared placeholder
+ * The distinct author emails of `shas` in the bare clone `repo` (git with gitEnv(home)), without shared placeholder
  * addresses (a noreply@ address strangers share would claim their commits). A sha the clone lacks
  * (GitHub attributes a commit on a branch the clone does not hold) is skipped, never fatal.
  */
-export function authorEmails(repo: string, shas: readonly string[], git = "git"): string[] {
+export function authorEmails(
+  repo: string,
+  shas: readonly string[],
+  home: string,
+  git = "git",
+): string[] {
   if (shas.length === 0) return [];
   const out = spawnSync(
     git,
@@ -18,13 +24,7 @@ export function authorEmails(repo: string, shas: readonly string[], git = "git")
     {
       encoding: "utf8",
       timeout: 60_000,
-      env: {
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        GIT_TERMINAL_PROMPT: "0",
-        LC_ALL: "C",
-      },
+      env: gitEnv(home),
       stdio: ["ignore", "pipe", "ignore"],
     },
   );

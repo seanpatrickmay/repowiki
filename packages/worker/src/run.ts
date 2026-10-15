@@ -7,7 +7,7 @@ import { ApiError, type FailCode, type WorkerApi, type WorkerSpec } from "./api.
 import { type CloneResult, cloneBare } from "./clone.ts";
 import { CLI, type CliRun, engineEnv, ROOT, rebasedFetch, runCli } from "./engine.ts";
 import { buildFacts, type FileFacts, indexedCount } from "./facts.ts";
-import { indexInChild } from "./indexing.ts";
+import { countTree, indexInChild, TREE_FACTOR } from "./indexing.ts";
 import { authorEmails, peopleFile } from "./people-file.ts";
 import { suggest } from "./suggestions.ts";
 
@@ -26,9 +26,11 @@ export interface PhaseDeps {
   heartbeatMs?: number;
   clone?: (input: Parameters<typeof cloneBare>[0]) => Promise<CloneResult>;
   runCli?: typeof runCli;
+  /** Counts the tree's blobs before indexing (countTree); null when git failed. */
+  countTree?: (repo: string, sha: string, home: string) => Promise<number | null>;
   /** Indexes in a child under time and heap limits (indexInChild). */
   indexRepo?: (repo: string, rev: string, home: string) => Promise<{ files: readonly FileFacts[] }>;
-  emails?: (repo: string, shas: readonly string[]) => string[];
+  emails?: (repo: string, shas: readonly string[], home: string) => string[];
   provider?: (spec: WorkerSpec, token: string) => Provider;
 }
 
@@ -146,6 +148,13 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
   try {
     mkdirSync(where.home, { recursive: true });
     await beat.step("index");
+    // A tree far past the file limit is refused on its listing, before the index reads it.
+    const listed = await (deps.countTree ?? countTree)(where.repo, spec.commitSha, where.home);
+    if (listed === null) throw new Error("the tree could not be listed");
+    if (listed > spec.limits.maxIndexedFiles * TREE_FACTOR) {
+      if ((await deps.api.indexed(listed)) === "too-large") return false;
+      throw new Error("the server took a count over the file limit");
+    }
     const index = await (
       deps.indexRepo ?? ((repo, sha, home) => indexInChild({ repo, sha, home }))
     )(where.repo, spec.commitSha, where.home);
@@ -155,7 +164,7 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
     await beat.step("write");
     await cli(CLI.wiki, [where.repo, spec.commitSha, "--out", where.out, "--deadline", "80"]);
     await beat.step("people");
-    const emails = (deps.emails ?? authorEmails)(where.repo, spec.author.commitShas);
+    const emails = (deps.emails ?? authorEmails)(where.repo, spec.author.commitShas, where.home);
     writeFileSync(where.people, JSON.stringify(peopleFile(spec.author.login, emails)));
     await cli(CLI.people, [
       where.repo,

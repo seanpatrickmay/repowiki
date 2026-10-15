@@ -1,10 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTestRepo, type TestRepo } from "@repowiki/engine/test-repo";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { runCli } from "./engine.ts";
-import { INDEX_CHILD, INDEX_HEAP_MB, indexInChild } from "./indexing.ts";
+import { countTree, INDEX_CHILD, INDEX_HEAP_MB, indexInChild } from "./indexing.ts";
 
 let repo: TestRepo;
 let sha: string;
@@ -72,4 +72,28 @@ describe("the index child (spec 2 S9)", () => {
     });
     await expect(indexInChild({ repo: repo.dir, sha, home, run: junk })).rejects.toThrow();
   }, 60_000);
+});
+
+describe("countTree", () => {
+  it("counts the tree's blobs, and gives null for a missing commit or a timeout", async () => {
+    expect(await countTree(repo.dir, sha, home)).toBe(3);
+    expect(await countTree(repo.dir, "b".repeat(40), home)).toBeNull();
+    const fake = (body: string) => {
+      const dir = mkdtempSync(join(tmpdir(), "fake-git-"));
+      writeFileSync(join(dir, "git"), `#!/bin/sh\n${body.replaceAll("DIR", dir)}\n`);
+      chmodSync(join(dir, "git"), 0o755);
+      return { git: join(dir, "git"), dir };
+    };
+    const dumped = fake("env > 'DIR/env'; printf 'a\\0b\\0'");
+    expect(await countTree(repo.dir, sha, home, { git: dumped.git })).toBe(2);
+    const env = readFileSync(join(dumped.dir, "env"), "utf8").split("\n");
+    expect(env).toContain(`HOME=${home}`);
+    expect(env).toContain("GIT_CONFIG_GLOBAL=/dev/null");
+    expect(env).toContain("GIT_CONFIG_NOSYSTEM=1");
+    expect(env).toContain("GIT_TERMINAL_PROMPT=0");
+    const started = Date.now();
+    const slow = fake("sleep 5");
+    expect(await countTree(repo.dir, sha, home, { git: slow.git, timeoutMs: 200 })).toBeNull();
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
 });
