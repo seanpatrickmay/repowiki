@@ -97,17 +97,28 @@ export async function issueToken(
   return token;
 }
 
-/** The job and attempt a token was issued for, or null for an unknown or revoked token. */
-export async function tokenJob(
-  q: Queryable,
-  token: string,
-): Promise<{ jobId: string; attempt: number } | null> {
-  const rows = await q.query<{ job_id: string; attempt: number }>(
-    "SELECT job_id, attempt FROM job_tokens WHERE token_hash = $1 AND NOT revoked",
+/** The job and attempt a live token was issued for, and whether it leased that attempt. */
+export interface TokenHolder {
+  jobId: string;
+  attempt: number;
+  leased: boolean;
+}
+
+/** The holder of a token, or null for an unknown or revoked token. */
+export async function tokenJob(q: Queryable, token: string): Promise<TokenHolder | null> {
+  const rows = await q.query<{ job_id: string; attempt: number; leased: boolean }>(
+    "SELECT job_id, attempt, leased FROM job_tokens WHERE token_hash = $1 AND NOT revoked",
     [sha256Hex(token)],
   );
   const row = rows[0];
-  return row === undefined ? null : { jobId: row.job_id, attempt: Number(row.attempt) };
+  return row === undefined
+    ? null
+    : { jobId: row.job_id, attempt: Number(row.attempt), leased: row.leased };
+}
+
+/** The token that leased its job's attempt; only it may act on the running job (M14c A5). */
+export async function markLeased(q: Queryable, token: string): Promise<void> {
+  await q.query("UPDATE job_tokens SET leased = true WHERE token_hash = $1", [sha256Hex(token)]);
 }
 
 /** How many tokens an attempt has had and when the last was issued (the sweeper's restart bound). */

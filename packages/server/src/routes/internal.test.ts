@@ -1,0 +1,110 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createApp, type Deps } from "../app.ts";
+import type { App } from "../http/server.ts";
+import { issueToken, jobById } from "../store/jobs.ts";
+import { internalRoutes } from "./internal.ts";
+import { call, startedJob, testDeps } from "./test-app.ts";
+
+let deps: Deps;
+let app: App;
+let job: { jobId: string; token: string; projectId: string };
+const bearer = (token: string, extra: Record<string, string> = {}) => ({
+  authorization: `Bearer ${token}`,
+  ...extra,
+});
+const post = (path: string, token: string, body?: unknown) =>
+  call(app, {
+    method: "POST",
+    path,
+    headers: bearer(token, body === undefined ? {} : { "content-type": "application/json" }),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+beforeEach(async () => {
+  deps = await testDeps();
+  app = createApp(deps, internalRoutes(deps));
+  job = await startedJob(deps);
+});
+afterEach(async () => deps.db.close());
+
+describe("the worker's internal API (spec 2 §6)", () => {
+  it("refuses a missing or forged token", async () => {
+    expect((await call(app, { method: "POST", path: "/internal/job/lease" })).status).toBe(401);
+    expect((await post("/internal/job/lease", "forged")).status).toBe(401);
+  });
+
+  it("checks the token before reading a body (A4)", async () => {
+    const reply = await call(app, {
+      method: "POST",
+      path: "/internal/job/heartbeat",
+      headers: { "content-type": "application/json", "content-length": String(64 * 1024 * 1024) },
+      body: "{}",
+    });
+    expect(reply.status).toBe(401);
+  });
+
+  it("leases the job once and returns the worker's spec, idempotently", async () => {
+    const first = await post("/internal/job/lease", job.token);
+    expect(first.status).toBe(200);
+    expect(JSON.parse(String(first.body))).toMatchObject({
+      jobId: job.jobId,
+      attempt: 1,
+      kind: "generate",
+      repo: { fullName: "demo-dev/demo-repo", name: "demo-repo" },
+      author: { login: "demo-dev" },
+      limits: { maxIndexedFiles: 1000 },
+      llmUrl: `${deps.config.runner.internalUrl}/llm`,
+    });
+    expect((await post("/internal/job/lease", job.token)).status).toBe(200);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ status: "running", step: "fetch" });
+  });
+
+  it("lets only the token that leased an attempt act on it (A5)", async () => {
+    const second = await issueToken(deps.db, job.jobId, 1, deps.now());
+    expect((await post("/internal/job/lease", job.token)).status).toBe(200);
+    expect((await post("/internal/job/lease", second)).status).toBe(409);
+    expect((await post("/internal/job/heartbeat", second, { step: "index" })).status).toBe(409);
+    expect((await post("/internal/job/fail", second, { code: "job-failed" })).status).toBe(409);
+    expect((await post("/internal/job/heartbeat", job.token, { step: "index" })).status).toBe(204);
+  });
+
+  it("records heartbeats and fails a repository over the plan's file limit", async () => {
+    await post("/internal/job/lease", job.token);
+    expect((await post("/internal/job/heartbeat", job.token, { step: "index" })).status).toBe(204);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ step: "index" });
+    expect((await post("/internal/job/heartbeat", job.token, { step: "nope" })).status).toBe(400);
+    const ok = await post("/internal/job/indexed", job.token, { indexedFiles: 1000 });
+    expect(ok.status).toBe(204);
+    const big = await post("/internal/job/indexed", job.token, { indexedFiles: 1001 });
+    expect(big.status).toBe(422);
+    expect(JSON.parse(String(big.body))).toEqual({ code: "repo-too-large" });
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({
+      status: "failed",
+      refusal: "repo-too-large",
+    });
+    expect((await post("/internal/job/heartbeat", job.token, { step: "write" })).status).toBe(401);
+  });
+
+  it("refuses a heartbeat before the lease", async () => {
+    expect((await post("/internal/job/heartbeat", job.token, { step: "index" })).status).toBe(409);
+  });
+
+  it("fails a job with a worker code and refuses any other code", async () => {
+    await post("/internal/job/lease", job.token);
+    expect((await post("/internal/job/fail", job.token, { code: "frozen" })).status).toBe(400);
+    expect((await post("/internal/job/fail", job.token, { code: "job-failed" })).status).toBe(204);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({
+      status: "failed",
+      refusal: "job-failed",
+    });
+  });
+
+  it("charges an open reservation as spend when the job ends", async () => {
+    await post("/internal/job/lease", job.token);
+    await deps.db.query(
+      "INSERT INTO reservations (id, job_id, attempt, usd_micros) VALUES ($1, $2, 1, 12345)",
+      [deps.newId(), job.jobId],
+    );
+    await post("/internal/job/fail", job.token, { code: "job-failed" });
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ spentUsdMicros: 12345 });
+  });
+});

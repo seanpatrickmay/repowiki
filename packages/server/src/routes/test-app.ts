@@ -1,9 +1,9 @@
 import { Readable } from "node:stream";
-import type { Deps } from "../app.ts";
+import { createApp, type Deps } from "../app.ts";
 import { loadConfig } from "../config.ts";
 import type { Db } from "../db/db.ts";
 import { fakeEndpoints } from "../github/endpoints.ts";
-import { FAKE_TOKEN, FAKE_USER, fakeGitHubFetch } from "../github/fake.ts";
+import { FAKE_REPO, FAKE_TOKEN, FAKE_USER, fakeGitHubFetch } from "../github/fake.ts";
 import { HttpError } from "../http/body.ts";
 import type { Method, Reply, RouteRequest } from "../http/router.ts";
 import { type App, text } from "../http/server.ts";
@@ -12,6 +12,7 @@ import { signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { createSession } from "../store/sessions.ts";
 import { freshDb } from "../store/test-db.ts";
+import { projectRoutes } from "./projects.ts";
 
 export const TEST_NOW = "2026-10-14T12:00:00.000Z";
 
@@ -95,4 +96,23 @@ export async function signedInCookie(
 /** Test-only: the headers of a same-origin form post. */
 export function form(cookie: string, origin: string): Record<string, string> {
   return { cookie, origin, "content-type": "application/x-www-form-urlencoded" };
+}
+
+/** Test-only: a signed-in user who started a generation through `POST /projects`; its first token. */
+export async function startedJob(
+  deps: Deps,
+): Promise<{ jobId: string; token: string; projectId: string }> {
+  const recording = recordingRunner();
+  const local = { ...deps, runner: recording.runner };
+  const { cookie, csrf } = await signedInCookie(local);
+  const reply = await call(createApp(local, projectRoutes(local)), {
+    method: "POST",
+    path: "/projects",
+    headers: form(cookie, deps.config.origin),
+    body: `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`,
+  });
+  const projectId = String(reply.headers?.location).split("/").at(-1) ?? "";
+  const start = recording.started[0];
+  if (start === undefined) throw new Error("no job started");
+  return { jobId: start.jobId, token: start.token, projectId };
 }

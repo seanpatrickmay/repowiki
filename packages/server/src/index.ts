@@ -84,6 +84,8 @@ export {
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 export { refusalPage } from "./pages/refusal.ts";
 export { authRoutes } from "./routes/auth.ts";
+export { internalRoutes, LEASE_MS, type WorkerSpec } from "./routes/internal.ts";
+export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
 export { pageSession, projectRoutes } from "./routes/projects.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
 export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
@@ -113,11 +115,13 @@ export {
   jobById,
   jobSpec,
   jobsOf,
+  markLeased,
   openReservations,
   revokeTokens,
   saveJob,
   saveJobSpec,
   settleOpen,
+  type TokenHolder,
   tokenJob,
   tokensIssued,
 } from "./store/jobs.ts";
