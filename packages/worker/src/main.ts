@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { workerApi } from "./api.ts";
 import { takeEnv } from "./env.ts";
 import { runFixture } from "./fixture.ts";
+import { importMain } from "./import.ts";
 import { type PhaseDeps, phase1, phase2 } from "./run.ts";
 
 const PHASES = ["phase1", "phase2", "all"] as const;
@@ -57,7 +58,8 @@ const exit = (code: number) => {
   setTimeout(() => process.exit(code), 5_000).unref();
 };
 
-main().then(
+// Local testing's import mode (M14g) reads its own environment; see import.ts.
+(process.env.REPOWIKI_WORKER_MODE === "import" ? importMain(log) : main()).then(
   (ok) => exit(ok ? 0 : 1),
   (error: unknown) => {
     log({ worker: "crashed", error: error instanceof Error ? error.name : "unknown" });
