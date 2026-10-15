@@ -191,6 +191,8 @@ Each task one PR under ~300 changed lines where the code allows.
 
 Billing, the ledger, daily lifecycle checks, export and account deletion, backups, metrics and durable rate limits (specs 3 and 4); private repositories; Wikipedia links in hosted wikis; a GitHub App.
 
+A separate content origin: public and preview sites share the app's origin in this release, defended by the CSP (`script-src 'self'`, no inline scripts) against an escaping bug in the site package; moving pages to their own origin is spec 3's hardening.
+
 ## 15. Dependencies added
 
 `pg` 8.23.1 and `@types/pg` 8.23.1 (MIT), `@electric-sql/pglite` 0.5.8 (Apache-2.0). Each was reviewed: actively maintained (releases within the last two months), tens of millions of weekly downloads, permissive licences.
