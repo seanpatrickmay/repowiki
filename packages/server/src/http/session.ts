@@ -25,27 +25,38 @@ export function secureCookies(config: Config): boolean {
   return config.origin.startsWith("https://");
 }
 
+/**
+ * The request `currentSession` reads: its headers, and the connection's `raw` message, which
+ * keys the renewal so a handler that copies the request or its headers cannot lose it.
+ */
+export interface SessionRequest {
+  headers: Headers;
+  raw: object;
+}
+
 /** The cookie to re-issue for a request whose session just slid; read by `createApp`. */
 const renewals = new WeakMap<object, string>();
 
-export function renewalCookie(headers: Headers): string | undefined {
-  return renewals.get(headers);
+export function renewalCookie(request: SessionRequest): string | undefined {
+  return renewals.get(request.raw);
 }
 
 /** The signed-in session for a request's cookie, or null; a slid session's cookie is re-issued. */
 export async function currentSession(
   db: Queryable,
   config: Config,
-  headers: Headers,
+  request: SessionRequest,
   now: string,
 ): Promise<Session | null> {
-  const token = parseCookies(header(headers, "cookie")).get(
+  const token = parseCookies(header(request.headers, "cookie")).get(
     sessionCookieName(secureCookies(config)),
   );
   if (token === undefined || token === "") return null;
   const found = await readSession(db, token, now);
   if (found === null) return null;
-  if (found.renewed) renewals.set(headers, sessionSetCookie(config, token, SESSION_DAYS * 86_400));
+  if (found.renewed) {
+    renewals.set(request.raw, sessionSetCookie(config, token, SESSION_DAYS * 86_400));
+  }
   return { account: found.account, csrf: found.csrf, token };
 }
 

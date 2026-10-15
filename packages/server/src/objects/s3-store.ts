@@ -26,6 +26,9 @@ const unescapeXml = (text: string) =>
     .replaceAll("&amp;", "&");
 const MAX_LIST_PAGES = 1000;
 
+/** A listing still truncated after MAX_LIST_PAGES pages: returning part of it would lose keys. */
+export class ObjectListTruncated extends Error {}
+
 /** R2 (or any S3 API) with path-style URLs, signed by hand (spec 2 S12). */
 export function s3ObjectStore(options: S3Options): ObjectStore {
   const region = options.region ?? "auto";
@@ -115,9 +118,9 @@ export function s3ObjectStore(options: S3Options): ObjectStore {
         }
         const next = /<NextContinuationToken>([^<]*)<\/NextContinuationToken>/.exec(xml)?.[1];
         token = /<IsTruncated>true<\/IsTruncated>/.test(xml) && next ? unescapeXml(next) : null;
-        if (token === null) break;
+        if (token === null) return keys.sort();
       }
-      return keys.sort();
+      throw new ObjectListTruncated(`object store LIST passed ${MAX_LIST_PAGES} pages`);
     },
     async delete(keys) {
       const urls = keys.map(objectUrl);

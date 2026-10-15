@@ -106,3 +106,17 @@ describe("headSha (spec 2 S8)", () => {
     ).rejects.toBeInstanceOf(GitHubError);
   });
 });
+
+describe("the repository list's page cap", () => {
+  it("stops after ten full pages and logs that it did", async () => {
+    const lines: object[] = [];
+    const endless = githubApi(
+      async () =>
+        Response.json(Array.from({ length: 100 }, (_, i) => ({ ...FAKE_REPO, id: i + 1 }))),
+      endpoints,
+      (line) => lines.push(line),
+    );
+    expect(await endless.publicRepos(FAKE_TOKEN)).toHaveLength(1000);
+    expect(lines).toEqual([{ github: "repo-list-truncated", pages: 10 }]);
+  });
+});

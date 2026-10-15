@@ -69,7 +69,11 @@ export interface GitHubApi {
 }
 
 /** GitHub's REST API as the signed-in user, through `fetchFn` (spec 2 S8). */
-export function githubApi(fetchFn: typeof fetch, endpoints: GitHubEndpoints): GitHubApi {
+export function githubApi(
+  fetchFn: typeof fetch,
+  endpoints: GitHubEndpoints,
+  log: (line: object) => void = () => {},
+): GitHubApi {
   /**
    * The response, or null for 404 (not there, or hidden), 409 (an empty repository) and any
    * status in `missing`.
@@ -127,10 +131,12 @@ export function githubApi(fetchFn: typeof fetch, endpoints: GitHubEndpoints): Gi
           z.array(GitHubRepo),
           "repository list",
         );
-        if (batch === null) break;
+        if (batch === null) return all;
         all.push(...batch.filter((repo) => !repo.private));
-        if (batch.length < 100) break;
+        if (batch.length < 100) return all;
       }
+      // The 1000 most recently pushed are plenty to choose from; say that the rest were left out.
+      log({ github: "repo-list-truncated", pages: MAX_REPO_PAGES });
       return all;
     },
     async repository(token, id) {

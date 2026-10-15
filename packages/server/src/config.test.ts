@@ -37,6 +37,11 @@ describe("loadConfig (spec 2 S17)", () => {
     expect(config.tokenKey).toHaveLength(32);
   });
 
+  it("strips one trailing slash from R2_ENDPOINT", () => {
+    const config = loadConfig({ ...production, R2_ENDPOINT: `${production.R2_ENDPOINT}/` });
+    expect(config.objects).toMatchObject({ endpoint: production.R2_ENDPOINT });
+  });
+
   it("names every missing production variable and never echoes a value", () => {
     const { TOKEN_KEY, GITHUB_CLIENT_SECRET, ...rest } = production;
     expect(TOKEN_KEY && GITHUB_CLIENT_SECRET).toBeTruthy();

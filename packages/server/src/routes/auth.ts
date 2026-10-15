@@ -20,7 +20,13 @@ import { signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { createSession, endSession, SESSION_DAYS } from "../store/sessions.ts";
 
-const failure = (status: number, title: string, message: string) =>
+/** A sign-in that went wrong, as a page; `headers` clears the state cookie. */
+const failurePage = (
+  status: number,
+  title: string,
+  message: string,
+  headers: Record<string, string> = {},
+) =>
   html(
     status,
     page({
@@ -28,7 +34,15 @@ const failure = (status: number, title: string, message: string) =>
       body: `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/">Back to RepoWiki</a></p>`,
       session: null,
     }),
+    headers,
   );
+
+/** GitHub could not be reached or answered nonsense: a network failure, a timeout, a bad reply. */
+const unreachable = (error: unknown) =>
+  error instanceof GitHubError ||
+  error instanceof TokenRevoked ||
+  error instanceof TypeError ||
+  (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name));
 
 /** Sign-in with GitHub and sign-out (spec 2 S6, S7). */
 export function authRoutes(deps: Deps): Route[] {
@@ -43,6 +57,9 @@ export function authRoutes(deps: Deps): Route[] {
       ? deps.config.github
       : { clientId: "fake-client", clientSecret: "fake-secret" };
   const nowMs = () => Date.parse(deps.now());
+  /** Every failed callback clears the state cookie, so a stale one never lingers. */
+  const failure = (status: number, title: string, message: string) =>
+    failurePage(status, title, message, { "set-cookie": stateCookie("", 0) });
   const api = githubApi(deps.fetch, deps.github);
 
   return [
@@ -68,6 +85,9 @@ export function authRoutes(deps: Deps): Route[] {
         );
         const state = request.query.get("state");
         const code = request.query.get("code");
+        if (request.query.get("error") === "access_denied") {
+          return failure(400, "Sign-in cancelled", "You cancelled the sign-in on GitHub.");
+        }
         if (
           !expected ||
           !state ||
@@ -81,7 +101,15 @@ export function authRoutes(deps: Deps): Route[] {
             "The sign-in link expired or was not started here. Try again.",
           );
         }
-        const token = await exchangeCode(deps.fetch, deps.github, { ...client, code, redirectUri });
+        const unanswered = () =>
+          failure(502, "Sign-in failed", "GitHub could not be reached. Try again.");
+        let token: string | null;
+        try {
+          token = await exchangeCode(deps.fetch, deps.github, { ...client, code, redirectUri });
+        } catch (error) {
+          if (!unreachable(error)) throw error;
+          return unanswered();
+        }
         if (token === null) {
           return failure(400, "Sign-in failed", "GitHub did not confirm the sign-in. Try again.");
         }
@@ -89,7 +117,7 @@ export function authRoutes(deps: Deps): Route[] {
         try {
           user = await api.user(token);
         } catch (error) {
-          if (!(error instanceof GitHubError || error instanceof TokenRevoked)) throw error;
+          if (!unreachable(error)) throw error;
           return failure(502, "Sign-in failed", "GitHub did not return your profile. Try again.");
         }
         const allowlist = new Set(deps.config.signupAllowlist);
@@ -134,7 +162,7 @@ export function authRoutes(deps: Deps): Route[] {
       method: "POST",
       pattern: "/auth/signout",
       handler: async (request) => {
-        const session = await currentSession(deps.db, deps.config, request.headers, deps.now());
+        const session = await currentSession(deps.db, deps.config, request, deps.now());
         const form = await readForm(request.raw);
         checkMutation(deps.config, request.headers, session, form.get("csrf"));
         await endSession(deps.db, session.token);
