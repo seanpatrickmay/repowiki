@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { BODY_LIMIT, HttpError, readJson } from "./body.ts";
 import { createRouter, type RouteRequest } from "./router.ts";
-import { type AppServer, html, json, listen, text } from "./server.ts";
+import { type AppServer, html, json, listen, serverUrl, text } from "./server.ts";
 
 const logs: object[] = [];
 let server: AppServer;
@@ -127,6 +127,23 @@ describe("listen (spec 2 S2)", () => {
     const response = await fetch(`${server.url}/teapot`);
     expect(response.status).toBe(418);
     expect(await response.text()).toBe("short and stout");
+  });
+});
+
+describe("binding (spec 2 S1)", () => {
+  it("brackets an IPv6 host in the URL it reports", async () => {
+    expect(serverUrl("::", 8788)).toBe("http://[::]:8788");
+    expect(serverUrl("0.0.0.0", 8787)).toBe("http://0.0.0.0:8787");
+    const v6 = await listen(async () => text(200, "v6"), { port: 0, host: "::1", log: () => {} });
+    expect(v6.url).toMatch(/^http:\/\/\[::1\]:\d+$/);
+    expect(await (await fetch(v6.url)).text()).toBe("v6");
+    await v6.close();
+  });
+
+  it("rejects, rather than throwing an uncaught error, when the port is taken", async () => {
+    const port = Number(new URL(server.url).port);
+    const again = listen(async () => text(200, "x"), { port, host: "127.0.0.1", log: () => {} });
+    await expect(again).rejects.toMatchObject({ code: "EADDRINUSE" });
   });
 });
 

@@ -106,4 +106,15 @@ describe("startServer", () => {
     await reply.text();
     await server.close();
   }, 60_000);
+
+  it("rejects with the bind error when its port is taken", async () => {
+    const port = await freePort();
+    const first = await startServer(loadConfig({ ...DEMO, PORT: String(port) }));
+    try {
+      const second = startServer(loadConfig({ ...DEMO, PORT: String(port) }));
+      await expect(second).rejects.toMatchObject({ code: "EADDRINUSE" });
+    } finally {
+      await first.close();
+    }
+  }, 60_000);
 });
