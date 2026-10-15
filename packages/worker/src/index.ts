@@ -7,6 +7,14 @@ export {
   workerApi,
 } from "./api.ts";
 export {
+  CLONE_TIMEOUT_MS,
+  type CloneResult,
+  cloneBare,
+  dirBytes,
+  gitEnv,
+  MAX_REPO_BYTES,
+} from "./clone.ts";
+export {
   authorFacts,
   buildFacts,
   type FileFacts,
