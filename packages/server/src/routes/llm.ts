@@ -7,11 +7,13 @@ import { HttpError, readBody } from "../http/body.ts";
 import type { Handler, Reply, Route, RouteRequest } from "../http/router.ts";
 import { json } from "../http/server.ts";
 import { AnthropicUsage, actualMicros, reserveMicros } from "../proxy/cost.ts";
-import { MessageParams, refusedBeta } from "../proxy/request.ts";
+import { BatchCreate, MessageParams, refusedBeta } from "../proxy/request.ts";
 import { jobById, openReservations, revokeTokens, saveJob } from "../store/jobs.ts";
 import { heldJob, tokenFrom } from "./job-token.ts";
 
 export const MESSAGE_LIMIT = 8 * 1024 * 1024;
+/** A batch carries many requests, so it gets its own, larger body limit (M14c A3). */
+export const BATCH_LIMIT = 64 * 1024 * 1024;
 export const PER_SECOND = 10;
 const COUNT_CONCURRENCY = 4;
 
@@ -247,9 +249,73 @@ export function proxyCore(deps: Deps) {
   };
 }
 
+/** Anthropic's batch ids, safe to put in a path. */
+const BATCH_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** What a batch's results cost: the sum over succeeded lines, the reservation if one is unreadable. */
+function resultsCost(text: string, reserved: number): number {
+  let sum = 0;
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    let parsed: { result?: { type?: unknown; message?: { model?: unknown; usage?: unknown } } };
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return Math.max(sum, reserved);
+    }
+    if (parsed.result?.type !== "succeeded") continue;
+    const { model, usage } = parsed.result.message ?? {};
+    const read = AnthropicUsage.safeParse(usage);
+    const cost =
+      read.success && typeof model === "string" ? actualMicros(model, read.data, true) : null;
+    if (cost === null) return Math.max(sum, reserved);
+    sum += cost;
+  }
+  return sum;
+}
+
 /** The worker's Anthropic endpoint: the job's cap made hard, the real key never in the sandbox. */
 export function llmRoutes(deps: Deps): Route[] {
   const core = proxyCore(deps);
+
+  /** The job's reservation for `batchId`; 404 for a batch this job did not create. */
+  async function ownBatch(token: string, batchId: string): Promise<{ id: string; usd: number }> {
+    const job = await core.runningJob(deps.db, token, false);
+    const rows = BATCH_ID.test(batchId)
+      ? await deps.db.query<{ id: string; usd_micros: string | number }>(
+          "SELECT id, usd_micros FROM reservations WHERE job_id = $1 AND batch_id = $2",
+          [job.id, batchId],
+        )
+      : [];
+    if (rows[0] === undefined) throw new HttpError(404, "No such batch for this job.");
+    return { id: rows[0].id, usd: Number(rows[0].usd_micros) };
+  }
+
+  /** The SDK reads results from `results_url` as given: point it back through the proxy. */
+  function rewrite(text: string): string {
+    let batch: Record<string, unknown>;
+    try {
+      batch = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return text;
+    }
+    if (typeof batch?.id !== "string" || typeof batch.results_url !== "string") return text;
+    const id = encodeURIComponent(batch.id);
+    const resultsUrl = `${deps.config.runner.internalUrl}/llm/v1/messages/batches/${id}/results`;
+    return JSON.stringify({ ...batch, results_url: resultsUrl });
+  }
+
+  /** Retrieve or cancel one of the job's batches. */
+  const batchCall = (suffix: string, method: "GET" | "POST"): Handler =>
+    anthropicShaped(async (request) => {
+      const token = await core.authenticate(request);
+      const batchId = request.params.id ?? "";
+      await ownBatch(token, batchId);
+      const path = `/v1/messages/batches/${encodeURIComponent(batchId)}${suffix}`;
+      const response = await core.upstream(request, path, method);
+      return core.passThrough(response.status, rewrite(await response.text()));
+    });
+
   return [
     {
       method: "POST",
@@ -272,6 +338,62 @@ export function llmRoutes(deps: Deps): Route[] {
         }
         await core.settle(id, core.messageCost(response.ok, text, params.model, reserved));
         return core.passThrough(response.status, text);
+      }),
+    },
+    {
+      method: "POST",
+      pattern: "/llm/v1/messages/batches",
+      handler: anthropicShaped(async (request) => {
+        const token = await core.authenticate(request);
+        const body = await core.readParams(request, BATCH_LIMIT, BatchCreate);
+        const requests = body.requests.map((r) => r.params);
+        const reserved = await core.reservationFor(request, requests, true);
+        const id = await core.reserve(token, reserved);
+        if (id === null) return core.capRefusal();
+        let response: Response;
+        let text: string;
+        try {
+          response = await core.upstream(
+            request,
+            "/v1/messages/batches",
+            "POST",
+            JSON.stringify(body),
+          );
+          text = await response.text();
+        } catch {
+          // The batch may exist upstream with no id we can read: charge the reservation.
+          await core.settle(id, reserved);
+          throw new HttpError(502, "The model provider did not answer.");
+        }
+        const batchId = response.ok ? (JSON.parse(rewrite(text)) as { id?: unknown }).id : null;
+        if (typeof batchId !== "string" || !BATCH_ID.test(batchId)) {
+          await core.settle(id, response.ok ? reserved : 0);
+          return core.passThrough(response.status, text);
+        }
+        await deps.db.query("UPDATE reservations SET batch_id = $2 WHERE id = $1", [id, batchId]);
+        return core.passThrough(response.status, rewrite(text));
+      }),
+    },
+    { method: "GET", pattern: "/llm/v1/messages/batches/:id", handler: batchCall("", "GET") },
+    {
+      method: "POST",
+      pattern: "/llm/v1/messages/batches/:id/cancel",
+      handler: batchCall("/cancel", "POST"),
+    },
+    {
+      method: "GET",
+      pattern: "/llm/v1/messages/batches/:id/results",
+      handler: anthropicShaped(async (request) => {
+        const token = await core.authenticate(request);
+        const batchId = request.params.id ?? "";
+        const reservation = await ownBatch(token, batchId);
+        const path = `/v1/messages/batches/${encodeURIComponent(batchId)}/results`;
+        const response = await core.upstream(request, path, "GET");
+        const text = await response.text();
+        if (!response.ok) return core.passThrough(response.status, text);
+        // Settled once: a second read of the same results charges nothing (settle is idempotent).
+        await core.settle(reservation.id, resultsCost(text, reservation.usd));
+        return { status: 200, headers: { "content-type": "application/x-jsonl" }, body: text };
       }),
     },
   ];
