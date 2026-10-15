@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { WikiExport } from "@repowiki/core";
 import { makePeopleSnapshot } from "@repowiki/core/test-fixtures";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "./config.ts";
 import { LocalProfile } from "./github/profile.ts";
 import { adaProfile, writeProfile } from "./github/test-profile.ts";
@@ -123,7 +123,11 @@ describe("local profile mode (M14g)", () => {
     const second = await me.go("/projects", { form: { csrf, githubRepoId: "8003" } });
     expect(second.status, second.text).toBe(303);
     await waitFor(me, second.location ?? "", "Generation: failed");
-    expect(JSON.stringify(logs)).toContain("no local wiki for ada/notes");
+    // The worker's stderr is logged when it exits, which can be a moment after the job failed.
+    await vi.waitFor(() => expect(JSON.stringify(logs)).toContain("no local wiki for ada/notes"), {
+      timeout: 15_000,
+      interval: 250,
+    });
 
     await server?.close();
     server = null;

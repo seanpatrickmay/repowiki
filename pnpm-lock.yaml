@@ -35,6 +35,9 @@ importers:
       '@repowiki/server':
         specifier: workspace:*
         version: link:packages/server
+      '@repowiki/worker':
+        specifier: workspace:*
+        version: link:packages/worker
       '@types/node':
         specifier: 24.19.0
         version: 24.19.0

@@ -34,6 +34,7 @@ export {
   type SnapshotFacts,
 } from "./facts.ts";
 export { runFixture } from "./fixture.ts";
+export { type Author, exportFacts, matchAuthor, runImport } from "./import.ts";
 export { AUTHOR_ID, authorEmails, peopleFile } from "./people-file.ts";
 export {
   CLI_TIMEOUT_MS,
