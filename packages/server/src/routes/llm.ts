@@ -260,18 +260,22 @@ export function proxyCore(deps: Deps) {
       if (owner[0] === undefined) return [];
       // Job row first, then the reservation: the order every other job transaction locks in.
       const job = await jobById(tx, owner[0].job_id, true);
-      const rows = await tx.query<{ settled: boolean }>(
-        "SELECT settled FROM reservations WHERE id = $1 FOR UPDATE",
+      const rows = await tx.query<{ settled: boolean; batch: boolean }>(
+        "SELECT settled, batch FROM reservations WHERE id = $1 FOR UPDATE",
         [reservationId],
       );
       if (rows[0] === undefined) return [];
       const now = deps.now();
       if (rows[0].settled) {
         // The job ended first and was charged the reservation; its spend is final, but the
-        // budgets count real spend (fresh review I3).
+        // budgets count real spend (fresh review I3). A message's cost is known exactly, so it
+        // replaces the reservation; a batch, which the job's end may have cancelled part-way,
+        // never records less than it reserved.
         await tx.query(
-          `UPDATE reservations SET actual_usd_micros = $2, settled_at = $3
-           WHERE id = $1 AND COALESCE(actual_usd_micros, 0) < $2`,
+          rows[0].batch
+            ? `UPDATE reservations SET actual_usd_micros = $2, settled_at = $3
+               WHERE id = $1 AND COALESCE(actual_usd_micros, 0) < $2`
+            : "UPDATE reservations SET actual_usd_micros = $2, settled_at = $3 WHERE id = $1",
           [reservationId, actual, now],
         );
         return [];
