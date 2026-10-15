@@ -119,6 +119,10 @@ function tokens(css: string, from = 0): Map<string, string> {
 }
 
 describe("BIOGRAPHY_STYLE", () => {
+  it("runs each section heading below the infobox, as in the mockup (review M2)", () => {
+    expect(BIOGRAPHY_STYLE).toContain(".article > h2 { clear: right; }");
+  });
+
   const site = readFileSync(new URL("../../../site/src/styles/wiki.css", import.meta.url), "utf8");
   const dark = (css: string) => tokens(css, css.indexOf("prefers-color-scheme: dark"));
 

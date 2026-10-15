@@ -102,7 +102,7 @@ export { type PublishInput, publish } from "./publish.ts";
 export { REFUSAL_CODES, REFUSALS, RefusalCode, type RefusalInfo } from "./refusals.ts";
 export { type Ok, ok, type Refused, type Result, refused } from "./result.ts";
 export { firstRevision, refreshRevision, reviewRevision } from "./revisions.ts";
-export { firstClause, plainWords } from "./text.ts";
+export { firstClause, plainWords, sentencesOf } from "./text.ts";
 export {
   claimHandle,
   HANDLE_MAX_LENGTH,

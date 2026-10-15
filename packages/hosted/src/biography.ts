@@ -1,7 +1,7 @@
 import { GitSha, IsoDateTime, type WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { Facts, plainText } from "./content.ts";
-import { firstClause, plainWords } from "./text.ts";
+import { firstClause, plainWords, sentencesOf } from "./text.ts";
 
 /** One published project as the author's biography reads it (ADR-0013), stored as `entry.json`. */
 export const BiographyEntry = z.strictObject({
@@ -124,7 +124,8 @@ const plural = (n: number, one: string) => `${thousands(n)} ${one}${n === 1 ? ""
 const yearOf = (iso: string) => iso.slice(0, 4);
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const sentences = (text: string) => text.split(/(?<=[.!?])\s+/).filter((s) => s !== "");
+/** Suffixes after a family name, dropped before the surname is taken (review M1). */
+const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|phd|md)\.?$/i;
 
 /** `items` joined as "A", "A and B" or "A, B and C", each made by `run`. */
 function listed<T>(items: readonly T[], run: (item: T) => Run[]): Run[] {
@@ -140,10 +141,10 @@ const listedText = (items: readonly string[]) => listed(items, (t) => [{ text: t
  * "<Title> is", cut at a clause within 110 characters; null when the sentence starts otherwise.
  */
 export function nounPhrase(lead: string, title: string): string | null {
-  const first = sentences(plainWords(lead, 4000).replace(/\s+/g, " "))[0] ?? "";
+  const first = sentencesOf(plainWords(lead, 4000).replace(/\s+/g, " "))[0] ?? "";
   const subject = new RegExp(`^(?:the\\s+)?${escapeRe(title)}\\s+(?:is|was|are)\\s+`, "i");
   if (!subject.test(first)) return null;
-  const phrase = firstClause(first.replace(subject, ""), 110);
+  const phrase = firstClause(first.replace(subject, ""), 110).replace(/[.!?]+$/, "");
   return phrase === "" ? null : phrase;
 }
 
@@ -152,11 +153,20 @@ export function biographyName(displayName: string, login: string): string {
   return plainWords(displayName, 120) || login;
 }
 
-/** The surname: the display name's last word, or the login when there is no display name. */
+/**
+ * The surname: the display name's last word once bracketed groups ("(she/her)"), anything after
+ * a comma, emoji and symbols, and suffixes such as "Jr." or "PhD" are gone; the login when nothing
+ * is left or there is no display name (review M1).
+ */
 export function surnameOf(displayName: string, login: string): string {
   const name = plainWords(displayName, 120);
   if (name === "" || name === login) return login;
-  return name.split(/\s+/).at(-1) ?? login;
+  const kept = (name.replace(/\([^)]*\)|\[[^\]]*\]/g, " ").split(",")[0] ?? "")
+    .replace(/[^\p{L}\p{M}\p{N}\s'’.-]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => /[\p{L}\p{N}]/u.test(word));
+  while (kept.length > 0 && NAME_SUFFIX.test(kept.at(-1) ?? "")) kept.pop();
+  return kept.at(-1) ?? login;
 }
 
 /** Numbered references, one per URL, in the order first cited. */
@@ -308,7 +318,7 @@ export function biography(input: {
       lead:
         p.entry.lead === ""
           ? []
-          : [{ text: sentences(p.entry.lead).slice(0, 2).join(" ") }, treeCite(p)],
+          : [{ text: sentencesOf(p.entry.lead).slice(0, 2).join(" ") }, treeCite(p)],
       contribution: [{ text: p.entry.contribution }, historyCite(p)],
       label: GENERATED_LABEL(p.entry.repo.commitSha),
     })),
