@@ -65,6 +65,18 @@ export const Facts = z
   );
 export type Facts = z.infer<typeof Facts>;
 
+/** What a revision publishes (ADR-0012): always generated, never edited by the author. */
+export const PortfolioContent = z.strictObject({
+  tagline: plainText(90),
+  summary: plainText(900),
+  contribution: plainText(1200).refine((t) => t.trim() !== "", "empty contribution"),
+  highlights: z
+    .array(z.strictObject({ featureId: FeatureId, blurb: plainText(140) }))
+    .max(4)
+    .refine((h) => distinct(h.map((x) => x.featureId)), "duplicate highlight"),
+});
+export type PortfolioContent = z.infer<typeof PortfolioContent>;
+
 /** The portfolio layer an author edits (§8); a missing tagline or summary uses the suggestion. */
 export const Overrides = z
   .strictObject({

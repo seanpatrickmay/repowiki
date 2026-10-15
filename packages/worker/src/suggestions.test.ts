@@ -8,7 +8,6 @@ import {
   cleanSuggestions,
   fallbackSuggestions,
   leadOf,
-  plainWords,
   suggest,
   taglineFrom,
 } from "./suggestions.ts";
@@ -35,23 +34,6 @@ function provider(
     },
   };
 }
-
-describe("plainWords", () => {
-  it("turns link tokens and Markdown into plain text within a limit", () => {
-    expect(
-      plainWords("The **[[ingest]]** step reads <script> files and [[wp:Unix|Unix]] pipes.", 200),
-    ).toBe("The ingest step reads < script> files and Unix pipes.");
-    expect(plainWords("one two three four", 9)).toBe("one two");
-    expect(plainWords("# Title\n> quoted SIGNALS_TABLE", 200)).toBe("Title\nquoted SIGNALS_TABLE");
-  });
-
-  it("drops hidden characters and keeps at most three paragraphs", () => {
-    expect(plainWords("a\u200Bb\u0007c\td", 200)).toBe("abc d");
-    expect(plainWords("one\n\ntwo\n\nthree\n\nfour\n\nfive", 200)).toBe(
-      "one\n\ntwo\n\nthree four five",
-    );
-  });
-});
 
 describe("suggestions (spec 2 §8)", () => {
   it("reads the About article's lead as plain text", () => {
