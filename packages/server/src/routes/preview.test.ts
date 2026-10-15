@@ -102,17 +102,22 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
       "referrer-policy": "no-referrer",
     });
     expect(home.headers?.["set-cookie"]).toBeUndefined();
-    const wiki = await call(pages, { path: `${base}docs/` });
+    // The preview's biography links to the preview's wiki, at the project's slug (ADR-0013).
+    const at = `${base}demo-repo/`;
+    expect(String(home.body)).toContain(`href="${at}">Read the wiki</a>`);
+    const wiki = await call(pages, { path: at });
     expect(wiki.status).toBe(200);
     expect(wiki.headers?.["content-security-policy"]).toContain("wasm-unsafe-eval");
     expect(wiki.headers?.["x-robots-tag"]).toBe("noindex");
-    expect(String(wiki.body)).toContain(`${base}docs/`);
-    expect(String(wiki.body)).not.toContain('"/demo-dev/demo-repo/docs/');
+    expect(String(wiki.body)).toContain(`${at}wiki/`);
+    expect(String(wiki.body)).not.toContain('"/demo-dev/demo-repo/');
     expect(String(wiki.body)).not.toContain("github.com/_preview/");
     // Every wiki page is public (ADR-0012).
-    expect((await call(pages, { path: `${base}docs/wiki/${first}/` })).status).toBe(200);
-    expect((await call(pages, { path: `${base}docs/wiki/signals/` })).status).toBe(200);
-    expect((await call(pages, { path: `${base}portfolio.json` })).status).toBe(404);
+    expect((await call(pages, { path: `${at}wiki/${first}/` })).status).toBe(200);
+    expect((await call(pages, { path: `${at}wiki/signals/` })).status).toBe(200);
+    expect((await call(pages, { path: `${base}demo-repo` })).headers?.location).toBe(at);
+    expect((await call(pages, { path: `${base}entry.json` })).status).toBe(404);
+    expect((await call(pages, { path: `${base}docs/` })).status).toBe(404);
     expect((await call(pages, { path: base.slice(0, -1) })).status).toBe(301);
     expect((await call(pages, { path: `/_preview/${"A".repeat(43)}/` })).status).toBe(404);
 

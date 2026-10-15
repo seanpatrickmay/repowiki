@@ -2,6 +2,7 @@ import {
   ATTESTATION_VERSION,
   ATTESTATIONS,
   type DraftRevision,
+  GENERATED_LABEL,
   type Generation,
   JOB_STEPS,
   type Job,
@@ -12,7 +13,6 @@ import {
   REFUSALS,
   type Review,
 } from "@repowiki/hosted";
-import { GENERATED_LABEL } from "../render/portfolio.ts";
 import { escapeHtml as e, type PageSession, page } from "./layout.ts";
 
 export interface ProjectView {

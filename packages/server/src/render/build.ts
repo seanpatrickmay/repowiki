@@ -47,12 +47,16 @@ function runChild(args: readonly string[]): Promise<void> {
   });
 }
 
-/** The tree of a preview or version: the built wiki under docs/, plus portfolio.json (S13). */
+/** Where a tree keeps the built wiki, and the project's biography entry (ADR-0013). */
+export const SITE_DIR = "site/";
+export const ENTRY_FILE = "entry.json";
+
+/** The tree of a preview or version: the built wiki under site/, plus entry.json (S13). */
 export function buildTree(input: {
   exp: WikiExport;
   base: string;
   repoUrl: string;
-  portfolio: Uint8Array;
+  entry: Uint8Array;
 }): Promise<{ files: TreeFile[]; hash: string }> {
   return renderQueue(async () => {
     const work = mkdtempSync(join(tmpdir(), "repowiki-render-"));
@@ -61,10 +65,7 @@ export function buildTree(input: {
       const outDir = join(work, "site");
       writeFileSync(exportFile, JSON.stringify(input.exp));
       await runChild([exportFile, outDir, input.repoUrl, input.base]);
-      const files = [
-        ...readTree(outDir, "docs/"),
-        { path: "portfolio.json", bytes: input.portfolio },
-      ];
+      const files = [...readTree(outDir, SITE_DIR), { path: ENTRY_FILE, bytes: input.entry }];
       return { files, hash: treeHash(files) };
     } finally {
       rmSync(work, { recursive: true, force: true });

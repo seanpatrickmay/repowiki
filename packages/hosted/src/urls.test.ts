@@ -155,9 +155,9 @@ describe("handle changes (Contract spec §9)", () => {
 });
 
 describe("URLs (Contract spec §9)", () => {
-  it("are our own https origin plus handle and slug", () => {
+  it("are our own https origin plus handle and slug; a project's is its wiki (ADR-0013)", () => {
     expect(projectUrl("https://repowiki.dev", "sean", "repowiki")).toBe(
-      "https://repowiki.dev/sean/repowiki",
+      "https://repowiki.dev/sean/repowiki/",
     );
     expect(profileUrl("https://repowiki.dev", "sean")).toBe("https://repowiki.dev/sean");
     expect(siteKey(A, 3)).toBe(`sites/${A}/v3/`);

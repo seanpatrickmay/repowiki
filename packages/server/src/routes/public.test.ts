@@ -21,6 +21,7 @@ const post = (path: string, body: string) =>
   });
 const get = (path: string) => call(app, { path });
 const PAGE = "/demo-dev/demo-repo";
+const WIKI = `${PAGE}/`;
 
 beforeAll(async () => {
   deps = await testDeps();
@@ -30,19 +31,16 @@ beforeAll(async () => {
     ...publishRoutes(deps),
     ...publicRoutes(deps),
   ]);
-  p = await generatedProject(deps, {
-    tagline: 'A "tiny" demo & <3 more',
-    contributionDraft: "Mine.",
-  });
+  p = await generatedProject(deps, { contributionDraft: 'Mine: a "tiny" demo & <3 more.' });
   await post(`/projects/${p.projectId}/review`, "revision=1&attest=yes");
 }, 300_000);
 afterAll(async () => deps.db.close());
 
 describe("public pages (spec 2 S14; Contract §9)", () => {
   it("serves nothing before publishing", async () => {
-    expect((await get(PAGE)).status).toBe(404);
-    expect((await get(`${PAGE}/docs/`)).status).toBe(404);
-    expect(String((await get("/demo-dev")).body)).not.toContain(`href="${PAGE}"`);
+    expect((await get(WIKI)).status).toBe(404);
+    // No published project, no biography (ADR-0013).
+    expect((await get("/demo-dev")).status).toBe(404);
     await post(`/projects/${p.projectId}/preview`, "revision=1");
     const hash = (await previewOf(deps.db, p.projectId, 1))?.siteHash ?? "";
     expect(
@@ -55,49 +53,41 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     ).toBe(303);
   }, 300_000);
 
-  it("serves the portfolio page signed out, escaped, cached for 60 seconds", async () => {
-    const reply = await get(PAGE);
+  it("serves the biography signed out, escaped, linking to the wiki, cached for 60 seconds", async () => {
+    const reply = await get("/demo-dev");
     expect(reply.status).toBe(200);
     const body = String(reply.body);
-    expect(body).toContain("Mine.");
-    expect(body).toContain("Author-reviewed");
-    expect(body).toContain(`<a href="${deps.config.appOrigin}/">Made with RepoWiki</a>`);
-    expect(body).toMatch(/Published 20\d\d-\d\d-\d\d/);
-    expect(body).toContain("A &quot;tiny&quot; demo &amp; &lt;3 more");
+    expect(body).toContain('<h1 class="page-title">Demo Developer</h1>');
+    expect(body).toContain("Mine: a &quot;tiny&quot; demo &amp; &lt;3 more.");
     expect(body).not.toContain("<3");
+    expect(body).toContain(`href="${WIKI}">Read the wiki</a>`);
+    expect(body).toContain('<link rel="stylesheet" href="/_app/biography.css">');
+    expect(body).not.toContain("<style");
+    // Public pages point readers at the app on its own origin (ADR-0012).
+    expect(body).toContain(`<a href="${deps.config.appOrigin}/">Made with RepoWiki</a>`);
     expect(reply.headers?.["cache-control"]).toBe("public, max-age=60");
     expect(reply.headers?.["set-cookie"]).toBeUndefined();
   });
 
-  it("serves the published wiki's bytes as copied, and 404s for anything else", async () => {
-    const home = await get(`${PAGE}/docs/`);
+  it("serves the published wiki's bytes as copied at the project's root, and 404s for anything else", async () => {
+    const home = await get(WIKI);
     expect(home.status).toBe(200);
     expect(home.headers?.["content-security-policy"]).toContain("wasm-unsafe-eval");
     expect(home.headers?.["cache-control"]).toBe("public, max-age=60");
     const version = await versionOf(deps.db, p.projectId, 1);
-    const stored = await deps.objects.get(`${version?.siteKey}docs/index.html`);
+    const stored = await deps.objects.get(`${version?.siteKey}site/index.html`);
     expect(home.body).toEqual(stored?.body);
-    expect((await get(`${PAGE}/docs/wiki/signals/`)).status).toBe(200);
-    expect((await get(`${PAGE}/docs/wiki/deliverables/`)).status).toBe(200);
-    expect((await get(`${PAGE}/docs/nope.html`)).status).toBe(404);
-    expect((await get(`${PAGE}/portfolio.json`)).status).toBe(404);
+    expect(new TextDecoder().decode(home.body as Uint8Array)).toContain(`${WIKI}wiki/`);
+    expect((await get(`${WIKI}wiki/signals/`)).status).toBe(200);
+    expect((await get(`${WIKI}wiki/deliverables/`)).status).toBe(200);
+    expect((await get(`${WIKI}nope.html`)).status).toBe(404);
+    // The old /docs/ paths never launched, and the entry is not a page.
+    expect((await get(`${WIKI}docs/`)).status).toBe(404);
+    expect((await get(`${WIKI}entry.json`)).status).toBe(404);
     expect((await get("/demo-dev/nope")).status).toBe(404);
     expect((await get("/nobody-here")).status).toBe(404);
-    expect((await get(`${PAGE}/`)).status).toBe(301);
-    expect((await get("/Demo-Dev/demo-repo")).headers?.location).toBe(PAGE);
-  });
-
-  it("lists published projects on the profile, escaped", async () => {
-    const reply = await get("/demo-dev");
-    expect(reply.status).toBe(200);
-    expect(String(reply.body)).toContain(`href="${PAGE}"`);
-    expect(String(reply.body)).toContain("&lt;3 more");
-    expect(String(reply.body)).not.toContain("<3");
-    expect(String(reply.body)).not.toContain("<style");
-    // Public pages point readers at the app on its own origin (ADR-0012).
-    expect(String(reply.body)).toContain(
-      `<a href="${deps.config.appOrigin}/">Made with RepoWiki</a>`,
-    );
+    expect((await get(PAGE)).headers?.location).toBe(WIKI);
+    expect((await get("/Demo-Dev/demo-repo")).headers?.location).toBe(WIKI);
   });
 
   it("never redirects off the site, and redirects only to canonical paths (fresh review I1)", async () => {
@@ -108,18 +98,19 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     }
     expect((await get("/demo-dev/%09evil.com/")).status).toBe(404);
     expect((await get("/demo-dev/nope/")).status).toBe(404);
-    expect((await get("/demo-dev/nope/docs")).status).toBe(404);
-    const slash = await get(`${PAGE}/`);
-    expect(slash.status).toBe(301);
-    expect(slash.headers?.location).toBe(PAGE);
-    expect((await get(`${PAGE}/docs`)).headers?.location).toBe(`${PAGE}/docs/`);
+    expect((await get("/demo-dev/nope/wiki")).status).toBe(404);
+    const bare = await get(PAGE);
+    expect(bare.status).toBe(301);
+    expect(bare.headers?.location).toBe(WIKI);
   });
 
   it("sends another case of a slug, and a handle's trailing slash, to the canonical path", async () => {
     const cased = await get("/demo-dev/Demo-Repo");
     expect(cased.status).toBe(301);
-    expect(cased.headers?.location).toBe(PAGE);
-    expect((await get("/Demo-Dev/Demo-Repo/docs/")).headers?.location).toBe(`${PAGE}/docs/`);
+    expect(cased.headers?.location).toBe(WIKI);
+    expect((await get("/Demo-Dev/Demo-Repo/wiki/signals/")).headers?.location).toBe(
+      `${WIKI}wiki/signals/`,
+    );
     const profile = await get("/demo-dev/");
     expect(profile.status).toBe(301);
     expect(profile.headers?.location).toBe("/demo-dev");
@@ -143,24 +134,25 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
       ],
     );
     expect((await get("/old-dev")).headers?.location).toBe("/demo-dev");
-    expect((await get("/old-dev/demo-repo")).headers?.location).toBe(PAGE);
-    const deep = await get("/old-dev/demo-repo/docs/wiki/signals/");
-    expect(deep.headers?.location).toBe(`${PAGE}/docs/wiki/signals/`);
+    expect((await get("/old-dev/demo-repo")).headers?.location).toBe(WIKI);
+    const deep = await get("/old-dev/demo-repo/wiki/signals/");
+    expect(deep.headers?.location).toBe(`${WIKI}wiki/signals/`);
     expect((await get("/old-dev/nope")).status).toBe(404);
   });
 
-  it("answers 410 for a withdrawn page at once and drops it from the profile", async () => {
+  it("answers 410 for a withdrawn wiki at once and drops it from the biography", async () => {
     await post(`/projects/${p.projectId}/unpublish`, "");
-    expect((await get(PAGE)).status).toBe(410);
-    expect((await get(`${PAGE}/docs/`)).status).toBe(410);
-    expect(String((await get("/demo-dev")).body)).not.toContain(`href="${PAGE}"`);
+    expect((await get(WIKI)).status).toBe(410);
+    expect((await get(`${WIKI}wiki/signals/`)).status).toBe(410);
+    // Its only published project gone, the biography is gone too.
+    expect((await get("/demo-dev")).status).toBe(404);
   });
 
   it("says a page taken down by the operator was removed, not withdrawn by its author", async () => {
     const project = await projectById(deps.db, p.projectId);
     if (project === null) throw new Error("project");
     await saveProject(deps.db, { ...project, withdrawReason: "operator" });
-    const reply = await get(PAGE);
+    const reply = await get(WIKI);
     expect(reply.status).toBe(410);
     expect(String(reply.body)).toBe("This page was removed.");
   });
