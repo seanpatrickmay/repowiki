@@ -5,10 +5,12 @@ import type { Route } from "../http/router.ts";
 import { redirect } from "../http/server.ts";
 import type { Session } from "../http/session.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
+import { cancelBatches } from "../proxy/cancel.ts";
 import {
   activeJob,
   issueToken,
   jobById,
+  openBatchIds,
   revokeTokens,
   saveJob,
   settleOpen,
@@ -46,22 +48,24 @@ export function jobRoutes(deps: Deps): Route[] {
         const { session } = await mutation(deps, request);
         const projectId = request.params.id ?? "";
         const back = `/projects/${projectId}`;
-        const result = await deps.db.transaction(async (tx): Promise<Result<true>> => {
+        const result = await deps.db.transaction(async (tx): Promise<Result<string[]>> => {
           const found = await lockedJob(tx, session, projectId, request.params.job ?? "");
           if (found === null) return { ok: false, code: "not-found" };
           const now = deps.now();
           const caller = { kind: "account" as const, account: session.account };
           const verdict = authorize("job.cancel", { now, caller, project: found.project });
           if (!verdict.ok) return verdict;
+          const batches = await openBatchIds(tx, found.job.id);
           // Open spend is charged before the job stops, as every ending does (spec 2 §6).
           const cancelled = cancelJob(await settleOpen(tx, found.job, now), now);
           if (!cancelled.ok) return cancelled;
           await saveJob(tx, cancelled.value);
           await revokeTokens(tx, found.job.id);
           await auditAuthor(tx, deps, "job.cancel", projectId, "allowed");
-          return ok(true);
+          return ok(batches);
         });
         if (!result.ok) return refusalPage(result.code, pageSession(session), { back });
+        await cancelBatches(deps.anthropic, result.value, logOf(deps));
         return redirect(back);
       },
     },

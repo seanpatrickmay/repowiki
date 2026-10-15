@@ -10,8 +10,9 @@ import {
 import { issueToken, jobById, markLeased, saveJob, tokenJob } from "../store/jobs.ts";
 import { usageFor } from "../store/projects.ts";
 import { internalRoutes } from "./internal.ts";
-import { llmRoutes } from "./llm.ts";
-import { call, startedJob, testDeps } from "./test-app.ts";
+import { llmRoutes, proxyCore } from "./llm.ts";
+import { jobRoutes } from "./project-jobs.ts";
+import { call, form, signedInCookie, startedJob, testDeps } from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
@@ -50,7 +51,7 @@ async function setUp(options: FakeAnthropicOptions = {}) {
   deps = await testDeps({
     anthropic: { url: "https://api.anthropic.test", key: "sk-real", fetch: upstream.fetch },
   });
-  app = createApp(deps, [...internalRoutes(deps), ...llmRoutes(deps)]);
+  app = createApp(deps, [...internalRoutes(deps), ...llmRoutes(deps), ...jobRoutes(deps)]);
   job = await startedJob(deps);
   await call(app, {
     method: "POST",
@@ -67,6 +68,20 @@ async function secondJob(): Promise<string> {
   const token = await issueToken(deps.db, other.id, 1, deps.now());
   await markLeased(deps.db, token);
   return token;
+}
+
+/** The owner cancels the job through the project page's form. */
+async function cancelAsOwner(): Promise<string> {
+  const { cookie, csrf, accountId } = await signedInCookie(deps);
+  const reply = await call(app, {
+    method: "POST",
+    path: `/projects/${job.projectId}/jobs/${job.jobId}/cancel`,
+    headers: form(cookie, deps.config.origin),
+    body: `csrf=${csrf}`,
+  });
+  expect(reply.status).toBe(303);
+  expect(await jobById(deps.db, job.jobId)).toMatchObject({ status: "cancelled" });
+  return accountId;
 }
 
 /** A failed fetch, as undici reports one: a TypeError whose cause carries the system code. */
@@ -242,6 +257,29 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     expect(usage).toMatchObject({ monthUsdMicros: 11_000, platformDayUsdMicros: 11_000 });
   });
 
+  it("records the real cost of a message that lands after its job ended (fresh review I3)", async () => {
+    const core = proxyCore(deps);
+    const reservation = await core.reserve(job.token, 1000, false);
+    if (reservation === null) throw new Error("reserve");
+    const accountId = await cancelAsOwner();
+    expect(await spent()).toBe(1000);
+    await core.settle(reservation, 7000);
+    const rows = await deps.db.query<{ actual_usd_micros: string }>(
+      "SELECT actual_usd_micros FROM reservations WHERE id = $1",
+      [reservation],
+    );
+    expect(Number(rows[0]?.actual_usd_micros)).toBe(7000);
+    // The job's spend was final when it ended; the budgets see the real cost.
+    expect(await spent()).toBe(1000);
+    expect(await usageFor(deps.db, accountId, deps.now())).toMatchObject({ monthUsdMicros: 7000 });
+    await core.settle(reservation, 3000);
+    const again = await deps.db.query<{ actual_usd_micros: string }>(
+      "SELECT actual_usd_micros FROM reservations WHERE id = $1",
+      [reservation],
+    );
+    expect(Number(again[0]?.actual_usd_micros)).toBe(7000);
+  });
+
   it("refuses max_tokens past the engine's largest call (S11)", async () => {
     expect((await send("/llm/v1/messages", message(64_000))).status).toBe(400);
     expect((await send("/llm/v1/messages", message(16_001))).status).toBe(400);
@@ -414,6 +452,30 @@ describe("the LLM proxy's batch routes (spec 2 S11)", () => {
     expect((await get(`/llm/v1/messages/batches/${made.id}/results`)).status).toBe(401);
   });
 
+  const cancels = () =>
+    upstream.calls.filter((c) => c.method === "POST" && c.url.endsWith("/cancel"));
+
+  it("cancels a job's open batches upstream when its owner cancels it (fresh review I3)", async () => {
+    const made = JSON.parse(String((await send("/llm/v1/messages/batches", batch())).body));
+    await cancelAsOwner();
+    expect(cancels().map((c) => c.url)).toEqual([
+      `https://api.anthropic.test/v1/messages/batches/${made.id}/cancel`,
+    ]);
+    expect(cancels()[0]?.headers.get("x-api-key")).toBe("sk-real");
+  });
+
+  it("cancels the open batches of a job its cost cap ended (fresh review I3)", async () => {
+    await deps.db.close();
+    await setUp({ usage: { input_tokens: 1000, output_tokens: 2000 } });
+    await setCap(5000);
+    const made = JSON.parse(String((await send("/llm/v1/messages/batches", batch())).body));
+    expect((await send("/llm/v1/messages", message())).status).toBe(200);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ refusal: "job-cost-cap" });
+    expect(cancels().map((c) => c.url)).toEqual([
+      `https://api.anthropic.test/v1/messages/batches/${made.id}/cancel`,
+    ]);
+  });
+
   it("charges a batch still unread when the job ends (Review Focus 3)", async () => {
     await send("/llm/v1/messages/batches", batch());
     const fail = await call(app, {
@@ -424,6 +486,7 @@ describe("the LLM proxy's batch routes (spec 2 S11)", () => {
     });
     expect(fail.status).toBe(204);
     expect(await jobById(deps.db, job.jobId)).toMatchObject({ spentUsdMicros: 2626 });
+    expect(cancels()).toHaveLength(1);
   });
 });
 
