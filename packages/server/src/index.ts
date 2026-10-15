@@ -35,6 +35,14 @@ export {
   stateKey,
   stateValid,
 } from "./github/oauth.ts";
+export {
+  chooseExports,
+  type ExportChoice,
+  LocalProfile,
+  loadProfile,
+  type TakeProfileOptions,
+  takeProfile,
+} from "./github/profile.ts";
 export { BODY_LIMIT, HttpError, readBody, readForm, readJson } from "./http/body.ts";
 export {
   type CookieOptions,
