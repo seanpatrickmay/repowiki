@@ -173,6 +173,11 @@ describe("URLs (Contract spec §9)", () => {
       "https://repowiki.fly.dev",
       "https://pub-1.r2.dev",
       "https://x.workers.dev",
+      // One spelling per origin (review fix): no trailing dot, no default port, no bare provider.
+      "https://repowiki.fly.dev.",
+      "https://repowiki.dev.",
+      "https://fly.dev",
+      "https://app.repowiki.app:443",
     ]) {
       expect(Origin.safeParse(bad).success, bad).toBe(false);
     }

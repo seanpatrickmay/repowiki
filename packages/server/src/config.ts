@@ -182,7 +182,8 @@ export function loadConfig(env: Env): Config {
 
 /** The app and its public pages on different hosts: cookies are scoped by host, not port. */
 function apart(appOrigin: string, publicOrigin: string): void {
-  if (new URL(appOrigin).hostname === new URL(publicOrigin).hostname) {
+  const host = (origin: string) => new URL(origin).hostname.replace(/\.$/, "");
+  if (host(appOrigin) === host(publicOrigin)) {
     throw new ConfigError("APP_ORIGIN and PUBLIC_ORIGIN must be on different hosts.");
   }
 }

@@ -150,4 +150,4 @@ UPDATE revisions SET body = jsonb_set(body #- '{overrides,hiddenFeatureIds}', '{
 
 ## After the plan: the runbook (controller)
 
-DNS and certificates for `repowiki.app` and `app.repowiki.app` (both to the Fly app; `fly certs add` each), the GitHub OAuth app's homepage and callback URL moved to `https://app.repowiki.app/auth/github/callback`, `APP_ORIGIN` and `PUBLIC_ORIGIN` set, and the health check's host.
+DNS and certificates for `repowiki.app` and `app.repowiki.app` (both to the Fly app; `fly certs add` each), the GitHub OAuth app's homepage and callback URL moved to `https://app.repowiki.app/auth/github/callback`, `APP_ORIGIN` and `PUBLIC_ORIGIN` set; the Fly health check is `GET /healthz`, which needs no hostname.
