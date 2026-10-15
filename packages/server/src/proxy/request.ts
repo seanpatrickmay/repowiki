@@ -1,7 +1,12 @@
 import { z } from "zod";
 
-/** The most output a proxied request may ask for. */
-export const MAX_OUTPUT = 64_000;
+/**
+ * The most output a proxied request may ask for: the engine's largest call (the manifest and the
+ * architecture page, 16,000). It bounds how far in-flight requests can pass a job's cap (S11).
+ */
+export const MAX_PROXY_OUTPUT_TOKENS = 16_000;
+/** The most requests one batch may carry; with two batches in flight it bounds a job's overshoot. */
+export const MAX_BATCH_REQUESTS = 1000;
 
 /**
  * `anthropic-beta` values the proxy passes through: the engine sets none (packages/llm), so none.
@@ -25,7 +30,7 @@ const Text = z.union([z.string(), z.array(TextBlock).min(1)]);
  */
 export const MessageParams = z.strictObject({
   model: z.string().min(1).max(128),
-  max_tokens: z.int().min(1).max(MAX_OUTPUT),
+  max_tokens: z.int().min(1).max(MAX_PROXY_OUTPUT_TOKENS),
   system: Text.optional(),
   messages: z.array(z.strictObject({ role: z.enum(["user", "assistant"]), content: Text })).min(1),
   output_config: z
@@ -50,7 +55,7 @@ export const BatchCreate = z.strictObject({
       }),
     )
     .min(1)
-    .max(10_000),
+    .max(MAX_BATCH_REQUESTS),
 });
 export type BatchCreate = z.infer<typeof BatchCreate>;
 

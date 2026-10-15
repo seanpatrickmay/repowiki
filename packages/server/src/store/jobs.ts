@@ -153,14 +153,16 @@ export async function openReservations(q: Queryable, jobId: string): Promise<num
 
 /**
  * A job about to stop: every open reservation becomes spend in full, because the real cost of a
- * batch whose results were never read is unknown (Contract C8; spec 2 §6). Spend never passes the
- * cap, which the Job schema forbids.
+ * batch whose results were never read is unknown (Contract C8; spec 2 §6). Each is recorded as
+ * its real cost at `now`; the job's spend never passes the cap, which the Job schema forbids.
  */
-export async function settleOpen(q: Queryable, job: Job): Promise<Job> {
+export async function settleOpen(q: Queryable, job: Job, now: string): Promise<Job> {
   const open = await openReservations(q, job.id);
-  await q.query("UPDATE reservations SET settled = true WHERE job_id = $1 AND NOT settled", [
-    job.id,
-  ]);
+  await q.query(
+    `UPDATE reservations SET settled = true, actual_usd_micros = usd_micros, settled_at = $2
+     WHERE job_id = $1 AND NOT settled`,
+    [job.id, now],
+  );
   if (open === 0 || job.status !== "running") return job;
   const spend = Math.min(open, job.capUsdMicros - job.spentUsdMicros);
   const spent = recordSpend(job, job.attempt, spend);

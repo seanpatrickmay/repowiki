@@ -8,6 +8,7 @@ import {
   fakeAnthropicFetch,
 } from "../proxy/fake-anthropic.ts";
 import { issueToken, jobById, markLeased, saveJob, tokenJob } from "../store/jobs.ts";
+import { usageFor } from "../store/projects.ts";
 import { internalRoutes } from "./internal.ts";
 import { llmRoutes } from "./llm.ts";
 import { call, startedJob, testDeps } from "./test-app.ts";
@@ -206,13 +207,45 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     await deps.db.close();
     await setUp({ usage: { input_tokens: 1000, output_tokens: 2000 } });
     await setCap(5000);
+    // Another request in flight when the cap is reached is settled with the job.
+    await deps.db.query(
+      "INSERT INTO reservations (id, job_id, attempt, usd_micros) VALUES ($1, $2, 1, 100)",
+      [deps.newId(), job.jobId],
+    );
     expect((await send("/llm/v1/messages", message())).status).toBe(200);
+    expect(await deps.db.query("SELECT * FROM reservations WHERE NOT settled")).toEqual([]);
     expect(await jobById(deps.db, job.jobId)).toMatchObject({
       status: "failed",
       refusal: "job-cost-cap",
       spentUsdMicros: 5000,
     });
     expect(await tokenJob(deps.db, job.token)).toBeNull();
+  });
+
+  it("records an overrun's real cost and counts it in the month's usage (S11)", async () => {
+    await deps.db.close();
+    await setUp({ usage: { input_tokens: 1000, output_tokens: 2000 } });
+    await setCap(5000);
+    expect((await send("/llm/v1/messages", message())).status).toBe(200);
+    const rows = await deps.db.query<{ actual_usd_micros: string; settled_at: Date }>(
+      "SELECT actual_usd_micros, settled_at FROM reservations",
+    );
+    expect(rows.map((r) => [Number(r.actual_usd_micros), r.settled_at.toISOString()])).toEqual([
+      [11_000, deps.now()],
+    ]);
+    expect(await spent()).toBe(5000);
+    const owner = await deps.db.query<{ account_id: string }>(
+      "SELECT account_id FROM projects WHERE id = $1",
+      [job.projectId],
+    );
+    const usage = await usageFor(deps.db, owner[0]?.account_id ?? "", deps.now());
+    expect(usage).toMatchObject({ monthUsdMicros: 11_000, platformDayUsdMicros: 11_000 });
+  });
+
+  it("refuses max_tokens past the engine's largest call (S11)", async () => {
+    expect((await send("/llm/v1/messages", message(64_000))).status).toBe(400);
+    expect((await send("/llm/v1/messages", message(16_001))).status).toBe(400);
+    expect((await send("/llm/v1/messages", message(16_000))).status).toBe(200);
   });
 
   it("charges an unparseable success the reservation (A2)", async () => {
@@ -303,6 +336,16 @@ describe("the LLM proxy's batch routes (spec 2 S11)", () => {
     expect((await get(`/llm/v1/messages/batches/${theirs}`, otherToken)).status).toBe(200);
   });
 
+  it("allows a job two batches in flight and refuses a third with 429 (S11)", async () => {
+    const first = JSON.parse(String((await send("/llm/v1/messages/batches", batch(1))).body));
+    expect((await send("/llm/v1/messages/batches", batch(1))).status).toBe(200);
+    const third = await send("/llm/v1/messages/batches", batch(1));
+    expect(third.status).toBe(429);
+    expect(String(third.body)).not.toContain("job-cost-cap");
+    await get(`/llm/v1/messages/batches/${first.id}/results`);
+    expect((await send("/llm/v1/messages/batches", batch(1))).status).toBe(200);
+  });
+
   it("settles a non-JSON batch-create success at its reservation and answers 502", async () => {
     await deps.db.close();
     await setUp({ batchBody: "not json" });
@@ -329,6 +372,11 @@ describe("the LLM proxy's batch routes (spec 2 S11)", () => {
     ]);
     expect(replies.map((r) => r.status)).toEqual([200, 200]);
     expect(upstream.maxCountsInFlight()).toBeLessThanOrEqual(4);
+  });
+
+  it("refuses a batch of more than 1,000 requests (S11)", async () => {
+    expect((await send("/llm/v1/messages/batches", batch(1001, 10))).status).toBe(400);
+    expect(upstream.calls).toEqual([]);
   });
 
   it("refuses a batch whose reservation would pass the cap", async () => {

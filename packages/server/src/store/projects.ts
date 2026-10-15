@@ -59,11 +59,37 @@ export async function saveRepository(q: Queryable, repository: Repository): Prom
 }
 
 const monthStart = (now: string) => `${monthOf(now)}-01T00:00:00.000Z`;
+const nextMonthStart = (now: string) => {
+  const d = new Date(monthStart(now));
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  return d.toISOString();
+};
 const dayStart = (now: string) => `${new Date(now).toISOString().slice(0, 10)}T00:00:00.000Z`;
+const nextDayStart = (now: string) =>
+  new Date(Date.parse(dayStart(now)) + 86_400_000).toISOString();
 
-/** Reserved caps of unfinished jobs plus actual spend of finished ones (Contract C8, §18.6). */
-const COST = `CASE WHEN j.status IN ('queued', 'running') THEN (j.body->>'capUsdMicros')::bigint
-  ELSE (j.body->>'spentUsdMicros')::bigint END`;
+/**
+ * A job's model cost in the period [$from, $to), which holds now (spec 2 S11, S15). Settled costs
+ * count by `settled_at` and uncapped; an unfinished job counts the greater of its cap (in the
+ * period it was created in) and its settled costs plus its open reservations; a finished job with
+ * no recorded costs counts its spend when it finished.
+ */
+const COST = (from: string, to: string) => {
+  const within = (at: string) => `(${at} >= ${from} AND ${at} < ${to})`;
+  const settled = `(SELECT COALESCE(sum(r.actual_usd_micros), 0) FROM reservations r
+    WHERE r.job_id = j.id AND r.settled AND ${within("r.settled_at")})`;
+  const open = `(SELECT COALESCE(sum(r.usd_micros), 0) FROM reservations r
+    WHERE r.job_id = j.id AND NOT r.settled)`;
+  const recorded = `EXISTS (SELECT 1 FROM reservations r
+    WHERE r.job_id = j.id AND r.actual_usd_micros IS NOT NULL)`;
+  const field = (name: string) => `(j.body->>'${name}')::timestamptz`;
+  return `CASE WHEN j.status IN ('queued', 'running') THEN GREATEST(
+      CASE WHEN ${within(field("createdAt"))} THEN (j.body->>'capUsdMicros')::bigint ELSE 0 END,
+      ${settled} + ${open})
+    WHEN ${recorded} THEN ${settled}
+    WHEN ${within(field("finishedAt"))} THEN (j.body->>'spentUsdMicros')::bigint
+    ELSE 0 END`;
+};
 const SUCCEEDED = (kind: string) => `j.status = 'succeeded' AND j.body->>'kind' = '${kind}'`;
 const IN_FLIGHT = (kind: string) =>
   `j.status IN ('queued', 'running') AND j.body->>'kind' = '${kind}'`;
@@ -79,9 +105,9 @@ export async function usageFor(q: Queryable, accountId: string, now: string): Pr
       count(*) FILTER (WHERE ${SUCCEEDED("refresh")} AND ${THIS_MONTH("finishedAt")}) AS ref_month,
       count(*) FILTER (WHERE ${IN_FLIGHT("generate")}) AS gen_flight,
       count(*) FILTER (WHERE ${IN_FLIGHT("refresh")}) AS ref_flight,
-      COALESCE(sum(${COST}) FILTER (WHERE ${THIS_MONTH("createdAt")}), 0) AS month_usd
+      COALESCE(sum(${COST("$2::timestamptz", "$3::timestamptz")}), 0) AS month_usd
     FROM projects p JOIN jobs j ON j.project_id = p.id WHERE p.account_id = $1`,
-    [accountId, monthStart(now)],
+    [accountId, monthStart(now), nextMonthStart(now)],
   );
   // `pg` returns bigint counts and sums as strings.
   const r = rows[0] ?? {};
@@ -98,11 +124,12 @@ export async function usageFor(q: Queryable, accountId: string, now: string): Pr
   };
 }
 
-/** Platform-wide model cost of the UTC day: reserved caps plus actual spend. */
+/** Platform-wide model cost of the UTC day, counted as `COST` counts it. */
 export async function platformDayUsdMicros(q: Queryable, now: string): Promise<number> {
   const rows = await q.query<{ usd: string | number }>(
-    `SELECT COALESCE(sum(${COST}), 0) AS usd FROM jobs j WHERE (j.body->>'createdAt')::timestamptz >= $1`,
-    [dayStart(now)],
+    `SELECT COALESCE(sum(${COST("$1::timestamptz", "$2::timestamptz")}), 0) AS usd FROM jobs j
+     WHERE j.status IN ('queued', 'running') OR (j.body->>'finishedAt')::timestamptz >= $1`,
+    [dayStart(now), nextDayStart(now)],
   );
   return Number(rows[0]?.usd ?? 0);
 }

@@ -102,8 +102,9 @@ export function internalRoutes(deps: Deps): Route[] {
 
   /** The job ends: open reservations become spend, then every token dies. */
   const fail = async (tx: Queryable, job: Job, code: WorkerCode) => {
-    const settled = await settleOpen(tx, job);
-    await saveJob(tx, contract(failJob(settled, settled.attempt, code, deps.now())));
+    const now = deps.now();
+    const settled = await settleOpen(tx, job, now);
+    await saveJob(tx, contract(failJob(settled, settled.attempt, code, now)));
     await revokeTokens(tx, job.id);
   };
 
@@ -202,7 +203,7 @@ export function internalRoutes(deps: Deps): Route[] {
       const project = await projectById(tx, job.projectId, true);
       if (project === null) throw new Error("job has no project");
       const now = deps.now();
-      const settled = await settleOpen(tx, job);
+      const settled = await settleOpen(tx, job, now);
       const done = contract(succeedJob(settled, settled.attempt, now));
       const generation: Generation = {
         id: deps.newId(),

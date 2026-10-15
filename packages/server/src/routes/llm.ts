@@ -8,7 +8,7 @@ import type { Handler, Reply, Route, RouteRequest } from "../http/router.ts";
 import { json } from "../http/server.ts";
 import { AnthropicUsage, actualMicros, reserveMicros } from "../proxy/cost.ts";
 import { BatchCreate, MessageParams, refusedBeta } from "../proxy/request.ts";
-import { jobById, openReservations, revokeTokens, saveJob } from "../store/jobs.ts";
+import { jobById, openReservations, revokeTokens, saveJob, settleOpen } from "../store/jobs.ts";
 import { heldJob, tokenFrom } from "./job-token.ts";
 
 export const MESSAGE_LIMIT = 8 * 1024 * 1024;
@@ -16,6 +16,8 @@ export const MESSAGE_LIMIT = 8 * 1024 * 1024;
 export const BATCH_LIMIT = 64 * 1024 * 1024;
 export const PER_SECOND = 10;
 const COUNT_CONCURRENCY = 4;
+/** Batch creates one job may have open at once (S11). */
+export const MAX_BATCHES_IN_FLIGHT = 2;
 
 /** Failures where fetch never opened a connection, so nothing reached the provider (M1). */
 const UNSENT_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
@@ -208,25 +210,38 @@ export function proxyCore(deps: Deps) {
     );
   }
 
-  /** Reserve `usd` against the token's job, or null when spent plus open would pass the cap. */
-  async function reserve(token: string, usd: number): Promise<string | null> {
+  /**
+   * Reserve `usd` against the token's job; null when spent plus open would pass the cap. A batch
+   * create is refused with 429 while the job already has MAX_BATCHES_IN_FLIGHT open (S11).
+   */
+  async function reserve(token: string, usd: number, batch: boolean): Promise<string | null> {
     return deps.db.transaction(async (tx) => {
       const job = await runningJob(tx, token, true);
+      if (batch) {
+        const rows = await tx.query<{ n: string | number }>(
+          "SELECT count(*) AS n FROM reservations WHERE job_id = $1 AND batch AND NOT settled",
+          [job.id],
+        );
+        if (Number(rows[0]?.n ?? 0) >= MAX_BATCHES_IN_FLIGHT) {
+          throw new HttpError(429, "Too many batches in flight for this job.");
+        }
+      }
       const open = await openReservations(tx, job.id);
       if (job.spentUsdMicros + open + usd > job.capUsdMicros) return null;
       const id = deps.newId();
       await tx.query(
-        "INSERT INTO reservations (id, job_id, attempt, usd_micros) VALUES ($1, $2, $3, $4)",
-        [id, job.id, job.attempt, usd],
+        "INSERT INTO reservations (id, job_id, attempt, usd_micros, batch) VALUES ($1, $2, $3, $4, $5)",
+        [id, job.id, job.attempt, usd, batch],
       );
       return id;
     });
   }
 
   /**
-   * Settle a reservation once, charging `actual` in full (A2). Spend never passes the cap, which
-   * the Job schema forbids: a charge that reaches it fails the job with job-cost-cap in the same
-   * transaction. A job that already ended had its open reservations charged then, so it is skipped.
+   * Settle a reservation once, recording `actual` uncapped (budgets count real spend) and charging
+   * it to the job (A2). The job's spend never passes the cap, which the Job schema forbids: a
+   * charge that reaches it fails the job with job-cost-cap in the same transaction, settling its
+   * other open reservations. A job that already ended had its open reservations settled then.
    */
   async function settle(reservationId: string, actual: number): Promise<void> {
     await deps.db.transaction(async (tx) => {
@@ -242,12 +257,17 @@ export function proxyCore(deps: Deps) {
         [reservationId],
       );
       if (rows[0] === undefined || rows[0].settled) return;
-      await tx.query("UPDATE reservations SET settled = true WHERE id = $1", [reservationId]);
+      const now = deps.now();
+      await tx.query(
+        "UPDATE reservations SET settled = true, actual_usd_micros = $2, settled_at = $3 WHERE id = $1",
+        [reservationId, actual, now],
+      );
       if (job === null || job.status !== "running") return;
       const charge = Math.min(actual, job.capUsdMicros - job.spentUsdMicros);
       let next = contract(recordSpend(job, job.attempt, charge));
       if (next.spentUsdMicros >= next.capUsdMicros) {
-        next = contract(failJob(next, next.attempt, "job-cost-cap", deps.now()));
+        next = await settleOpen(tx, next, now);
+        next = contract(failJob(next, next.attempt, "job-cost-cap", now));
         await revokeTokens(tx, job.id);
       }
       await saveJob(tx, next);
@@ -402,7 +422,7 @@ export function llmRoutes(deps: Deps): Route[] {
         const token = await core.authenticate(request);
         const params = await core.readParams(request, MESSAGE_LIMIT, MessageParams);
         const reserved = await core.reservationFor(request, [params], false);
-        const id = await core.reserve(token, reserved);
+        const id = await core.reserve(token, reserved, false);
         if (id === null) return core.capRefusal();
         const path = "/v1/messages";
         const { response, text } = await core.forward(request, id, reserved, path, params);
@@ -418,7 +438,7 @@ export function llmRoutes(deps: Deps): Route[] {
         const body = await core.readParams(request, BATCH_LIMIT, BatchCreate);
         const requests = body.requests.map((r) => r.params);
         const reserved = await core.reservationFor(request, requests, true);
-        const id = await core.reserve(token, reserved);
+        const id = await core.reserve(token, reserved, true);
         if (id === null) return core.capRefusal();
         const path = "/v1/messages/batches";
         const { response, text } = await core.forward(request, id, reserved, path, body);
