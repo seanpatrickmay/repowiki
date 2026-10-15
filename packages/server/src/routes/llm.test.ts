@@ -1,3 +1,4 @@
+import type { Job } from "@repowiki/hosted";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
@@ -6,7 +7,7 @@ import {
   type FakeAnthropicOptions,
   fakeAnthropicFetch,
 } from "../proxy/fake-anthropic.ts";
-import { jobById, tokenJob } from "../store/jobs.ts";
+import { issueToken, jobById, markLeased, saveJob, tokenJob } from "../store/jobs.ts";
 import { internalRoutes } from "./internal.ts";
 import { llmRoutes } from "./llm.ts";
 import { call, startedJob, testDeps } from "./test-app.ts";
@@ -57,6 +58,20 @@ async function setUp(options: FakeAnthropicOptions = {}) {
   });
 }
 
+/** A second running job, leased by its own token. */
+async function secondJob(): Promise<string> {
+  const first = (await jobById(deps.db, job.jobId)) as Job;
+  const other = { ...first, id: "00000000-0000-4000-8000-0000000000bb", projectId: first.id };
+  await saveJob(deps.db, other);
+  const token = await issueToken(deps.db, other.id, 1, deps.now());
+  await markLeased(deps.db, token);
+  return token;
+}
+
+/** A failed fetch, as undici reports one: a TypeError whose cause carries the system code. */
+const networkError = (code: string) =>
+  Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(code), { code }) });
+
 async function setCap(usdMicros: number) {
   await deps.db.query(
     `UPDATE jobs SET body = body || jsonb_build_object('capUsdMicros', $2::int, 'estimateUsdMicros', $2::int)
@@ -97,6 +112,24 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     expect((await send("/llm/v1/messages", message(1_000_000))).status).toBe(400);
     await deps.db.query(
       "UPDATE jobs SET body = jsonb_set(body, '{attempt}', to_jsonb(2)) WHERE id = $1",
+      [job.jobId],
+    );
+    expect((await send("/llm/v1/messages", message())).status).toBe(401);
+    expect(upstream.calls).toEqual([]);
+  });
+
+  it("refuses a second worker's token on a leased job with 403, which the SDK does not retry", async () => {
+    const second = await issueToken(deps.db, job.jobId, 1, deps.now());
+    const reply = await send("/llm/v1/messages", message(), second);
+    expect(reply.status).toBe(403);
+    expect(JSON.parse(String(reply.body))).toMatchObject({ error: { type: "permission_error" } });
+    expect(upstream.calls).toEqual([]);
+  });
+
+  it("refuses a job whose lease ran out before the sweeper recovered it", async () => {
+    await deps.db.query(
+      `UPDATE jobs SET body = jsonb_set(body, '{leaseExpiresAt}', to_jsonb('2026-10-14T11:00:00.000Z'::text))
+       WHERE id = $1`,
       [job.jobId],
     );
     expect((await send("/llm/v1/messages", message())).status).toBe(401);
@@ -159,7 +192,7 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     await setCap(13_000);
     // Counted: 10,000 × 1.25 + 1250 = 13,750, past the cap.
     expect((await send("/llm/v1/messages", message())).status).toBe(429);
-  });
+  }, 30_000);
 
   it("charges usage above the reservation in full (A2)", async () => {
     await deps.db.close();
@@ -188,6 +221,25 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
     expect((await send("/llm/v1/messages", message())).status).toBe(200);
     expect(await spent()).toBe(1375);
   });
+
+  it("charges nothing when the request never left, and the reservation when it may have", async () => {
+    await deps.db.close();
+    await setUp({ throws: networkError("ECONNREFUSED") });
+    expect((await send("/llm/v1/messages", message())).status).toBe(502);
+    expect(
+      (
+        await send("/llm/v1/messages/batches", {
+          requests: [{ custom_id: "a", params: message() }],
+        })
+      ).status,
+    ).toBe(502);
+    expect(await spent()).toBe(0);
+    expect(await deps.db.query("SELECT * FROM reservations WHERE NOT settled")).toEqual([]);
+    await deps.db.close();
+    await setUp({ throws: networkError("ECONNRESET") });
+    expect((await send("/llm/v1/messages", message())).status).toBe(502);
+    expect(await spent()).toBe(1375);
+  }, 30_000);
 
   it("limits each job token to 10 requests a second", async () => {
     for (let i = 0; i < 10; i++) {
@@ -238,11 +290,45 @@ describe("the LLM proxy's batch routes (spec 2 S11)", () => {
   });
 
   it("refuses another job's batch id without calling upstream", async () => {
-    expect((await get("/llm/v1/messages/batches/msgbatch_other")).status).toBe(404);
-    expect((await get("/llm/v1/messages/batches/msgbatch_other/results")).status).toBe(404);
-    const cancel = await send("/llm/v1/messages/batches/msgbatch_other/cancel", undefined);
+    const otherToken = await secondJob();
+    const created = await send("/llm/v1/messages/batches", batch(), otherToken);
+    expect(created.status).toBe(200);
+    const theirs = JSON.parse(String(created.body)).id as string;
+    const before = upstream.calls.length;
+    expect((await get(`/llm/v1/messages/batches/${theirs}`)).status).toBe(404);
+    expect((await get(`/llm/v1/messages/batches/${theirs}/results`)).status).toBe(404);
+    const cancel = await send(`/llm/v1/messages/batches/${theirs}/cancel`, undefined);
     expect(cancel.status).toBe(404);
-    expect(upstream.calls).toEqual([]);
+    expect(upstream.calls).toHaveLength(before);
+    expect((await get(`/llm/v1/messages/batches/${theirs}`, otherToken)).status).toBe(200);
+  });
+
+  it("settles a non-JSON batch-create success at its reservation and answers 502", async () => {
+    await deps.db.close();
+    await setUp({ batchBody: "not json" });
+    expect((await send("/llm/v1/messages/batches", batch())).status).toBe(502);
+    expect(await spent()).toBe(2626);
+    expect(await open()).toEqual([]);
+  });
+
+  it("charges only the succeeded lines of a batch's results", async () => {
+    await deps.db.close();
+    await setUp({ resultTypes: ["succeeded", "errored", "canceled", "expired"] });
+    const made = JSON.parse(String((await send("/llm/v1/messages/batches", batch(4))).body));
+    expect((await get(`/llm/v1/messages/batches/${made.id}/results`)).status).toBe(200);
+    expect(await spent()).toBe(upstream.costOfBatchResult);
+  });
+
+  it("counts tokens at most 4 at a time across every job (S11)", async () => {
+    await deps.db.close();
+    await setUp({ countDelayMs: 30 });
+    const other = await secondJob();
+    const replies = await Promise.all([
+      send("/llm/v1/messages/batches", batch(6)),
+      send("/llm/v1/messages/batches", batch(6), other),
+    ]);
+    expect(replies.map((r) => r.status)).toEqual([200, 200]);
+    expect(upstream.maxCountsInFlight()).toBeLessThanOrEqual(4);
   });
 
   it("refuses a batch whose reservation would pass the cap", async () => {

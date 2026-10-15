@@ -17,10 +17,39 @@ export const BATCH_LIMIT = 64 * 1024 * 1024;
 export const PER_SECOND = 10;
 const COUNT_CONCURRENCY = 4;
 
+/** Failures where fetch never opened a connection, so nothing reached the provider (M1). */
+const UNSENT_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
+function neverSent(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  const code = (error.cause as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" && UNSENT_CODES.has(code);
+}
+
+/** At most `limit` calls of `run` at once; the others wait their turn. */
+export function semaphore(limit: number): <T>(run: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (run) => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
+    try {
+      return await run();
+    } finally {
+      const next = waiting.shift();
+      if (next === undefined) active--;
+      else next();
+    }
+  };
+}
+
+/** Token counts in flight across every job in this process (S11): one batch cannot starve others. */
+const counting = semaphore(COUNT_CONCURRENCY);
+
 /** Errors in Anthropic's shape, so the worker's SDK reports them as the API's own. */
 const KINDS: Readonly<Record<number, string>> = {
   400: "invalid_request_error",
   401: "authentication_error",
+  403: "permission_error",
   404: "not_found_error",
   409: "invalid_request_error",
   413: "request_too_large",
@@ -71,8 +100,21 @@ export function proxyCore(deps: Deps) {
 
   /** The job a running worker's token speaks for, with the row locked when `tx` is a transaction. */
   async function runningJob(q: Queryable, token: string | null, lock: boolean): Promise<Job> {
-    const { job } = await heldJob(q, token, lock);
+    let job: Job;
+    try {
+      ({ job } = await heldJob(q, token, lock));
+    } catch (error) {
+      // The SDK retries a 409; a second worker must stop, so it gets a 403 here (M3).
+      if (error instanceof HttpError && error.status === 409) {
+        throw new HttpError(403, error.message);
+      }
+      throw error;
+    }
     if (job.status !== "running") throw new HttpError(401, "This job is not running.");
+    // A lease that ran out is over, even before the sweeper recovers the job (M4).
+    if (job.leaseExpiresAt === null || Date.parse(job.leaseExpiresAt) <= Date.parse(deps.now())) {
+      throw new HttpError(401, "This job's lease has expired.");
+    }
     return job;
   }
 
@@ -129,11 +171,8 @@ export function proxyCore(deps: Deps) {
   async function inputTokens(request: RouteRequest, params: MessageParams): Promise<number> {
     const { max_tokens: _max, temperature: _t, metadata: _m, ...countable } = params;
     try {
-      const response = await upstream(
-        request,
-        "/v1/messages/count_tokens",
-        "POST",
-        JSON.stringify(countable),
+      const response = await counting(() =>
+        upstream(request, "/v1/messages/count_tokens", "POST", JSON.stringify(countable)),
       );
       const counted = (await response.json().catch(() => null)) as { input_tokens?: unknown };
       if (response.ok && Number.isSafeInteger(counted?.input_tokens)) {
@@ -215,6 +254,32 @@ export function proxyCore(deps: Deps) {
     });
   }
 
+  /**
+   * POST `body` upstream. A connection that never opened is charged 0 (M1); a failure after the
+   * request may have reached the provider is charged the reservation, never less.
+   */
+  async function forward(
+    request: RouteRequest,
+    reservationId: string,
+    reserved: number,
+    path: string,
+    body: unknown,
+  ): Promise<{ response: Response; text: string }> {
+    let response: Response;
+    try {
+      response = await upstream(request, path, "POST", JSON.stringify(body));
+    } catch (error) {
+      await settle(reservationId, neverSent(error) ? 0 : reserved);
+      throw new HttpError(502, "The model provider did not answer.");
+    }
+    try {
+      return { response, text: await response.text() };
+    } catch {
+      await settle(reservationId, reserved);
+      throw new HttpError(502, "The model provider did not answer.");
+    }
+  }
+
   /** The upstream reply as the worker sees it. */
   const passThrough = (status: number, body: string): Reply => ({
     status,
@@ -244,6 +309,7 @@ export function proxyCore(deps: Deps) {
     reservationFor,
     reserve,
     settle,
+    forward,
     passThrough,
     messageCost,
     capRefusal,
@@ -253,6 +319,16 @@ export function proxyCore(deps: Deps) {
 
 /** Anthropic's batch ids, safe to put in a path. */
 const BATCH_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A batch-create reply's id, or null when the reply is not JSON or has no usable id. */
+function batchIdOf(text: string): string | null {
+  try {
+    const id = (JSON.parse(text) as { id?: unknown } | null)?.id;
+    return typeof id === "string" && BATCH_ID.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 /** What a batch's results cost: the sum over succeeded lines, the reservation if one is unreadable. */
 function resultsCost(text: string, reserved: number): number {
@@ -328,16 +404,8 @@ export function llmRoutes(deps: Deps): Route[] {
         const reserved = await core.reservationFor(request, [params], false);
         const id = await core.reserve(token, reserved);
         if (id === null) return core.capRefusal();
-        let response: Response;
-        let text: string;
-        try {
-          response = await core.upstream(request, "/v1/messages", "POST", JSON.stringify(params));
-          text = await response.text();
-        } catch {
-          // The request may have been billed: charge what was reserved, never less.
-          await core.settle(id, reserved);
-          throw new HttpError(502, "The model provider did not answer.");
-        }
+        const path = "/v1/messages";
+        const { response, text } = await core.forward(request, id, reserved, path, params);
         await core.settle(id, core.messageCost(response.ok, text, params.model, reserved));
         return core.passThrough(response.status, text);
       }),
@@ -352,25 +420,17 @@ export function llmRoutes(deps: Deps): Route[] {
         const reserved = await core.reservationFor(request, requests, true);
         const id = await core.reserve(token, reserved);
         if (id === null) return core.capRefusal();
-        let response: Response;
-        let text: string;
-        try {
-          response = await core.upstream(
-            request,
-            "/v1/messages/batches",
-            "POST",
-            JSON.stringify(body),
-          );
-          text = await response.text();
-        } catch {
-          // The batch may exist upstream with no id we can read: charge the reservation.
-          await core.settle(id, reserved);
-          throw new HttpError(502, "The model provider did not answer.");
-        }
-        const batchId = response.ok ? (JSON.parse(rewrite(text)) as { id?: unknown }).id : null;
-        if (typeof batchId !== "string" || !BATCH_ID.test(batchId)) {
-          await core.settle(id, response.ok ? reserved : 0);
+        const path = "/v1/messages/batches";
+        const { response, text } = await core.forward(request, id, reserved, path, body);
+        if (!response.ok) {
+          await core.settle(id, 0);
           return core.passThrough(response.status, text);
+        }
+        const batchId = batchIdOf(text);
+        if (batchId === null) {
+          // The batch may exist upstream with no id we can read: charge the reservation (M2).
+          await core.settle(id, reserved);
+          throw new HttpError(502, "The model provider's reply could not be read.");
         }
         await deps.db.query("UPDATE reservations SET batch_id = $2 WHERE id = $1", [id, batchId]);
         return core.passThrough(response.status, rewrite(text));

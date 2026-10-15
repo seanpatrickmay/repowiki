@@ -36,6 +36,7 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { 
     runner: recordingRunner().runner,
     objects: fsObjectStore(mkdtempSync(join(tmpdir(), "repowiki-objects-"))),
     anthropic: { url: "https://api.anthropic.test", key: null, fetch: fakeAnthropicFetch().fetch },
+    log: () => undefined,
     ...overrides,
   };
 }
