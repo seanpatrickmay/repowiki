@@ -57,3 +57,13 @@ describe("plan limits (Contract spec §10)", () => {
     expect(isFrozen("pro", 11)).toBe(true);
   });
 });
+
+it("keeps two concurrent jobs under the monthly ceiling when each reserves its cap (final review I6)", () => {
+  const first = jobCap(2_000_000, PLANS.pro.monthlyUsdMicros);
+  expect(first).toEqual({ ok: true, value: 3_000_000 });
+  const reserved = first.ok ? first.value : 0;
+  expect(jobCap(2_000_000, PLANS.pro.monthlyUsdMicros - reserved)).toEqual({
+    ok: false,
+    code: "monthly-cost-ceiling",
+  });
+});

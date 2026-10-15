@@ -4,11 +4,22 @@ import { ok, type Result, refused } from "./result.ts";
 
 type Revised = Result<{ project: Project; revision: DraftRevision }>;
 
+/** Whether any of `records` belongs to a project other than `project` (a caller bug or a leak). */
+export function fromAnotherProject(
+  project: Project,
+  ...records: readonly ({ projectId: string } | null)[]
+): boolean {
+  return records.some((r) => r !== null && r.projectId !== project.id);
+}
+
+const foreign = () => refused("invalid-input", "records from another project");
+
 const next = (project: Project, revision: DraftRevision): Revised =>
   ok({ project: { ...project, latestRevision: revision.number }, revision });
 
 /** Revision 1, when a project's first generation lands (§6.3). */
 export function firstRevision(project: Project, generation: Generation, now: string): Revised {
+  if (fromAnotherProject(project, generation)) return foreign();
   if (project.latestRevision !== 0) return refused("invalid-transition");
   return next(project, {
     projectId: project.id,
@@ -32,6 +43,7 @@ export function refreshRevision(
   generation: Generation,
   now: string,
 ): Revised {
+  if (fromAnotherProject(project, latest, previous, generation)) return foreign();
   if (latest.number !== project.latestRevision) return refused("stale-revision");
   if (latest.generationId !== previous.id) return refused("invalid-transition");
   const { overrides } = latest;
@@ -76,6 +88,7 @@ export function saveRevision(
   input: unknown,
   now: string,
 ): Revised {
+  if (fromAnotherProject(project, latest, generation)) return foreign();
   if (baseRevision !== latest.number || latest.number !== project.latestRevision) {
     return refused("stale-revision");
   }

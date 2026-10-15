@@ -44,6 +44,7 @@ export const aProject = (patch: Partial<Project> = {}): Project => ({
   state: "draft",
   withdrawReason: null,
   withdrawnAt: null,
+  unavailableSince: null,
   latestRevision: 0,
   currentVersion: 0,
   createdAt: T0,

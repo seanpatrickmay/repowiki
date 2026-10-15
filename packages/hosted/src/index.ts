@@ -65,6 +65,7 @@ export {
   authorize,
   type Caller,
   checkEligibility,
+  type EligibilitySubject,
   type PolicyContext,
   type Usage,
 } from "./policy.ts";

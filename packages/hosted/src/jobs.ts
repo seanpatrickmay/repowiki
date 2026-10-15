@@ -68,28 +68,51 @@ export function leaseJob(job: Job, now: string, leaseMs: number): Result<Job> {
   });
 }
 
-/** The worker is alive and at `step`; steps only move forward. */
-export function heartbeatJob(job: Job, step: JobStep, now: string, leaseMs: number): Result<Job> {
+/**
+ * The worker holding `attempt` may act on a running job; a worker whose lease expired and whose
+ * job was recovered holds an older attempt and is refused, so two workers never share one job.
+ */
+function fenced(job: Job, attempt: number): Result<Job> {
   if (job.status !== "running") return invalid();
+  if (job.attempt !== attempt) return refused("invalid-transition", "stale attempt");
+  return ok(job);
+}
+
+/** The worker is alive and at `step`; steps only move forward, and only within the lease. */
+export function heartbeatJob(
+  job: Job,
+  attempt: number,
+  step: JobStep,
+  now: string,
+  leaseMs: number,
+): Result<Job> {
+  const held = fenced(job, attempt);
+  if (!held.ok) return held;
+  if (job.leaseExpiresAt !== null && Date.parse(now) > Date.parse(job.leaseExpiresAt)) {
+    return refused("invalid-transition", "lease expired");
+  }
   if (job.step !== null && JOB_STEPS.indexOf(step) < JOB_STEPS.indexOf(job.step)) return invalid();
   return ok({ ...job, step, leaseExpiresAt: after(now, leaseMs) });
 }
 
 /** Money the job's model calls cost; the job stops rather than pass its cap. */
-export function recordSpend(job: Job, usdMicros: number): Result<Job> {
-  if (job.status !== "running") return invalid();
+export function recordSpend(job: Job, attempt: number, usdMicros: number): Result<Job> {
+  const held = fenced(job, attempt);
+  if (!held.ok) return held;
   if (!Number.isInteger(usdMicros) || usdMicros < 0) return refused("invalid-input", "usdMicros");
   if (job.spentUsdMicros + usdMicros > job.capUsdMicros) return refused("job-cost-cap");
   return ok({ ...job, spentUsdMicros: job.spentUsdMicros + usdMicros });
 }
 
-export function succeedJob(job: Job, now: string): Result<Job> {
-  if (job.status !== "running") return invalid();
+export function succeedJob(job: Job, attempt: number, now: string): Result<Job> {
+  const held = fenced(job, attempt);
+  if (!held.ok) return held;
   return ok({ ...job, status: "succeeded", leaseExpiresAt: null, finishedAt: now });
 }
 
-export function failJob(job: Job, code: RefusalCode, now: string): Result<Job> {
-  if (job.status !== "running") return invalid();
+export function failJob(job: Job, attempt: number, code: RefusalCode, now: string): Result<Job> {
+  const held = fenced(job, attempt);
+  if (!held.ok) return held;
   return ok({ ...job, status: "failed", refusal: code, leaseExpiresAt: null, finishedAt: now });
 }
 
@@ -98,7 +121,7 @@ export function recoverJob(job: Job, now: string): Result<Job> {
   if (job.status !== "running" || job.leaseExpiresAt === null) return invalid();
   if (Date.parse(job.leaseExpiresAt) > Date.parse(now)) return invalid();
   if (job.attempt >= PLATFORM.jobMaxAttempts) {
-    return failJob(job, "job-interrupted", now);
+    return failJob(job, job.attempt, "job-interrupted", now);
   }
   return ok({
     ...job,

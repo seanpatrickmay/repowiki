@@ -61,27 +61,29 @@ describe("running a job (Contract spec §6.1)", () => {
   it("leases a queued job and extends the lease as its steps advance", () => {
     const leased = value(leaseJob(aJob(), T0, LEASE));
     expect(leased).toEqual(running({ leaseExpiresAt: "2026-10-14T12:02:00.000Z" }));
-    const later = value(heartbeatJob(leased, "write", T1, LEASE));
+    const later = value(heartbeatJob(leased, 1, "write", T1, LEASE));
     expect(later).toMatchObject({ step: "write", leaseExpiresAt: "2026-10-14T12:03:00.000Z" });
-    expect(heartbeatJob(later, "index", T1, LEASE)).toMatchObject({ code: "invalid-transition" });
-    expect(value(heartbeatJob(later, "write", T1, LEASE)).step).toBe("write");
+    expect(heartbeatJob(later, 1, "index", T1, LEASE)).toMatchObject({
+      code: "invalid-transition",
+    });
+    expect(value(heartbeatJob(later, 1, "write", T1, LEASE)).step).toBe("write");
   });
 
   it("adds spend up to the cap and refuses to pass it", () => {
     const job = running({ spentUsdMicros: 500_000 });
-    expect(value(recordSpend(job, 100_000)).spentUsdMicros).toBe(600_000);
-    expect(recordSpend(job, 100_001)).toEqual({ ok: false, code: "job-cost-cap" });
-    expect(recordSpend(job, -1)).toMatchObject({ code: "invalid-input" });
-    expect(recordSpend(job, 0.5)).toMatchObject({ code: "invalid-input" });
+    expect(value(recordSpend(job, 1, 100_000)).spentUsdMicros).toBe(600_000);
+    expect(recordSpend(job, 1, 100_001)).toEqual({ ok: false, code: "job-cost-cap" });
+    expect(recordSpend(job, 1, -1)).toMatchObject({ code: "invalid-input" });
+    expect(recordSpend(job, 1, 0.5)).toMatchObject({ code: "invalid-input" });
   });
 
   it("succeeds or fails with a code, clearing the lease", () => {
-    expect(value(succeedJob(running(), T1))).toMatchObject({
+    expect(value(succeedJob(running(), 1, T1))).toMatchObject({
       status: "succeeded",
       finishedAt: T1,
       leaseExpiresAt: null,
     });
-    expect(value(failJob(running(), "repo-too-large", T1))).toMatchObject({
+    expect(value(failJob(running(), 1, "repo-too-large", T1))).toMatchObject({
       status: "failed",
       refusal: "repo-too-large",
       finishedAt: T1,
@@ -134,10 +136,10 @@ describe("recovering and retrying (Contract spec §6.1)", () => {
 describe("every (status, event) pair (Contract spec §6.1)", () => {
   const events: Record<string, (job: Job) => Result<Job>> = {
     lease: (j) => leaseJob(j, T0, LEASE),
-    heartbeat: (j) => heartbeatJob(j, "fetch", T0, LEASE),
-    spend: (j) => recordSpend(j, 1),
-    succeed: (j) => succeedJob(j, T1),
-    fail: (j) => failJob(j, "job-failed", T1),
+    heartbeat: (j) => heartbeatJob(j, 1, "fetch", T0, LEASE),
+    spend: (j) => recordSpend(j, 1, 1),
+    succeed: (j) => succeedJob(j, 1, T1),
+    fail: (j) => failJob(j, 1, "job-failed", T1),
     recover: (j) => recoverJob(j, LATER),
     retry: (j) => retryJob(j),
     cancel: (j) => cancelJob(j, T1),
@@ -167,4 +169,28 @@ describe("every (status, event) pair (Contract spec §6.1)", () => {
       });
     }
   }
+});
+
+describe("fencing a worker to its attempt (final review C3)", () => {
+  it("refuses a stale worker's heartbeat, spend, success and failure after recovery", () => {
+    const first = value(leaseJob(aJob(), T0, LEASE));
+    const requeued = value(recoverJob(first, LATER));
+    const second = value(leaseJob(requeued, LATER, LEASE));
+    expect(second.attempt).toBe(2);
+    const stale = { ok: false, code: "invalid-transition", detail: "stale attempt" };
+    expect(heartbeatJob(second, 1, "index", LATER, LEASE)).toEqual(stale);
+    expect(recordSpend(second, 1, 10)).toEqual(stale);
+    expect(succeedJob(second, 1, LATER)).toEqual(stale);
+    expect(failJob(second, 1, "job-failed", LATER)).toEqual(stale);
+    expect(value(heartbeatJob(second, 2, "index", LATER, LEASE)).step).toBe("index");
+    expect(value(succeedJob(second, 2, LATER)).status).toBe("succeeded");
+  });
+
+  it("refuses a heartbeat once the lease has run out", () => {
+    expect(heartbeatJob(running(), 1, "index", LATER, LEASE)).toEqual({
+      ok: false,
+      code: "invalid-transition",
+      detail: "lease expired",
+    });
+  });
 });

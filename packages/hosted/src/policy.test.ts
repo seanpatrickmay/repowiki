@@ -19,13 +19,18 @@ const usage = (patch: Partial<Usage> = {}): Usage => ({
   refreshesThisMonth: 0,
   monthUsdMicros: 0,
   platformDayUsdMicros: 0,
+  inFlightGenerations: 0,
+  inFlightRefreshes: 0,
   ...patch,
 });
+const ME = { githubUserId: 101, githubRepoId: 202 };
+const live = aProject({ state: "published", currentVersion: 1, latestRevision: 1 });
 const signedIn = (account = free): Caller => ({ kind: "account", account });
 const ctx = (patch: Partial<PolicyContext> = {}): PolicyContext => ({
   now: NOW,
   caller: signedIn(),
   ownerId: ids.account,
+  project: live,
   facts: eligibleFacts(),
   usage: usage({ activeProjects: 1 }),
   estimateUsdMicros: 400_000,
@@ -34,12 +39,12 @@ const ctx = (patch: Partial<PolicyContext> = {}): PolicyContext => ({
 
 describe("eligibility (Contract spec §7.2)", () => {
   it("accepts a fresh check of a public, unforked repository the user pushes and committed to", () => {
-    expect(checkEligibility(eligibleFacts(), NOW, 60_000)).toEqual({
+    expect(checkEligibility(eligibleFacts(), NOW, 60_000, ME)).toEqual({
       ok: true,
       value: eligibleFacts(),
     });
     for (const permission of ["admin", "maintain", "push"] as const) {
-      expect(checkEligibility(eligibleFacts({ permission }), NOW, 60_000).ok).toBe(true);
+      expect(checkEligibility(eligibleFacts({ permission }), NOW, 60_000, ME).ok).toBe(true);
     }
   });
 
@@ -51,28 +56,28 @@ describe("eligibility (Contract spec §7.2)", () => {
       permission: "pull",
       authoredCommits: 0,
     });
-    expect(checkEligibility(all, NOW, 60_000)).toMatchObject({ code: "github-token-revoked" });
-    expect(checkEligibility({ ...all, tokenValid: true }, NOW, 60_000)).toMatchObject({
+    expect(checkEligibility(all, NOW, 60_000, ME)).toMatchObject({ code: "github-token-revoked" });
+    expect(checkEligibility({ ...all, tokenValid: true }, NOW, 60_000, ME)).toMatchObject({
       code: "repo-private",
     });
     const pub = { ...all, tokenValid: true, visibility: "public" as const };
-    expect(checkEligibility(pub, NOW, 60_000)).toMatchObject({ code: "repo-fork" });
-    expect(checkEligibility({ ...pub, isFork: false }, NOW, 60_000)).toMatchObject({
+    expect(checkEligibility(pub, NOW, 60_000, ME)).toMatchObject({ code: "repo-fork" });
+    expect(checkEligibility({ ...pub, isFork: false }, NOW, 60_000, ME)).toMatchObject({
       code: "repo-no-push",
     });
     for (const permission of ["triage", "pull", "none"] as const) {
-      expect(checkEligibility(eligibleFacts({ permission }), NOW, 60_000)).toMatchObject({
+      expect(checkEligibility(eligibleFacts({ permission }), NOW, 60_000, ME)).toMatchObject({
         code: "repo-no-push",
       });
     }
-    expect(checkEligibility(eligibleFacts({ authoredCommits: 0 }), NOW, 60_000)).toMatchObject({
+    expect(checkEligibility(eligibleFacts({ authoredCommits: 0 }), NOW, 60_000, ME)).toMatchObject({
       code: "repo-no-commits",
     });
   });
 
   it("refuses a missing or stale check", () => {
-    expect(checkEligibility(null, NOW, 60_000)).toMatchObject({ code: "invalid-input" });
-    expect(checkEligibility(eligibleFacts(), "2026-10-14T12:01:01Z", 60_000)).toMatchObject({
+    expect(checkEligibility(null, NOW, 60_000, ME)).toMatchObject({ code: "invalid-input" });
+    expect(checkEligibility(eligibleFacts(), "2026-10-14T12:01:01Z", 60_000, ME)).toMatchObject({
       code: "invalid-input",
       detail: "eligibility check is stale",
     });
@@ -107,7 +112,10 @@ describe("who may do what (Contract spec §7.1)", () => {
 
   it("answers not-found for another account's resources", () => {
     for (const action of OWNER_ACTIONS) {
-      expect(authorize(action, ctx({ ownerId: ids.other })), action).toEqual({
+      expect(
+        authorize(action, ctx({ ownerId: ids.other, project: { ...live, accountId: ids.other } })),
+        action,
+      ).toEqual({
         ok: false,
         code: "not-found",
       });
@@ -169,7 +177,10 @@ describe("public pages (Contract spec §7.1, C10)", () => {
 
 describe("starting a generation (Contract spec §7.1, §10)", () => {
   const create = (patch: Partial<PolicyContext>) =>
-    authorize("job.create", ctx({ usage: usage(), ...patch }));
+    authorize(
+      "job.create",
+      ctx({ usage: usage(), project: undefined, githubRepoId: 202, ...patch }),
+    );
 
   it("allows a first project on Free", () => {
     expect(create({})).toEqual({ ok: true, value: true });
@@ -287,5 +298,143 @@ describe("refreshing, editing, publishing and restoring (Contract spec §7.1, C7
         ctx({ project: unavailable, usage: usage({ activeProjects: 0 }) }),
       ).ok,
     ).toBe(true);
+  });
+});
+
+describe("eligibility must be the caller's, for the project's repository (final review C1)", () => {
+  const otherUser = eligibleFacts({ githubUserId: 424_242 });
+  const otherRepo = eligibleFacts({ githubRepoId: 999 });
+
+  it("refuses another user's or another repository's check", () => {
+    expect(checkEligibility(otherUser, NOW, 60_000, ME)).toEqual({
+      ok: false,
+      code: "invalid-input",
+      detail: "eligibility is for another user",
+    });
+    expect(checkEligibility(otherRepo, NOW, 60_000, ME)).toEqual({
+      ok: false,
+      code: "invalid-input",
+      detail: "eligibility is for another repository",
+    });
+  });
+
+  it("applies to every action that needs eligibility", () => {
+    const actions = [
+      "job.refresh",
+      "job.retry",
+      "draft.save",
+      "draft.review",
+      "project.publish",
+    ] as const;
+    for (const action of actions) {
+      for (const facts of [otherUser, otherRepo]) {
+        expect(authorize(action, ctx({ caller: signedIn(pro), facts })), action).toMatchObject({
+          code: "invalid-input",
+        });
+      }
+    }
+    const unavailable = aProject({
+      state: "withdrawn",
+      withdrawReason: "repository",
+      withdrawnAt: T0,
+      unavailableSince: T0,
+    });
+    const restoreCtx = { project: unavailable, usage: usage(), facts: otherRepo };
+    expect(authorize("project.restore", ctx(restoreCtx))).toMatchObject({ code: "invalid-input" });
+    const create = { project: undefined, usage: usage(), githubRepoId: 202 };
+    expect(authorize("job.create", ctx({ ...create, facts: otherRepo }))).toMatchObject({
+      code: "invalid-input",
+    });
+    expect(authorize("job.create", ctx({ ...create, facts: otherUser }))).toMatchObject({
+      code: "invalid-input",
+    });
+  });
+});
+
+describe("retrying a failed job (final review C2)", () => {
+  it("is refused while frozen or without a live check, but uses no quota", () => {
+    const frozen = ctx({ usage: usage({ activeProjects: 2 }) });
+    expect(authorize("job.retry", frozen)).toMatchObject({ code: "frozen" });
+    expect(authorize("job.retry", ctx({ facts: null }))).toMatchObject({ code: "invalid-input" });
+    const revoked = ctx({ facts: eligibleFacts({ permission: "pull" }) });
+    expect(authorize("job.retry", revoked)).toMatchObject({ code: "repo-no-push" });
+    const quotaUsed = usage({ activeProjects: 1, refreshesThisMonth: 30, generationsLifetime: 1 });
+    expect(authorize("job.retry", ctx({ usage: quotaUsed }))).toEqual({ ok: true, value: true });
+  });
+});
+
+describe("starting a generation for an existing project (final review I4)", () => {
+  const firstDraft = aProject();
+  const base = { project: firstDraft, usage: usage({ activeProjects: 1 }) };
+
+  it("needs no new project slot and refuses another account's project", () => {
+    expect(authorize("job.create", ctx(base))).toEqual({ ok: true, value: true });
+    const theirs = { ...firstDraft, accountId: ids.other };
+    expect(authorize("job.create", ctx({ ...base, project: theirs }))).toMatchObject({
+      code: "not-found",
+    });
+    expect(
+      authorize("job.create", ctx({ ...base, project: undefined, ownerId: ids.other })),
+    ).toMatchObject({
+      code: "not-found",
+    });
+  });
+
+  it("refuses a project that already has a draft; that is a refresh", () => {
+    expect(authorize("job.create", ctx({ ...base, project: live }))).toMatchObject({
+      code: "invalid-transition",
+    });
+  });
+});
+
+describe("project-scoped actions need the project (final review I5, I9)", () => {
+  it("throw when the caller forgets the project", () => {
+    for (const action of ["project.publish", "project.restore", "draft.save"] as const) {
+      expect(() => authorize(action, ctx({ project: undefined }))).toThrow(
+        "authorize needs project",
+      );
+    }
+  });
+
+  it("refuse to spend or edit on an operator-withdrawn or purged project", () => {
+    const takenDown = aProject({ state: "withdrawn", withdrawReason: "operator", withdrawnAt: T0 });
+    const purged = aProject({
+      state: "purged",
+      withdrawReason: "repository",
+      withdrawnAt: T0,
+      unavailableSince: T0,
+    });
+    for (const project of [takenDown, purged]) {
+      for (const action of ["job.refresh", "job.retry", "draft.save", "project.publish"] as const) {
+        const result = authorize(action, ctx({ caller: signedIn(pro), project }));
+        expect(result, `${action} on ${project.state}`).toMatchObject({
+          code: "invalid-transition",
+        });
+      }
+    }
+    const mine = aProject({ state: "withdrawn", withdrawReason: "author", withdrawnAt: T0 });
+    expect(authorize("draft.save", ctx({ project: mine, usage: usage() })).ok).toBe(true);
+  });
+});
+
+describe("quotas count jobs still in flight (final review I7)", () => {
+  const create = (patch: Partial<PolicyContext>) =>
+    authorize("job.create", ctx({ project: undefined, githubRepoId: 202, ...patch }));
+
+  it("refuses a generation the in-flight ones would use up", () => {
+    const pro9 = usage({ generationsThisMonth: 9, inFlightGenerations: 1 });
+    expect(create({ caller: signedIn(pro), usage: pro9 })).toMatchObject({
+      code: "plan-generation-limit",
+    });
+    expect(create({ usage: usage({ inFlightGenerations: 1 }) })).toMatchObject({
+      code: "plan-generation-limit",
+    });
+  });
+
+  it("refuses a refresh the in-flight ones would use up", () => {
+    const used = usage({ activeProjects: 1, refreshesThisMonth: 29, inFlightRefreshes: 1 });
+    expect(authorize("job.refresh", ctx({ caller: signedIn(pro), usage: used }))).toMatchObject({
+      code: "plan-refresh-limit",
+    });
   });
 });

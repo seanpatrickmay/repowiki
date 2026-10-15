@@ -16,7 +16,13 @@ const DAY29 = "2026-11-12T12:00:00Z";
 const DAY31 = "2026-11-14T12:00:00Z";
 const published = aProject({ state: "published", currentVersion: 2, latestRevision: 3 });
 const withdrawn = (reason: Project["withdrawReason"], patch: Partial<Project> = {}) =>
-  aProject({ state: "withdrawn", withdrawReason: reason, withdrawnAt: T0, ...patch });
+  aProject({
+    state: "withdrawn",
+    withdrawReason: reason,
+    withdrawnAt: T0,
+    unavailableSince: reason === "repository" ? T0 : null,
+    ...patch,
+  });
 
 describe("projects (Contract spec §6.2)", () => {
   it("start as drafts", () => {
@@ -24,12 +30,14 @@ describe("projects (Contract spec §6.2)", () => {
     expect(newProject({ ...input, now: T0 })).toEqual(aProject());
   });
 
-  it("withdraw by the author only from published", () => {
+  it("withdraw by the author from published or draft (final review I10a)", () => {
     expect(unpublish(published, T1)).toEqual({
       ok: true,
       value: { ...published, state: "withdrawn", withdrawReason: "author", withdrawnAt: T1 },
     });
-    expect(unpublish(aProject(), T1)).toMatchObject({ code: "invalid-transition" });
+    expect(unpublish(aProject(), T1)).toMatchObject({
+      value: { state: "withdrawn", withdrawReason: "author", currentVersion: 0 },
+    });
     expect(unpublish(withdrawn("author"), T1)).toMatchObject({ code: "invalid-transition" });
   });
 
@@ -41,7 +49,7 @@ describe("projects (Contract spec §6.2)", () => {
       });
       expect(takedown(p, T1)).toMatchObject({ value: { withdrawReason: "operator" } });
     }
-    expect(repositoryUnavailable(withdrawn("author"), T1)).toMatchObject({
+    expect(repositoryUnavailable(withdrawn("operator"), T1)).toMatchObject({
       code: "invalid-transition",
     });
   });
@@ -72,5 +80,46 @@ describe("projects (Contract spec §6.2)", () => {
     });
     expect(purge(withdrawn("account-deleted"), DAY31)).toMatchObject({ ok: true });
     expect(purge(withdrawn("author"), DAY31)).toMatchObject({ code: "invalid-transition" });
+  });
+});
+
+describe("a repository going away under an author-withdrawn project (final review I10b)", () => {
+  it("starts the purge clock without changing the page", () => {
+    const mine = withdrawn("author");
+    expect(repositoryUnavailable(mine, T1)).toEqual({
+      ok: true,
+      value: { ...mine, unavailableSince: T1 },
+    });
+    expect(repositoryUnavailable({ ...mine, unavailableSince: T1 }, T1)).toMatchObject({
+      code: "invalid-transition",
+    });
+  });
+
+  it("records when the repository went away on a live project too", () => {
+    expect(repositoryUnavailable(published, T1)).toMatchObject({
+      value: { unavailableSince: T1, withdrawnAt: T1 },
+    });
+  });
+
+  it("purges it 30 days after the repository went away, not after the author withdrew it", () => {
+    const gone = withdrawn("author", { withdrawnAt: "2026-01-01T00:00:00Z", unavailableSince: T1 });
+    expect(purge(gone, DAY31)).toMatchObject({ code: "invalid-transition" });
+    expect(purge(gone, "2026-11-20T00:00:00Z")).toMatchObject({ value: { state: "purged" } });
+  });
+
+  it("stops the clock when restored, leaving the page withdrawn", () => {
+    const gone = withdrawn("author", { unavailableSince: T1 });
+    expect(restore(gone, DAY29)).toEqual({
+      ok: true,
+      value: { ...gone, unavailableSince: null },
+    });
+    expect(restore(gone, "2026-11-20T00:00:00Z")).toEqual({ ok: false, code: "restore-expired" });
+  });
+
+  it("clears the clock on a repository restore", () => {
+    const gone = withdrawn("repository", { unavailableSince: T0 });
+    expect(restore(gone, DAY29)).toMatchObject({
+      value: { state: "draft", unavailableSince: null },
+    });
   });
 });

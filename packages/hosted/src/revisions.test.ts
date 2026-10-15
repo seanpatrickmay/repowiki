@@ -112,3 +112,32 @@ describe("draft revisions (Contract spec §6.3)", () => {
     expect(reviewRevision(blank, 1, T0)).toMatchObject({ code: "contribution-missing" });
   });
 });
+
+describe("records from another project (final review I8)", () => {
+  const elsewhere = { projectId: ids.other };
+  const project = aProject({ latestRevision: 1 });
+  const foreign = { ok: false, code: "invalid-input", detail: "records from another project" };
+
+  it("refuses a first revision from another project's generation", () => {
+    expect(firstRevision(aProject(), aGeneration(elsewhere), T0)).toEqual(foreign);
+  });
+
+  it("refuses to save over another project's revision or generation", () => {
+    expect(saveRevision(project, aRevision(elsewhere), aGeneration(), 1, edited, T1)).toEqual(
+      foreign,
+    );
+    expect(saveRevision(project, aRevision(), aGeneration(elsewhere), 1, edited, T1)).toEqual(
+      foreign,
+    );
+  });
+
+  it("refuses a refresh with another project's revision or generations", () => {
+    const next = aGeneration({ id: ids.generation2 });
+    expect(refreshRevision(project, aRevision(elsewhere), aGeneration(), next, T1)).toEqual(
+      foreign,
+    );
+    expect(
+      refreshRevision(project, aRevision(), aGeneration(), { ...next, ...elsewhere }, T1),
+    ).toEqual(foreign);
+  });
+});

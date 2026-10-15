@@ -53,7 +53,7 @@ Goals, in priority order:
 | C5 | Optimistic concurrency | Ruling: every mutation of a draft names the revision number it was made against (`baseRevision`) and every publish names the published version the author saw (`expectedVersion`). A mismatch is refusal `stale-revision` or `stale-publication` (409). — Two tabs or a refresh landing mid-edit must never silently overwrite the author's work or publish something they did not see. |
 | C6 | Preview is the publication | Ruling: publishing promotes the **exact rendered site** the author previewed: the publish request carries the preview's content hash, which must equal the stored render of that revision. — "Show the exact public version for review" is only true if the bytes are the same. — Cost if wrong: a render per preview, which is the static build the engine already does. |
 | C7 | Live checks | Ruling: actions that spend money or make something public (create a job, refresh, publish, restore) need an eligibility check made **at that moment**. Actions that only change private state (save, review) accept a check at most **1 hour** old. The policy enforces both: a "live" check must be at most 60 seconds old when the policy reads it. Unpublish, export and account deletion need no check. — The brief requires rechecking authorization at publication; GitHub rate limits make a live call on every keystroke wasteful. — Cost if wrong: an author whose access was revoked can keep editing a private draft for up to an hour, but cannot publish it. |
-| C8 | Quota is charged on success | Ruling: a job reserves its cost estimate against the account's monthly ceiling when created, records actual spend as it goes, and counts against the generation or refresh quota **only when it succeeds**. Retries of the same job share one cost cap and one quota charge. — "Failed and interrupted jobs use no quota" (D3) and "retries avoid duplicate charging" (brief). The platform, not the author, absorbs the cost of failures, bounded by the per-job cap. |
+| C8 | Quota is charged on success | Ruling: a job reserves its **cost cap** (not its estimate, so concurrent jobs cannot overrun the hard ceiling together) against the account's monthly ceiling when created, records actual spend as it goes, and counts against the generation or refresh quota **only when it succeeds**. Retries of the same job share one cost cap and one quota charge. — "Failed and interrupted jobs use no quota" (D3) and "retries avoid duplicate charging" (brief). The platform, not the author, absorbs the cost of failures, bounded by the per-job cap. |
 | C9 | Frozen | Ruling: a project is **frozen** when the account has more active projects (draft or published) than its plan allows (§10). A frozen project allows only unpublish and export; withdrawing projects until the count fits unfreezes the rest. — This turns D4's downgrade rule into one computed predicate instead of a state that has to be kept in sync. |
 | C10 | Not found, not forbidden | Ruling: a request for another account's draft, job, preview or revision is refused as `not-found` (404), identical to a missing id. Public pages answer 410 when withdrawn and 404 when the slug never existed. — Probing must not reveal which private drafts exist. |
 
@@ -66,7 +66,7 @@ All timestamps are `IsoDateTime`; all money is integer **micro-dollars** (`usdMi
 | `Account` | `id`, `githubUserId` (positive int), `login`, `displayName`, `githubCreatedAt`, `plan` (`free` \| `pro`), `status` (`active` \| `deleting`), `createdAt` | One per GitHub user. `deleting` refuses everything except reads of the deletion status. |
 | `Handle` | `handle`, `accountId`, `state` (`active` \| `redirect` \| `tombstoned`), `redirectTo` (handle, only when `redirect`), `createdAt` | Exactly one `active` handle per active account. Never deleted (§9). |
 | `Repository` | `githubRepoId` (positive int), `fullName`, `visibility` (`public` \| `private`), `isFork`, `defaultBranch`, `checkedAt` | Shared by every project on the same GitHub repository. |
-| `Project` | `id`, `accountId`, `githubRepoId`, `slug`, `state` (§6.2), `withdrawReason` (`author` \| `repository` \| `operator` \| `account-deleted`, only when `withdrawn`), `withdrawnAt`, `latestRevision` (int ≥ 0), `currentVersion` (int ≥ 0), `createdAt` | Unique on (`accountId`, `githubRepoId`) and on (`accountId`, `slug`). |
+| `Project` | `id`, `accountId`, `githubRepoId`, `slug`, `state` (§6.2), `withdrawReason` (`author` \| `repository` \| `operator` \| `account-deleted`, only when `withdrawn`), `withdrawnAt`, `unavailableSince` (§18.9), `latestRevision` (int ≥ 0), `currentVersion` (int ≥ 0), `createdAt` | Unique on (`accountId`, `githubRepoId`) and on (`accountId`, `slug`). |
 | `Job` | `id`, `projectId`, `kind` (`generate` \| `refresh`), `commitSha` (pinned at creation), `status` (§6.1), `step` (§6.1), `attempt` (1–3), `leaseExpiresAt`, `estimateUsdMicros`, `capUsdMicros`, `spentUsdMicros`, `refusal` (code, §11, only when `failed`), `createdAt`, `startedAt`, `finishedAt` | At most one non-terminal job per project. |
 | `Generation` | `id`, `jobId`, `projectId`, `commitSha`, `exportKey`, `exportHash`, `suggestions` (§8), `facts` (§8), `engineVersion`, `models` (ids), `spentUsdMicros`, `createdAt` | Produced only by a succeeded job. |
 | `DraftRevision` | `projectId`, `number` (1, 2, …), `generationId`, `overrides` (§8), `flags` (§6.3), `source` (`generation` \| `author`), `createdAt` | `number` is dense and starts at 1. |
@@ -106,13 +106,15 @@ Each transition is a pure function `(state, event, context) → { next } | { ref
 |---|---|---|---|
 | — | `create` | `draft` | Created with its first job. |
 | `draft` \| `published` | `publish` | `published`, `currentVersion + 1` | §6.4. |
-| `published` | `unpublish` (author) | `withdrawn` (`author`) | Always allowed to the owner, including frozen and access-revoked projects. |
+| `draft` \| `published` | `unpublish` (author) | `withdrawn` (`author`) | Always allowed to the owner, including frozen and access-revoked projects; withdrawing a draft is how a frozen account frees a slot. |
 | `draft` \| `published` | `repository-unavailable` (daily check) | `withdrawn` (`repository`) | Repository private, deleted, or now a fork. |
 | `draft` \| `published` | `takedown` (operator) | `withdrawn` (`operator`) | Audited with a reason. |
 | any but `purged` | `account-deleted` | `withdrawn` (`account-deleted`) | Followed by purge within 30 days. |
 | `withdrawn` (`author`) | `publish` | `published` | Same URL; §6.4 applies. |
-| `withdrawn` (`repository`) | `restore` (author) | previous state | Within 30 days of `withdrawnAt` and after a live eligibility check; restores `published` only if it had a current version. |
-| `withdrawn` (`repository` or `account-deleted`) | `purge` (system) | `purged` | 30 days after `withdrawnAt`. Generations, revisions, previews and sites are deleted; the project row and slug remain as a tombstone. |
+| `withdrawn` (`author`) | `repository-unavailable` (daily check) | unchanged, `unavailableSince` set | The page is already 410; the purge clock starts so nothing derived from source outlives the grace period. |
+| `withdrawn` (`repository`) | `restore` (author) | previous state | Within 30 days of `unavailableSince` and after a live eligibility check; restores `published` only if it had a current version. |
+| `withdrawn` (`author`) with `unavailableSince` | `restore` (author) | unchanged, `unavailableSince` cleared | Same window and check; the page stays withdrawn. |
+| `withdrawn` (`repository`, or `author` with `unavailableSince`, or `account-deleted`) | `purge` (system) | `purged` | 30 days after `unavailableSince` (`withdrawnAt` for account deletion). Generations, revisions, previews and sites are deleted; the project row and slug remain as a tombstone. |
 
 Withdrawn by `operator` leaves only through an operator action (`reinstate`), which spec 3 defines.
 
@@ -147,7 +149,8 @@ Actors: `anonymous`, `author` (a signed-in account acting on its own resources),
 | `repos.list` (eligible repositories) | — | — | yes | — |
 | `job.create` (generate) | — | not-found | yes | Live eligibility (§7.2); plan has a project slot and a generation left (lifetime and monthly); size within plan; Free: account age, platform spend not paused. |
 | `job.refresh` | — | not-found | yes | Live eligibility; plan allows refreshes and has one left; not frozen. |
-| `job.read`, `job.cancel`, `job.retry` | — | not-found | yes | `job.retry`: retryable failure, attempt < 3. |
+| `job.read`, `job.cancel` | — | not-found | yes | None. |
+| `job.retry` | — | not-found | yes | Live eligibility; not frozen; project workable; retryable failure, attempt < 3. Uses no quota (C8). |
 | `draft.read`, `preview.read` | — | not-found | yes | — |
 | `draft.save`, `draft.review` | — | not-found | yes | Eligibility at most 1 hour old; not frozen. |
 | `project.publish` | — | not-found | yes | Live eligibility; not frozen; §6.4. |
@@ -308,3 +311,17 @@ Each task is one PR under ~300 changed lines.
 ## 17. Out of scope
 
 Servers, storage, GitHub calls, the job runner, the proxy, UI, billing, private repositories, social features, rankings, and skill assessment. Wiki prose editing (F18) stays deferred.
+
+## 18. Amendments from the final review (2026-10-14)
+
+A fresh review of the M13 branch found these gaps in the rules above; the code and the rows above follow these amendments.
+
+1. **Eligibility belongs to the caller and the project (§7.2).** A check is used only when its `githubUserId` is the caller's and its `githubRepoId` is the project's (or, for `job.create` on a new repository, the requested one); otherwise `invalid-input`. Co-authors of one repository never share a check.
+2. **Workers are fenced to their attempt (§6.1).** `heartbeat`, `spend`, `succeed` and `fail` carry the attempt the worker leased; a worker whose job was recovered holds an older attempt and is refused (`invalid-transition`, "stale attempt"). A heartbeat after the lease expired is refused.
+3. **Retry spends money (§7.1).** `job.retry` needs a live check and an unfrozen, workable project, but charges no quota.
+4. **`job.create` on an existing project (§7.1).** A project whose first job produced no draft (state `draft`, `latestRevision` 0) may start a new generation without a new slot; any other existing project needs a refresh. Ownership is checked first. The server answers a duplicate create from the active job (after a `job.read` check) before the quota policy, so idempotency survives quota counting.
+5. **Project-scoped actions need the project (§7.1).** Refresh, retry, save, review, publish and restore receive the project; a missing one is a programming error. They refuse `invalid-transition` on a project withdrawn by an operator or for account deletion, or purged.
+6. **Concurrent jobs reserve their caps (C8).** See C8.
+7. **Quotas count jobs in flight (§10).** A generation or refresh is allowed only if succeeded plus queued-or-running jobs stay under the limit; charging still happens on success.
+8. **Records belong to their project (§6.3–6.4).** Revisions, generations, reviews, previews and published versions passed to a transition must carry the project's id; otherwise `invalid-input`. Publishing clears `unavailableSince`.
+9. **Drafts can be withdrawn, and author-withdrawn projects still purge (§6.2, D4).** See the §6.2 rows. `Project` gains `unavailableSince` (§5): set when the daily check finds the repository gone, always set on repository withdrawals, cleared by restore and publish.
