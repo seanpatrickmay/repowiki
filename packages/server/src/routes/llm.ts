@@ -1,14 +1,22 @@
 import { failJob, type Job, type Result, recordSpend } from "@repowiki/hosted";
 import { priceFor } from "@repowiki/llm";
 import type { z } from "zod";
-import type { Deps } from "../app.ts";
+import { type Deps, logOf } from "../app.ts";
 import type { Queryable } from "../db/db.ts";
 import { HttpError, readBody } from "../http/body.ts";
 import type { Handler, Reply, Route, RouteRequest } from "../http/router.ts";
 import { json } from "../http/server.ts";
+import { cancelBatches } from "../proxy/cancel.ts";
 import { AnthropicUsage, actualMicros, reserveMicros } from "../proxy/cost.ts";
 import { BatchCreate, MessageParams, refusedBeta } from "../proxy/request.ts";
-import { jobById, openReservations, revokeTokens, saveJob, settleOpen } from "../store/jobs.ts";
+import {
+  jobById,
+  openBatchIds,
+  openReservations,
+  revokeTokens,
+  saveJob,
+  settleOpen,
+} from "../store/jobs.ts";
 import { heldJob, tokenFrom } from "./job-token.ts";
 
 export const MESSAGE_LIMIT = 8 * 1024 * 1024;
@@ -244,34 +252,48 @@ export function proxyCore(deps: Deps) {
    * other open reservations. A job that already ended had its open reservations settled then.
    */
   async function settle(reservationId: string, actual: number): Promise<void> {
-    await deps.db.transaction(async (tx) => {
+    const ended = await deps.db.transaction(async (tx): Promise<string[]> => {
       const owner = await tx.query<{ job_id: string }>(
         "SELECT job_id FROM reservations WHERE id = $1",
         [reservationId],
       );
-      if (owner[0] === undefined) return;
+      if (owner[0] === undefined) return [];
       // Job row first, then the reservation: the order every other job transaction locks in.
       const job = await jobById(tx, owner[0].job_id, true);
       const rows = await tx.query<{ settled: boolean }>(
         "SELECT settled FROM reservations WHERE id = $1 FOR UPDATE",
         [reservationId],
       );
-      if (rows[0] === undefined || rows[0].settled) return;
+      if (rows[0] === undefined) return [];
       const now = deps.now();
+      if (rows[0].settled) {
+        // The job ended first and was charged the reservation; its spend is final, but the
+        // budgets count real spend (fresh review I3).
+        await tx.query(
+          `UPDATE reservations SET actual_usd_micros = $2, settled_at = $3
+           WHERE id = $1 AND COALESCE(actual_usd_micros, 0) < $2`,
+          [reservationId, actual, now],
+        );
+        return [];
+      }
       await tx.query(
         "UPDATE reservations SET settled = true, actual_usd_micros = $2, settled_at = $3 WHERE id = $1",
         [reservationId, actual, now],
       );
-      if (job === null || job.status !== "running") return;
+      if (job === null || job.status !== "running") return [];
       const charge = Math.min(actual, job.capUsdMicros - job.spentUsdMicros);
       let next = contract(recordSpend(job, job.attempt, charge));
+      let batches: string[] = [];
       if (next.spentUsdMicros >= next.capUsdMicros) {
+        batches = await openBatchIds(tx, job.id);
         next = await settleOpen(tx, next, now);
         next = contract(failJob(next, next.attempt, "job-cost-cap", now));
         await revokeTokens(tx, job.id);
       }
       await saveJob(tx, next);
+      return batches;
     });
+    await cancelBatches(deps.anthropic, ended, logOf(deps));
   }
 
   /**

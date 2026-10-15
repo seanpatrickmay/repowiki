@@ -4,6 +4,7 @@ import type { Deps } from "../app.ts";
 import type { Db } from "../db/db.ts";
 import type { GitHubRepo } from "../github/api.ts";
 import { FAKE_REPO, FAKE_USER } from "../github/fake.ts";
+import { fakeAnthropicFetch } from "../proxy/fake-anthropic.ts";
 import { testDeps } from "../routes/test-app.ts";
 import { signIn } from "../store/accounts.ts";
 import { issueToken, jobById, openReservations, saveJob, tokenJob } from "../store/jobs.ts";
@@ -144,6 +145,27 @@ describe("the sweeper (spec 2 S16)", () => {
     expect(await sweep(deps)).toMatchObject({ recovered: 1 });
     expect(await theJob()).toMatchObject({ status: "queued", attempt: 2, spentUsdMicros: 1234 });
     expect(await openReservations(deps.db, job.id)).toBe(0);
+  });
+
+  it("cancels a recovered attempt's open batches upstream (fresh review I3)", async () => {
+    const upstream = fakeAnthropicFetch();
+    deps = {
+      ...deps,
+      anthropic: { url: "https://api.anthropic.test", key: "sk-real", fetch: upstream.fetch },
+    };
+    const leased = leaseJob(job, clock, 60_000);
+    if (!leased.ok) throw new Error("lease");
+    await saveJob(deps.db, leased.value);
+    await deps.db.query(
+      "INSERT INTO reservations (id, job_id, attempt, usd_micros, batch, batch_id) VALUES ($1, $2, 1, 500, true, 'msgbatch_9')",
+      [deps.newId(), job.id],
+    );
+    clock = "2026-10-14T12:05:00.000Z";
+    expect(await sweep(deps)).toMatchObject({ recovered: 1 });
+    const cancels = upstream.calls.filter((c) => c.url.endsWith("/cancel"));
+    expect(cancels.map((c) => c.url)).toEqual([
+      "https://api.anthropic.test/v1/messages/batches/msgbatch_9/cancel",
+    ]);
   });
 
   it("leaves a job's reservations open when a heartbeat renewed its lease before the lock", async () => {

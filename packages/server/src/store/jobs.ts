@@ -156,6 +156,16 @@ export async function openReservations(q: Queryable, jobId: string): Promise<num
  * batch whose results were never read is unknown (Contract C8; spec 2 §6). Each is recorded as
  * its real cost at `now`; the job's spend never passes the cap, which the Job schema forbids.
  */
+/** The upstream ids of a job's batches still open: what to cancel once the job ends (S11). */
+export async function openBatchIds(q: Queryable, jobId: string): Promise<string[]> {
+  const rows = await q.query<{ batch_id: string }>(
+    `SELECT batch_id FROM reservations
+     WHERE job_id = $1 AND batch AND NOT settled AND batch_id IS NOT NULL ORDER BY batch_id`,
+    [jobId],
+  );
+  return rows.map((r) => r.batch_id);
+}
+
 export async function settleOpen(q: Queryable, job: Job, now: string): Promise<Job> {
   const open = await openReservations(q, job.id);
   await q.query(

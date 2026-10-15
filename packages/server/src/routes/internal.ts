@@ -16,15 +16,17 @@ import {
   succeedJob,
 } from "@repowiki/hosted";
 import { z } from "zod";
-import type { Deps } from "../app.ts";
+import { type Deps, logOf } from "../app.ts";
 import type { Queryable } from "../db/db.ts";
 import { HttpError, readBody, readJson } from "../http/body.ts";
 import type { Reply, Route, RouteRequest } from "../http/router.ts";
 import { json } from "../http/server.ts";
+import { cancelBatches } from "../proxy/cancel.ts";
 import { generationById, latestRevision, saveGeneration, saveRevision } from "../store/drafts.ts";
 import {
   jobSpec,
   markLeased,
+  openBatchIds,
   revokeTokens,
   saveJob,
   saveJobSpec,
@@ -84,7 +86,7 @@ export function internalRoutes(deps: Deps): Route[] {
     method: "POST" | "PUT",
     path: string,
     read: (request: RouteRequest) => Promise<T>,
-    act: (tx: Queryable, held: Held, body: T) => Promise<Reply>,
+    act: (tx: Queryable, held: Held, body: T, ended: string[]) => Promise<Reply>,
   ): Route {
     return {
       method,
@@ -93,7 +95,13 @@ export function internalRoutes(deps: Deps): Route[] {
         const token = tokenOf(request);
         await heldJob(deps.db, token, false);
         const body = await read(request);
-        return deps.db.transaction(async (tx) => act(tx, await heldJob(tx, token, true), body));
+        // The batches of a job this request ended, cancelled once the ending has committed.
+        const ended: string[] = [];
+        const reply = await deps.db.transaction(async (tx) =>
+          act(tx, await heldJob(tx, token, true), body, ended),
+        );
+        await cancelBatches(deps.anthropic, ended, logOf(deps));
+        return reply;
       },
     };
   }
@@ -101,7 +109,8 @@ export function internalRoutes(deps: Deps): Route[] {
   const none = async () => undefined;
 
   /** The job ends: open reservations become spend, then every token dies. */
-  const fail = async (tx: Queryable, job: Job, code: WorkerCode) => {
+  const fail = async (tx: Queryable, job: Job, code: WorkerCode, ended: string[]) => {
+    ended.push(...(await openBatchIds(tx, job.id)));
     const now = deps.now();
     const settled = await settleOpen(tx, job, now);
     await saveJob(tx, contract(failJob(settled, settled.attempt, code, now)));
@@ -149,12 +158,12 @@ export function internalRoutes(deps: Deps): Route[] {
     "POST",
     "indexed",
     (r) => readJson(r.raw, Indexed),
-    async (tx, { job }, { indexedFiles }) => {
+    async (tx, { job }, { indexedFiles }, ended) => {
       if (job.status !== "running") throw new HttpError(409, "invalid-transition");
       const spec = await jobSpec(tx, job.id);
       if (spec === null) throw new Error("job has no spec");
       if (indexedFiles <= PLANS[spec.plan].maxIndexedFiles) return noContent;
-      await fail(tx, job, "repo-too-large");
+      await fail(tx, job, "repo-too-large", ended);
       return json(422, { code: "repo-too-large" });
     },
   );
@@ -238,9 +247,9 @@ export function internalRoutes(deps: Deps): Route[] {
     "POST",
     "fail",
     (r) => readJson(r.raw, Fail),
-    async (tx, { job }, { code }) => {
+    async (tx, { job }, { code }, ended) => {
       if (job.status !== "running") throw new HttpError(409, "invalid-transition");
-      await fail(tx, job, code);
+      await fail(tx, job, code, ended);
       return noContent;
     },
   );

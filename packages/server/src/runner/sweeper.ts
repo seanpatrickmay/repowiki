@@ -1,8 +1,11 @@
 import { failJob, leaseJob, recoverJob } from "@repowiki/hosted";
+import type { Deps } from "../app.ts";
 import type { Db } from "../db/db.ts";
+import { cancelBatches } from "../proxy/cancel.ts";
 import {
   issueToken,
   jobById,
+  openBatchIds,
   revokeTokens,
   saveJob,
   settleOpen,
@@ -20,6 +23,8 @@ export interface SweepDeps {
   runner: JobRunner;
   now: () => string;
   log?: (line: object) => void;
+  /** Where a recovered attempt's open batches are cancelled; none are without it. */
+  anthropic?: Deps["anthropic"];
 }
 
 export interface Swept {
@@ -33,14 +38,17 @@ async function recover(
   deps: SweepDeps,
   id: string,
   now: string,
+  ended: string[],
 ): Promise<StartRequest | "failed" | null> {
   return deps.db.transaction(async (tx) => {
     const job = await jobById(tx, id, true);
     if (job === null || job.status !== "running") return null;
     // A heartbeat may have renewed the lease since the sweep's SELECT: check before settling.
     if (!recoverJob(job, now).ok) return null;
+    const batches = await openBatchIds(tx, id);
     const next = recoverJob(await settleOpen(tx, job, now), now);
     if (!next.ok) return null;
+    ended.push(...batches);
     await saveJob(tx, next.value);
     await revokeTokens(tx, id);
     if (next.value.status !== "queued") return "failed";
@@ -87,10 +95,15 @@ export async function sweep(deps: SweepDeps): Promise<Swept> {
     "SELECT id FROM jobs WHERE status = 'running' AND lease_expires_at <= $1",
     [now],
   );
+  const ended: string[] = [];
   for (const { id } of expired) {
-    const outcome = await recover(deps, id, now);
+    const outcome = await recover(deps, id, now, ended);
     if (outcome !== null) swept.recovered++;
     if (outcome !== null && outcome !== "failed") toStart.push(outcome);
+  }
+  // The old attempt's batches: nothing will read their results now (fresh review I3).
+  if (deps.anthropic !== undefined) {
+    await cancelBatches(deps.anthropic, ended, deps.log ?? (() => undefined));
   }
   const queued = await deps.db.query<{ id: string }>(
     "SELECT id FROM jobs WHERE status = 'queued' ORDER BY id",
