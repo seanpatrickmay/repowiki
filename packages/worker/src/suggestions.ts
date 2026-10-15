@@ -42,15 +42,42 @@ export function leadOf(exp: WikiExport): string {
 
 const titleOf = (exp: WikiExport) => exp.architecture.at(-1)?.title ?? exp.repo;
 
-/** Suggestions with no model: the lead's first sentence and the author's busiest features. */
-export function fallbackSuggestions(exp: WikiExport, facts: Facts): Suggestions {
+const TAGLINE_MAX = 90;
+const BREAK = / (?:that|which|with|using|where|and|to|for) |[,;:] | — /g;
+
+/**
+ * A tagline from prose: its first sentence without the full stop, cut when too long at its last
+ * clause ("… that …", "… and …") or comma, colon or dash within the limit, else at a word with an
+ * ellipsis.
+ */
+export function taglineFrom(text: string): string {
+  const plain = plainWords(text, 4000).replace(/\s+/g, " ");
+  const sentence = (plain.split(/(?<=[.!?])\s/)[0] ?? "").replace(/\.$/, "");
+  if (sentence.length <= TAGLINE_MAX) return sentence;
+  const head = sentence.slice(0, TAGLINE_MAX);
+  const pause = [...head.matchAll(BREAK)].filter((m) => m.index >= 30).at(-1);
+  if (pause !== undefined) return head.slice(0, pause.index);
+  const cut = head.slice(0, TAGLINE_MAX - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 0 ? cut.slice(0, space) : cut).replace(/[,;:]$/, "")}…`;
+}
+
+/**
+ * Suggestions with no model: a tagline from the repository's own description, else the lead's
+ * first sentence, and the author's busiest features.
+ */
+export function fallbackSuggestions(
+  exp: WikiExport,
+  facts: Facts,
+  description: string | null = null,
+): Suggestions {
   const lead = leadOf(exp);
   const firstSentence = lead.split(/(?<=[.!?])\s/)[0] ?? "";
   const busiest = [...facts.author.features]
     .sort((a, b) => b.commits - a.commits)
     .map((f) => f.featureId);
   return Suggestions.parse({
-    tagline: plainWords(firstSentence || titleOf(exp), 90),
+    tagline: taglineFrom(description?.trim() || firstSentence || titleOf(exp)),
     summary: plainWords(lead, 900),
     contributionDraft: "",
     highlightCandidates: [...new Set([...busiest, ...facts.featureIds])].slice(0, 4),

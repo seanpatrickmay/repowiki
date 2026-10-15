@@ -52,7 +52,7 @@ export {
   type TreeBlob,
 } from "./git.ts";
 export { type CommitInfo, pullRequestOf, readHistory, readSources } from "./history.ts";
-export type { SourceLanguage } from "./languages.ts";
+export { languageForPath, type SourceLanguage } from "./languages.ts";
 export type { SymbolDef, SymbolKind } from "./symbols.ts";
 /** Test-only: scripted git repositories (spec §8's fixture repo builder), for other modules' tests. */
 export { createTestRepo, type TestAuthor, type TestRepo } from "./test-repo.ts";

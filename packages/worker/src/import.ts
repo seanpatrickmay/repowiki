@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type PeopleSnapshot, WikiExport } from "@repowiki/core";
+import { pathLanguageName } from "@repowiki/engine";
 import { Facts, type JobStep } from "@repowiki/hosted";
 import { z } from "zod";
 import { ApiError, type WorkerApi, workerApi } from "./api.ts";
@@ -25,7 +26,10 @@ export interface Author {
 export const ImportProfile = z.object({
   user: z.object({ login: z.string().min(1), name: z.string().nullable() }),
   repos: z.array(
-    z.object({ repo: z.object({ full_name: z.string() }), export: z.string().nullable() }),
+    z.object({
+      repo: z.object({ full_name: z.string(), description: z.string().nullish() }),
+      export: z.string().nullable(),
+    }),
   ),
 });
 export type ImportProfile = z.infer<typeof ImportProfile>;
@@ -74,15 +78,57 @@ export function matchAuthor(snapshot: PeopleSnapshot, author: Author): Person | 
 }
 
 /**
- * A generation's facts from a built export: indexed files and languages from the page
- * infoboxes (each page's lines split evenly across its languages), the author's share from
- * People. Zeros when People is off or does not name the author.
+ * Prose and data formats an infobox can list; the languages line is about code, as it is in
+ * an engine run, which counts only the languages it parses.
+ */
+const NOT_CODE = new Set([
+  "CSV",
+  "INI",
+  "JSON",
+  "Markdown",
+  "reStructuredText",
+  "Text",
+  "TOML",
+  "XML",
+  "YAML",
+]);
+
+/**
+ * A generation's facts from a built export: indexed files and code languages from the page
+ * infoboxes (each page's lines split across its code languages by how many of its member files
+ * each has, evenly when none can be told; a page with no code language is left out of the
+ * shares), the author's share from People. Zeros when People is off or does not name the author.
  */
 export function exportFacts(exp: WikiExport, author: Author): Facts {
-  const files = exp.pages.flatMap(({ infobox }): FileFacts[] => {
-    const langs = infobox.languages;
-    if (langs.length === 0) return [{ language: null, loc: infobox.loc, skipped: null }];
-    return langs.map((language) => ({ language, loc: infobox.loc / langs.length, skipped: null }));
+  const counts = new Map<string, Map<string, number>>();
+  for (const [path, { featureId }] of Object.entries(exp.manifest.membership)) {
+    const raw = pathLanguageName(path);
+    if (raw === undefined) continue;
+    const name = raw === "TSX" ? "TypeScript" : raw;
+    const page = counts.get(featureId) ?? new Map<string, number>();
+    page.set(name, (page.get(name) ?? 0) + 1);
+    counts.set(featureId, page);
+  }
+  const files = exp.pages.flatMap(({ featureId, infobox }): FileFacts[] => {
+    const langs = [
+      ...new Set(
+        infobox.languages
+          .filter((l) => !NOT_CODE.has(l))
+          .map((l) => (l === "TSX" ? "TypeScript" : l)),
+      ),
+    ];
+    if (langs.length === 0) {
+      const skipped = infobox.languages.length > 0 ? "not-code" : null;
+      return [{ language: null, loc: infobox.loc, skipped }];
+    }
+    const members = counts.get(featureId);
+    const weights = langs.map((l) => members?.get(l) ?? 0);
+    const total = weights.reduce((sum, w) => sum + w, 0);
+    return langs.map((language, i) => ({
+      language,
+      loc: total === 0 ? infobox.loc / langs.length : (infobox.loc * (weights[i] ?? 0)) / total,
+      skipped: null,
+    }));
   });
   const featureIds = pageFeatureIds(exp);
   const snapshot = exp.people?.snapshot ?? null;
@@ -101,10 +147,11 @@ export function exportFacts(exp: WikiExport, author: Author): Facts {
 /** Why an import cannot go on; the message is the whole log line (no secret is in it). */
 class Refused extends Error {}
 
+const entryFor = (profile: ImportProfile, fullName: string) =>
+  profile.repos.find((r) => r.repo.full_name.toLowerCase() === fullName.toLowerCase());
+
 function localWiki(profile: ImportProfile, fullName: string, sha: string): WikiExport {
-  const entry = profile.repos.find(
-    (r) => r.repo.full_name.toLowerCase() === fullName.toLowerCase(),
-  );
+  const entry = entryFor(profile, fullName);
   const missing = `no local wiki for ${fullName}; build it with pnpm wiki:build`;
   if (entry?.export == null) throw new Refused(missing);
   let raw: unknown;
@@ -144,7 +191,11 @@ export async function runImport(
     }
     await api.putExport(new TextEncoder().encode(JSON.stringify(exp)));
     await api.succeed({
-      suggestions: fallbackSuggestions(exp, facts),
+      suggestions: fallbackSuggestions(
+        exp,
+        facts,
+        entryFor(profile, spec.repo.fullName)?.repo.description ?? null,
+      ),
       facts,
       engineVersion: "import",
       models: ["none"],

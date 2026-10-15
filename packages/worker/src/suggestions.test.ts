@@ -10,6 +10,7 @@ import {
   leadOf,
   plainWords,
   suggest,
+  taglineFrom,
 } from "./suggestions.ts";
 
 const exp = WikiExport.parse(fixtureExport());
@@ -107,5 +108,57 @@ describe("suggestions (spec 2 §8)", () => {
     expect(result.suggestions).toEqual(fallbackSuggestions(exp, facts));
     expect(Suggestions.safeParse(result.suggestions).success).toBe(true);
     expect(result.suggestions.tagline.length).toBeGreaterThan(0);
+  });
+});
+
+describe("taglineFrom (local feedback, 2026-10-15)", () => {
+  it("keeps a short sentence whole, without its full stop", () => {
+    expect(taglineFrom("A personal life dashboard for wellness and habits.")).toBe(
+      "A personal life dashboard for wellness and habits",
+    );
+  });
+
+  it("cuts a long sentence at its last clause or pause within the limit", () => {
+    expect(
+      taglineFrom(
+        "AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search and a graph network.",
+      ),
+    ).toBe("AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine");
+    expect(
+      taglineFrom(
+        "RotoText is a web application that uses eye tracking and geometric projection to let players align their gaze.",
+      ),
+    ).toBe("RotoText is a web application that uses eye tracking and geometric projection");
+    expect(
+      taglineFrom(
+        "Generates a cited, feature-by-feature wiki for a git repo and updates it as the code changes",
+      ),
+    ).toBe("Generates a cited, feature-by-feature wiki for a git repo");
+  });
+
+  it("takes the first sentence of a long description", () => {
+    expect(
+      taglineFrom(
+        "Tool to aid novice language speakers read books in their new dialect. AI powered vocab and reading comprehension quizzes, with sentence-by-sentence translation as needed.",
+      ),
+    ).toBe("Tool to aid novice language speakers read books in their new dialect");
+  });
+
+  it("ends a clause-less overlong text at a word, with an ellipsis", () => {
+    const tagline = taglineFrom(`${"word ".repeat(40)}end`);
+    expect(tagline.length).toBeLessThanOrEqual(90);
+    expect(tagline.endsWith("word…")).toBe(true);
+  });
+
+  it("prefers the repository's own description over the wiki's lead", () => {
+    const from = fallbackSuggestions(
+      exp,
+      facts,
+      "Settlers of Catan AI: Rust engine, information-set MCTS",
+    );
+    expect(from.tagline).toBe("Settlers of Catan AI: Rust engine, information-set MCTS");
+    expect(fallbackSuggestions(exp, facts, null).tagline).toBe(
+      fallbackSuggestions(exp, facts).tagline,
+    );
   });
 });
