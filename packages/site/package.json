@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/build.ts",
+    "./test-fixtures": "./src/test-fixtures.ts"
+  },
   "dependencies": {
     "@repowiki/core": "workspace:*",
     "astro": "7.3.5",

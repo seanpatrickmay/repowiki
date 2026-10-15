@@ -84,7 +84,13 @@ export {
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 export { refusalPage } from "./pages/refusal.ts";
 export { authRoutes } from "./routes/auth.ts";
-export { internalRoutes, LEASE_MS, type WorkerSpec } from "./routes/internal.ts";
+export {
+  EXPORT_LIMIT,
+  exportKey,
+  internalRoutes,
+  LEASE_MS,
+  type WorkerSpec,
+} from "./routes/internal.ts";
 export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
 export { pageSession, projectRoutes } from "./routes/projects.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
@@ -107,6 +113,7 @@ export {
   signIn,
 } from "./store/accounts.ts";
 export { appendAudit } from "./store/audit.ts";
+export { generationById, latestRevision, saveGeneration, saveRevision } from "./store/drafts.ts";
 export { readGitHubToken, saveGitHubToken } from "./store/github-tokens.ts";
 export {
   activeJob,

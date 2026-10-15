@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import { createApp, type Deps } from "../app.ts";
 import { loadConfig } from "../config.ts";
@@ -7,6 +10,7 @@ import { FAKE_REPO, FAKE_TOKEN, FAKE_USER, fakeGitHubFetch } from "../github/fak
 import { HttpError } from "../http/body.ts";
 import type { Method, Reply, RouteRequest } from "../http/router.ts";
 import { type App, text } from "../http/server.ts";
+import { fsObjectStore } from "../objects/fs-store.ts";
 import { recordingRunner } from "../runner/runner.ts";
 import { signIn } from "../store/accounts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
@@ -29,6 +33,7 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { 
     now: () => TEST_NOW,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
     runner: recordingRunner().runner,
+    objects: fsObjectStore(mkdtempSync(join(tmpdir(), "repowiki-objects-"))),
     ...overrides,
   };
 }

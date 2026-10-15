@@ -152,6 +152,9 @@ importers:
       '@repowiki/hosted':
         specifier: workspace:*
         version: link:../hosted
+      '@repowiki/site':
+        specifier: workspace:*
+        version: link:../site
       pg:
         specifier: 8.23.1
         version: 8.23.1
