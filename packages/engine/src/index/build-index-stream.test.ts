@@ -17,7 +17,7 @@ vi.mock("./git.ts", async (importOriginal) => {
   };
 });
 
-const { indexRepo } = await import("./build-index.ts");
+const { indexRepo, MAX_MANIFEST_BYTES } = await import("./build-index.ts");
 
 const LINES = 400_000;
 let repo: TestRepo;
@@ -54,12 +54,12 @@ describe("indexRepo reads blobs as a stream", () => {
     expect(seen.blobs.find((blob) => blob.size === 6)?.content?.toString("utf8")).toBe("x = 1\n");
   });
 
-  it("holds at most maxFileBytes per blob when parsing, and reads manifests whole", async () => {
+  it("holds at most maxFileBytes per blob when parsing, and manifests up to 1 MiB", async () => {
     repo.write("package.json", JSON.stringify({ name: "root" }));
     repo.write("a.py", "x = 1\n");
     repo.commit("add files");
     await indexRepo(repo.dir, "HEAD", { maxFileBytes: 50 });
-    expect(seen.holdLimits).toEqual([Number.POSITIVE_INFINITY, 50]);
+    expect(seen.holdLimits).toEqual([MAX_MANIFEST_BYTES, 50]);
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
