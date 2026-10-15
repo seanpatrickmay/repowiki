@@ -4,6 +4,17 @@ export { type Db, isUniqueViolation, type Queryable, withRetries } from "./db/db
 export { type Migration, migrate, migrationFiles, openDatabase } from "./db/migrate.ts";
 export { openPg, type PoolLike, poolDb } from "./db/pg.ts";
 export { openPglite } from "./db/pglite.ts";
+export { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
+export {
+  FAKE_CODE,
+  FAKE_COMMITS,
+  FAKE_REPO,
+  FAKE_TOKEN,
+  FAKE_USER,
+  fakeAuthorizeRoute,
+  fakeGitHubFetch,
+} from "./github/fake.ts";
+export { authorizeUrl, exchangeCode } from "./github/oauth.ts";
 export { BODY_LIMIT, HttpError, readBody, readForm, readJson } from "./http/body.ts";
 export {
   type CookieOptions,
