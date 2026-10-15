@@ -69,6 +69,8 @@ export {
   sessionSetCookie,
 } from "./http/session.ts";
 export { fsObjectStore } from "./objects/fs-store.ts";
+export { objectStoreFor } from "./objects/open.ts";
+export { type S3Options, s3ObjectStore } from "./objects/s3-store.ts";
 export { encodeRfc3986, type SignInput, signV4 } from "./objects/sigv4.ts";
 export {
   assertKey,
