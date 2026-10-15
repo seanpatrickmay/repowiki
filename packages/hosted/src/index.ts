@@ -73,6 +73,7 @@ export {
 } from "./projects.ts";
 export { REFUSAL_CODES, REFUSALS, RefusalCode, type RefusalInfo } from "./refusals.ts";
 export { type Ok, ok, type Refused, type Result, refused } from "./result.ts";
+export { firstRevision, refreshRevision, reviewRevision, saveRevision } from "./revisions.ts";
 export {
   claimHandle,
   HANDLE_MAX_LENGTH,
