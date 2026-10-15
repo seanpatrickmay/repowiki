@@ -58,8 +58,6 @@ export function publish(
   if (revision !== latest.number || latest.number !== project.latestRevision) {
     return refused("stale-revision");
   }
-  if (latest.flags.length > 0) return refused("needs-review-flags");
-  if (latest.overrides.contribution.trim() === "") return refused("contribution-missing");
   if (review === null || review.revision !== revision) return refused("not-reviewed");
   if (input.expectedVersion !== project.currentVersion) return refused("stale-publication");
   if (preview === null || preview.revision !== revision || preview.siteHash !== input.previewHash) {

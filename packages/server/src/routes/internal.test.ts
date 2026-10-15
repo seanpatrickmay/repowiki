@@ -2,6 +2,7 @@ import { type Job, recoverJob } from "@repowiki/hosted";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
+import { FAKE_USER } from "../github/fake.ts";
 import type { App } from "../http/server.ts";
 import { generationById, latestRevision } from "../store/drafts.ts";
 import { issueToken, jobById, jobSpec, revokeTokens, saveJob } from "../store/jobs.ts";
@@ -128,7 +129,11 @@ describe("the worker's internal API (spec 2 §6)", () => {
     expect((await post("/internal/job/succeed", job.token, success())).status).toBe(204);
     expect(await jobById(deps.db, job.jobId)).toMatchObject({ status: "succeeded" });
     const revision = await latestRevision(deps.db, job.projectId);
-    expect(revision).toMatchObject({ number: 1, source: "generation" });
+    // The revision holds the generated content (ADR-0012): the model's draft, as written.
+    expect(revision).toMatchObject({
+      number: 1,
+      content: { tagline: "A tiny demo", contribution: "I wrote it.", highlights: [] },
+    });
     expect(await generationById(deps.db, revision?.generationId ?? "")).toMatchObject({
       jobId: job.jobId,
       exportKey: key,
@@ -136,6 +141,16 @@ describe("the worker's internal API (spec 2 §6)", () => {
     });
     expect(await projectById(deps.db, job.projectId)).toMatchObject({ latestRevision: 1 });
     expect((await post("/internal/job/heartbeat", job.token, { step: "render" })).status).toBe(401);
+  });
+
+  it("writes the contribution from the facts when the model wrote none (ADR-0012)", async () => {
+    await post("/internal/job/lease", job.token);
+    await putExport(job.token, JSON.stringify(fixtureExport()));
+    const blank = { ...success(), suggestions: { ...suggestions, contributionDraft: "" } };
+    expect((await post("/internal/job/succeed", job.token, blank)).status).toBe(204);
+    expect((await latestRevision(deps.db, job.projectId))?.content.contribution).toBe(
+      `${FAKE_USER.name} wrote 2 of the repository's 2 commits and about 100% of its current lines.`,
+    );
   });
 
   it("refuses success before the export is stored, and an invalid export", async () => {

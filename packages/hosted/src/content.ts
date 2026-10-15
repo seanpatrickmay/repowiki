@@ -23,7 +23,7 @@ export function plainText(max: number) {
 const distinct = (values: readonly string[]) => new Set(values).size === values.length;
 const count = z.int().nonnegative();
 
-/** What a generation proposes; the author's overrides replace any of it (§8). */
+/** What a generation proposes; a revision's content is made from it (ADR-0012). */
 export const Suggestions = z.strictObject({
   tagline: plainText(90),
   summary: plainText(900),
@@ -76,22 +76,6 @@ export const PortfolioContent = z.strictObject({
     .refine((h) => distinct(h.map((x) => x.featureId)), "duplicate highlight"),
 });
 export type PortfolioContent = z.infer<typeof PortfolioContent>;
-
-/** The portfolio layer an author edits (§8); a missing tagline or summary uses the suggestion. */
-export const Overrides = z
-  .strictObject({
-    tagline: plainText(90).optional(),
-    summary: plainText(900).optional(),
-    contribution: plainText(1200),
-    highlights: z.array(z.strictObject({ featureId: FeatureId, blurb: plainText(140) })).max(4),
-  })
-  .refine((o) => distinct(o.highlights.map((h) => h.featureId)), "duplicate highlight");
-export type Overrides = z.infer<typeof Overrides>;
-
-export const EMPTY_OVERRIDES: Overrides = {
-  contribution: "",
-  highlights: [],
-};
 
 /** The review declaration's wording by version; a Review records which one the author accepted. */
 export const ATTESTATIONS = {

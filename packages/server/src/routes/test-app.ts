@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import type { Suggestions } from "@repowiki/hosted";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { createApp, type Deps } from "../app.ts";
 import { loadConfig } from "../config.ts";
@@ -16,7 +17,9 @@ import { fsObjectStore } from "../objects/fs-store.ts";
 import { fakeAnthropicFetch } from "../proxy/fake-anthropic.ts";
 import { recordingRunner } from "../runner/runner.ts";
 import { signIn } from "../store/accounts.ts";
+import { latestRevision, saveRevision } from "../store/drafts.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
+import { projectById, saveProject } from "../store/projects.ts";
 import { createSession } from "../store/sessions.ts";
 import { freshDb } from "../store/test-db.ts";
 import { internalRoutes } from "./internal.ts";
@@ -134,6 +137,7 @@ export const FIXTURE_FEATURES = [...new Set(fixtureExport().pages.map((p) => p.f
 /** Test-only: a project whose first generation succeeded, so revision 1 exists; its owner signed in. */
 export async function generatedProject(
   deps: Deps,
+  suggested: Partial<Suggestions> = {},
 ): Promise<{ projectId: string; jobId: string; cookie: string; csrf: string; accountId: string }> {
   const job = await startedJob(deps);
   const app = createApp(deps, internalRoutes(deps));
@@ -152,6 +156,7 @@ export async function generatedProject(
         summary: "It demonstrates RepoWiki.",
         contributionDraft: "I wrote the ingest code.",
         highlightCandidates: FIXTURE_FEATURES.slice(0, 1),
+        ...suggested,
       },
       facts: {
         languages: [{ name: "Python", share: 1 }],
@@ -166,6 +171,18 @@ export async function generatedProject(
   if (done.status !== 204) throw new Error(`succeed answered ${done.status}`);
   const { cookie, csrf, accountId } = await signedInCookie(deps);
   return { projectId: job.projectId, jobId: job.jobId, cookie, csrf, accountId };
+}
+
+/** Test-only: as if a refresh landed: the next revision, with the latest one's content. */
+export async function refreshed(deps: Deps, projectId: string): Promise<void> {
+  await deps.db.transaction(async (tx) => {
+    const project = await projectById(tx, projectId, true);
+    const latest = await latestRevision(tx, projectId);
+    if (project === null || latest === null) throw new Error("no revision to refresh");
+    const number = latest.number + 1;
+    await saveRevision(tx, { ...latest, number, createdAt: deps.now() });
+    await saveProject(tx, { ...project, latestRevision: number });
+  });
 }
 
 /** Test-only: a second GitHub user with an account and a session, who owns nothing. */

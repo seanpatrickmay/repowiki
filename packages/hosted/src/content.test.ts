@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   ATTESTATION_VERSION,
   ATTESTATIONS,
-  EMPTY_OVERRIDES,
   Facts,
-  Overrides,
+  PortfolioContent,
   plainText,
 } from "./content.ts";
-import { aGeneration } from "./test-fixtures.ts";
+import { aContent, aGeneration } from "./test-fixtures.ts";
 
 const ok = (schema: { safeParse(v: unknown): { success: boolean } }, value: unknown) =>
   schema.safeParse(value).success;
@@ -34,23 +33,17 @@ describe("plain text (Contract spec §8)", () => {
   });
 });
 
-describe("overrides (Contract spec §8)", () => {
-  it("start empty and accept up to four distinct highlights", () => {
-    expect(ok(Overrides, EMPTY_OVERRIDES)).toBe(true);
+describe("portfolio content (ADR-0012)", () => {
+  it("accepts up to four distinct highlights and a non-empty contribution", () => {
+    const content = aContent();
+    expect(ok(PortfolioContent, content)).toBe(true);
     const four = ["a", "b", "c", "d"].map((featureId) => ({ featureId, blurb: "x" }));
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: four })).toBe(true);
+    expect(ok(PortfolioContent, { ...content, highlights: four })).toBe(true);
     const five = [...four, { featureId: "e", blurb: "x" }];
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: five })).toBe(false);
-  });
-
-  it("refuse a duplicate, a long blurb, hidden features (ADR-0012) and unknown fields", () => {
-    const h = (featureId: string, blurb = "x") => ({ featureId, blurb });
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a"), h("a")] })).toBe(false);
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, hiddenFeatureIds: [] })).toBe(false);
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, highlights: [h("a", "x".repeat(141))] })).toBe(
-      false,
-    );
-    expect(ok(Overrides, { ...EMPTY_OVERRIDES, html: "<b>" })).toBe(false);
+    expect(ok(PortfolioContent, { ...content, highlights: five })).toBe(false);
+    expect(ok(PortfolioContent, { ...content, highlights: [four[0], four[0]] })).toBe(false);
+    expect(ok(PortfolioContent, { ...content, contribution: " " })).toBe(false);
+    expect(ok(PortfolioContent, { ...content, hiddenFeatureIds: [] })).toBe(false);
   });
 });
 

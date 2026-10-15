@@ -12,6 +12,7 @@ import {
   REFUSALS,
   type Review,
 } from "@repowiki/hosted";
+import { GENERATED_LABEL } from "../render/portfolio.ts";
 import { escapeHtml as e, type PageSession, page } from "./layout.ts";
 
 export interface ProjectView {
@@ -88,30 +89,21 @@ function jobSection(v: ProjectView): string {
   return `<section class="card"><h2>${e(title)}</h2>${progress}<ol>${steps}</ol>${why}${jobActions(v)}</section>`;
 }
 
-function editor(v: ProjectView): string {
-  const { revision, generation, project, session, titles } = v;
+/** The revision's generated content, read-only: the author reviews it and edits nothing (ADR-0012). */
+function content(v: ProjectView): string {
+  const { revision, generation, titles } = v;
   if (revision === null || generation === null) return "";
-  const o = revision.overrides;
-  const s = generation.suggestions;
-  const flags =
-    revision.flags.length === 0
-      ? ""
-      : `<p class="notice">Check these before review: ${revision.flags.map(e).join(", ")}</p>`;
-  const rows = generation.facts.featureIds
-    .map((id) => {
-      const lit = o.highlights.find((h) => h.featureId === id);
-      return `<tr><td>${e(titles.get(id) ?? id)}</td>
-<td><input type="checkbox" name="highlight" value="${e(id)}"${lit ? " checked" : ""} aria-label="Highlight"> <input name="blurb:${e(id)}" maxlength="140" value="${e(lit?.blurb ?? "")}" aria-label="Highlight text"></td></tr>`;
-    })
+  const c = revision.content;
+  const highlights = c.highlights
+    .map(
+      (h) => `<li><strong>${e(titles.get(h.featureId) ?? h.featureId)}</strong> ${e(h.blurb)}</li>`,
+    )
     .join("");
-  const inner = `${field("baseRevision", revision.number)}
-<label for="tagline">Tagline</label><input id="tagline" name="tagline" maxlength="90" value="${e(o.tagline ?? s.tagline)}">
-<label for="summary">Summary</label><textarea id="summary" name="summary" maxlength="900">${e(o.summary ?? s.summary)}</textarea>
-<label for="contribution">Your contribution</label><p class="muted">Required to publish. Describe your own work; the suggestion is only a start.</p>
-<textarea id="contribution" name="contribution" maxlength="1200">${e(o.contribution || s.contributionDraft)}</textarea>
-<table><thead><tr><th>Feature</th><th>Highlight (up to 4)</th></tr></thead><tbody>${rows}</tbody></table>
-<button>Save</button>`;
-  return `<section class="card"><h2>Portfolio (revision ${revision.number})</h2>${flags}${form(`/projects/${project.id}/revisions`, session, inner)}</section>`;
+  return `<section class="card"><h2>Portfolio (revision ${revision.number})</h2><p class="muted">Generated from the repository and its git history. Review it, preview it, and publish it as it is.</p>
+<h3>Tagline</h3><p>${e(c.tagline)}</p>
+<h3>Summary</h3><p>${e(c.summary)}</p>
+<h3>My contribution</h3><p>${e(c.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha))}</p>
+<h3>Highlights</h3>${highlights ? `<ul>${highlights}</ul>` : `<p class="muted">None.</p>`}</section>`;
 }
 
 function reviewSection(v: ProjectView): string {
@@ -157,7 +149,7 @@ export function projectPage(v: ProjectView): string {
   return page({
     title: v.project.slug,
     head: isActive(v.job) && v.revision === null ? '<meta http-equiv="refresh" content="3">' : "",
-    body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${editor(v)}${reviewSection(v)}${publishSection(v)}`,
+    body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${content(v)}${reviewSection(v)}${publishSection(v)}`,
     session: v.session,
   });
 }

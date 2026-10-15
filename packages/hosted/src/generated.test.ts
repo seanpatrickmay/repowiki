@@ -5,6 +5,7 @@ import {
   contributionParagraph,
   documentationFeatures,
   generatedContent,
+  generatedContribution,
   generatedHighlights,
 } from "./generated.ts";
 
@@ -147,5 +148,13 @@ describe("generatedContent (ADR-0012)", () => {
     });
     expect(content.contribution).toMatch(/^< b>Ada< \/b> wrote 181 of/);
     expect(PortfolioContent.safeParse(content).success).toBe(true);
+  });
+});
+
+describe("generatedContribution (ADR-0012)", () => {
+  it("is the content's contribution, callable on its own (a profile's per-project section)", () => {
+    const input = { suggestions: suggestions(), facts: facts(), exp, authorName: "Ada Lovelace" };
+    expect(generatedContribution(input)).toBe(generatedContent(input).contribution);
+    expect(generatedContribution(input)).toMatch(/^Ada Lovelace wrote 181 of/);
   });
 });

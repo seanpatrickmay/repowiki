@@ -30,13 +30,11 @@ beforeAll(async () => {
     ...publishRoutes(deps),
     ...publicRoutes(deps),
   ]);
-  p = await generatedProject(deps);
-  const tagline = encodeURIComponent('A "tiny" demo & <3 more');
-  await post(
-    `/projects/${p.projectId}/revisions`,
-    `baseRevision=1&contribution=Mine.&tagline=${tagline}`,
-  );
-  await post(`/projects/${p.projectId}/review`, "revision=2&attest=yes");
+  p = await generatedProject(deps, {
+    tagline: 'A "tiny" demo & <3 more',
+    contributionDraft: "Mine.",
+  });
+  await post(`/projects/${p.projectId}/review`, "revision=1&attest=yes");
 }, 300_000);
 afterAll(async () => deps.db.close());
 
@@ -45,13 +43,13 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     expect((await get(PAGE)).status).toBe(404);
     expect((await get(`${PAGE}/docs/`)).status).toBe(404);
     expect(String((await get("/demo-dev")).body)).not.toContain(`href="${PAGE}"`);
-    await post(`/projects/${p.projectId}/preview`, "revision=2");
-    const hash = (await previewOf(deps.db, p.projectId, 2))?.siteHash ?? "";
+    await post(`/projects/${p.projectId}/preview`, "revision=1");
+    const hash = (await previewOf(deps.db, p.projectId, 1))?.siteHash ?? "";
     expect(
       (
         await post(
           `/projects/${p.projectId}/publish`,
-          `revision=2&expectedVersion=0&previewHash=${hash}`,
+          `revision=1&expectedVersion=0&previewHash=${hash}`,
         )
       ).status,
     ).toBe(303);

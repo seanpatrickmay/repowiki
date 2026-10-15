@@ -14,18 +14,19 @@
 
 - No manual overrides and no hidden features anywhere: schema, store, routes, pages, export filtering.
 - `@repowiki/hosted` stays pure (core and zod only; no clock, randomness or I/O).
-- Shipped migrations are never edited; 0005 and 0006 are appended and must load rows written by M14g local runs (`hosted:local`).
+- Shipped migrations are never edited; 0005–0007 are appended and must load rows written by M14g local runs (`hosted:local`).
 - Tests never call the network or a model. Never log a token or secret. Token checks are constant-time; SQL is parameterized.
 - The pages host never sets a cookie and ignores any `Cookie` header; the session cookie exists only on the app host.
 - `INTERNAL_PORT` and `INTERNAL_URL` are unchanged.
-- Stacked branches, each under ~300 changed lines (lockfiles, fixtures and cassettes excluded), in this order: `m14/generated-docs`, `m14/generated-content`, `m14/no-hidden-features`, `m14/generated-revisions`, `m14/app-origin`, `m14/preview-links`.
+- Stacked branches, each under ~300 changed lines (lockfiles, fixtures and cassettes excluded), in this order: `m14/generated-docs`, `m14/generated-content`, `m14/no-hidden-features`, `m14/review-v2`, `m14/generated-revisions`, `m14/app-origin`, `m14/preview-links`.
+- Scope note (owner, later on 2026-10-15): the project page will be replaced by a biography profile in a follow-up milestone. No further work on highlight blurbs or the page's layout; the contribution stays one callable function (`generatedContribution`).
 - `pnpm check` passes before every commit; commits use `git -c user.email=sean.may101@gmail.com commit`.
 
 ## Review Focus
 
 1. **Labelling.** A generated contribution always carries "Generated from the git history at `<sha>`; not written by the author."; a version published before this change (no `contributionBy` in its `portfolio.json`) is never labelled generated.
 2. **Documentation-like features** never lead the highlights or the "most of all" clause, and still appear in the wiki and facts.
-3. **Stored rows from M14g.** After migrations 0005 and 0006 every revision parses, no version 1 review remains, and no preview of a rewritten revision can be published.
+3. **Stored rows from M14g.** After migrations 0005–0007 every revision parses, no version 1 review remains, and no preview of a rewritten revision can be published.
 4. **Cookies by host.** A pages-host request carrying the session cookie is served exactly as a signed-out one; no pages-host reply has `Set-Cookie`.
 5. **Preview tokens.** Only the SHA-256 is stored; an expired, unknown or other-revision token is 404; responses are `no-store`, `noindex`, `no-referrer`; the old `/preview/:id/:rev/` route is gone from both hosts.
 6. **Production configuration** refuses a missing `APP_ORIGIN` or `PUBLIC_ORIGIN`, equal hosts, and any `*.fly.dev` origin.
@@ -93,15 +94,23 @@ UPDATE revisions SET body = jsonb_set(body #- '{overrides,hiddenFeatureIds}', '{
 
 ---
 
+### Task 3b: Attestation 2
+
+**Files:** `packages/hosted/src/content.ts` (`ATTESTATIONS[2]`, `ATTESTATION_VERSION = 2`), `entities.ts` (`Review.attestationVersion: 2`), `packages/server/src/pages/project.ts`, `packages/server/src/db/migrations/0006-review-attestation-2.sql` (deletes version 1 reviews), tests.
+
+- [ ] branch `m14/review-v2`; failing tests (the wording, a v1 review refused, a stored v1 review gone after 0006); implement; `pnpm check`; commit `feat(hosted): review attestation 2, for an author approving generated content`
+
+---
+
 ### Task 4: Generated revisions and the review step
 
 **Files:**
-- Modify: `packages/hosted/src/content.ts` (drop `Overrides`, `EMPTY_OVERRIDES`; `ATTESTATIONS[2]`, `ATTESTATION_VERSION = 2`), `entities.ts` (`DraftRevision { projectId, number, generationId, content, createdAt }`, `Review.attestationVersion: 2`, drop `RevisionFlag`, drop `draft.save`), `revisions.ts` (`firstRevision(project, generation, content, now)`, `refreshRevision(project, latest, generation, content, now)`, `reviewRevision(latest, revision, now)`; no `saveRevision`), `publish.ts`, `refusals.ts` (drop `needs-review-flags`, `contribution-missing`), `policy.ts`, tests and fixtures
+- Modify: `packages/hosted/src/content.ts` (drop `Overrides`, `EMPTY_OVERRIDES`; `entities.ts` (`DraftRevision { projectId, number, generationId, content, createdAt }`, drop `RevisionFlag`, drop `draft.save`), `revisions.ts` (`firstRevision(project, generation, content, now)`, `refreshRevision(project, latest, generation, content, now)`, `reviewRevision(latest, revision, now)`; no `saveRevision`), `publish.ts`, `refusals.ts` (drop `needs-review-flags`, `contribution-missing`), `policy.ts`, tests and fixtures
 - Modify: `packages/server/src/routes/internal.ts` (succeed reads the export and the account, calls `generatedContent`), `routes/drafts.ts` (no `POST /projects/:id/revisions`), `pages/project.ts` (read-only content, attestation 2), `routes/preview.ts`, `render/portfolio.ts` (`PortfolioData.contributionBy: "author" | "generated"`, default `"author"`; the label), tests, `e2e.test.ts`, `local.e2e.test.ts`
-- Create: `packages/server/src/db/migrations/0006-generated-revisions.sql`
+- Create: `packages/server/src/db/migrations/0007-generated-revisions.sql`
 
 - [ ] **Step 1:** branch `m14/generated-revisions`
-- [ ] **Step 2: failing tests** — `firstRevision` stores the given content; a refresh carries nothing forward; `reviewRevision` records version 2; `publish` needs only latest, review, version and preview; the refusal set has 28 codes; succeed stores `generatedContent`'s result (the deterministic paragraph for an empty draft); the project page shows the content read-only with no form fields but the review and preview controls; the public page shows the label; a stored `portfolio.json` without `contributionBy` renders unlabelled; a legacy revision (overrides, flags, v1 review, preview) loads after 0006 with content from its generation, and its review and preview are gone.
+- [ ] **Step 2: failing tests** — `firstRevision` stores the given content; a refresh carries nothing forward; `reviewRevision` records version 2; `publish` needs only latest, review, version and preview; the refusal set has 28 codes; succeed stores `generatedContent`'s result (the deterministic paragraph for an empty draft); the project page shows the content read-only with no form fields but the review and preview controls; the public page shows the label; a stored `portfolio.json` without `contributionBy` renders unlabelled; a legacy revision (overrides, flags, review, preview) loads after 0007 with content from its generation, and its review and preview are gone.
 - [ ] **Step 3:** run them — FAIL
 - [ ] **Step 4:** implement
 - [ ] **Step 5:** `pnpm check`; commit `feat(server): make every project page the generated content, reviewed by its author`
@@ -127,7 +136,7 @@ UPDATE revisions SET body = jsonb_set(body #- '{overrides,hiddenFeatureIds}', '{
 ### Task 6: Previews on the pages origin at capability URLs
 
 **Files:**
-- Create: `packages/server/src/db/migrations/0007-preview-tokens.sql`, `packages/server/src/store/preview-tokens.ts`, its test
+- Create: `packages/server/src/db/migrations/0008-preview-tokens.sql`, `packages/server/src/store/preview-tokens.ts`, its test
 - Modify: `packages/server/src/routes/preview.ts` (`POST /projects/:id/preview/open`; `previewPageRoutes` for `/_preview/:token/*`; the old route removed), `pages/project.ts` (the open form), `render/portfolio.ts` (banner wording), `wiring.ts`, `packages/hosted/src/urls.ts` (`_preview` reserved), tests, `e2e.test.ts`
 
 **Interfaces:**

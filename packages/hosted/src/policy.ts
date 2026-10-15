@@ -61,8 +61,8 @@ const ALWAYS_OWNER: ReadonlySet<Action> = new Set([
   "project.export",
 ]);
 
-/** Private-state edits accept an hour-old check; the rest must be live (C7). */
-const RECENT_ENOUGH: ReadonlySet<Action> = new Set(["draft.save", "draft.review"]);
+/** A review changes only private state and accepts an hour-old check; the rest must be live (C7). */
+const RECENT_ENOUGH: ReadonlySet<Action> = new Set(["draft.review"]);
 
 /**
  * The eligibility rule (§7.2): the check must be about this user and repository and fresh

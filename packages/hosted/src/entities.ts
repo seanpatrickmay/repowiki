@@ -1,6 +1,6 @@
 import { GitSha, IsoDateTime, Sha256Hex } from "@repowiki/core";
 import { z } from "zod";
-import { Facts, Overrides, Suggestions } from "./content.ts";
+import { Facts, PortfolioContent, Suggestions } from "./content.ts";
 import { Plan } from "./limits.ts";
 import { RefusalCode } from "./refusals.ts";
 import { HandleName, HandleState, Slug } from "./urls.ts";
@@ -141,22 +141,12 @@ export const Generation = z
   );
 export type Generation = z.infer<typeof Generation>;
 
-/** Why a revision cannot be reviewed yet (§6.3). */
-export const RevisionFlag = z
-  .string()
-  .regex(
-    /^(?:suggestion-changed:(?:tagline|summary|contribution)|highlight-missing:[a-z0-9]+(?:-[a-z0-9]+)*)$/,
-    "unknown revision flag",
-  );
-export type RevisionFlag = z.infer<typeof RevisionFlag>;
-
+/** One generation's content, as its author reviews and publishes it (ADR-0012). */
 export const DraftRevision = z.strictObject({
   projectId: Uuid,
   number: Ordinal,
   generationId: Uuid,
-  overrides: Overrides,
-  flags: z.array(RevisionFlag),
-  source: z.enum(["generation", "author"]),
+  content: PortfolioContent,
   createdAt: IsoDateTime,
 });
 export type DraftRevision = z.infer<typeof DraftRevision>;
@@ -231,7 +221,6 @@ export const ACTIONS = [
   "job.retry",
   "draft.read",
   "preview.read",
-  "draft.save",
   "draft.review",
   "project.publish",
   "project.unpublish",

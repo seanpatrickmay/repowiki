@@ -24,8 +24,6 @@ export const REFUSAL_CODES = [
   "stale-publication",
   "preview-mismatch",
   "not-reviewed",
-  "needs-review-flags",
-  "contribution-missing",
   "frozen",
   "withdrawn",
   "restore-expired",
@@ -148,16 +146,6 @@ export const REFUSALS: Readonly<Record<RefusalCode, RefusalInfo>> = {
     status: 409,
     retryable: false,
     message: "Review this version before publishing.",
-  },
-  "needs-review-flags": {
-    status: 409,
-    retryable: false,
-    message: "Some generated text under your edits changed. Check the flagged fields and save.",
-  },
-  "contribution-missing": {
-    status: 422,
-    retryable: false,
-    message: "Write your contribution statement before review.",
   },
   frozen: {
     status: 402,

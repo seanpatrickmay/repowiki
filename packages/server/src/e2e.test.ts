@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "./config.ts";
-import { freePort } from "./routes/test-app.ts";
+import { FIXTURE_FEATURES, freePort } from "./routes/test-app.ts";
 import { browser, field, sleep } from "./test-browser.ts";
 import { type RunningServer, startServer } from "./wiring.ts";
 
@@ -17,7 +17,7 @@ beforeAll(async () => {
 afterAll(async () => server.close());
 
 describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
-  it("signs in, generates, edits, reviews, previews, publishes, reads signed out, and unpublishes", async () => {
+  it("signs in, generates, reviews, previews, publishes, reads signed out, and unpublishes", async () => {
     const me = browser(base);
     expect((await me.go("/")).status).toBe(200);
     const dashboard = await me.follow("/auth/github");
@@ -43,35 +43,27 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
 
     // Every wiki page is public (ADR-0012): there is nothing to hide.
     expect(page.text).not.toContain('name="hidden"');
-    const features = [...page.text.matchAll(/name="highlight" value="([^"]+)"/g)].map((m) => m[1]);
+    const features = FIXTURE_FEATURES;
     expect(features.length).toBeGreaterThan(1);
-    const saved = await me.go(`${projectPath}/revisions`, {
-      form: {
-        csrf,
-        baseRevision: "1",
-        tagline: field(page.text, "tagline"),
-        summary: "A small project the demo documents.",
-        contribution: "I wrote the ingest code.",
-      },
-    });
-    expect(saved.status, saved.text).toBe(303);
+    // The author edits nothing (ADR-0012): review the generated revision, preview, publish.
+    expect(page.text).not.toContain("<textarea");
     const reviewed = await me.go(`${projectPath}/review`, {
-      form: { csrf, revision: "2", attest: "yes" },
+      form: { csrf, revision: "1", attest: "yes" },
     });
     expect(reviewed.status, reviewed.text).toBe(303);
-    const previewed = await me.go(`${projectPath}/preview`, { form: { csrf, revision: "2" } });
+    const previewed = await me.go(`${projectPath}/preview`, { form: { csrf, revision: "1" } });
     expect(previewed.status, previewed.text).toBe(303);
     page = await me.go(projectPath);
     const previewHash = field(page.text, "previewHash");
     expect(previewHash).toMatch(/^[0-9a-f]{64}$/);
     const id = projectPath.split("/").at(-1) ?? "";
-    expect((await me.go(`/preview/${id}/2/`)).status).toBe(200);
-    expect((await browser(base).go(`/preview/${id}/2/`)).status).toBe(404);
+    expect((await me.go(`/preview/${id}/1/`)).status).toBe(200);
+    expect((await browser(base).go(`/preview/${id}/1/`)).status).toBe(404);
 
     const published = await me.go(`${projectPath}/publish`, {
       form: {
         csrf,
-        revision: "2",
+        revision: "1",
         expectedVersion: field(page.text, "expectedVersion"),
         previewHash,
       },
@@ -81,7 +73,8 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     const reader = browser(base);
     const project = await reader.go("/demo-dev/demo-repo");
     expect(project.status).toBe(200);
-    expect(project.text).toContain("I wrote the ingest code.");
+    expect(project.text).toContain("The author wrote most of the ingest and search code");
+    expect(project.text).toContain("not written by the author");
     const wiki = await reader.go("/demo-dev/demo-repo/docs/");
     expect(wiki.status).toBe(200);
     // Search (Pagefind's WebAssembly) and the diagrams need the site's own policy.
