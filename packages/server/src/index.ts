@@ -106,6 +106,7 @@ export {
   MessageParams,
   refusedBeta,
 } from "./proxy/request.ts";
+export { buildTree, renderQueue, SITE_BUILD_TIMEOUT_MS } from "./render/build.ts";
 export { hostedExport } from "./render/hosted-export.ts";
 export {
   CHECKED_STATEMENT,
