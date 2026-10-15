@@ -11,7 +11,11 @@ export interface Config {
   mode: Mode;
   origin: string;
   port: number;
+  /** The worker listener's port (`/internal/*`, `/llm/*`); production only, null elsewhere (S1). */
+  internalPort: number | null;
   host: string;
+  /** What workers report as the engine version (`REPOWIKI_ENGINE_VERSION`). */
+  engineVersion: string;
   tokenKey: Buffer;
   signupAllowlist: string[];
   anthropicApiKey: string | null;
@@ -41,17 +45,23 @@ export function loadConfig(env: Env): Config {
     if (!value) missing.push(name);
     return value ?? "";
   };
-  const port = Number(env.PORT ?? 8787);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535)
-    throw new ConfigError("PORT is invalid.");
+  const port = portOf(env.PORT, 8787, "PORT");
+  const engineVersion = env.REPOWIKI_ENGINE_VERSION?.trim() || "dev";
+  if (!ENGINE_VERSION.test(engineVersion)) {
+    throw new ConfigError("REPOWIKI_ENGINE_VERSION must be 1 to 64 letters, digits or ._+-.");
+  }
 
   if (mode === "production") {
     const origin = need("PUBLIC_ORIGIN");
+    const internalPort = portOf(env.INTERNAL_PORT, 8788, "INTERNAL_PORT");
+    if (internalPort === port) throw new ConfigError("INTERNAL_PORT must differ from PORT.");
     const config: Config = {
       mode,
       origin,
       port,
+      internalPort,
       host: env.HOST ?? "0.0.0.0",
+      engineVersion,
       tokenKey: Buffer.alloc(0),
       signupAllowlist: allowlist(env.SIGNUP_ALLOWLIST),
       anthropicApiKey: need("ANTHROPIC_API_KEY"),
@@ -83,6 +93,9 @@ export function loadConfig(env: Env): Config {
     if (!Origin.safeParse(origin).success) {
       throw new ConfigError("PUBLIC_ORIGIN must be RepoWiki's own https origin with no path.");
     }
+    if (!reachesPort(config.runner.internalUrl, internalPort)) {
+      throw new ConfigError("INTERNAL_URL must be an http(s) URL naming INTERNAL_PORT.");
+    }
     config.tokenKey = tokenKey(key);
     return config;
   }
@@ -99,7 +112,9 @@ export function loadConfig(env: Env): Config {
     mode,
     origin,
     port,
+    internalPort: null,
     host: "127.0.0.1",
+    engineVersion,
     tokenKey: env.TOKEN_KEY ? tokenKey(env.TOKEN_KEY) : randomBytes(32),
     signupAllowlist: allowlist(env.SIGNUP_ALLOWLIST),
     anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() || null,
@@ -111,6 +126,27 @@ export function loadConfig(env: Env): Config {
         ? { kind: "oauth", clientId, clientSecret }
         : { kind: "fake" },
   };
+}
+
+function portOf(value: string | undefined, fallback: number, name: string): number {
+  const port = Number(value ?? fallback);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new ConfigError(`${name} is invalid.`);
+  }
+  return port;
+}
+
+/** The worker's own check on its version (packages/worker env.ts), so a bad one fails here. */
+const ENGINE_VERSION = /^[A-Za-z0-9._+-]{1,64}$/;
+
+/** Workers must reach the worker listener, never the public one: the URL names its port. */
+function reachesPort(url: string, port: number): boolean {
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) && parsed.port === String(port);
+  } catch {
+    return false;
+  }
 }
 
 function allowlist(value: string | undefined): string[] {
