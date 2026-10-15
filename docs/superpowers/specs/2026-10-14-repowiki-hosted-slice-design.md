@@ -141,6 +141,7 @@ All under `/internal/`, authenticated by `Authorization: Bearer <job token>`; a 
 - **Indexed files** come from the manifest build (the number of files the engine indexed), reported before any page is written.
 - **Languages** are the indexed files' languages by line share, from the index.
 - **Feature ids** are the manifest's.
+- **Technologies** (added by ADR-0014) are the libraries, frameworks and tools in RepoWiki's curated table that the tree declares, imports or configures, each with the file that proves it, detected in the index child.
 - **Author facts:** the worker writes a people file whose one entry matches `login:<login>` plus `email:` keys for the author emails of the commit shas the job spec lists, so People groups the author's identities; the facts are that person's `commits`, `currentLines` and `features` against the snapshot's totals.
 - **Suggestions:** one `generate` call (through the proxy, schema = the Contract's `Suggestions`) given the About article's lead, the feature titles and the author's per-feature counts, with the instruction to describe only what the author's own commits show. The contribution draft is a starting point the author must rewrite or approve (Contract §8).
 
