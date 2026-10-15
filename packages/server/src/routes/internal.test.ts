@@ -1,7 +1,10 @@
+import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
-import { issueToken, jobById } from "../store/jobs.ts";
+import { generationById, latestRevision } from "../store/drafts.ts";
+import { issueToken, jobById, jobSpec } from "../store/jobs.ts";
+import { projectById } from "../store/projects.ts";
 import { internalRoutes } from "./internal.ts";
 import { call, startedJob, testDeps } from "./test-app.ts";
 
@@ -19,6 +22,33 @@ const post = (path: string, token: string, body?: unknown) =>
     headers: bearer(token, body === undefined ? {} : { "content-type": "application/json" }),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+const putExport = (token: string, body: string) =>
+  call(app, {
+    method: "PUT",
+    path: "/internal/job/export",
+    headers: bearer(token, { "content-type": "application/json" }),
+    body,
+  });
+
+const suggestions = {
+  tagline: "A tiny demo",
+  summary: "It demonstrates RepoWiki.",
+  contributionDraft: "I wrote it.",
+  highlightCandidates: [],
+};
+const facts = () => ({
+  languages: [{ name: "Python", share: 1 }],
+  indexedFiles: 3,
+  featureIds: fixtureExport().manifest.features.map((f) => f.id),
+  author: { commits: 2, totalCommits: 2, currentLines: 10, totalLines: 10, features: [] },
+});
+const success = () => ({
+  suggestions,
+  facts: facts(),
+  engineVersion: "0.0.0",
+  models: ["claude-haiku-4-5"],
+});
+
 beforeEach(async () => {
   deps = await testDeps();
   app = createApp(deps, internalRoutes(deps));
@@ -34,8 +64,8 @@ describe("the worker's internal API (spec 2 §6)", () => {
 
   it("checks the token before reading a body (A4)", async () => {
     const reply = await call(app, {
-      method: "POST",
-      path: "/internal/job/heartbeat",
+      method: "PUT",
+      path: "/internal/job/export",
       headers: { "content-type": "application/json", "content-length": String(64 * 1024 * 1024) },
       body: "{}",
     });
@@ -86,6 +116,34 @@ describe("the worker's internal API (spec 2 §6)", () => {
 
   it("refuses a heartbeat before the lease", async () => {
     expect((await post("/internal/job/heartbeat", job.token, { step: "index" })).status).toBe(409);
+  });
+
+  it("stores the export, then creates the generation and revision 1 on success", async () => {
+    await post("/internal/job/lease", job.token);
+    expect((await putExport(job.token, JSON.stringify(fixtureExport()))).status).toBe(204);
+    const key = `exports/${job.jobId}-1.json`;
+    expect((await jobSpec(deps.db, job.jobId))?.export?.key).toBe(key);
+    expect(await deps.objects.head(key)).not.toBeNull();
+    expect((await post("/internal/job/succeed", job.token, success())).status).toBe(204);
+    expect(await jobById(deps.db, job.jobId)).toMatchObject({ status: "succeeded" });
+    const revision = await latestRevision(deps.db, job.projectId);
+    expect(revision).toMatchObject({ number: 1, source: "generation" });
+    expect(await generationById(deps.db, revision?.generationId ?? "")).toMatchObject({
+      jobId: job.jobId,
+      exportKey: key,
+      suggestions,
+    });
+    expect(await projectById(deps.db, job.projectId)).toMatchObject({ latestRevision: 1 });
+    expect((await post("/internal/job/heartbeat", job.token, { step: "render" })).status).toBe(401);
+  });
+
+  it("refuses success before the export is stored, and an invalid export", async () => {
+    await post("/internal/job/lease", job.token);
+    const empty = { ...success(), facts: {} };
+    expect((await post("/internal/job/succeed", job.token, empty)).status).toBe(400);
+    expect((await post("/internal/job/succeed", job.token, success())).status).toBe(409);
+    expect((await putExport(job.token, '{"schemaVersion":1}')).status).toBe(400);
+    expect((await putExport(job.token, "{not json")).status).toBe(400);
   });
 
   it("fails a job with a worker code and refuses any other code", async () => {

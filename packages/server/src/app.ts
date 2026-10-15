@@ -5,6 +5,7 @@ import { fakeAuthorizeRoute } from "./github/fake.ts";
 import { createRouter, type Reply, type Route } from "./http/router.ts";
 import { type App, html, text } from "./http/server.ts";
 import { renewalCookie } from "./http/session.ts";
+import type { ObjectStore } from "./objects/store.ts";
 import { escapeHtml, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 import type { JobRunner } from "./runner/runner.ts";
 
@@ -19,6 +20,8 @@ export interface Deps {
   newId: () => string;
   /** Starts job attempts: a child process locally, a Fly Machine in production (spec 2 S16). */
   runner: JobRunner;
+  /** Exports, previews and published sites (spec 2 S12). */
+  objects: ObjectStore;
 }
 
 export const callbackUrl = (config: Config) => `${config.origin}/auth/github/callback`;
