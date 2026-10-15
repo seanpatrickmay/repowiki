@@ -105,14 +105,13 @@ describe("local profile mode (M14g)", () => {
     expect(published.status, published.text).toBe(303);
 
     const reader = browser(pages);
-    const project = await reader.go("/ada/engine");
-    expect(project.status).toBe(200);
-    expect(project.text).toContain("Python 73% · TypeScript 27%");
-    expect(project.text).toContain("15 files indexed");
-    expect(project.text).toContain("4 of 9 commits");
+    const bio = await reader.go("/ada");
+    expect(bio.status).toBe(200);
+    expect(bio.text).toContain('<td>Python</td><td class="num">73%</td>');
+    expect(bio.text).toContain('<td class="num">4</td>');
     // No model in import mode: the contribution is the facts paragraph (ADR-0012).
-    expect(project.text).toContain(CONTRIBUTION);
-    expect((await reader.go("/ada/engine/docs/")).status).toBe(200);
+    expect(bio.text).toContain(CONTRIBUTION);
+    expect((await reader.go("/ada/engine/")).status).toBe(200);
 
     // A second project (Pro) for a repository with no local wiki fails, saying why in the log.
     const second = await me.go("/projects", { form: { csrf, githubRepoId: "8003" } });
@@ -128,7 +127,7 @@ describe("local profile mode (M14g)", () => {
     server = null;
     ({ base, pages } = await start(env));
     const back = browser(pages);
-    expect((await back.go("/ada/engine")).text).toContain(CONTRIBUTION);
+    expect((await back.go("/ada")).text).toContain(CONTRIBUTION);
     const again = await me.go(`${base}/dashboard`);
     expect(again.status).toBe(200);
     expect(again.text).toContain("ada/engine");

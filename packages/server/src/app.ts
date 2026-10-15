@@ -7,8 +7,13 @@ import { createRouter, type Reply, type Route } from "./http/router.ts";
 import { type App, html, text } from "./http/server.ts";
 import { renewalCookie } from "./http/session.ts";
 import type { ObjectStore } from "./objects/store.ts";
+import {
+  BIOGRAPHY_STYLE,
+  BIOGRAPHY_STYLE_PATH,
+  SILHOUETTE_PATH,
+  SILHOUETTE_SVG,
+} from "./pages/biography-style.ts";
 import { escapeHtml, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
-import { PUBLIC_STYLE, PUBLIC_STYLE_PATH } from "./pages/public-style.ts";
 import type { JobRunner } from "./runner/runner.ts";
 
 /** Everything a route needs from outside (spec 2 §4); tests pass fakes. */
@@ -39,18 +44,21 @@ export const nameOf = (error: unknown) => (error instanceof Error ? error.name :
 
 export const callbackUrl = (config: Config) => `${config.appOrigin}/auth/github/callback`;
 
-const styleRoute = (pattern: string, body: string): Route => ({
+const fileRoute = (pattern: string, body: string, type = "text/css; charset=utf-8"): Route => ({
   method: "GET",
   pattern,
   handler: async () => ({
     status: 200,
-    headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300" },
+    headers: { "content-type": type, "cache-control": "public, max-age=300" },
     body,
   }),
 });
-/** The app's style sheet; public pages and previews use theirs, on the pages host (ADR-0012). */
-const appStyle = styleRoute(STYLE_PATH, STYLE);
-const publicStyle = styleRoute(PUBLIC_STYLE_PATH, PUBLIC_STYLE);
+/** The app's style sheet; the biography uses its own and the silhouette, on the pages host. */
+const appStyle = fileRoute(STYLE_PATH, STYLE);
+const pagesFiles = [
+  fileRoute(BIOGRAPHY_STYLE_PATH, BIOGRAPHY_STYLE),
+  fileRoute(SILHOUETTE_PATH, SILHOUETTE_SVG, "image/svg+xml"),
+];
 
 /**
  * The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. A
@@ -73,7 +81,8 @@ function errorReply(error: HttpError): Reply {
 
 /**
  * The routes, the style sheets, and in fake mode the fake GitHub's authorize page. The pages host
- * (ADR-0012) gets only the public style sheet and answers an unknown path in plain text.
+ * (ADR-0012) gets only the biography's style sheet and silhouette, and answers an unknown path in
+ * plain text.
  */
 export function createApp(
   deps: Deps,
@@ -85,7 +94,7 @@ export function createApp(
     deps.config.github.kind === "fake" && !pages
       ? [fakeAuthorizeRoute(callbackUrl(deps.config))]
       : [];
-  const route = createRouter([pages ? publicStyle : appStyle, ...fake, ...routes]);
+  const route = createRouter([...(pages ? pagesFiles : [appStyle]), ...fake, ...routes]);
   return async (request) => {
     const found = route(request.method, request.path);
     if ("handler" in found) {

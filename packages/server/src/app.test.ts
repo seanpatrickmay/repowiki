@@ -43,13 +43,19 @@ describe("createApp (spec 2 §4)", () => {
     expect(String(reply.body)).toContain("--accent");
   });
 
-  it("serves the public pages' style sheet on the pages host only (ADR-0012)", async () => {
-    expect((await call(createApp(deps, []), { path: "/_app/portfolio.css" })).status).toBe(404);
+  it("serves the biography's style sheet and silhouette on the pages host only (ADR-0013)", async () => {
+    const app = createApp(deps, []);
+    expect((await call(app, { path: "/_app/biography.css" })).status).toBe(404);
+    expect((await call(app, { path: "/_app/avatar.svg" })).status).toBe(404);
     const pages = createApp(deps, [], { host: "pages" });
-    const reply = await call(pages, { path: "/_app/portfolio.css" });
+    const reply = await call(pages, { path: "/_app/biography.css" });
     expect(reply.status).toBe(200);
     expect(reply.headers?.["content-type"]).toBe("text/css; charset=utf-8");
-    expect(String(reply.body)).toContain(".cards");
+    expect(String(reply.body)).toContain(".hatnote");
+    const silhouette = await call(pages, { path: "/_app/avatar.svg" });
+    expect(silhouette.headers?.["content-type"]).toBe("image/svg+xml");
+    expect(String(silhouette.body)).toContain("<svg");
+    expect((await call(pages, { path: "/_app/portfolio.css" })).status).toBe(404);
   });
 
   it("mounts the fake GitHub's authorize page only when GitHub is fake", async () => {

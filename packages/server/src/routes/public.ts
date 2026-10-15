@@ -7,12 +7,12 @@ import {
 } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
-import { type ProfileEntry, profilePage } from "../pages/profile.ts";
-import { PortfolioData, portfolioHtml } from "../render/portfolio.ts";
+import { SITE_DIR } from "../render/build.ts";
 import { accountById, resolveHandle } from "../store/accounts.ts";
 import { versionOf } from "../store/drafts.ts";
-import { projectBySlug, projectsOf } from "../store/projects.ts";
-import { SITE_CSP, serveTreeFile, siteBase } from "./preview.ts";
+import { projectBySlug } from "../store/projects.ts";
+import { biographyPage, publishedEntries } from "./biography-page.ts";
+import { SITE_CSP, serveTreeFile } from "./preview.ts";
 
 const PUBLIC = { "cache-control": "public, max-age=60" };
 const plain = (status: number, body: string): Reply => ({
@@ -28,6 +28,7 @@ type Owner =
   | {
       accountId: string;
       handle: string;
+      login: string;
       displayName: string;
       status: string;
       /** The name asked for is not the handle's canonical spelling (case, or a renamed handle). */
@@ -38,7 +39,7 @@ type Owner =
 const encodedRest = (rest: string) => rest.split("/").map(encodeURIComponent).join("/");
 
 /**
- * Signed-out reads of published pages and profiles (spec 2 S14), registered after every app route.
+ * Signed-out reads of biographies and published wikis (spec 2 S14, ADR-0013), on the pages host.
  * A redirect is only ever built from a stored handle and slug, after the page itself was found,
  * so no request can turn one into a link off the site.
  */
@@ -61,6 +62,7 @@ export function publicRoutes(deps: Deps): Route[] {
     return {
       accountId: account.id,
       handle: found.handle,
+      login: account.login,
       displayName: account.displayName,
       status: account.status,
       moved: moved || name !== found.handle,
@@ -94,17 +96,9 @@ export function publicRoutes(deps: Deps): Route[] {
     }
     const version = await versionOf(deps.db, project.id, project.currentVersion);
     if (version === null) return { reply: notFound() };
-    const base = `/${who.handle}/${project.slug}`;
+    const base = `/${who.handle}/${project.slug}/`;
     const canonical = who.moved || slug !== project.slug ? base : null;
     return { project, version, handle: who.handle, canonical };
-  }
-
-  /** The stored portfolio layer of a version. */
-  async function portfolioOf(version: PublishedVersion): Promise<PortfolioData | null> {
-    const stored = await deps.objects.get(`${version.siteKey}portfolio.json`);
-    return stored === null
-      ? null
-      : PortfolioData.parse(JSON.parse(new TextDecoder().decode(stored.body)));
   }
 
   return [
@@ -125,28 +119,23 @@ export function publicRoutes(deps: Deps): Route[] {
         if ("reply" in who) return who.reply;
         if (who.status !== "active") return plain(410, "This page was removed.");
         if (who.moved) return moved(`/${who.handle}`);
-        const entries: ProfileEntry[] = [];
-        for (const project of await projectsOf(deps.db, who.accountId)) {
-          if (project.state !== "published") continue;
-          const version = await versionOf(deps.db, project.id, project.currentVersion);
-          const data = version === null ? null : await portfolioOf(version);
-          if (version === null || data === null) continue;
-          entries.push({
-            slug: project.slug,
-            title: data.title,
-            tagline: data.tagline,
-            publishedAt: version.publishedAt,
-          });
-        }
-        entries.sort((a, b) =>
-          a.publishedAt < b.publishedAt ? 1 : a.publishedAt > b.publishedAt ? -1 : 0,
-        );
-        const { appOrigin } = deps.config;
-        const body = profilePage({
-          handle: who.handle,
-          displayName: who.displayName,
-          entries,
-          appOrigin,
+        // Built on request from the projects published now (ADR-0013): none, no page.
+        const published = await publishedEntries(deps, who.accountId);
+        if (published.length === 0) return notFound();
+        const projects = published.map((p) => ({
+          slug: p.slug,
+          href: `/${who.handle}/${p.slug}/`,
+          entry: p.entry,
+        }));
+        const asOf =
+          published
+            .map((p) => p.publishedAt)
+            .sort()
+            .at(-1) ?? deps.now();
+        const body = biographyPage(deps, who, projects, {
+          asOf,
+          self: `/${who.handle}`,
+          preview: false,
         });
         return {
           status: 200,
@@ -161,34 +150,22 @@ export function publicRoutes(deps: Deps): Route[] {
       handler: async (request) => {
         const found = await published(request.params.handle ?? "", request.params.slug ?? "");
         if ("reply" in found) return found.reply;
-        if (found.canonical !== null) return moved(found.canonical);
-        const data = await portfolioOf(found.version);
-        if (data === null) return notFound();
-        const base = siteBase(found.handle, found.project.slug);
-        const { appOrigin } = deps.config;
-        const options = { base, publishedAt: found.version.publishedAt, preview: false, appOrigin };
-        return {
-          status: 200,
-          headers: { ...PUBLIC, "content-type": "text/html; charset=utf-8" },
-          body: portfolioHtml(data, options),
-        };
+        return moved(found.canonical ?? `/${found.handle}/${found.project.slug}/`);
       },
     },
     {
+      // The project's wiki, its main page at the project's own path (ADR-0013).
       method: "GET",
       pattern: "/:handle/:slug/*",
       handler: async (request) => {
         const { handle = "", slug = "" } = request.params;
         const rest = request.params["*"] ?? "";
-        if (rest !== "" && rest !== "docs" && !rest.startsWith("docs/")) return notFound();
         const found = await published(handle, slug);
         if ("reply" in found) return found.reply;
-        const base = found.canonical ?? `/${found.handle}/${found.project.slug}`;
-        if (rest === "") return moved(base);
-        if (rest === "docs") return moved(`${base}/docs/`);
-        if (found.canonical !== null) return moved(`${base}/${encodedRest(rest)}`);
+        if (found.canonical !== null) return moved(`${found.canonical}${encodedRest(rest)}`);
         // The published bytes exactly as previewed and copied (Contract §6.4).
-        const file = await serveTreeFile(deps.objects, found.version.siteKey, rest);
+        const prefix = `${found.version.siteKey}${SITE_DIR}`;
+        const file = await serveTreeFile(deps.objects, prefix, rest);
         if (file === null) return notFound();
         const headers = {
           ...PUBLIC,

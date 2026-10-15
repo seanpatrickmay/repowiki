@@ -69,7 +69,7 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     const shown = await browser(pages).go(link);
     expect(shown.status).toBe(200);
     expect(shown.text).toContain("Preview: a private link that expires within an hour");
-    expect((await browser(pages).go(`${link}docs/`)).status).toBe(200);
+    expect((await browser(pages).go(`${link}demo-repo/`)).status).toBe(200);
     expect((await me.go(`/preview/${id}/1/`)).status).toBe(404);
 
     const published = await me.go(`${projectPath}/publish`, {
@@ -83,32 +83,32 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     expect(published.status, published.text).toBe(303);
 
     const reader = browser(pages);
-    const project = await reader.go("/demo-dev/demo-repo");
-    expect(project.status).toBe(200);
-    expect(project.text).toContain("The author wrote most of the ingest and search code");
-    expect(project.text).toContain("not written by the author");
-    const wiki = await reader.go("/demo-dev/demo-repo/docs/");
+    // The biography quotes the generated contribution, labelled (ADR-0012, ADR-0013).
+    const profile = await reader.go("/demo-dev");
+    expect(profile.status).toBe(200);
+    expect(profile.text).toContain("The author wrote most of the ingest and search code");
+    expect(profile.text).toContain("not written by the author");
+    expect(profile.text).toContain('href="/demo-dev/demo-repo/"');
+    expect(profile.text).toContain(`href="${base}/"`);
+    expect((await reader.go("/demo-dev/demo-repo")).location).toBe("/demo-dev/demo-repo/");
+    const wiki = await reader.go("/demo-dev/demo-repo/");
     expect(wiki.status).toBe(200);
     // Search (Pagefind's WebAssembly) and the diagrams need the site's own policy.
     expect(wiki.csp).toContain("'wasm-unsafe-eval'");
-    expect((await reader.go("/demo-dev/demo-repo/docs/pagefind/pagefind.js")).status).toBe(200);
+    expect((await reader.go("/demo-dev/demo-repo/pagefind/pagefind.js")).status).toBe(200);
     for (const feature of features) {
-      expect((await reader.go(`/demo-dev/demo-repo/docs/wiki/${feature}/`)).status).toBe(200);
+      expect((await reader.go(`/demo-dev/demo-repo/wiki/${feature}/`)).status).toBe(200);
     }
-    const profile = await reader.go("/demo-dev");
-    expect(profile.status).toBe(200);
-    expect(profile.text).toContain('href="/demo-dev/demo-repo"');
-    expect(profile.text).toContain(`href="${base}/"`);
     // Public pages are not on the app's origin, and the app's session means nothing on theirs.
-    expect((await browser(base).go("/demo-dev/demo-repo")).status).toBe(404);
-    const signedIn = await me.go(`${pages}/demo-dev/demo-repo`);
+    expect((await browser(base).go("/demo-dev")).status).toBe(404);
+    const signedIn = await me.go(`${pages}/demo-dev`);
     expect(signedIn.status).toBe(200);
     expect(signedIn.text).not.toContain("Sign out");
     expect((await reader.go("/dashboard")).status).toBe(404);
 
     const withdrawn = await me.go(`${projectPath}/unpublish`, { form: { csrf } });
     expect(withdrawn.status, withdrawn.text).toBe(303);
-    expect((await reader.go("/demo-dev/demo-repo")).status).toBe(410);
-    expect((await reader.go("/demo-dev/demo-repo/docs/")).status).toBe(410);
+    expect((await reader.go("/demo-dev/demo-repo/")).status).toBe(410);
+    expect((await reader.go("/demo-dev")).status).toBe(404);
   }, 300_000);
 });

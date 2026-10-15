@@ -189,8 +189,9 @@ export function tombstoneHandles(
     .map((h) => ({ ...h, state: "tombstoned", redirectTo: null }));
 }
 
+/** A project's public URL: its wiki's main page (ADR-0013). */
 export function projectUrl(origin: string, handle: string, slug: string): string {
-  return `${origin}/${handle}/${slug}`;
+  return `${origin}/${handle}/${slug}/`;
 }
 
 export function profileUrl(origin: string, handle: string): string {

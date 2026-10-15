@@ -92,10 +92,14 @@ export {
   isKey,
   type ObjectStore,
 } from "./objects/store.ts";
+export {
+  BIOGRAPHY_STYLE,
+  BIOGRAPHY_STYLE_PATH,
+  SILHOUETTE_PATH,
+  SILHOUETTE_SVG,
+} from "./pages/biography-style.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
-export { type ProfileEntry, profilePage } from "./pages/profile.ts";
 export { type ProjectView, projectPage } from "./pages/project.ts";
-export { PUBLIC_STYLE, PUBLIC_STYLE_PATH } from "./pages/public-style.ts";
 export { pageSession, refusalPage } from "./pages/refusal.ts";
 export {
   AnthropicUsage,
@@ -116,14 +120,15 @@ export {
   MessageParams,
   refusedBeta,
 } from "./proxy/request.ts";
-export { buildTree, renderQueue, SITE_BUILD_TIMEOUT_MS } from "./render/build.ts";
-export { hostedExport } from "./render/hosted-export.ts";
+export { type BiographyOptions, biographyHtml, madeWith } from "./render/biography.ts";
 export {
-  CHECKED_STATEMENT,
-  PortfolioData,
-  portfolioData,
-  portfolioHtml,
-} from "./render/portfolio.ts";
+  buildTree,
+  ENTRY_FILE,
+  renderQueue,
+  SITE_BUILD_TIMEOUT_MS,
+  SITE_DIR,
+} from "./render/build.ts";
+export { hostedExport } from "./render/hosted-export.ts";
 export { readTree, type TreeFile, treeHash } from "./render/tree.ts";
 export { authRoutes } from "./routes/auth.ts";
 export {

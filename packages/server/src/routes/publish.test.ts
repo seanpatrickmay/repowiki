@@ -87,7 +87,7 @@ describe("publish (Contract §6.4)", () => {
     const live = String(
       (await call(app, { path: `/projects/${p.projectId}`, headers: { cookie: p.cookie } })).body,
     );
-    expect(live).toContain(`href="${deps.config.publicOrigin}/demo-dev/demo-repo"`);
+    expect(live).toContain(`href="${deps.config.publicOrigin}/demo-dev/demo-repo/"`);
     const version = await versionOf(deps.db, p.projectId, 1);
     expect(version).toMatchObject({
       revision: 2,

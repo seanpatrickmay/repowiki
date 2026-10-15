@@ -1,4 +1,4 @@
-import { authorize, type Project, type RefusalCode } from "@repowiki/hosted";
+import { authorize, biographyEntry, type Project, type RefusalCode } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
@@ -6,13 +6,13 @@ import type { Session } from "../http/session.ts";
 import { assertKey, contentTypeFor, type ObjectStore } from "../objects/store.ts";
 import { page } from "../pages/layout.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
-import { buildTree } from "../render/build.ts";
+import { buildTree, SITE_DIR } from "../render/build.ts";
 import { hostedExport } from "../render/hosted-export.ts";
-import { PortfolioData, portfolioData, portfolioHtml } from "../render/portfolio.ts";
 import { accountById, activeHandle } from "../store/accounts.ts";
 import { generationById, latestRevision, previewOf, savePreview } from "../store/drafts.ts";
 import { mintPreviewToken, previewByToken } from "../store/preview-tokens.ts";
 import { projectById } from "../store/projects.ts";
+import { biographyPage, publishedEntries, storedEntry } from "./biography-page.ts";
 import { auditAuthor, mutation, storedExport } from "./drafts.ts";
 import { ownedProject, repoFullName } from "./live.ts";
 
@@ -24,7 +24,7 @@ export const SITE_CSP =
 export const previewKey = (projectId: string, revision: number, siteHash: string) =>
   `previews/${projectId}/r${revision}/${siteHash}/`;
 
-/** The path a project's site is served under; its wiki is at `<base>docs/`. */
+/** The path a project's wiki is served under (ADR-0013). */
 export const siteBase = (handle: string, slug: string) => `/${handle}/${slug}/`;
 
 const TEXT = /^(text\/|application\/(json|javascript|xml))/;
@@ -90,12 +90,17 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
     const repo =
       (await repoFullName(deps.db, project.githubRepoId)) ?? `${session.account.login}/${exp.repo}`;
     const hosted = hostedExport(exp);
-    const data = portfolioData({ generation, revision: latest, exp: hosted, repoFullName: repo });
+    const entry = biographyEntry({
+      generation,
+      contribution: latest.content.contribution,
+      exp: hosted,
+      repoFullName: repo,
+    });
     const tree = await build({
       exp: hosted,
-      base: `${siteBase(await handleOf(session), project.slug)}docs/`,
+      base: siteBase(await handleOf(session), project.slug),
       repoUrl: `https://github.com/${repo}`,
-      portfolio: new TextEncoder().encode(JSON.stringify(data)),
+      entry: new TextEncoder().encode(JSON.stringify(entry)),
     });
     const prefix = previewKey(project.id, revision, tree.hash);
     for (const file of tree.files) {
@@ -206,9 +211,10 @@ const PREVIEW_HEADERS = {
 };
 
 /**
- * The pages origin's preview links (ADR-0012): `/_preview/<token>/` serves the previewed portfolio
- * page and `/_preview/<token>/docs/…` its wiki, with the public wiki base rewritten into the link,
- * while the token lives. Anything else is a 404.
+ * The pages origin's preview links (ADR-0012, ADR-0013): `/_preview/<token>/` is the author's
+ * biography as it will read with this revision published, and `/_preview/<token>/<slug>/…` the
+ * revision's wiki, with the public wiki path rewritten into the link, while the token lives.
+ * Anything else is a 404.
  */
 export function previewPageRoutes(deps: Deps): Route[] {
   const notFound: Reply = {
@@ -233,29 +239,34 @@ export function previewPageRoutes(deps: Deps): Route[] {
         const owner = await accountById(deps.db, project.accountId);
         if (owner?.status !== "active" || !previewable(project)) return notFound;
         const base = `/_preview/${token}/`;
+        const wiki = `${base}${project.slug}/`;
         const rest = request.params["*"] ?? "";
         const moved = (location: string): Reply => ({
           status: 301,
           headers: { ...PREVIEW_HEADERS, location },
         });
+        const handle = (await activeHandle(deps.db, project.accountId)) ?? "";
         if (rest === "") {
           if (!request.path.endsWith("/")) return moved(base);
-          const stored = await deps.objects.get(`${preview.siteKey}portfolio.json`);
-          if (stored === null) return notFound;
-          const data = PortfolioData.parse(JSON.parse(new TextDecoder().decode(stored.body)));
-          const options = {
-            base,
-            publishedAt: null,
-            preview: true,
-            appOrigin: deps.config.appOrigin,
-          };
-          return html(200, portfolioHtml(data, options), PREVIEW_HEADERS);
+          const entry = await storedEntry(deps.objects, preview.siteKey);
+          if (entry === null) return notFound;
+          // This revision in place of the project's published version, beside the others.
+          const others = (await publishedEntries(deps, owner.id))
+            .filter((p) => p.projectId !== project.id)
+            .map((p) => ({ slug: p.slug, href: `/${handle}/${p.slug}/`, entry: p.entry }));
+          const mine = { slug: project.slug, href: wiki, entry };
+          const options = { asOf: deps.now(), self: base, preview: true };
+          return html(200, biographyPage(deps, owner, [mine, ...others], options), PREVIEW_HEADERS);
         }
-        if (rest === "docs") return moved(`${base}docs/`);
-        if (!rest.startsWith("docs/")) return notFound;
-        const handle = (await activeHandle(deps.db, project.accountId)) ?? "";
-        const from = `${siteBase(handle, project.slug)}docs/`;
-        const file = await serveTreeFile(deps.objects, preview.siteKey, rest, from, `${base}docs/`);
+        if (rest === project.slug) return moved(wiki);
+        if (!rest.startsWith(`${project.slug}/`)) return notFound;
+        const file = await serveTreeFile(
+          deps.objects,
+          `${preview.siteKey}${SITE_DIR}`,
+          rest.slice(project.slug.length + 1),
+          siteBase(handle, project.slug),
+          wiki,
+        );
         if (file === null) return notFound;
         return {
           status: 200,

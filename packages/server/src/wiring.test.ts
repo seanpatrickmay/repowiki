@@ -141,7 +141,7 @@ describe("listeners (spec 2 S1)", () => {
     expect(await status("/dashboard", app)).toBe(303);
     expect(await status("/dashboard", pages)).toBe(404);
     expect(await status("/auth/github", pages)).toBe(404);
-    expect(await status("/_app/portfolio.css", pages)).toBe(200);
+    expect(await status("/_app/biography.css", pages)).toBe(200);
     expect(await status("/_app/style.css", pages)).toBe(404);
     const root = await call(only.app, { path: "/", headers: pages });
     expect(root).toMatchObject({ status: 302, headers: { location: "http://127.0.0.1:8787/" } });

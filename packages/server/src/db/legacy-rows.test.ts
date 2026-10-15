@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Deps } from "../app.ts";
 import { generatedProject, testDeps } from "../routes/test-app.ts";
 import { latestRevision, previewOf, reviewOf } from "../store/drafts.ts";
+import { mintPreviewToken } from "../store/preview-tokens.ts";
+import { projectById } from "../store/projects.ts";
 import type { Db } from "./db.ts";
 import { migrate } from "./migrate.ts";
 
@@ -86,5 +88,24 @@ describe("rows stored before ADR-0012 (migration 0006)", () => {
     await storedBefore("SELECT $1::uuid", 6);
     expect(await reviewOf(deps.db, projectId, 1)).toBeNull();
     expect(await previewOf(deps.db, projectId, 1)).not.toBeNull();
+  });
+});
+
+describe("trees stored before ADR-0013 (migration 0009)", () => {
+  it("take published projects back to draft and drop every preview and link", async () => {
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"published","currentVersion":1}'::jsonb WHERE id = $1`,
+      [projectId],
+    );
+    await storedBefore("SELECT $1::uuid", 8, 2);
+    await mintPreviewToken(deps.db, { projectId, revision: 1 }, AT);
+    await deps.db.query("DELETE FROM schema_migrations WHERE version = 9");
+    await migrate(deps.db);
+    const project = await projectById(deps.db, projectId);
+    expect(project).toMatchObject({ state: "draft", currentVersion: 1 });
+    expect(await previewOf(deps.db, projectId, 1)).toBeNull();
+    expect(await deps.db.query("SELECT 1 FROM preview_tokens")).toHaveLength(0);
+    // The review stands: it attested to the same generated content.
+    expect(await reviewOf(deps.db, projectId, 1)).not.toBeNull();
   });
 });
