@@ -59,6 +59,7 @@ export {
   sessionSetCookie,
 } from "./http/session.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
+export { authRoutes } from "./routes/auth.ts";
 export {
   accountById,
   activeHandle,

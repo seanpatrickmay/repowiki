@@ -4,8 +4,9 @@ import { loadConfig } from "../config.ts";
 import type { Db } from "../db/db.ts";
 import { fakeEndpoints } from "../github/endpoints.ts";
 import { fakeGitHubFetch } from "../github/fake.ts";
+import { HttpError } from "../http/body.ts";
 import type { Method, Reply, RouteRequest } from "../http/router.ts";
-import type { App } from "../http/server.ts";
+import { type App, text } from "../http/server.ts";
 import { freshDb } from "../store/test-db.ts";
 
 export const TEST_NOW = "2026-10-14T12:00:00.000Z";
@@ -26,7 +27,7 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { 
   };
 }
 
-/** Test-only: one request to `app` without a socket; the path is split as `listen` splits it. */
+/** Test-only: one request to `app` without a socket; path and errors handled as `listen` does. */
 export async function call(
   app: App,
   init: { method?: Method; path: string; headers?: Record<string, string>; body?: string },
@@ -40,13 +41,18 @@ export async function call(
     { headers, method },
   ) as unknown as RouteRequest["raw"];
   const at = init.path.indexOf("?");
-  return app({
+  const request = app({
     method,
     path: at === -1 ? init.path : init.path.slice(0, at),
     params: {},
     query: new URLSearchParams(at === -1 ? "" : init.path.slice(at + 1)),
     headers,
     raw,
+  });
+  // As `listen` does: an HttpError is the client's answer.
+  return request.catch((e: unknown) => {
+    if (e instanceof HttpError) return text(e.status, e.message);
+    throw e;
   });
 }
 
