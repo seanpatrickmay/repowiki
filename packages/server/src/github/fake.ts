@@ -6,6 +6,8 @@ import type { GitHubEndpoints } from "./endpoints.ts";
 export const FAKE_TOKEN = "fake-token";
 export const FAKE_CODE = "fake-code";
 export const FAKE_COMMITS = 42;
+/** The commit the fake repository's default branch points at. */
+export const FAKE_HEAD = "d".repeat(40);
 
 export const FAKE_USER = {
   id: 4242,
@@ -73,6 +75,7 @@ export function fakeGitHubFetch(endpoints: GitHubEndpoints): typeof fetch {
       const link = last > 1 ? `${page(2)}; rel="next", ${page(last)}; rel="last"` : "";
       return json(commits, { headers: link ? { link } : {} });
     }
+    if (path === `/repos/${FAKE_REPO.full_name}/commits/main`) return json({ sha: FAKE_HEAD });
     return json({ message: "Not Found" }, { status: 404 });
   };
 }

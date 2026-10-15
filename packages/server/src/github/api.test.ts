@@ -91,3 +91,18 @@ describe("the GitHub API client (spec 2 S8)", () => {
     expect(asked).toHaveLength(2);
   });
 });
+
+describe("headSha (spec 2 S8)", () => {
+  it("reads the commit a branch points at", async () => {
+    expect(await api.headSha(FAKE_TOKEN, FAKE_REPO.full_name, "main")).toMatch(/^[0-9a-f]{40}$/);
+    expect(await api.headSha(FAKE_TOKEN, FAKE_REPO.full_name, "nope")).toBeNull();
+  });
+
+  it("gives null for an empty repository (409) and a missing ref (422)", async () => {
+    expect(await answering(409).headSha(FAKE_TOKEN, FAKE_REPO.full_name, "main")).toBeNull();
+    expect(await answering(422).headSha(FAKE_TOKEN, FAKE_REPO.full_name, "main")).toBeNull();
+    await expect(
+      answering(500).headSha(FAKE_TOKEN, FAKE_REPO.full_name, "main"),
+    ).rejects.toBeInstanceOf(GitHubError);
+  });
+});
