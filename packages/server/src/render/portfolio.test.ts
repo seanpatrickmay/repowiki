@@ -157,7 +157,7 @@ describe("the portfolio layer (Contract §8)", () => {
       preview: true,
       appOrigin: "http://127.0.0.1:8787",
     });
-    expect(page).toContain("Preview: only you can see this page");
+    expect(page).toContain("Preview: a private link that expires within an hour");
     expect(page).toContain("/preview/p/2/docs/");
     expect(page).not.toContain("Published 20");
   });

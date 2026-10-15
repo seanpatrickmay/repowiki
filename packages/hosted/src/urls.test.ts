@@ -44,7 +44,9 @@ describe("handles (Contract spec §9)", () => {
 
   it("are never one of the reserved route names", () => {
     expect(RESERVED_HANDLES.has("api")).toBe(true);
-    expect(RESERVED_HANDLES.size).toBe(31);
+    expect(RESERVED_HANDLES.size).toBe(32);
+    // The pages origin's preview links (ADR-0012); no GitHub login has a "_" anyway.
+    expect(isReservedHandle("_preview")).toBe(true);
     for (const name of RESERVED_HANDLES) expect(HandleName.safeParse(name).success).toBe(false);
   });
 

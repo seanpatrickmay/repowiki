@@ -15,7 +15,7 @@ const legacy = (overrides: object, flags: string[] = []) =>
      'overrides', '${JSON.stringify(overrides)}'::jsonb, 'flags', '${JSON.stringify(flags)}'::jsonb,
      'source', 'author') WHERE project_id = $1`;
 
-/** Revision 1 rewritten by `sql`, with a review and a preview, then migrations `from` on again. */
+/** Revision 1 rewritten by `sql`, with a review and a preview, then migrations `from`–0007 again. */
 async function storedBefore(sql: string, from: number, attestationVersion = 1): Promise<void> {
   await deps.db.query(sql, [projectId]);
   await deps.db.query(
@@ -27,7 +27,8 @@ async function storedBefore(sql: string, from: number, attestationVersion = 1): 
     "INSERT INTO previews (project_id, revision, body) VALUES ($1, 1, $2::jsonb)",
     [projectId, JSON.stringify({ ...preview, createdAt: AT })],
   );
-  await deps.db.query("DELETE FROM schema_migrations WHERE version >= $1", [from]);
+  // Only the ADR-0012 row migrations run again; later ones (0008 creates a table) cannot.
+  await deps.db.query("DELETE FROM schema_migrations WHERE version BETWEEN $1 AND 7", [from]);
   await migrate(deps.db);
 }
 

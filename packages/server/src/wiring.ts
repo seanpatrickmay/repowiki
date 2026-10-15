@@ -16,7 +16,7 @@ import { draftRoutes } from "./routes/drafts.ts";
 import { internalRoutes } from "./routes/internal.ts";
 import { landingRoutes } from "./routes/landing.ts";
 import { llmRoutes } from "./routes/llm.ts";
-import { previewRoutes } from "./routes/preview.ts";
+import { previewPageRoutes, previewRoutes } from "./routes/preview.ts";
 import { jobRoutes } from "./routes/project-jobs.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { publicRoutes } from "./routes/public.ts";
@@ -114,7 +114,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...previewRoutes(deps),
       ...publishRoutes(deps),
     ],
-    pages: publicRoutes(deps),
+    pages: [...previewPageRoutes(deps), ...publicRoutes(deps)],
     worker: [...internalRoutes(deps), ...llmRoutes(deps)],
   };
 }

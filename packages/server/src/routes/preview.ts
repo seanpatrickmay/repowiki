@@ -2,7 +2,7 @@ import { authorize, type Project, type RefusalCode } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
-import { currentSession, type Session } from "../http/session.ts";
+import type { Session } from "../http/session.ts";
 import { assertKey, contentTypeFor, type ObjectStore } from "../objects/store.ts";
 import { page } from "../pages/layout.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
@@ -11,6 +11,8 @@ import { hostedExport } from "../render/hosted-export.ts";
 import { PortfolioData, portfolioData, portfolioHtml } from "../render/portfolio.ts";
 import { activeHandle } from "../store/accounts.ts";
 import { generationById, latestRevision, previewOf, savePreview } from "../store/drafts.ts";
+import { mintPreviewToken, previewByToken } from "../store/preview-tokens.ts";
+import { projectById } from "../store/projects.ts";
 import { auditAuthor, mutation, storedExport } from "./drafts.ts";
 import { ownedProject, repoFullName } from "./live.ts";
 
@@ -122,12 +124,6 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
     return saved === null ? redirect(back) : refused(saved);
   }
 
-  const notFound: Reply = {
-    status: 404,
-    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" },
-    body: "Not found",
-  };
-
   return [
     {
       method: "POST",
@@ -161,48 +157,97 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
       },
     },
     {
-      method: "GET",
-      pattern: "/preview/:id/:rev/*",
-      handler: async (request): Promise<Reply> => {
-        const session = await currentSession(deps.db, deps.config, request, deps.now());
-        if (session === null) return notFound;
+      // A capability link to the preview on the pages origin (ADR-0012).
+      method: "POST",
+      pattern: "/projects/:id/preview/open",
+      handler: async (request) => {
+        const { session, form } = await mutation(deps, request);
+        const shown = pageSession(session);
         const project = await ownedProject(deps.db, session, request.params.id ?? "");
-        if (project === null) return notFound;
+        if (project === null) return refusalPage("not-found", shown);
         const caller = { kind: "account" as const, account: session.account };
-        if (!authorize("preview.read", { now: deps.now(), caller, project }).ok) return notFound;
-        const revision = Number(request.params.rev);
+        const verdict = authorize("preview.read", { now: deps.now(), caller, project });
+        if (!verdict.ok) return refusalPage(verdict.code, shown);
+        const revision = Number(form.get("revision"));
         const preview = Number.isSafeInteger(revision)
           ? await previewOf(deps.db, project.id, revision)
           : null;
-        if (preview === null) return notFound;
-        const base = `/preview/${project.id}/${revision}/`;
+        if (preview === null) return refusalPage("not-found", shown);
+        const token = await deps.db.transaction(async (tx) => {
+          const minted = await mintPreviewToken(
+            tx,
+            { projectId: project.id, revision },
+            deps.now(),
+          );
+          await auditAuthor(tx, deps, "preview.open", project.id, "allowed");
+          return minted;
+        });
+        return redirect(`${deps.config.publicOrigin}/_preview/${token}/`);
+      },
+    },
+  ];
+}
+
+/** What every preview reply carries: never cached, never indexed, never a referrer (ADR-0012). */
+const PREVIEW_HEADERS = {
+  "cache-control": "no-store",
+  "x-robots-tag": "noindex",
+  "referrer-policy": "no-referrer",
+};
+
+/**
+ * The pages origin's preview links (ADR-0012): `/_preview/<token>/` serves the previewed portfolio
+ * page and `/_preview/<token>/docs/…` its wiki, with the public wiki base rewritten into the link,
+ * while the token lives. Anything else is a 404.
+ */
+export function previewPageRoutes(deps: Deps): Route[] {
+  const notFound: Reply = {
+    status: 404,
+    headers: { ...PREVIEW_HEADERS, "content-type": "text/plain; charset=utf-8" },
+    body: "Not found",
+  };
+  return [
+    {
+      method: "GET",
+      pattern: "/_preview/:token/*",
+      handler: async (request): Promise<Reply> => {
+        const token = request.params.token ?? "";
+        const target = await previewByToken(deps.db, token, deps.now());
+        if (target === null) return notFound;
+        const [project, preview] = await Promise.all([
+          projectById(deps.db, target.projectId),
+          previewOf(deps.db, target.projectId, target.revision),
+        ]);
+        if (project === null || preview === null) return notFound;
+        const base = `/_preview/${token}/`;
         const rest = request.params["*"] ?? "";
-        const headers = { "cache-control": "private, no-store" };
+        const moved = (location: string): Reply => ({
+          status: 301,
+          headers: { ...PREVIEW_HEADERS, location },
+        });
         if (rest === "") {
-          if (!request.path.endsWith("/")) return redirect(base, 301);
+          if (!request.path.endsWith("/")) return moved(base);
           const stored = await deps.objects.get(`${preview.siteKey}portfolio.json`);
           if (stored === null) return notFound;
           const data = PortfolioData.parse(JSON.parse(new TextDecoder().decode(stored.body)));
-          return html(
-            200,
-            portfolioHtml(data, {
-              base,
-              publishedAt: null,
-              preview: true,
-              appOrigin: deps.config.appOrigin,
-            }),
-            headers,
-          );
+          const options = {
+            base,
+            publishedAt: null,
+            preview: true,
+            appOrigin: deps.config.appOrigin,
+          };
+          return html(200, portfolioHtml(data, options), PREVIEW_HEADERS);
         }
-        if (rest === "docs") return redirect(`${base}docs/`, 301);
+        if (rest === "docs") return moved(`${base}docs/`);
         if (!rest.startsWith("docs/")) return notFound;
-        const from = `${siteBase(await handleOf(session), project.slug)}docs/`;
+        const handle = (await activeHandle(deps.db, project.accountId)) ?? "";
+        const from = `${siteBase(handle, project.slug)}docs/`;
         const file = await serveTreeFile(deps.objects, preview.siteKey, rest, from, `${base}docs/`);
         if (file === null) return notFound;
         return {
           status: 200,
           headers: {
-            ...headers,
+            ...PREVIEW_HEADERS,
             "content-type": file.contentType,
             "content-security-policy": SITE_CSP,
           },

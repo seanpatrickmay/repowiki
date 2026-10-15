@@ -111,7 +111,7 @@ export function portfolioHtml(
     ? `<dt>Architecture</dt><dd><a href="${e(`${docs}special/about/`)}">How the parts fit together, with the diagram</a></dd>`
     : "";
   const banner = options.preview
-    ? `<div class="preview">Preview: only you can see this page</div>`
+    ? `<div class="preview">Preview: a private link that expires within an hour. This version is not published.</div>`
     : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(data.title)}</title><meta name="description" content="${e(data.tagline)}"><link rel="stylesheet" href="${PUBLIC_STYLE_PATH}"></head><body>${banner}<main>
 <header><h1>${e(data.title)}</h1><p class="tagline">${e(data.tagline)}</p><p class="meta"><a href="${e(repoUrl)}">${e(repo.fullName)} at ${e(repo.commitSha.slice(0, 7))}</a> · ${e(date)}<span class="badge">Author-reviewed</span></p></header>

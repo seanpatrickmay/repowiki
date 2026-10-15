@@ -32,6 +32,7 @@ describe("migrations (spec 2 S4)", () => {
       "job_specs",
       "job_tokens",
       "jobs",
+      "preview_tokens",
       "previews",
       "projects",
       "published_versions",

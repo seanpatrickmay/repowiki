@@ -79,7 +79,7 @@ describe("publish (Contract §6.4)", () => {
     const page = String(
       (await call(app, { path: `/projects/${p.projectId}`, headers: { cookie: p.cookie } })).body,
     );
-    expect(page).toContain(`href="/preview/${p.projectId}/2/"`);
+    expect(page).toContain(`action="/projects/${p.projectId}/preview/open"`);
     expect(page).toContain(`name="previewHash" value="${hash}"`);
     expect((await publishing(hash)).status).toBe(303);
     expect(await project()).toMatchObject({ state: "published", currentVersion: 1 });
