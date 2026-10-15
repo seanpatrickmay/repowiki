@@ -292,3 +292,14 @@ describe("the LLM proxy's batch routes (spec 2 S11)", () => {
     expect(await jobById(deps.db, job.jobId)).toMatchObject({ spentUsdMicros: 2626 });
   });
 });
+
+describe("the LLM proxy without a provider key", () => {
+  it("answers 503 before reserving or charging anything", async () => {
+    deps = { ...deps, anthropic: { ...deps.anthropic, key: null } };
+    app = createApp(deps, llmRoutes(deps));
+    expect((await send("/llm/v1/messages", message())).status).toBe(503);
+    expect((await send("/llm/v1/messages/batches", { requests: [] })).status).toBe(503);
+    expect(await spent()).toBe(0);
+    expect(await deps.db.query("SELECT * FROM reservations")).toEqual([]);
+  });
+});
