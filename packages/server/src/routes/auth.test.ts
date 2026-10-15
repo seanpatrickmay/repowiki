@@ -159,3 +159,17 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
     expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
   });
 });
+
+describe("GitHub sign-in when GitHub misbehaves (spec 2 S7)", () => {
+  it("answers 502 when GitHub will not return the profile", async () => {
+    const broken: Deps = {
+      ...deps,
+      fetch: async (input, init) =>
+        String(input).endsWith("/user")
+          ? new Response("oops", { status: 500 })
+          : deps.fetch(input, init),
+    };
+    expect((await signInFlow(createApp(broken, authRoutes(broken)))).back.status).toBe(502);
+    expect(await deps.db.query("SELECT * FROM accounts")).toEqual([]);
+  });
+});
