@@ -13,7 +13,8 @@ import { liveEligibility, ownedProject } from "./live.ts";
 /**
  * Copy a stored tree byte for byte (Contract §6.4: publish promotes the exact preview), after
  * hashing what was read: a tree whose bytes no longer match `expectedHash` is not copied and
- * the copy answers false (M14e A1). Both prefixes end with "/".
+ * the copy answers false (M14e A1). `to` ends up holding exactly the tree. Both prefixes end
+ * with "/".
  */
 export async function copyTree(
   objects: ObjectStore,
@@ -34,6 +35,11 @@ export async function copyTree(
     });
   }
   if (treeHash(files) !== expectedHash) return false;
+  // A publish that failed halfway may have left files at `to`. The version number is nobody's
+  // until its row commits, so they are cleared; anything that survives refuses the copy.
+  const leftovers = await objects.list(to);
+  if (leftovers.length > 0) await objects.delete(leftovers);
+  if ((await objects.list(to)).length > 0) return false;
   for (const file of files) await objects.put(`${to}${file.path}`, file.bytes, file.contentType);
   return true;
 }

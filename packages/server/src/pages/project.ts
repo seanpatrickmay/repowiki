@@ -79,7 +79,12 @@ function jobSection(v: ProjectView): string {
   const why =
     job.refusal === null ? "" : `<p class="notice">${e(REFUSALS[job.refusal].message)}</p>`;
   const title = `${job.kind === "refresh" ? "Refresh" : "Generation"}: ${job.status}`;
-  return `<section class="card"><h2>${e(title)}</h2><ol>${steps}</ol>${why}${jobActions(v)}</section>`;
+  // The page reloads itself only before there is an editor to type into (fresh review I4).
+  const progress =
+    active && v.revision !== null
+      ? `<p class="muted">Refreshing… <a href="/projects/${e(v.project.id)}">reload</a> to see progress.</p>`
+      : "";
+  return `<section class="card"><h2>${e(title)}</h2>${progress}<ol>${steps}</ol>${why}${jobActions(v)}</section>`;
 }
 
 function editor(v: ProjectView): string {
@@ -144,12 +149,15 @@ function publishSection(v: ProjectView): string {
   return `<section class="card"><h2>Preview and publish</h2>${live}${build}${ready}</section>`;
 }
 
-/** The author's working page for one project (spec 2 §7); refreshes itself while a job runs. */
+/**
+ * The author's working page for one project (spec 2 §7); reloads itself while the first
+ * generation runs, and never once there is a revision being edited.
+ */
 export function projectPage(v: ProjectView): string {
   const repo = v.repoFullName === null ? "" : `<p class="muted">${e(v.repoFullName)}</p>`;
   return page({
     title: v.project.slug,
-    head: isActive(v.job) ? '<meta http-equiv="refresh" content="3">' : "",
+    head: isActive(v.job) && v.revision === null ? '<meta http-equiv="refresh" content="3">' : "",
     body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${editor(v)}${reviewSection(v)}${publishSection(v)}`,
     session: v.session,
   });

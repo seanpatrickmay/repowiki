@@ -49,6 +49,8 @@ describe("serveTreeFile (spec 2 S13)", () => {
     expect(png?.body).toEqual(new Uint8Array([1, 2]));
     const asStored = await serveTreeFile(deps.objects, prefix, "docs/");
     expect(new TextDecoder().decode(asStored?.body as Uint8Array)).toBe(html);
+    // A real file where the dot segments would land, so only the refusal keeps it out.
+    await deps.objects.put("previews/p/r1/x", new TextEncoder().encode("outside"), "text/plain");
     expect(await serveTreeFile(deps.objects, prefix, "docs/../../x")).toBeNull();
     expect(await serveTreeFile(deps.objects, prefix, "docs/missing.html")).toBeNull();
   });

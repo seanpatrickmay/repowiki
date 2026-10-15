@@ -1,4 +1,10 @@
-import { authorize, HANDLE_PATTERN, type Project, type PublishedVersion } from "@repowiki/hosted";
+import {
+  authorize,
+  HANDLE_PATTERN,
+  type Project,
+  type PublishedVersion,
+  Slug,
+} from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { type ProfileEntry, profilePage } from "../pages/profile.ts";
@@ -19,19 +25,37 @@ const moved = (location: string): Reply => ({ status: 301, headers: { ...PUBLIC,
 
 type Owner =
   | { reply: Reply }
-  | { accountId: string; handle: string; displayName: string; status: string };
+  | {
+      accountId: string;
+      handle: string;
+      displayName: string;
+      status: string;
+      /** The name asked for is not the handle's canonical spelling (case, or a renamed handle). */
+      moved: boolean;
+    };
 
-/** Signed-out reads of published pages and profiles (spec 2 S14), registered after every app route. */
+/** A decoded path tail, encoded again for a Location header. */
+const encodedRest = (rest: string) => rest.split("/").map(encodeURIComponent).join("/");
+
+/**
+ * Signed-out reads of published pages and profiles (spec 2 S14), registered after every app route.
+ * A redirect is only ever built from a stored handle and slug, after the page itself was found,
+ * so no request can turn one into a link off the site.
+ */
 export function publicRoutes(deps: Deps): Route[] {
-  /** The handle's active account, or the reply for a redirect, a gone or a missing handle. */
-  async function owner(name: string, rest: string): Promise<Owner> {
+  /** The handle's active account (following one rename), or the reply for a missing or gone one. */
+  async function owner(name: string): Promise<Owner> {
     const lower = name.toLowerCase();
     if (!HANDLE_PATTERN.test(lower)) return { reply: notFound() };
-    const found = await resolveHandle(deps.db, lower);
-    if (found.kind === "redirect") return { reply: moved(`/${found.to}${rest}`) };
+    let found = await resolveHandle(deps.db, lower);
+    let moved = name !== lower;
+    if (found.kind === "redirect") {
+      if (!HANDLE_PATTERN.test(found.to)) return { reply: notFound() };
+      found = await resolveHandle(deps.db, found.to);
+      moved = true;
+    }
     if (found.kind === "gone") return { reply: plain(410, "This page was removed.") };
-    if (found.kind === "missing") return { reply: notFound() };
-    if (name !== found.handle) return { reply: moved(`/${found.handle}${rest}`) };
+    if (found.kind !== "active") return { reply: notFound() };
     const account = await accountById(deps.db, found.accountId);
     if (account === null) return { reply: notFound() };
     return {
@@ -39,6 +63,7 @@ export function publicRoutes(deps: Deps): Route[] {
       handle: found.handle,
       displayName: account.displayName,
       status: account.status,
+      moved: moved || name !== found.handle,
     };
   }
 
@@ -46,11 +71,15 @@ export function publicRoutes(deps: Deps): Route[] {
   async function published(
     name: string,
     slug: string,
-    rest: string,
-  ): Promise<{ reply: Reply } | { project: Project; version: PublishedVersion; handle: string }> {
-    const who = await owner(name, `/${slug}${rest}`);
+  ): Promise<
+    | { reply: Reply }
+    | { project: Project; version: PublishedVersion; handle: string; canonical: string | null }
+  > {
+    const lowerSlug = slug.toLowerCase();
+    if (!Slug.safeParse(lowerSlug).success) return { reply: notFound() };
+    const who = await owner(name);
     if ("reply" in who) return who;
-    const project = await projectBySlug(deps.db, who.accountId, slug);
+    const project = await projectBySlug(deps.db, who.accountId, lowerSlug);
     if (project === null) return { reply: notFound() };
     const verdict = authorize("public.read", {
       now: deps.now(),
@@ -59,14 +88,15 @@ export function publicRoutes(deps: Deps): Route[] {
       ownerStatus: who.status as "active" | "deleting",
     });
     if (!verdict.ok) {
-      return {
-        reply:
-          verdict.code === "withdrawn" ? plain(410, "The author withdrew this page.") : notFound(),
-      };
+      if (verdict.code !== "withdrawn") return { reply: notFound() };
+      const by = project.withdrawReason === "author" ? "The author withdrew this page." : null;
+      return { reply: plain(410, by ?? "This page was removed.") };
     }
     const version = await versionOf(deps.db, project.id, project.currentVersion);
     if (version === null) return { reply: notFound() };
-    return { project, version, handle: who.handle };
+    const base = `/${who.handle}/${project.slug}`;
+    const canonical = who.moved || slug !== project.slug ? base : null;
+    return { project, version, handle: who.handle, canonical };
   }
 
   /** The stored portfolio layer of a version. */
@@ -82,9 +112,10 @@ export function publicRoutes(deps: Deps): Route[] {
       method: "GET",
       pattern: "/:handle",
       handler: async (request) => {
-        const who = await owner(request.params.handle ?? "", "");
+        const who = await owner(request.params.handle ?? "");
         if ("reply" in who) return who.reply;
         if (who.status !== "active") return plain(410, "This page was removed.");
+        if (who.moved) return moved(`/${who.handle}`);
         const entries: ProfileEntry[] = [];
         for (const project of await projectsOf(deps.db, who.accountId)) {
           if (project.state !== "published") continue;
@@ -113,8 +144,9 @@ export function publicRoutes(deps: Deps): Route[] {
       method: "GET",
       pattern: "/:handle/:slug",
       handler: async (request) => {
-        const found = await published(request.params.handle ?? "", request.params.slug ?? "", "");
+        const found = await published(request.params.handle ?? "", request.params.slug ?? "");
         if ("reply" in found) return found.reply;
+        if (found.canonical !== null) return moved(found.canonical);
         const data = await portfolioOf(found.version);
         if (data === null) return notFound();
         const base = siteBase(found.handle, found.project.slug);
@@ -132,11 +164,13 @@ export function publicRoutes(deps: Deps): Route[] {
       handler: async (request) => {
         const { handle = "", slug = "" } = request.params;
         const rest = request.params["*"] ?? "";
-        if (rest === "") return moved(`/${handle}/${slug}`);
-        if (rest === "docs") return moved(`/${handle}/${slug}/docs/`);
-        const found = await published(handle, slug, `/${rest}`);
+        if (rest !== "" && rest !== "docs" && !rest.startsWith("docs/")) return notFound();
+        const found = await published(handle, slug);
         if ("reply" in found) return found.reply;
-        if (!rest.startsWith("docs/")) return notFound();
+        const base = found.canonical ?? `/${found.handle}/${found.project.slug}`;
+        if (rest === "") return moved(base);
+        if (rest === "docs") return moved(`${base}/docs/`);
+        if (found.canonical !== null) return moved(`${base}/${encodedRest(rest)}`);
         // The published bytes exactly as previewed and copied (Contract §6.4).
         const file = await serveTreeFile(deps.objects, found.version.siteKey, rest);
         if (file === null) return notFound();
@@ -146,6 +180,17 @@ export function publicRoutes(deps: Deps): Route[] {
           "content-security-policy": SITE_CSP,
         };
         return { status: 200, headers, body: file.body };
+      },
+    },
+    {
+      method: "GET",
+      pattern: "/:handle/*",
+      handler: async (request) => {
+        // Only `/<handle>/` reaches here: every longer path matched a route above.
+        if ((request.params["*"] ?? "") !== "") return notFound();
+        const who = await owner(request.params.handle ?? "");
+        if ("reply" in who) return who.reply;
+        return moved(`/${who.handle}`);
       },
     },
   ];

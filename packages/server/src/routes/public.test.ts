@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
 import { previewOf, versionOf } from "../store/drafts.ts";
+import { projectById, saveProject } from "../store/projects.ts";
 import { draftRoutes } from "./drafts.ts";
 import { previewRoutes } from "./preview.ts";
 import { publicRoutes } from "./public.ts";
@@ -10,7 +11,7 @@ import { call, form, generatedProject, testDeps } from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
-let p: { projectId: string; cookie: string; csrf: string };
+let p: { projectId: string; cookie: string; csrf: string; accountId: string };
 const post = (path: string, body: string) =>
   call(app, {
     method: "POST",
@@ -96,10 +97,68 @@ describe("public pages (spec 2 S14; Contract §9)", () => {
     expect(String(reply.body)).not.toContain("<style");
   });
 
+  it("never redirects off the site, and redirects only to canonical paths (fresh review I1)", async () => {
+    for (const path of ["/%09/evil.com/", "/%5Cevil.com/x/", "/%09/evil.com", "/%5C%5Cevil.com"]) {
+      const reply = await get(path);
+      expect(reply.status, path).toBe(404);
+      expect(reply.headers?.location, path).toBeUndefined();
+    }
+    expect((await get("/demo-dev/%09evil.com/")).status).toBe(404);
+    expect((await get("/demo-dev/nope/")).status).toBe(404);
+    expect((await get("/demo-dev/nope/docs")).status).toBe(404);
+    const slash = await get(`${PAGE}/`);
+    expect(slash.status).toBe(301);
+    expect(slash.headers?.location).toBe(PAGE);
+    expect((await get(`${PAGE}/docs`)).headers?.location).toBe(`${PAGE}/docs/`);
+  });
+
+  it("sends another case of a slug, and a handle's trailing slash, to the canonical path", async () => {
+    const cased = await get("/demo-dev/Demo-Repo");
+    expect(cased.status).toBe(301);
+    expect(cased.headers?.location).toBe(PAGE);
+    expect((await get("/Demo-Dev/Demo-Repo/docs/")).headers?.location).toBe(`${PAGE}/docs/`);
+    const profile = await get("/demo-dev/");
+    expect(profile.status).toBe(301);
+    expect(profile.headers?.location).toBe("/demo-dev");
+    expect((await get("/Demo-Dev/")).headers?.location).toBe("/demo-dev");
+    expect((await get("/nobody-here/")).status).toBe(404);
+  });
+
+  it("sends a renamed handle's pages to the new handle, but only pages that exist", async () => {
+    await deps.db.query(
+      "INSERT INTO handles (handle, account_id, body) VALUES ($1, $2, $3::jsonb)",
+      [
+        "old-dev",
+        p.accountId,
+        JSON.stringify({
+          handle: "old-dev",
+          accountId: p.accountId,
+          state: "redirect",
+          redirectTo: "demo-dev",
+          createdAt: "2026-10-14T12:00:00.000Z",
+        }),
+      ],
+    );
+    expect((await get("/old-dev")).headers?.location).toBe("/demo-dev");
+    expect((await get("/old-dev/demo-repo")).headers?.location).toBe(PAGE);
+    const deep = await get("/old-dev/demo-repo/docs/wiki/signals/");
+    expect(deep.headers?.location).toBe(`${PAGE}/docs/wiki/signals/`);
+    expect((await get("/old-dev/nope")).status).toBe(404);
+  });
+
   it("answers 410 for a withdrawn page at once and drops it from the profile", async () => {
     await post(`/projects/${p.projectId}/unpublish`, "");
     expect((await get(PAGE)).status).toBe(410);
     expect((await get(`${PAGE}/docs/`)).status).toBe(410);
     expect(String((await get("/demo-dev")).body)).not.toContain(`href="${PAGE}"`);
+  });
+
+  it("says a page taken down by the operator was removed, not withdrawn by its author", async () => {
+    const project = await projectById(deps.db, p.projectId);
+    if (project === null) throw new Error("project");
+    await saveProject(deps.db, { ...project, withdrawReason: "operator" });
+    const reply = await get(PAGE);
+    expect(reply.status).toBe(410);
+    expect(String(reply.body)).toBe("This page was removed.");
   });
 });
