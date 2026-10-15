@@ -138,6 +138,7 @@ export {
 } from "./manifest/index.ts";
 export {
   type IdentityGroup,
+  isPlaceholderEmail,
   MAX_FIX_OUTPUT_TOKENS,
   MAX_PERSON_OUTPUT_TOKENS,
   maskEmail,

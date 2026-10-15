@@ -56,8 +56,10 @@ describe("PeopleConfig (spec v2 #6 R9)", () => {
       minCommits: 3,
       maxNarratives: 25,
       ignoreRevs: true,
+      mailmap: true,
       othersMinPeople: 1,
     });
+    expect(PeopleConfig.parse({ mailmap: false }).mailmap).toBe(false);
   });
 
   it("reads the spec's example, with the narrative flag and the owner's keys", () => {

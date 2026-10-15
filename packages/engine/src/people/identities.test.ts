@@ -106,6 +106,19 @@ describe("resolveIdentities (spec v2 #6 §6, R7)", () => {
     expect(wyatt?.otherNames).toEqual(["wyattb"]);
   });
 
+  it("ignores the committed mailmap when the people file says mailmap: false", () => {
+    // A hostile line that claims another person's commits for the author (the hosted run).
+    const mailmap = "Me <me@x.example> <alice@y.example>\n";
+    const commits = [by("Me", "me@x.example", 1), by("Alice", "alice@y.example", 2)];
+    const file = { people: [{ match: ["email:me@x.example"] }] };
+    const mine = (resolved: ResolvedIdentities) =>
+      resolved.groups.find((g) => g.entry === 0)?.identities.map((i) => i.email);
+    expect(mine(resolve(commits, file, { mailmap }))).toEqual(["me@x.example", "alice@y.example"]);
+    expect(mine(resolve(commits, { ...file, mailmap: false }, { mailmap }))).toEqual([
+      "me@x.example",
+    ]);
+  });
+
   it("joins on each automatic rule alone", () => {
     const pairs = (commits: AuthoredCommit[]) => resolve(commits).groups.length;
     expect(pairs([by("A", "x@e.com"), by("B", "X@E.com")])).toBe(1);

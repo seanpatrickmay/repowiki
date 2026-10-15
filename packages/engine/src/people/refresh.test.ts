@@ -66,6 +66,9 @@ describe("readPeople (spec v2 #6 §4 steps 1-3)", () => {
     expect(read.assigned.ids).toEqual(["ada-lovelace", "robert-jones"]);
     expect(read.ignoreRevs).toHaveLength(1);
     expect(readPeople(input({ ignoreRevs: false })).ignoreRevs).toEqual([]);
+    const unmapped = readPeople(input({ mailmap: false }));
+    expect(unmapped.identities.groups.map((g) => g.name)).toEqual(["Ada Lovelace", "bob"]);
+    expect(unmapped.mailmap.entries.size).toBe(0);
     expect(store.listPeopleRegistry()).toEqual([]);
     expect(store.getPeopleSnapshot()).toBeNull();
   });
