@@ -113,7 +113,7 @@ Each ruling is "Ruling: X — why — cost if wrong".
   and their hosts must differ (cookies ignore ports). Outside production both default to
   `http://127.0.0.1:<port>` (app) and `http://localhost:<port>` (pages), must be loopback, and
   must differ in host. The OAuth callback is `APP_ORIGIN/auth/github/callback`; `INTERNAL_PORT`
-  and `INTERNAL_URL` are unchanged. Fly's health check names the app host. — Cookies are scoped
+  and `INTERNAL_URL` are unchanged. Fly's health check reads `/healthz`, answered on any host. — Cookies are scoped
   by host, not port. — Cost if wrong: one more environment variable to check.
 - **Cross-links.** Ruling: the app shows each project's public URL on `PUBLIC_ORIGIN`; the project
   page and profile end with "Made with RepoWiki" linking to `APP_ORIGIN`. — Readers can find the
