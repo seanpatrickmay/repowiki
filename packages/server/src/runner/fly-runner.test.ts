@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { FLY_API, flyRunner } from "./fly-runner.ts";
 
-function fake(status = 200) {
+function fake(status = 200, created: unknown = { id: "e784079b449483", state: "created" }) {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
   const fetchFn: typeof fetch = async (input, init) => {
     calls.push({ url: String(input), init });
-    const body = status === 200 ? { id: "m1" } : { error: "no capacity" };
+    const body = status === 200 ? created : { error: "no capacity" };
     return new Response(JSON.stringify(body), { status });
   };
   return { fetchFn, calls };
@@ -45,6 +45,24 @@ describe("the Fly runner (spec 2 S16)", () => {
       REPOWIKI_ENGINE_VERSION: "abc1234",
     });
     expect(JSON.stringify(body)).not.toContain("fly-secret");
+  });
+
+  it("logs the created machine's id with the job, never a token", async () => {
+    const lines: object[] = [];
+    const log = (line: object) => lines.push(line);
+    const { fetchFn } = fake();
+    const runner = flyRunner({ ...options, fetch: fetchFn, log });
+    await runner.start({ jobId: "j1", attempt: 2, token: "job-token" });
+    expect(lines).toEqual([{ machine: "e784079b449483", job: "j1", attempt: 2 }]);
+    // An id it cannot read is logged as null rather than echoed.
+    const odd = fake(200, { id: "x\ny" });
+    await flyRunner({ ...options, fetch: odd.fetchFn, log }).start({
+      jobId: "j2",
+      attempt: 1,
+      token: "job-token",
+    });
+    expect(lines[1]).toEqual({ machine: null, job: "j2", attempt: 1 });
+    expect(JSON.stringify(lines)).not.toMatch(/job-token|fly-secret/);
   });
 
   it("throws when Fly refuses, without echoing the token", async () => {

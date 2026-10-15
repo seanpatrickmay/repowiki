@@ -13,15 +13,22 @@ export interface FlyRunnerOptions {
   internalUrl: string;
   engineVersion: string;
   fetch?: typeof fetch;
+  /** Where the created machine's id is logged, with the job; never a token. */
+  log?: (line: object) => void;
 }
+
+/** A Fly machine id as the API returns one; anything else is never echoed into the logs. */
+const MACHINE_ID = /^[0-9a-z]{1,32}$/;
 
 /**
  * One auto-destroying Fly Machine per job attempt (spec 2 S16). Its environment is the job's
  * single-use token and the server's private address, nothing else. A refusal throws without
- * echoing either token; the caller leaves the job queued and the sweeper restarts it.
+ * echoing either token; the caller leaves the job queued and the sweeper restarts it. A machine
+ * is not destroyed when its job is cancelled: its worker exits on its next refused call (S16).
  */
 export function flyRunner(options: FlyRunnerOptions): JobRunner {
   const fetchFn = options.fetch ?? fetch;
+  const log = options.log ?? (() => {});
   return {
     async start({ jobId, attempt, token }) {
       const response = await fetchFn(
@@ -50,8 +57,19 @@ export function flyRunner(options: FlyRunnerOptions): JobRunner {
           signal: AbortSignal.timeout(30_000),
         },
       );
-      await response.body?.cancel();
-      if (!response.ok) throw new Error(`Fly refused the worker machine: HTTP ${response.status}`);
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`Fly refused the worker machine: HTTP ${response.status}`);
+      }
+      // The id ties a machine in Fly's dashboard to its job; reading it is best effort.
+      const created: unknown = await response.json().catch(() => null);
+      const id =
+        typeof created === "object" && created !== null ? Reflect.get(created, "id") : null;
+      log({
+        machine: typeof id === "string" && MACHINE_ID.test(id) ? id : null,
+        job: jobId,
+        attempt,
+      });
     },
   };
 }

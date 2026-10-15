@@ -46,7 +46,8 @@ export function workerMode(config: Config): "fixture" | "engine" {
 function runnerFor(config: Config, log: (line: object) => void): JobRunner {
   if (config.runner.kind === "fly") {
     const { apiToken, app, image, internalUrl } = config.runner;
-    return flyRunner({ apiToken, app, image, internalUrl, engineVersion: config.engineVersion });
+    const { engineVersion } = config;
+    return flyRunner({ apiToken, app, image, internalUrl, engineVersion, log });
   }
   return localRunner({
     workerEntry: WORKER_ENTRY,
