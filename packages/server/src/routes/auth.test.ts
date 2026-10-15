@@ -165,7 +165,7 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
       });
     expect((await signOut({ origin: "https://evil.example" })).status).toBe(403);
     expect(await deps.db.query("SELECT * FROM sessions")).toHaveLength(1);
-    const out = await signOut({ origin: deps.config.origin });
+    const out = await signOut({ origin: deps.config.appOrigin });
     expect(out.status).toBe(303);
     expect(out.headers?.location).toBe("/");
     expect(setCookie(out, "session")).toBe("");
@@ -182,7 +182,7 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
       headers: {
         cookie: `session=${session}`,
         "content-type": "application/x-www-form-urlencoded",
-        origin: deps.config.origin,
+        origin: deps.config.appOrigin,
       },
       body: `csrf=${row?.csrf}`,
     });

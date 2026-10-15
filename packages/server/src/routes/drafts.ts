@@ -152,7 +152,11 @@ export function draftRoutes(deps: Deps): Route[] {
             : await versionOf(deps.db, project.id, project.currentVersion);
         const body = projectPage({
           project,
-          publicUrl: projectUrl(deps.config.origin, handle ?? session.account.login, project.slug),
+          publicUrl: projectUrl(
+            deps.config.publicOrigin,
+            handle ?? session.account.login,
+            project.slug,
+          ),
           repoFullName: repo,
           job: jobs[0] ?? null,
           revision,

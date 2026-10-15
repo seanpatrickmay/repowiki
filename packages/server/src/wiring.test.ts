@@ -21,6 +21,7 @@ import {
 const DEMO = { REPOWIKI_MODE: "demo" };
 const PRODUCTION = {
   REPOWIKI_MODE: "production",
+  APP_ORIGIN: "https://app.repowiki.dev",
   PUBLIC_ORIGIN: "https://repowiki.dev",
   DATABASE_URL: "postgres://u:p@db.example/repowiki",
   TOKEN_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -42,21 +43,26 @@ const dataDir = () => mkdtempSync(join(tmpdir(), "repowiki-wiring-"));
 const top = (routes: { pattern: string }[]) => new Set(routes.map((r) => r.pattern.split("/")[1]));
 
 describe("route sets (spec 2 S1)", () => {
-  it("keeps the worker's routes off the public set, and handles last", async () => {
+  it("keeps the worker's routes off both hosts' sets, and handles on the pages set only", async () => {
     const deps = await buildDeps(loadConfig(DEMO));
     const sets = routeSets(deps);
-    expect(top(sets.public).has("internal")).toBe(false);
-    expect(top(sets.public).has("llm")).toBe(false);
+    for (const set of [sets.app, sets.pages]) {
+      expect(top(set).has("internal")).toBe(false);
+      expect(top(set).has("llm")).toBe(false);
+    }
     expect([...top(sets.worker)].sort()).toEqual(["internal", "llm"]);
-    expect(sets.public[0]?.pattern).toBe("/");
-    expect(sets.public.slice(-2).map((r) => r.pattern)).toEqual(["/:handle/:slug/*", "/:handle/*"]);
+    expect(sets.app[0]?.pattern).toBe("/");
+    expect(sets.app.some((r) => r.pattern.startsWith("/:handle"))).toBe(false);
+    expect(top(sets.pages).has("dashboard")).toBe(false);
+    expect(top(sets.pages).has("auth")).toBe(false);
+    expect(sets.pages.slice(-2).map((r) => r.pattern)).toEqual(["/:handle/:slug/*", "/:handle/*"]);
     await deps.db.close();
   });
 
   it("wires the demo with fakes for GitHub, the model and the worker", async () => {
     const deps = await buildDeps(loadConfig(DEMO));
     expect(deps.config.github.kind).toBe("fake");
-    expect(deps.github.web).toBe(`${deps.config.origin}/_fake/github`);
+    expect(deps.github.web).toBe(`${deps.config.appOrigin}/_fake/github`);
     expect(deps.anthropic).toMatchObject({ url: "https://api.anthropic.test", key: "demo" });
     expect(workerMode(deps.config)).toBe("fixture");
     await deps.db.close();
@@ -98,10 +104,18 @@ describe("listeners (spec 2 S1)", () => {
     expect(pub).toMatchObject({ port: 8787, host: "0.0.0.0" });
     expect(worker).toMatchObject({ port: 8788, host: "::" });
     if (pub === undefined || worker === undefined) throw new Error("listeners");
-    for (const path of ["/internal/job/lease", "/llm/v1/messages", "/internal", "/llm"]) {
-      expect((await call(pub.app, { method: "POST", path })).status, path).toBe(404);
-      expect((await call(pub.app, { path: `${path}/x` })).status, path).toBe(404);
+    for (const host of ["app.repowiki.dev", "repowiki.dev"]) {
+      for (const path of ["/internal/job/lease", "/llm/v1/messages", "/internal", "/llm"]) {
+        const headers = { host };
+        expect((await call(pub.app, { method: "POST", path, headers })).status, path).toBe(404);
+        expect((await call(pub.app, { path: `${path}/x`, headers })).status, path).toBe(404);
+      }
     }
+    expect((await call(pub.app, { path: "/", headers: { host: "app.repowiki.dev" } })).status).toBe(
+      200,
+    );
+    // Fly's health check names the app host (deploy/fly.server.toml); no host is a 404.
+    expect((await call(pub.app, { path: "/" })).status).toBe(404);
     expect((await call(worker.app, { method: "POST", path: "/internal/job/lease" })).status).toBe(
       401,
     );
@@ -116,10 +130,27 @@ describe("listeners (spec 2 S1)", () => {
     expect(rest).toEqual([]);
     expect(only).toMatchObject({ port: 8787, host: "127.0.0.1" });
     if (only === undefined) throw new Error("listener");
-    expect((await call(only.app, { method: "POST", path: "/internal/job/lease" })).status).toBe(
-      401,
+    const app = { host: "127.0.0.1:8787" };
+    const pages = { host: "localhost:8787" };
+    const status = async (path: string, headers: Record<string, string>, method?: "POST") =>
+      (await call(only.app, { path, headers, ...(method ? { method } : {}) })).status;
+    expect(await status("/internal/job/lease", app, "POST")).toBe(401);
+    // The pages host is read-only: no worker route, and no method but GET.
+    expect(await status("/internal/job/lease", pages, "POST")).toBe(405);
+    expect(await status("/", app)).toBe(200);
+    expect(await status("/dashboard", app)).toBe(303);
+    expect(await status("/dashboard", pages)).toBe(404);
+    expect(await status("/auth/github", pages)).toBe(404);
+    expect(await status("/_app/portfolio.css", pages)).toBe(200);
+    expect(await status("/_app/style.css", pages)).toBe(404);
+    const root = await call(only.app, { path: "/", headers: pages });
+    expect(root).toMatchObject({ status: 302, headers: { location: "http://127.0.0.1:8787/" } });
+    // A handle is a pages path; on the app host it is no page at all.
+    const handle = await call(only.app, { path: "/nobody", headers: app });
+    expect(String(handle.body)).toContain("is not a page on RepoWiki");
+    expect(String((await call(only.app, { path: "/nobody", headers: pages })).body)).toBe(
+      "Not found",
     );
-    expect((await call(only.app, { path: "/" })).status).toBe(200);
     await deps.db.close();
   });
 });

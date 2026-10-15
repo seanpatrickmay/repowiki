@@ -109,6 +109,15 @@ export function publicRoutes(deps: Deps): Route[] {
 
   return [
     {
+      // The pages origin's root is the product's own front door (ADR-0012).
+      method: "GET",
+      pattern: "/",
+      handler: async () => ({
+        status: 302,
+        headers: { location: `${deps.config.appOrigin}/` },
+      }),
+    },
+    {
       method: "GET",
       pattern: "/:handle",
       handler: async (request) => {
@@ -132,7 +141,13 @@ export function publicRoutes(deps: Deps): Route[] {
         entries.sort((a, b) =>
           a.publishedAt < b.publishedAt ? 1 : a.publishedAt > b.publishedAt ? -1 : 0,
         );
-        const body = profilePage({ handle: who.handle, displayName: who.displayName, entries });
+        const { appOrigin } = deps.config;
+        const body = profilePage({
+          handle: who.handle,
+          displayName: who.displayName,
+          entries,
+          appOrigin,
+        });
         return {
           status: 200,
           headers: { ...PUBLIC, "content-type": "text/html; charset=utf-8" },
@@ -150,7 +165,8 @@ export function publicRoutes(deps: Deps): Route[] {
         const data = await portfolioOf(found.version);
         if (data === null) return notFound();
         const base = siteBase(found.handle, found.project.slug);
-        const options = { base, publishedAt: found.version.publishedAt, preview: false };
+        const { appOrigin } = deps.config;
+        const options = { base, publishedAt: found.version.publishedAt, preview: false, appOrigin };
         return {
           status: 200,
           headers: { ...PUBLIC, "content-type": "text/html; charset=utf-8" },

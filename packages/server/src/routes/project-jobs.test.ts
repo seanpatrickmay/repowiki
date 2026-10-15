@@ -29,7 +29,7 @@ const post = (path: string, who = me) =>
   call(app, {
     method: "POST",
     path,
-    headers: form(who.cookie, deps.config.origin),
+    headers: form(who.cookie, deps.config.appOrigin),
     body: `csrf=${who.csrf}`,
   });
 const worker = (path: string, body?: unknown) =>
@@ -144,7 +144,7 @@ describe("refresh (M14e A2)", () => {
     const reply = await call(freshApp, {
       method: "POST",
       path: `/projects/${p.projectId}/refresh`,
-      headers: form(p.cookie, fresh.config.origin),
+      headers: form(p.cookie, fresh.config.appOrigin),
       body: `csrf=${p.csrf}`,
     });
     expect(reply.status).toBe(REFUSALS["plan-refresh-limit"].status);
@@ -152,7 +152,7 @@ describe("refresh (M14e A2)", () => {
     const theirs = await call(freshApp, {
       method: "POST",
       path: `/projects/${p.projectId}/refresh`,
-      headers: form(other.cookie, fresh.config.origin),
+      headers: form(other.cookie, fresh.config.appOrigin),
       body: `csrf=${other.csrf}`,
     });
     expect(theirs.status).toBe(404);

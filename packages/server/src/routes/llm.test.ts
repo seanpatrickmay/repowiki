@@ -83,7 +83,7 @@ async function cancelAsOwner(): Promise<string> {
   const reply = await call(app, {
     method: "POST",
     path: `/projects/${job.projectId}/jobs/${job.jobId}/cancel`,
-    headers: form(cookie, deps.config.origin),
+    headers: form(cookie, deps.config.appOrigin),
     body: `csrf=${csrf}`,
   });
   expect(reply.status).toBe(303);

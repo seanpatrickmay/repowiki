@@ -10,6 +10,7 @@ const scratch = () => mkdtempSync(join(tmpdir(), "repowiki-config-"));
 const KEY = Buffer.alloc(32, 7).toString("base64");
 const production = {
   REPOWIKI_MODE: "production",
+  APP_ORIGIN: "https://app.repowiki.dev",
   PUBLIC_ORIGIN: "https://repowiki.dev",
   DATABASE_URL: "postgres://u:p@db.example/repowiki?sslmode=require",
   TOKEN_KEY: KEY,
@@ -33,7 +34,8 @@ describe("loadConfig (spec 2 S17)", () => {
     const config = loadConfig(production);
     expect(config).toMatchObject({
       mode: "production",
-      origin: "https://repowiki.dev",
+      appOrigin: "https://app.repowiki.dev",
+      publicOrigin: "https://repowiki.dev",
       port: 8787,
       signupAllowlist: ["seanpatrickmay", "friend"],
       database: { kind: "postgres", url: production.DATABASE_URL },
@@ -106,6 +108,31 @@ describe("loadConfig (spec 2 S17)", () => {
     expect(message).not.toContain("sk-ant");
   });
 
+  it("needs both origins in production, on different hosts, neither a provider's (ADR-0012)", () => {
+    const { APP_ORIGIN: _, ...noApp } = production;
+    expect(() => loadConfig(noApp)).toThrow(/APP_ORIGIN/);
+    const { PUBLIC_ORIGIN: __, ...noPages } = production;
+    expect(() => loadConfig(noPages)).toThrow(/PUBLIC_ORIGIN/);
+    for (const APP_ORIGIN of ["https://repowiki.dev", "https://repowiki.dev:8443"]) {
+      expect(() => loadConfig({ ...production, APP_ORIGIN }), APP_ORIGIN).toThrow(ConfigError);
+    }
+    for (const origin of ["https://x.fly.dev", "http://app.repowiki.dev"]) {
+      expect(() => loadConfig({ ...production, APP_ORIGIN: origin }), origin).toThrow(ConfigError);
+    }
+  });
+
+  it("puts the app on 127.0.0.1 and pages on localhost outside production, on one port", () => {
+    expect(loadConfig({ REPOWIKI_MODE: "demo", PORT: "9001" })).toMatchObject({
+      appOrigin: "http://127.0.0.1:9001",
+      publicOrigin: "http://localhost:9001",
+      runner: { kind: "local", internalUrl: "http://127.0.0.1:9001" },
+    });
+    const same = { PUBLIC_ORIGIN: "http://127.0.0.1:9001", APP_ORIGIN: "http://127.0.0.1:9001" };
+    expect(() => loadConfig({ REPOWIKI_MODE: "demo", ...same })).toThrow(ConfigError);
+    const outside = { REPOWIKI_MODE: "demo", APP_ORIGIN: "http://example.com" };
+    expect(() => loadConfig(outside)).toThrow(ConfigError);
+  });
+
   it("refuses an http or provider origin in production and a short token key", () => {
     expect(() => loadConfig({ ...production, PUBLIC_ORIGIN: "http://repowiki.dev" })).toThrow(
       ConfigError,
@@ -139,7 +166,8 @@ describe("loadConfig (spec 2 S17)", () => {
     const config = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: dir });
     expect(config).toMatchObject({
       mode: "development",
-      origin: "http://127.0.0.1:8787",
+      appOrigin: "http://127.0.0.1:8787",
+      publicOrigin: "http://localhost:8787",
       database: { kind: "pglite", dataDir: join(dir, "db") },
       objects: { kind: "fs", root: join(dir, "objects") },
       runner: { kind: "local" },

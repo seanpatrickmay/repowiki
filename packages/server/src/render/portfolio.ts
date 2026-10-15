@@ -68,6 +68,10 @@ export function portfolioData(input: {
   });
 }
 
+/** The link from a public page to the app on its own origin (ADR-0012). */
+export const madeWith = (appOrigin: string) =>
+  `<a href="${e(`${appOrigin}/`)}">Made with RepoWiki</a>`;
+
 const paragraphs = (text: string) =>
   text
     .split(/\n[ \t]*\n/)
@@ -79,7 +83,7 @@ const percent = (part: number, whole: number) =>
 /** The public project page (Contract §8), its seven parts in order; `base` ends with "/". */
 export function portfolioHtml(
   data: PortfolioData,
-  options: { base: string; publishedAt: string | null; preview: boolean },
+  options: { base: string; publishedAt: string | null; preview: boolean; appOrigin: string },
 ): string {
   const { facts, repo } = data;
   const docs = `${options.base}docs/`;
@@ -117,5 +121,6 @@ export function portfolioHtml(
 <section id="highlights"><h2>Highlights</h2>${highlights ? `<div class="cards">${highlights}</div>` : `<p class="meta">No highlights chosen.</p>`}</section>
 <section id="wiki"><h2>The wiki</h2><p><a href="${e(docs)}">Read the full source-linked wiki</a></p></section>
 <section id="checked" class="checked"><h2>What is checked</h2><p>${e(CHECKED_STATEMENT(repo.commitSha))}</p></section>
+<p class="meta">${madeWith(options.appOrigin)}</p>
 </main></body></html>`;
 }

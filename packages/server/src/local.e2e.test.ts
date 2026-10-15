@@ -47,9 +47,11 @@ let server: RunningServer | null = null;
 const logs: object[] = [];
 afterAll(async () => server?.close());
 
-async function start(env: Record<string, string>): Promise<string> {
-  server = await startServer(loadConfig(env), { log: (line) => logs.push(line) });
-  return server.urls[0] ?? "";
+/** The app's and the public pages' origins: two hosts on one port (ADR-0012). */
+async function start(env: Record<string, string>): Promise<{ base: string; pages: string }> {
+  const config = loadConfig(env);
+  server = await startServer(config, { log: (line) => logs.push(line) });
+  return { base: config.appOrigin, pages: config.publicOrigin };
 }
 
 async function waitFor(me: ReturnType<typeof browser>, path: string, text: string) {
@@ -72,7 +74,7 @@ describe("local profile mode (M14g)", () => {
       REPOWIKI_PROFILE: profile,
       REPOWIKI_LOCAL_PLAN: "pro",
     };
-    let base = await start(env);
+    let { base, pages } = await start(env);
     const me = browser(base);
     const dashboard = await me.follow("/auth/github");
     expect(dashboard.status, JSON.stringify(logs.slice(-5))).toBe(200);
@@ -102,7 +104,7 @@ describe("local profile mode (M14g)", () => {
     });
     expect(published.status, published.text).toBe(303);
 
-    const reader = browser(base);
+    const reader = browser(pages);
     const project = await reader.go("/ada/engine");
     expect(project.status).toBe(200);
     expect(project.text).toContain("Python 73% · TypeScript 27%");
@@ -124,8 +126,8 @@ describe("local profile mode (M14g)", () => {
 
     await server?.close();
     server = null;
-    base = await start(env);
-    const back = browser(base);
+    ({ base, pages } = await start(env));
+    const back = browser(pages);
     expect((await back.go("/ada/engine")).text).toContain(CONTRIBUTION);
     const again = await me.go(`${base}/dashboard`);
     expect(again.status).toBe(200);

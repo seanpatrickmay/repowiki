@@ -185,7 +185,12 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
           const data = PortfolioData.parse(JSON.parse(new TextDecoder().decode(stored.body)));
           return html(
             200,
-            portfolioHtml(data, { base, publishedAt: null, preview: true }),
+            portfolioHtml(data, {
+              base,
+              publishedAt: null,
+              preview: true,
+              appOrigin: deps.config.appOrigin,
+            }),
             headers,
           );
         }

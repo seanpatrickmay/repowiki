@@ -24,7 +24,7 @@ const post = (path: string, body: string, who: { cookie: string; csrf: string } 
   call(app, {
     method: "POST",
     path,
-    headers: form(who.cookie, deps.config.origin),
+    headers: form(who.cookie, deps.config.appOrigin),
     body: `csrf=${who.csrf}&${body}`,
   });
 const get = (path: string, cookie = p.cookie) => call(app, { path, headers: { cookie } });
