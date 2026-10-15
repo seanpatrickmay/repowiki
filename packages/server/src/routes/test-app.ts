@@ -1,0 +1,61 @@
+import { Readable } from "node:stream";
+import type { Deps } from "../app.ts";
+import { loadConfig } from "../config.ts";
+import type { Db } from "../db/db.ts";
+import { fakeEndpoints } from "../github/endpoints.ts";
+import { fakeGitHubFetch } from "../github/fake.ts";
+import type { Method, Reply, RouteRequest } from "../http/router.ts";
+import type { App } from "../http/server.ts";
+import { freshDb } from "../store/test-db.ts";
+
+export const TEST_NOW = "2026-10-14T12:00:00.000Z";
+
+/** Test-only: demo-mode dependencies over a fresh database, with a fixed clock and ids. */
+export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps & { db: Db }> {
+  const config = loadConfig({ REPOWIKI_MODE: "demo" });
+  const github = fakeEndpoints(config.origin);
+  let n = 0;
+  return {
+    config,
+    db: await freshDb(),
+    fetch: fakeGitHubFetch(github),
+    github,
+    now: () => TEST_NOW,
+    newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+    ...overrides,
+  };
+}
+
+/** Test-only: one request to `app` without a socket; the path is split as `listen` splits it. */
+export async function call(
+  app: App,
+  init: { method?: Method; path: string; headers?: Record<string, string>; body?: string },
+): Promise<Reply> {
+  const headers = Object.fromEntries(
+    Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]),
+  );
+  const method = init.method ?? "GET";
+  const raw = Object.assign(
+    Readable.from(init.body === undefined ? [] : [Buffer.from(init.body)]),
+    { headers, method },
+  ) as unknown as RouteRequest["raw"];
+  const at = init.path.indexOf("?");
+  return app({
+    method,
+    path: at === -1 ? init.path : init.path.slice(0, at),
+    params: {},
+    query: new URLSearchParams(at === -1 ? "" : init.path.slice(at + 1)),
+    headers,
+    raw,
+  });
+}
+
+/** Test-only: the value a reply's Set-Cookie gives `name`, or undefined. */
+export function setCookie(reply: Reply, name: string): string | undefined {
+  const value = reply.headers?.["set-cookie"];
+  const all = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  const found = all.find((c) => c.startsWith(`${name}=`));
+  return found === undefined
+    ? undefined
+    : decodeURIComponent(found.slice(name.length + 1).split(";")[0] ?? "");
+}
