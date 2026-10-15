@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ATTESTATIONS, EMPTY_OVERRIDES, Facts, Overrides, plainText } from "./content.ts";
+import {
+  ATTESTATION_VERSION,
+  ATTESTATIONS,
+  EMPTY_OVERRIDES,
+  Facts,
+  Overrides,
+  plainText,
+} from "./content.ts";
 import { aGeneration } from "./test-fixtures.ts";
 
 const ok = (schema: { safeParse(v: unknown): { success: boolean } }, value: unknown) =>
@@ -67,8 +74,12 @@ describe("facts (Contract spec §8)", () => {
   });
 });
 
-it("keeps attestation 1's wording (Contract spec §8)", () => {
+it("keeps attestation 1's wording and words attestation 2 for generated content (ADR-0012)", () => {
   expect(ATTESTATIONS[1]).toBe(
     "I reviewed this version. The contribution statement describes my own work accurately, and I checked the summary and highlights against the project.",
   );
+  expect(ATTESTATIONS[2]).toBe(
+    "I reviewed this version. It describes my project and my part in it accurately.",
+  );
+  expect(ATTESTATIONS[ATTESTATION_VERSION]).toBe(ATTESTATIONS[2]);
 });

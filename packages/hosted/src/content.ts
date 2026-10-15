@@ -96,5 +96,7 @@ export const EMPTY_OVERRIDES: Overrides = {
 /** The review declaration's wording by version; a Review records which one the author accepted. */
 export const ATTESTATIONS = {
   1: "I reviewed this version. The contribution statement describes my own work accurately, and I checked the summary and highlights against the project.",
+  2: "I reviewed this version. It describes my project and my part in it accurately.",
 } as const;
-export const ATTESTATION_VERSION = 1;
+/** What a review records now (ADR-0012): the author approves generated content, edits nothing. */
+export const ATTESTATION_VERSION = 2;

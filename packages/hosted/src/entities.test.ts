@@ -40,6 +40,8 @@ describe("entities (Contract spec §5)", () => {
     expect(ok(Generation, aGeneration())).toBe(true);
     expect(ok(DraftRevision, aRevision())).toBe(true);
     expect(ok(Review, aReview())).toBe(true);
+    // Reviews attest to version 2; version 1 attested to text the author wrote (ADR-0012).
+    expect(ok(Review, aReview({ attestationVersion: 1 as 2 }))).toBe(false);
     expect(ok(Preview, aPreview())).toBe(true);
     expect(ok(EligibilityFacts, eligibleFacts())).toBe(true);
     expect(ok(PublishedVersion, aPublishedVersion())).toBe(true);

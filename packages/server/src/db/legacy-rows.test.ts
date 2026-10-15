@@ -10,11 +10,11 @@ let projectId: string;
 const AT = "2026-10-14T12:00:00.000Z";
 
 /** Revision 1 as M14g stored it, with its review and preview, then the later migrations again. */
-async function storedBefore(sql: string, from: number): Promise<void> {
+async function storedBefore(sql: string, from: number, attestationVersion = 1): Promise<void> {
   await deps.db.query(sql, [projectId]);
   await deps.db.query(
     "INSERT INTO reviews (project_id, revision, body) VALUES ($1, 1, $2::jsonb)",
-    [projectId, JSON.stringify({ projectId, revision: 1, attestationVersion: 1, createdAt: AT })],
+    [projectId, JSON.stringify({ projectId, revision: 1, attestationVersion, createdAt: AT })],
   );
   const preview = { projectId, revision: 1, siteKey: "previews/x/", siteHash: "a".repeat(64) };
   await deps.db.query(
@@ -51,9 +51,18 @@ describe("rows stored before ADR-0012 (migration 0005)", () => {
       `UPDATE revisions SET body = jsonb_set(body, '{overrides,hiddenFeatureIds}', '[]')
        WHERE project_id = $1`,
       5,
+      2,
     );
     expect(await latestRevision(deps.db, projectId)).not.toBeNull();
     expect(await reviewOf(deps.db, projectId, 1)).not.toBeNull();
+    expect(await previewOf(deps.db, projectId, 1)).not.toBeNull();
+  });
+});
+
+describe("rows stored before ADR-0012 (migration 0006)", () => {
+  it("lose their version 1 reviews, which attested to author-written text", async () => {
+    await storedBefore("SELECT $1::uuid", 6);
+    expect(await reviewOf(deps.db, projectId, 1)).toBeNull();
     expect(await previewOf(deps.db, projectId, 1)).not.toBeNull();
   });
 });

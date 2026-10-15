@@ -39,7 +39,7 @@ describe("the project page (spec 2 §7)", () => {
     expect(body).toContain("I wrote the ingest code.");
     // Every wiki page is public: there is no hide control (ADR-0012).
     expect(body).not.toContain('name="hidden"');
-    expect(body).toContain("I reviewed this version.");
+    expect(body).toContain("I reviewed this version. It describes my project and my part in it");
     expect(body).not.toContain("style=");
     expect(body).not.toContain("<style");
   });
@@ -129,7 +129,7 @@ describe("review (Contract §6.3, §8)", () => {
     expect((await post(review, `csrf=${p.csrf}&revision=2&attest=yes`)).status).toBe(303);
     expect(await reviewOf(deps.db, p.projectId, 2)).toMatchObject({
       revision: 2,
-      attestationVersion: 1,
+      attestationVersion: 2,
     });
     expect(String((await page()).body)).toContain("You reviewed revision 2.");
   });

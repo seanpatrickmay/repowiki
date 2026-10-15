@@ -16,9 +16,9 @@ afterEach(async () => deps.db.close());
 
 describe("reviews, previews and versions (spec 2 §5)", () => {
   it("keeps the first review of a revision", async () => {
-    await saveReview(deps.db, { projectId, revision: 1, attestationVersion: 1, createdAt: AT });
+    await saveReview(deps.db, { projectId, revision: 1, attestationVersion: 2, createdAt: AT });
     const later = "2026-10-14T13:00:00.000Z";
-    await saveReview(deps.db, { projectId, revision: 1, attestationVersion: 1, createdAt: later });
+    await saveReview(deps.db, { projectId, revision: 1, attestationVersion: 2, createdAt: later });
     expect(await reviewOf(deps.db, projectId, 1)).toMatchObject({ createdAt: AT });
     expect(await reviewOf(deps.db, projectId, 2)).toBeNull();
   });
