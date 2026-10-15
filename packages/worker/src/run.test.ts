@@ -82,6 +82,7 @@ function deps(
     log: (line) => lines.push(line),
     heartbeatMs: 60_000,
     clone: async () => ({ ok: true }),
+    countTree: async () => 3,
     indexRepo: async () => ({
       files: [
         { language: "python", loc: 10, skipped: null },
@@ -268,6 +269,49 @@ describe("phase 2 (spec 2 S9, §8)", () => {
     expect(await phase2(d)).toBe(false);
     expect(calls).toEqual(["lease", "heartbeat:index", "indexed:2"]);
     expect(d.runs).toEqual([]);
+  });
+
+  it("refuses a tree listing over three times the file limit before indexing it", async () => {
+    const { api, calls } = fakeApi("too-large");
+    const indexed: string[] = [];
+    const d = {
+      ...deps(api, okRun),
+      countTree: async () => SPEC.limits.maxIndexedFiles * 3 + 1,
+      indexRepo: async (repo: string) => {
+        indexed.push(repo);
+        return { files: [] };
+      },
+    };
+    expect(await phase2(d)).toBe(false);
+    expect(calls).toEqual(["lease", "heartbeat:index", "indexed:3001"]);
+    expect(indexed).toEqual([]);
+    expect(d.runs).toEqual([]);
+  });
+
+  it("indexes a tree listing at three times the limit, and fails one git cannot list", async () => {
+    const homes: string[] = [];
+    const ok = fakeApi();
+    const d = {
+      ...deps(ok.api, okRun),
+      countTree: async (_repo: string, _sha: string, home: string) => {
+        homes.push(home);
+        return SPEC.limits.maxIndexedFiles * 3;
+      },
+      indexRepo: async (_repo: string, _sha: string, home: string) => {
+        homes.push(home);
+        return { files: [{ language: "python", loc: 10, skipped: null }] };
+      },
+      emails: (_repo: string, _shas: readonly string[], home: string) => {
+        homes.push(home);
+        return [];
+      },
+    };
+    expect(await phase2(d)).toBe(true);
+    expect(ok.calls).toContain("indexed:1");
+    expect(homes).toEqual(Array.from({ length: 3 }, () => join(d.workDir, "home")));
+    const broken = fakeApi();
+    expect(await phase2({ ...deps(broken.api, okRun), countTree: async () => null })).toBe(false);
+    expect(broken.calls).toEqual(["lease", "heartbeat:index", "fail:job-failed"]);
   });
 
   it("fails with job-cost-cap when a CLI died on the proxy's cost refusal", async () => {
