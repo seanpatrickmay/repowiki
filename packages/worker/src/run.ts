@@ -37,7 +37,12 @@ export interface PhaseDeps {
   /** Counts the tree's blobs before indexing (countTree); null when git failed. */
   countTree?: (repo: string, sha: string, home: string) => Promise<number | null>;
   /** Indexes in a child under time and heap limits (indexInChild). */
-  indexRepo?: (repo: string, rev: string, home: string) => Promise<{ files: readonly FileFacts[] }>;
+  indexRepo?: (
+    repo: string,
+    rev: string,
+    home: string,
+    signal?: AbortSignal,
+  ) => Promise<{ files: readonly FileFacts[] }>;
   emails?: (repo: string, shas: readonly string[], home: string) => string[];
   provider?: (spec: WorkerSpec, token: string) => Provider;
 }
@@ -51,23 +56,55 @@ class CliFailed extends Error {
   }
 }
 
-/** Sends the current step at once on every change, and again every `everyMs` while it lasts. */
-export function heartbeater(api: WorkerApi, everyMs: number, log: (line: object) => void) {
+/**
+ * Sends the current step at once on every change, and again every `everyMs` while it lasts, one
+ * at a time (a slow heartbeat skips the next tick). A 401 or 409 on an interval heartbeat means
+ * the lease is gone: the beats stop and `onLost` runs once, to stop the work in hand.
+ */
+export function heartbeater(
+  api: WorkerApi,
+  everyMs: number,
+  log: (line: object) => void,
+  onLost: () => void = () => {},
+) {
   let current: JobStep | null = null;
+  /** The heartbeat in flight, settled or not; null when none is. */
+  let inFlight: Promise<unknown> | null = null;
+  const send = (step: JobStep) => {
+    const sent = api.heartbeat(step).finally(() => {
+      if (inFlight === sent) inFlight = null;
+    });
+    inFlight = sent;
+    return sent;
+  };
   const timer = setInterval(() => {
-    if (current === null) return;
-    api.heartbeat(current).catch((error: unknown) => log({ heartbeat: "failed", ...why(error) }));
+    if (current === null || inFlight !== null) return;
+    send(current).catch((error: unknown) => {
+      log({ heartbeat: "failed", ...why(error) });
+      if (!leaseGone(error)) return;
+      clearInterval(timer);
+      onLost();
+    });
   }, everyMs);
   timer.unref();
   return {
     async step(step: JobStep) {
       current = step;
-      await api.heartbeat(step);
+      await inFlight?.catch(() => {});
+      await send(step);
     },
     stop() {
       clearInterval(timer);
     },
   };
+}
+
+/** The lease was lost while work ran: the phase ends with no fail call (the server has moved on). */
+class LeaseLost extends Error {
+  constructor() {
+    super("the lease was lost");
+    this.name = "LeaseLost";
+  }
 }
 
 /**
@@ -124,7 +161,10 @@ export async function phase1(deps: PhaseDeps): Promise<boolean> {
   const spec = await leased(deps, 1);
   if (spec === null) return false;
   const where = paths(deps.workDir, spec);
-  const beat = heartbeater(deps.api, deps.heartbeatMs ?? HEARTBEAT_MS, deps.log);
+  const lost = new AbortController();
+  const beat = heartbeater(deps.api, deps.heartbeatMs ?? HEARTBEAT_MS, deps.log, () =>
+    lost.abort(),
+  );
   try {
     await beat.step("fetch");
     mkdirSync(where.home, { recursive: true });
@@ -134,7 +174,9 @@ export async function phase1(deps: PhaseDeps): Promise<boolean> {
       dir: where.repo,
       sizeKb: spec.repo.sizeKb,
       home: where.home,
+      signal: lost.signal,
     });
+    if (lost.signal.aborted) throw new LeaseLost();
     if (!cloned.ok) {
       deps.log({ phase: 1, failed: cloned.code, detail: cloned.detail });
       return reportFailure(deps, cloned.code);
@@ -143,6 +185,7 @@ export async function phase1(deps: PhaseDeps): Promise<boolean> {
     return true;
   } catch (error) {
     deps.log({ phase: 1, failed: "job-failed", ...why(error) });
+    if (leaseGone(error) || lost.signal.aborted) return false;
     return reportFailure(deps, "job-failed");
   } finally {
     beat.stop();
@@ -171,7 +214,10 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
   const spec = await leased(deps, 2);
   if (spec === null) return false;
   const where = paths(deps.workDir, spec);
-  const beat = heartbeater(deps.api, deps.heartbeatMs ?? HEARTBEAT_MS, deps.log);
+  const lost = new AbortController();
+  const beat = heartbeater(deps.api, deps.heartbeatMs ?? HEARTBEAT_MS, deps.log, () =>
+    lost.abort(),
+  );
   const env = engineEnv({ home: where.home, llmUrl: spec.llmUrl, token: deps.token });
   // Whether a CLI that exited 0 showed the cost refusal: trusted only if the wiki is incomplete.
   let capped = false;
@@ -181,7 +227,9 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
       args,
       env,
       timeoutMs: CLI_TIMEOUT_MS,
+      signal: lost.signal,
     });
+    if (lost.signal.aborted) throw new LeaseLost();
     capped ||= run.costCapped;
     if (run.status === 0) return;
     deps.log({
@@ -205,8 +253,9 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
       throw new Error("the server took a count over the file limit");
     }
     const index = await (
-      deps.indexRepo ?? ((repo, sha, home) => indexInChild({ repo, sha, home }))
-    )(where.repo, spec.commitSha, where.home);
+      deps.indexRepo ?? ((repo, sha, home, signal) => indexInChild({ repo, sha, home, signal }))
+    )(where.repo, spec.commitSha, where.home, lost.signal);
+    if (lost.signal.aborted) throw new LeaseLost();
     if ((await deps.api.indexed(indexedCount(index.files))) === "too-large") return false;
     await beat.step("manifest");
     await cli(CLI.manifest, [where.repo, spec.commitSha, "--out", where.out]);
@@ -251,7 +300,7 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
   } catch (error) {
     const code = error instanceof CliFailed ? error.code : "job-failed";
     deps.log({ phase: 2, failed: code, ...why(error) });
-    if (leaseGone(error)) return false;
+    if (leaseGone(error) || lost.signal.aborted) return false;
     return reportFailure(deps, code);
   } finally {
     beat.stop();

@@ -64,6 +64,7 @@ function runGit(
   env: Record<string, string>,
   timeoutMs: number,
   watch?: { everyMs: number; over: () => boolean },
+  signal?: AbortSignal,
 ): Promise<GitRun> {
   return new Promise((resolve) => {
     const child = spawn(git, args, { env, stdio: ["ignore", "ignore", "pipe"], detached: true });
@@ -94,12 +95,15 @@ function runGit(
               kill();
             }
           }, watch.everyMs);
+    signal?.addEventListener("abort", kill);
+    if (signal?.aborted) kill();
     let settled = false;
     const done = (status: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearInterval(poll);
+      signal?.removeEventListener("abort", kill);
       resolve({ status, timedOut, stopped, stderr });
     };
     child.on("error", () => done(null));
@@ -123,6 +127,8 @@ export async function cloneBare(input: {
   timeoutMs?: number;
   maxBytes?: number;
   pollMs?: number;
+  /** Aborting it kills the clone's process group (the lease was lost). */
+  signal?: AbortSignal;
 }): Promise<CloneResult> {
   const maxBytes = input.maxBytes ?? MAX_REPO_BYTES;
   const git = input.git ?? "git";
@@ -155,6 +161,7 @@ export async function cloneBare(input: {
     env,
     input.timeoutMs ?? CLONE_TIMEOUT_MS,
     { everyMs: input.pollMs ?? CLONE_POLL_MS, over: () => bytesSoFar(input.dir) > maxBytes },
+    input.signal,
   );
   if (cloned.stopped || (cloned.status !== 0 && NO_SPACE.test(cloned.stderr))) {
     rmSync(input.dir, { recursive: true, force: true });

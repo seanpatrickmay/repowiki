@@ -83,6 +83,21 @@ describe("runCli (spec 2 S9)", () => {
     expect(alive()).toBe(false);
   });
 
+  it("kills a script's process group when its signal aborts", async () => {
+    const abort = new AbortController();
+    const started = Date.now();
+    const running = runCli({
+      script: script("setTimeout(() => {}, 60_000);"),
+      args: [],
+      env: {},
+      timeoutMs: 60_000,
+      signal: abort.signal,
+    });
+    setTimeout(() => abort.abort(), 200);
+    expect(await running).toMatchObject({ status: null, timedOut: false });
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it("notices the proxy's cost refusal anywhere in stderr, not only in its tail", async () => {
     const path = script(
       `process.stderr.write('ingest: not written: the write call failed: LlmError: batch could not be created: 429 {"type":"error","error":{"type":"rate_limit_error","message":"job-cost-cap"}}\\n'); process.stderr.write("x".repeat(20000)); process.exit(0);`,

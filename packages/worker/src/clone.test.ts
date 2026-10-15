@@ -132,6 +132,18 @@ describe("cloneBare (spec 2 S9)", () => {
     });
   });
 
+  it("stops the clone when its signal aborts", async () => {
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 200);
+    const started = Date.now();
+    const result = await cloneBare({
+      ...base(work(), fakeGit({ sleep: 30 }).git),
+      signal: abort.signal,
+    });
+    expect(result).toMatchObject({ ok: false, code: "job-failed" });
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it("fails when git cannot be started", async () => {
     expect(await cloneBare({ ...base(work(), "/nonexistent/git") })).toMatchObject({
       ok: false,

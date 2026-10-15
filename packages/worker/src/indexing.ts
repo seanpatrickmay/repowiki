@@ -36,6 +36,8 @@ export async function indexInChild(input: {
   sha: string;
   home: string;
   timeoutMs?: number;
+  /** Aborting it kills the child's process group. */
+  signal?: AbortSignal;
   run?: typeof runCli;
 }): Promise<{ files: FileFacts[] }> {
   const run = await (input.run ?? runCli)({
@@ -45,6 +47,7 @@ export async function indexInChild(input: {
     timeoutMs: input.timeoutMs ?? INDEX_TIMEOUT_MS,
     nodeArgs: [`--max-old-space-size=${INDEX_HEAP_MB}`],
     stdoutBytes: INDEX_STDOUT_BYTES,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (run.status !== 0 || typeof run.stdout !== "string") {
     throw new Error(`the index ${run.timedOut ? "timed out" : `exited ${run.status}`}`);
