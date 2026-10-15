@@ -4,6 +4,7 @@ import {
   type Generation,
   JOB_STEPS,
   type Job,
+  PLATFORM,
   type Preview,
   type Project,
   type PublishedVersion,
@@ -33,6 +34,38 @@ const form = (action: string, session: PageSession, inner: string, cls = "") =>
 const isActive = (job: Job | null) =>
   job !== null && (job.status === "queued" || job.status === "running");
 
+/** What the author can do about the last job: cancel it, retry it, or start again (M14e A2). */
+function jobActions(v: ProjectView): string {
+  const { job, project, session } = v;
+  if (job === null) return "";
+  const base = `/projects/${project.id}`;
+  if (isActive(job)) {
+    return form(
+      `${base}/jobs/${job.id}/cancel`,
+      session,
+      `<button class="secondary">Cancel</button>`,
+    );
+  }
+  if (job.status !== "failed") return "";
+  const retryable =
+    job.refusal !== null &&
+    REFUSALS[job.refusal].retryable &&
+    job.attempt < PLATFORM.jobMaxAttempts;
+  if (retryable) return form(`${base}/jobs/${job.id}/retry`, session, "<button>Retry</button>");
+  if (project.latestRevision === 0) {
+    return form(
+      "/projects",
+      session,
+      `${field("githubRepoId", project.githubRepoId)}<button>Start over</button>`,
+    );
+  }
+  return form(
+    `${base}/refresh`,
+    session,
+    `<button class="secondary">Refresh from the latest commit</button>`,
+  );
+}
+
 function jobSection(v: ProjectView): string {
   const { job } = v;
   if (job === null) return "";
@@ -46,7 +79,7 @@ function jobSection(v: ProjectView): string {
   const why =
     job.refusal === null ? "" : `<p class="notice">${e(REFUSALS[job.refusal].message)}</p>`;
   const title = `${job.kind === "refresh" ? "Refresh" : "Generation"}: ${job.status}`;
-  return `<section class="card"><h2>${e(title)}</h2><ol>${steps}</ol>${why}</section>`;
+  return `<section class="card"><h2>${e(title)}</h2><ol>${steps}</ol>${why}${jobActions(v)}</section>`;
 }
 
 function editor(v: ProjectView): string {

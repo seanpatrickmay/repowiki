@@ -121,7 +121,7 @@ export {
   type WorkerSpec,
 } from "./routes/internal.ts";
 export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
-export { type Live, liveEligibility, ownedProject, repoFullName } from "./routes/live.ts";
+export { isUuid, type Live, liveEligibility, ownedProject, repoFullName } from "./routes/live.ts";
 export {
   anthropicError,
   anthropicShaped,
@@ -132,6 +132,7 @@ export {
   proxyCore,
   rateLimiter,
 } from "./routes/llm.ts";
+export { jobRoutes } from "./routes/project-jobs.ts";
 export { projectRoutes } from "./routes/projects.ts";
 export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
 export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
