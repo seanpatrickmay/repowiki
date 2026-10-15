@@ -64,13 +64,25 @@ describe("projects (Contract spec §6.2)", () => {
 
   it("restore a repository withdrawal within 30 days to where it was", () => {
     const wasPublished = withdrawn("repository", { currentVersion: 2 });
-    expect(restore(wasPublished, DAY29)).toMatchObject({
+    const ok = { servable: true };
+    expect(restore(wasPublished, DAY29, ok)).toMatchObject({
       value: { state: "published", withdrawReason: null, withdrawnAt: null },
     });
-    expect(restore(withdrawn("repository"), DAY29)).toMatchObject({ value: { state: "draft" } });
-    expect(restore(wasPublished, DAY31)).toEqual({ ok: false, code: "restore-expired" });
-    expect(restore(withdrawn("author"), DAY29)).toMatchObject({ code: "invalid-transition" });
-    expect(restore(withdrawn("operator"), DAY29)).toMatchObject({ code: "invalid-transition" });
+    expect(restore(withdrawn("repository"), DAY29, ok)).toMatchObject({
+      value: { state: "draft" },
+    });
+    expect(restore(wasPublished, DAY31, ok)).toEqual({ ok: false, code: "restore-expired" });
+    expect(restore(withdrawn("author"), DAY29, ok)).toMatchObject({ code: "invalid-transition" });
+    expect(restore(withdrawn("operator"), DAY29, ok)).toMatchObject({
+      code: "invalid-transition",
+    });
+  });
+
+  it("restore to draft when the current version cannot be served (ADR-0013, review I3)", () => {
+    const oldLayout = withdrawn("repository", { currentVersion: 2 });
+    expect(restore(oldLayout, DAY29, { servable: false })).toMatchObject({
+      value: { state: "draft", currentVersion: 2, withdrawReason: null, unavailableSince: null },
+    });
   });
 
   it("purge repository and account withdrawals after 30 days, keeping the tombstone", () => {
@@ -109,16 +121,19 @@ describe("a repository going away under an author-withdrawn project (final revie
 
   it("stops the clock when restored, leaving the page withdrawn", () => {
     const gone = withdrawn("author", { unavailableSince: T1 });
-    expect(restore(gone, DAY29)).toEqual({
+    expect(restore(gone, DAY29, { servable: true })).toEqual({
       ok: true,
       value: { ...gone, unavailableSince: null },
     });
-    expect(restore(gone, "2026-11-20T00:00:00Z")).toEqual({ ok: false, code: "restore-expired" });
+    expect(restore(gone, "2026-11-20T00:00:00Z", { servable: true })).toEqual({
+      ok: false,
+      code: "restore-expired",
+    });
   });
 
   it("clears the clock on a repository restore", () => {
     const gone = withdrawn("repository", { unavailableSince: T0 });
-    expect(restore(gone, DAY29)).toMatchObject({
+    expect(restore(gone, DAY29, { servable: true })).toMatchObject({
       value: { state: "draft", unavailableSince: null },
     });
   });

@@ -1,10 +1,17 @@
-import { type Account, BiographyEntry, type BiographyProject, biography } from "@repowiki/hosted";
+import {
+  type Account,
+  authorize,
+  BiographyEntry,
+  type BiographyProject,
+  biography,
+} from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import { avatarPath } from "../github/avatar.ts";
 import type { ObjectStore } from "../objects/store.ts";
 import { SILHOUETTE_PATH } from "../pages/biography-style.ts";
 import { biographyHtml } from "../render/biography.ts";
 import { ENTRY_FILE } from "../render/build.ts";
+import { accountById } from "../store/accounts.ts";
 import { versionOf } from "../store/drafts.ts";
 import { projectsOf } from "../store/projects.ts";
 
@@ -26,11 +33,22 @@ export interface PublishedEntry {
   publishedAt: string;
 }
 
-/** The account's published projects, each with its current version's entry (ADR-0013). */
+/**
+ * The account's projects anyone may read now (the `public.read` policy), each with its current
+ * version's entry (ADR-0013).
+ */
 export async function publishedEntries(deps: Deps, accountId: string): Promise<PublishedEntry[]> {
+  const owner = await accountById(deps.db, accountId);
+  if (owner === null) return [];
   const found: PublishedEntry[] = [];
   for (const project of await projectsOf(deps.db, accountId)) {
-    if (project.state !== "published") continue;
+    const verdict = authorize("public.read", {
+      now: deps.now(),
+      caller: { kind: "anonymous" },
+      project,
+      ownerStatus: owner.status,
+    });
+    if (!verdict.ok) continue;
     const version = await versionOf(deps.db, project.id, project.currentVersion);
     const entry = version === null ? null : await storedEntry(deps.objects, version.siteKey);
     if (version === null || entry === null) continue;

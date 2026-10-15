@@ -259,7 +259,7 @@ describe("the GitHub avatar at sign-in (ADR-0013)", () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]);
 
   /** The fake GitHub, its user carrying `avatar_url`, and its avatar host answering `answer`. */
-  function avatarApp(answer: () => Response) {
+  function avatarApp(answer: () => Response, now = deps.now) {
     let fetches = 0;
     const github = deps.fetch;
     const fetchFn: typeof fetch = async (input, init) => {
@@ -272,22 +272,42 @@ describe("the GitHub avatar at sign-in (ADR-0013)", () => {
       if (!url.endsWith("/user")) return reply;
       return Response.json({ ...(await reply.json()), avatar_url: AVATAR });
     };
-    const local = { ...deps, fetch: fetchFn };
+    const local = { ...deps, fetch: fetchFn, now };
     return { app: createApp(local, authRoutes(local)), fetches: () => fetches };
   }
   const stored = async () =>
     (await deps.db.query<{ body: { avatar?: unknown } }>("SELECT body FROM accounts"))[0]?.body
       .avatar;
 
-  it("stores the avatar's bytes by hash, and fetches it again only when its URL changes", async () => {
+  it("stores the avatar's bytes by hash, and fetches it again only once a week has passed", async () => {
     const { app: on, fetches } = avatarApp(() => new Response(PNG));
     expect((await signInFlow(on)).back.status).toBe(303);
-    const avatar = (await stored()) as { sha256: string };
+    const avatar = (await stored()) as { sha256: string; fetchedAt: string };
     expect(avatar).toMatchObject({ contentType: "image/png", source: AVATAR });
+    expect(avatar.fetchedAt).toBe(deps.now());
     expect(avatar.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect((await deps.objects.get(`avatars/${avatar.sha256}`))?.body).toEqual(PNG);
     await signInFlow(on);
     expect(fetches()).toBe(1);
+    // GitHub's avatar URL never changes with the picture (review I2): a week on, it is fetched
+    // again; the same bytes only move fetchedAt, new bytes are stored under their own hash.
+    const WEEK_ON = "2026-10-21T12:00:01.000Z";
+    const later = avatarApp(
+      () => new Response(PNG),
+      () => WEEK_ON,
+    );
+    await signInFlow(later.app);
+    expect(later.fetches()).toBe(1);
+    expect(await stored()).toEqual({ ...avatar, fetchedAt: WEEK_ON });
+    const NEW = new Uint8Array([...PNG, 8]);
+    const changed = avatarApp(
+      () => new Response(NEW),
+      () => "2026-10-29T12:00:00.000Z",
+    );
+    await signInFlow(changed.app);
+    const next = (await stored()) as { sha256: string };
+    expect(next.sha256).not.toBe(avatar.sha256);
+    expect((await deps.objects.get(`avatars/${next.sha256}`))?.body).toEqual(NEW);
   });
 
   it("signs in without one when the avatar host fails, or sends something else", async () => {

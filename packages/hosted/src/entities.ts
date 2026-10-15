@@ -27,6 +27,8 @@ export const Account = z.strictObject({
       sha256: Sha256Hex,
       contentType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
       source: z.url({ protocol: /^https$/ }).max(500),
+      /** When the bytes were last fetched; a week on, sign-in fetches them again. */
+      fetchedAt: IsoDateTime,
     })
     .optional(),
 });

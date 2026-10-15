@@ -54,8 +54,11 @@ Each ruling is "Ruling: X — why — cost if wrong".
   a profile with many projects costs one read per project per uncached request; an in-process
   cache keyed by the published versions is the fix.
 - **Versions published before this change.** Ruling: migration 0009 returns every `published`
-  project to `draft` (its versions and bytes kept, `currentVersion` unchanged) and deletes every
-  preview row and preview token, since their trees have the old layout and no entry. The author
+  project to `draft` (its versions and bytes kept, `currentVersion` unchanged), and so every
+  project withdrawn for its repository with a version (clearing the withdrawal), and deletes
+  every preview row and preview token, since their trees have the old layout and no entry.
+  `restore()` takes whether the current version can be served (has `entry.json`) and restores to
+  `draft` when it cannot. The author
   previews and publishes again; the next version number follows on. — There is no production
   data, and an old tree cannot be rebuilt in SQL. — Cost if wrong: the owner republishes his local
   projects once; `draft` no longer strictly means "never published".
@@ -142,16 +145,18 @@ Each ruling is "Ruling: X — why — cost if wrong".
 ### The avatar
 
 - **Fetched at sign-in, served from the pages origin.** Ruling: at sign-in, when GitHub's
-  `avatar_url` is an `https://avatars.githubusercontent.com/` URL that differs from the stored
-  one, the server fetches it (5-second timeout, no redirects, at most 1 MB read), accepts only
-  PNG, JPEG, GIF or WebP by magic bytes, and stores the bytes at `avatars/<sha256>` with the
-  account's `avatar` set to `{ sha256, contentType, source }`. A failure keeps the previous
-  avatar and never fails the sign-in. The pages host serves `/_app/avatar/<sha256>` with
+  `avatar_url` is an `https://avatars.githubusercontent.com/` URL and the account has no stored
+  copy from that URL fetched within the last 7 days (GitHub keeps one URL per user while the
+  picture changes, so the copy's age decides, not the URL), the server fetches it (5-second
+  timeout, no redirects, at most 1 MB read), accepts only PNG, JPEG, GIF or WebP by magic bytes,
+  and stores the bytes at `avatars/<sha256>` with the account's `avatar` set to `{ sha256,
+  contentType, source, fetchedAt }`; when the hash is unchanged only `fetchedAt` moves. A
+  failure keeps the previous avatar and never fails the sign-in. The pages host serves `/_app/avatar/<sha256>` with
   `Cache-Control: public, max-age=31536000, immutable` and `nosniff`, only while an active
   account references that hash; with no avatar the biography uses the built-in silhouette at
   `/_app/avatar.svg`. — Readers' browsers never contact GitHub (`img-src 'self'`), and a
   content hash never needs invalidating. — Cost if wrong: a changed avatar shows only after the
-  next sign-in; a sign-in is up to five seconds slower when GitHub's avatar host is slow.
+  first sign-in a week or more after the last fetch; a sign-in is up to five seconds slower when GitHub's avatar host is slow.
 - **Local mode.** Ruling: `pnpm hosted:profile` saves the user's avatar beside the snapshot
   (`<snapshot>.avatar`) and records its URL; the local fake GitHub answers that URL with the saved
   bytes, so `hosted:local` stores and shows the real avatar through the same sign-in code. — The
@@ -191,3 +196,11 @@ Each ruling is "Ruling: X — why — cost if wrong".
 - The runbook's examples of public URLs change (`/<handle>/<slug>/` for a wiki, no `/docs/`), and
   the owner's local projects must be previewed and published again after migration 0009.
 - Spec 3 (safe operation) gains the avatar fetch as an outbound request to watch.
+- A project withdrawn for its repository before this change comes back as a draft, not withdrawn,
+  and loses its purge clock; the daily check withdraws it again if the repository is still
+  unavailable. Whoever calls `restore()` (spec 3's daily check) must pass whether the current
+  version has `entry.json`; an operator takedown keeps its old-layout version, and its
+  reinstatement must make the same check.
+- A preview whose account has no active handle answers 404, and `healthz` is a reserved handle.
+- `publishedEntries` asks the `public.read` policy for each project rather than reading the
+  state itself.
