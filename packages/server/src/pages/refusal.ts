@@ -1,6 +1,7 @@
 import { REFUSALS, type RefusalCode } from "@repowiki/hosted";
 import type { Reply } from "../http/router.ts";
 import { html } from "../http/server.ts";
+import type { Session } from "../http/session.ts";
 import { escapeHtml, type PageSession, page } from "./layout.ts";
 
 /**
@@ -24,3 +25,6 @@ export function refusalPage(
     }),
   );
 }
+
+/** What the layout needs of a session. */
+export const pageSession = (s: Session): PageSession => ({ csrf: s.csrf, login: s.account.login });

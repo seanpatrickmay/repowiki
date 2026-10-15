@@ -18,11 +18,16 @@ export interface PageSession {
   login: string;
 }
 
-/** A full page in the app's layout; `body` must already be escaped HTML. */
-export function page(input: { title: string; body: string; session: PageSession | null }): string {
+/** A full page in the app's layout; `body` and `head` must already be escaped HTML. */
+export function page(input: {
+  title: string;
+  body: string;
+  session: PageSession | null;
+  head?: string;
+}): string {
   const nav =
     input.session === null
       ? `<a href="/auth/github">Sign in with GitHub</a>`
       : `<span><a href="/dashboard">${escapeHtml(input.session.login)}</a> <form class="inline" method="post" action="/auth/signout"><input type="hidden" name="csrf" value="${escapeHtml(input.session.csrf)}"><button class="secondary">Sign out</button></form></span>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(input.title)} · RepoWiki</title><link rel="stylesheet" href="${STYLE_PATH}"></head><body><header><a href="/">RepoWiki</a>${nav}</header><main>${input.body}</main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(input.title)} · RepoWiki</title><link rel="stylesheet" href="${STYLE_PATH}">${input.head ?? ""}</head><body><header><a href="/">RepoWiki</a>${nav}</header><main>${input.body}</main></body></html>`;
 }
