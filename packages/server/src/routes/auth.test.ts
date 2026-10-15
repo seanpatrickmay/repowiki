@@ -205,4 +205,51 @@ describe("GitHub sign-in when GitHub misbehaves (spec 2 S7)", () => {
     expect((await signInFlow(createApp(broken, authRoutes(broken)))).back.status).toBe(502);
     expect(await deps.db.query("SELECT * FROM accounts")).toEqual([]);
   });
+
+  it("answers 502 when GitHub cannot be reached at all", async () => {
+    const down = (path: string): Deps => ({
+      ...deps,
+      fetch: async (input, init) => {
+        if (String(input).includes(path)) throw new TypeError("fetch failed");
+        return deps.fetch(input, init);
+      },
+    });
+    for (const path of ["/login/oauth/access_token", "/api/user"]) {
+      const broken = down(path);
+      const { back } = await signInFlow(createApp(broken, authRoutes(broken)));
+      expect(back.status, path).toBe(502);
+      expect(String(back.body)).toContain("Sign-in failed");
+    }
+  });
+});
+
+describe("GitHub sign-in failures clear the state cookie (spec 2 S7)", () => {
+  const cleared = (reply: Awaited<ReturnType<typeof call>>) =>
+    [reply.headers?.["set-cookie"] ?? []].flat().some((c) => /^oauth_state=;.*Max-Age=0/.test(c));
+
+  it("explains a sign-in the user cancelled on GitHub", async () => {
+    const start = await call(app, { path: "/auth/github" });
+    const state = setCookie(start, "oauth_state") ?? "";
+    const reply = await call(app, {
+      path: `/auth/github/callback?error=access_denied&state=${state}`,
+      headers: { cookie: `oauth_state=${encodeURIComponent(state)}` },
+    });
+    expect(reply.status).toBe(400);
+    expect(String(reply.body)).toContain("You cancelled the sign-in on GitHub.");
+    expect(cleared(reply)).toBe(true);
+  });
+
+  it("clears it after a bad state and a refused code", async () => {
+    const start = await call(app, { path: "/auth/github" });
+    const state = setCookie(start, "oauth_state") ?? "";
+    const cookie = { cookie: `oauth_state=${encodeURIComponent(state)}` };
+    const bad = await call(app, { path: "/auth/github/callback?code=x&state=no", headers: cookie });
+    expect(cleared(bad)).toBe(true);
+    const refused = await call(app, {
+      path: `/auth/github/callback?code=nope&state=${state}`,
+      headers: cookie,
+    });
+    expect(refused.status).toBe(400);
+    expect(cleared(refused)).toBe(true);
+  });
 });
