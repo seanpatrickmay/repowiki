@@ -19,6 +19,7 @@ export { eligibilityFacts, type FactsInput, permissionOf } from "./github/facts.
 export {
   FAKE_CODE,
   FAKE_COMMITS,
+  FAKE_HEAD,
   FAKE_REPO,
   FAKE_TOKEN,
   FAKE_USER,
@@ -93,5 +94,20 @@ export {
 } from "./store/accounts.ts";
 export { appendAudit } from "./store/audit.ts";
 export { readGitHubToken, saveGitHubToken } from "./store/github-tokens.ts";
+export {
+  activeJob,
+  issueToken,
+  JobSpec,
+  jobById,
+  jobSpec,
+  jobsOf,
+  openReservations,
+  revokeTokens,
+  saveJob,
+  saveJobSpec,
+  settleOpen,
+  tokenJob,
+  tokensIssued,
+} from "./store/jobs.ts";
 export { parsedBody, StoreError } from "./store/rows.ts";
 export { createSession, endSession, readSession, SESSION_DAYS } from "./store/sessions.ts";

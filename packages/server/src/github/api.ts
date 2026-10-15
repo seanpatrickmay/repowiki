@@ -40,7 +40,8 @@ export const GitHubRepo = z.object({
 });
 export type GitHubRepo = z.infer<typeof GitHubRepo>;
 
-const Commits = z.array(z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/) }));
+const GitSha = z.string().regex(/^[0-9a-f]{40}$/);
+const Commits = z.array(z.object({ sha: GitSha }));
 const MAX_COUNT = 1000;
 const MAX_REPO_PAGES = 10;
 
@@ -63,12 +64,21 @@ export interface GitHubApi {
   countCommits(token: string, fullName: string, login: string): Promise<number>;
   /** Up to `max` (at most 100) of `login`'s most recent commit shas. */
   commitShas(token: string, fullName: string, login: string, max: number): Promise<string[]>;
+  /** The commit `branch` points at; null when the repository is empty or has no such branch. */
+  headSha(token: string, fullName: string, branch: string): Promise<string | null>;
 }
 
 /** GitHub's REST API as the signed-in user, through `fetchFn` (spec 2 S8). */
 export function githubApi(fetchFn: typeof fetch, endpoints: GitHubEndpoints): GitHubApi {
-  /** The response, or null for 404 (not there, or hidden) and 409 (an empty repository). */
-  async function get(token: string, path: string): Promise<Response | null> {
+  /**
+   * The response, or null for 404 (not there, or hidden), 409 (an empty repository) and any
+   * status in `missing`.
+   */
+  async function get(
+    token: string,
+    path: string,
+    missing: readonly number[] = [],
+  ): Promise<Response | null> {
     const response = await fetchFn(`${endpoints.api}${path}`, {
       headers: {
         authorization: `Bearer ${token}`,
@@ -80,6 +90,7 @@ export function githubApi(fetchFn: typeof fetch, endpoints: GitHubEndpoints): Gi
     });
     if (response.status === 401) throw new TokenRevoked("GitHub refused the token");
     if (response.status === 404 || response.status === 409) return null;
+    if (missing.includes(response.status)) return null;
     if (!response.ok) {
       throw new GitHubError(`GitHub answered ${response.status} for ${path.split("?")[0]}`);
     }
@@ -137,6 +148,17 @@ export function githubApi(fetchFn: typeof fetch, endpoints: GitHubEndpoints): Gi
       const response = await get(token, commitsPath(fullName, login, perPage));
       const commits = await parse(response, Commits, "commit list");
       return (commits ?? []).slice(0, max).map((c) => c.sha);
+    },
+    async headSha(token, fullName, branch) {
+      if (!FULL_NAME.test(fullName)) throw new GitHubError("not a repository name");
+      // 422: GitHub has no commit for that ref.
+      const response = await get(
+        token,
+        `/repos/${fullName}/commits/${encodeURIComponent(branch)}`,
+        [422],
+      );
+      const commit = await parse(response, z.object({ sha: GitSha }), "commit");
+      return commit?.sha ?? null;
     },
   };
 }

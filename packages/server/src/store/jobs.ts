@@ -1,0 +1,154 @@
+import { GitSha, Sha256Hex } from "@repowiki/core";
+import { Job, Plan, recordSpend } from "@repowiki/hosted";
+import { z } from "zod";
+import { randomToken, sha256Hex } from "../crypto.ts";
+import type { Queryable } from "../db/db.ts";
+import { asJson, parsedBody } from "./rows.ts";
+
+/** What a worker needs that the Contract's Job does not hold (spec 2 §6). */
+export const JobSpec = z.strictObject({
+  repo: z.strictObject({
+    githubRepoId: z.int().positive(),
+    fullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
+    name: z.string().min(1),
+    cloneUrl: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\.git$/),
+    sizeKb: z.number().nonnegative(),
+  }),
+  author: z.strictObject({
+    login: z.string().min(1).max(39),
+    githubUserId: z.int().positive(),
+    commitShas: z.array(GitSha).max(100),
+  }),
+  plan: Plan,
+  export: z.strictObject({ key: z.string().min(1), hash: Sha256Hex }).nullable(),
+});
+export type JobSpec = z.infer<typeof JobSpec>;
+
+const lock = (forUpdate: boolean) => (forUpdate ? " FOR UPDATE" : "");
+const parsed = (rows: { body: unknown }[]) =>
+  rows[0] === undefined ? null : parsedBody(Job, rows[0].body, "job");
+
+export async function jobById(q: Queryable, id: string, forUpdate = false): Promise<Job | null> {
+  return parsed(
+    await q.query<{ body: unknown }>(`SELECT body FROM jobs WHERE id = $1${lock(forUpdate)}`, [id]),
+  );
+}
+
+/** The project's queued or running job, if any (at most one: `jobs_one_active`). */
+export async function activeJob(
+  q: Queryable,
+  projectId: string,
+  forUpdate = false,
+): Promise<Job | null> {
+  return parsed(
+    await q.query<{ body: unknown }>(
+      `SELECT body FROM jobs WHERE project_id = $1 AND status IN ('queued', 'running')${lock(forUpdate)}`,
+      [projectId],
+    ),
+  );
+}
+
+export async function jobsOf(q: Queryable, projectId: string): Promise<Job[]> {
+  const rows = await q.query<{ body: unknown }>(
+    "SELECT body FROM jobs WHERE project_id = $1 ORDER BY body->>'createdAt' DESC, id",
+    [projectId],
+  );
+  return rows.map((r) => parsedBody(Job, r.body, "job"));
+}
+
+export async function saveJob(q: Queryable, job: Job): Promise<void> {
+  const body = parsedBody(Job, job, "job");
+  await q.query(
+    `INSERT INTO jobs (id, project_id, status, lease_expires_at, body) VALUES ($1, $2, $3, $4, $5::jsonb)
+     ON CONFLICT (id) DO UPDATE SET status = excluded.status,
+       lease_expires_at = excluded.lease_expires_at, body = excluded.body`,
+    [body.id, body.projectId, body.status, body.leaseExpiresAt, asJson(body)],
+  );
+}
+
+export async function saveJobSpec(q: Queryable, jobId: string, spec: JobSpec): Promise<void> {
+  const body = parsedBody(JobSpec, spec, "job spec");
+  await q.query(
+    `INSERT INTO job_specs (job_id, body) VALUES ($1, $2::jsonb)
+     ON CONFLICT (job_id) DO UPDATE SET body = excluded.body`,
+    [jobId, asJson(body)],
+  );
+}
+
+export async function jobSpec(q: Queryable, jobId: string): Promise<JobSpec | null> {
+  const rows = await q.query<{ body: unknown }>("SELECT body FROM job_specs WHERE job_id = $1", [
+    jobId,
+  ]);
+  return rows[0] === undefined ? null : parsedBody(JobSpec, rows[0].body, "job spec");
+}
+
+/** A fresh single-use secret for one attempt of one job; only its hash is kept (spec 2 §10). */
+export async function issueToken(
+  q: Queryable,
+  jobId: string,
+  attempt: number,
+  now: string,
+): Promise<string> {
+  const token = randomToken();
+  await q.query(
+    "INSERT INTO job_tokens (token_hash, job_id, attempt, issued_at) VALUES ($1, $2, $3, $4)",
+    [sha256Hex(token), jobId, attempt, now],
+  );
+  return token;
+}
+
+/** The job and attempt a token was issued for, or null for an unknown or revoked token. */
+export async function tokenJob(
+  q: Queryable,
+  token: string,
+): Promise<{ jobId: string; attempt: number } | null> {
+  const rows = await q.query<{ job_id: string; attempt: number }>(
+    "SELECT job_id, attempt FROM job_tokens WHERE token_hash = $1",
+    [sha256Hex(token)],
+  );
+  const row = rows[0];
+  return row === undefined ? null : { jobId: row.job_id, attempt: Number(row.attempt) };
+}
+
+/** How many tokens an attempt has had and when the last was issued (the sweeper's restart bound). */
+export async function tokensIssued(
+  q: Queryable,
+  jobId: string,
+  attempt: number,
+): Promise<{ count: number; last: Date | null }> {
+  const rows = await q.query<{ count: string | number; last: Date | null }>(
+    "SELECT count(*) AS count, max(issued_at) AS last FROM job_tokens WHERE job_id = $1 AND attempt = $2",
+    [jobId, attempt],
+  );
+  return { count: Number(rows[0]?.count ?? 0), last: rows[0]?.last ?? null };
+}
+
+/** Every token of the job stops working: it ended, or its attempt was recovered (spec 2 §6). */
+export async function revokeTokens(q: Queryable, jobId: string): Promise<void> {
+  await q.query("DELETE FROM job_tokens WHERE job_id = $1", [jobId]);
+}
+
+/** The job's reservations the proxy has not settled yet, in micro-dollars. */
+export async function openReservations(q: Queryable, jobId: string): Promise<number> {
+  const rows = await q.query<{ usd: string | number }>(
+    "SELECT COALESCE(sum(usd_micros), 0) AS usd FROM reservations WHERE job_id = $1 AND NOT settled",
+    [jobId],
+  );
+  return Number(rows[0]?.usd ?? 0);
+}
+
+/**
+ * A job about to stop: every open reservation becomes spend in full, because the real cost of a
+ * batch whose results were never read is unknown (Contract C8; spec 2 §6). Spend never passes the
+ * cap, which the Job schema forbids.
+ */
+export async function settleOpen(q: Queryable, job: Job): Promise<Job> {
+  const open = await openReservations(q, job.id);
+  await q.query("UPDATE reservations SET settled = true WHERE job_id = $1 AND NOT settled", [
+    job.id,
+  ]);
+  if (open === 0 || job.status !== "running") return job;
+  const spend = Math.min(open, job.capUsdMicros - job.spentUsdMicros);
+  const spent = recordSpend(job, job.attempt, spend);
+  return spent.ok ? spent.value : job;
+}
