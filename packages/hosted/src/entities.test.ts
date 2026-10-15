@@ -107,18 +107,11 @@ describe("entities (Contract spec §5)", () => {
     expect(ok(Generation, { ...g, suggestions })).toBe(false);
   });
 
-  it("accept only the two kinds of revision flag (no hidden features, ADR-0012)", () => {
-    for (const flag of [
-      "suggestion-changed:tagline",
-      "suggestion-changed:summary",
-      "suggestion-changed:contribution",
-      "highlight-missing:indexing",
-    ]) {
-      expect(ok(DraftRevision, aRevision({ flags: [flag] })), flag).toBe(true);
-    }
-    for (const flag of ["suggestion-changed:title", "highlight-missing:", "hidden-missing:site"]) {
-      expect(ok(DraftRevision, aRevision({ flags: [flag] })), flag).toBe(false);
-    }
+  it("hold generated content, and no overrides or flags (ADR-0012)", () => {
+    expect(ok(DraftRevision, { ...aRevision(), flags: [] })).toBe(false);
+    expect(ok(DraftRevision, { ...aRevision(), overrides: {} })).toBe(false);
+    const markup = aRevision({ content: { ...aRevision().content, tagline: "<b>x</b>" } });
+    expect(ok(DraftRevision, markup)).toBe(false);
   });
 
   it("number revisions and versions from 1 and cap authored commits at 1000", () => {
@@ -145,7 +138,8 @@ describe("entities (Contract spec §5)", () => {
   });
 
   it("audit an action with its actor, target and outcome", () => {
-    expect(ACTIONS).toHaveLength(18);
+    expect(ACTIONS).toHaveLength(17);
+    expect(ACTIONS).not.toContain("draft.save");
     const event = {
       id: ids.generation,
       actor: "author",

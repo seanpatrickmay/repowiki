@@ -81,10 +81,10 @@ Each ruling is "Ruling: X — why — cost if wrong".
   restoring hiding from history, and its export filter.
 - **Stored rows.** Ruling: migration 0005 removes `hiddenFeatureIds` and the `hidden-missing`
   flags from stored revisions, deleting the reviews and previews of revisions that hid something;
-  migration 0006 rewrites every remaining legacy revision into `content` from its generation in
-  SQL (tagline, summary, the model draft or the facts paragraph without "most of all", and no
-  highlights, since titles and leads live in object storage) and deletes their version 1 reviews
-  and their previews. Published versions are untouched; a published `portfolio.json` without the
+  migration 0006 deletes every version 1 review; migration 0007 rewrites every remaining legacy
+  revision into `content` from its generation in SQL (tagline, summary, the model draft or the
+  facts paragraph without "most of all", and no highlights, since titles and leads live in object
+  storage) and deletes their reviews and previews. Published versions are untouched; a published `portfolio.json` without the
   new `contributionBy` field reads as author-written, so an old page is never mislabelled. — There
   is no production data, and local drafts must still load. — Cost if wrong: the owner's local
   drafts show no highlights until refreshed and must be reviewed again.
@@ -134,6 +134,14 @@ Each ruling is "Ruling: X — why — cost if wrong".
   hour is long enough to review and short enough that a pasted link dies the same day. — Cost if
   wrong: a leaked link shows an unpublished draft to its holder for up to an hour; the expiry is a
   constant.
+
+### Scope note (2026-10-15, later the same day)
+
+The owner then ruled that the separate project page (summary, highlights, contribution section)
+will be replaced in a follow-up milestone by a Wikipedia-style biography profile linking straight
+to each project's wiki. Generated highlight blurbs were already committed (`generatedHighlights`)
+and stay until then, unpolished; the project page's layout is not restyled. The contribution is
+made by one function, `generatedContribution`, so the profile's per-project section can call it.
 
 ## Consequences
 

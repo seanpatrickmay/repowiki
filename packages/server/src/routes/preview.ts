@@ -1,10 +1,4 @@
-import {
-  authorize,
-  type DraftRevision,
-  type Generation,
-  type Project,
-  type RefusalCode,
-} from "@repowiki/hosted";
+import { authorize, type Project, type RefusalCode } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
@@ -67,21 +61,6 @@ export async function serveTreeFile(
   return { body: text, contentType: object.contentType };
 }
 
-/** The resolved portfolio layer a revision previews; an unwritten contribution shows the draft. */
-function previewData(
-  generation: Generation,
-  revision: DraftRevision,
-  exp: Parameters<typeof portfolioData>[0]["exp"],
-  repo: string,
-) {
-  const written = revision.overrides.contribution.trim() !== "";
-  const contribution = written
-    ? revision.overrides.contribution
-    : generation.suggestions.contributionDraft || "Not written yet.";
-  const shown = { ...revision, overrides: { ...revision.overrides, contribution } };
-  return portfolioData({ generation, revision: shown, exp, repoFullName: repo });
-}
-
 /** Building a revision's exact site and serving it privately to its owner (spec 2 S13, §7). */
 export function previewRoutes(deps: Deps, build = buildTree): Route[] {
   /** Accounts with a preview build in flight; one each (M14e A3). */
@@ -109,7 +88,7 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
     const repo =
       (await repoFullName(deps.db, project.githubRepoId)) ?? `${session.account.login}/${exp.repo}`;
     const hosted = hostedExport(exp);
-    const data = previewData(generation, latest, hosted, repo);
+    const data = portfolioData({ generation, revision: latest, exp: hosted, repoFullName: repo });
     const tree = await build({
       exp: hosted,
       base: `${siteBase(await handleOf(session), project.slug)}docs/`,

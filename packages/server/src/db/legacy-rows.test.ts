@@ -9,7 +9,13 @@ let deps: Deps & { db: Db };
 let projectId: string;
 const AT = "2026-10-14T12:00:00.000Z";
 
-/** Revision 1 as M14g stored it, with its review and preview, then the later migrations again. */
+/** Revision 1 as M14g stored it: author overrides over the generation, with flags. */
+const legacy = (overrides: object, flags: string[] = []) =>
+  `UPDATE revisions SET body = (body - 'content') || jsonb_build_object(
+     'overrides', '${JSON.stringify(overrides)}'::jsonb, 'flags', '${JSON.stringify(flags)}'::jsonb,
+     'source', 'author') WHERE project_id = $1`;
+
+/** Revision 1 rewritten by `sql`, with a review and a preview, then migrations `from` on again. */
 async function storedBefore(sql: string, from: number, attestationVersion = 1): Promise<void> {
   await deps.db.query(sql, [projectId]);
   await deps.db.query(
@@ -31,31 +37,46 @@ beforeEach(async () => {
 });
 afterEach(async () => deps.db.close());
 
-describe("rows stored before ADR-0012 (migration 0005)", () => {
-  it("lose hidden features, and the review and preview made with them", async () => {
-    await storedBefore(
-      `UPDATE revisions SET body = jsonb_set(jsonb_set(body, '{overrides,hiddenFeatureIds}',
-         '["deliverables"]'), '{flags}', '["hidden-missing:gone", "highlight-missing:old"]')
-       WHERE project_id = $1`,
-      5,
-    );
+describe("rows stored before ADR-0012 (migrations 0005 and 0007)", () => {
+  it("load when they hid features, with nothing of the hiding left", async () => {
+    const overrides = { contribution: "Mine.", highlights: [], hiddenFeatureIds: ["signals"] };
+    await storedBefore(legacy(overrides, ["hidden-missing:gone", "highlight-missing:x"]), 5);
     const latest = await latestRevision(deps.db, projectId);
-    expect(latest?.flags).toEqual(["highlight-missing:old"]);
-    expect(latest?.overrides).not.toHaveProperty("hiddenFeatureIds");
+    expect(Object.keys(latest ?? {}).sort()).toEqual([
+      "content",
+      "createdAt",
+      "generationId",
+      "number",
+      "projectId",
+    ]);
     expect(await reviewOf(deps.db, projectId, 1)).toBeNull();
     expect(await previewOf(deps.db, projectId, 1)).toBeNull();
   });
 
-  it("keep the review and preview of a revision that hid nothing", async () => {
-    await storedBefore(
-      `UPDATE revisions SET body = jsonb_set(body, '{overrides,hiddenFeatureIds}', '[]')
+  it("hold their generation's content, the model's draft when it wrote one", async () => {
+    await storedBefore(legacy({ contribution: "Mine.", highlights: [], tagline: "Mine" }), 7, 2);
+    const latest = await latestRevision(deps.db, projectId);
+    expect(latest?.content).toEqual({
+      tagline: "A tiny demo",
+      summary: "It demonstrates RepoWiki.",
+      contribution: "I wrote the ingest code.",
+      highlights: [],
+    });
+    // The review and preview were of the author's text, not of this content.
+    expect(await reviewOf(deps.db, projectId, 1)).toBeNull();
+    expect(await previewOf(deps.db, projectId, 1)).toBeNull();
+  });
+
+  it("write the facts paragraph when the model wrote no draft", async () => {
+    await deps.db.query(
+      `UPDATE generations SET body = jsonb_set(body, '{suggestions,contributionDraft}', '""')
        WHERE project_id = $1`,
-      5,
-      2,
+      [projectId],
     );
-    expect(await latestRevision(deps.db, projectId)).not.toBeNull();
-    expect(await reviewOf(deps.db, projectId, 1)).not.toBeNull();
-    expect(await previewOf(deps.db, projectId, 1)).not.toBeNull();
+    await storedBefore(legacy({ contribution: "", highlights: [] }), 7, 2);
+    expect((await latestRevision(deps.db, projectId))?.content.contribution).toBe(
+      "Demo Developer wrote 2 of the repository's 3 commits and about 50% of its current lines.",
+    );
   });
 });
 

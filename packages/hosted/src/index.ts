@@ -2,10 +2,8 @@ export {
   ATTESTATION_VERSION,
   ATTESTATIONS,
   AuthorFacts,
-  EMPTY_OVERRIDES,
   Facts,
   MAX_PARAGRAPHS,
-  Overrides,
   PortfolioContent,
   plainText,
   Suggestions,
@@ -34,16 +32,17 @@ export {
   PublishedVersion,
   Repository,
   Review,
-  RevisionFlag,
   UsdMicros,
   Uuid,
   WithdrawReason,
 } from "./entities.ts";
 export {
   type ContentExport,
+  type ContentInput,
   contributionParagraph,
   documentationFeatures,
   generatedContent,
+  generatedContribution,
   generatedHighlights,
 } from "./generated.ts";
 export {
@@ -90,7 +89,7 @@ export {
 export { type PublishInput, publish } from "./publish.ts";
 export { REFUSAL_CODES, REFUSALS, RefusalCode, type RefusalInfo } from "./refusals.ts";
 export { type Ok, ok, type Refused, type Result, refused } from "./result.ts";
-export { firstRevision, refreshRevision, reviewRevision, saveRevision } from "./revisions.ts";
+export { firstRevision, refreshRevision, reviewRevision } from "./revisions.ts";
 export { firstClause, plainWords } from "./text.ts";
 export {
   claimHandle,

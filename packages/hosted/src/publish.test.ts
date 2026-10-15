@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_OVERRIDES } from "./content.ts";
 import { type PublishInput, publish } from "./publish.ts";
 import {
   aPreview,
@@ -14,7 +13,7 @@ import {
 } from "./test-fixtures.ts";
 
 const T1 = "2026-10-15T00:00:00Z";
-const ready = aRevision({ overrides: { ...EMPTY_OVERRIDES, contribution: "I wrote it." } });
+const ready = aRevision();
 const input = (patch: Partial<PublishInput> = {}): PublishInput => ({
   project: aProject({ latestRevision: 1 }),
   latest: ready,
@@ -73,12 +72,6 @@ describe("publish (Contract spec §6.4)", () => {
 
   it("refuses each failed condition on its own", () => {
     expect(publish(input({ revision: 2 }))).toMatchObject({ code: "stale-revision" });
-    expect(publish(input({ latest: { ...ready, flags: ["highlight-missing:x"] } }))).toMatchObject({
-      code: "needs-review-flags",
-    });
-    expect(publish(input({ latest: aRevision() }))).toMatchObject({
-      code: "contribution-missing",
-    });
     expect(publish(input({ review: null }))).toMatchObject({ code: "not-reviewed" });
     expect(publish(input({ review: aReview({ revision: 2 }) }))).toMatchObject({
       code: "not-reviewed",

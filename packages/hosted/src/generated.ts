@@ -95,26 +95,35 @@ export function contributionParagraph(
   return `${name} wrote ${a.commits} of the repository's ${total}${lines}${where}.`;
 }
 
-/**
- * A revision's content from its generation (ADR-0012): the suggested tagline and summary, the
- * model's contribution draft or else the facts paragraph, and the generated highlights.
- */
-export function generatedContent(input: {
+export interface ContentInput {
   suggestions: Suggestions;
   facts: Facts;
   exp: ContentExport;
   authorName: string;
-}): PortfolioContent {
-  const { suggestions, facts, exp } = input;
-  const draft = suggestions.contributionDraft.trim();
+}
+
+/**
+ * The published contribution (ADR-0012): the model's draft as written, or else the facts
+ * paragraph. The one place it is made, for the project page and any later per-project section.
+ */
+export function generatedContribution(input: ContentInput): string {
+  const draft = input.suggestions.contributionDraft.trim();
+  if (draft !== "") return draft;
   const name = plainWords(input.authorName, 100) || "The author";
+  const { exp } = input;
+  return contributionParagraph(name, input.facts, titlesOf(exp), documentationFeatures(exp));
+}
+
+/**
+ * A revision's content from its generation (ADR-0012): the suggested tagline and summary, the
+ * generated contribution and the generated highlights.
+ */
+export function generatedContent(input: ContentInput): PortfolioContent {
+  const { suggestions, facts, exp } = input;
   return PortfolioContent.parse({
     tagline: suggestions.tagline,
     summary: suggestions.summary,
-    contribution:
-      draft !== ""
-        ? draft
-        : contributionParagraph(name, facts, titlesOf(exp), documentationFeatures(exp)),
+    contribution: generatedContribution(input),
     highlights: generatedHighlights(suggestions, facts, exp),
   });
 }

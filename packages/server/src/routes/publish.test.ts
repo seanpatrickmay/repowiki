@@ -7,7 +7,15 @@ import { projectById } from "../store/projects.ts";
 import { draftRoutes } from "./drafts.ts";
 import { previewRoutes } from "./preview.ts";
 import { publishRoutes } from "./publish.ts";
-import { auditOutcomes, call, form, generatedProject, otherCookie, testDeps } from "./test-app.ts";
+import {
+  auditOutcomes,
+  call,
+  form,
+  generatedProject,
+  otherCookie,
+  refreshed,
+  testDeps,
+} from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
@@ -26,9 +34,9 @@ const publishing = (hash: string, revision = 2) =>
   );
 const project = () => projectById(deps.db, p.projectId);
 
-/** Revision 2 written, reviewed and previewed; its preview hash. */
+/** Revision 2 (after a refresh) reviewed and previewed; its preview hash. */
 async function ready(): Promise<string> {
-  await post(`/projects/${p.projectId}/revisions`, "baseRevision=1&contribution=Mine.");
+  await refreshed(deps, p.projectId);
   await post(`/projects/${p.projectId}/review`, "revision=2&attest=yes");
   await post(`/projects/${p.projectId}/preview`, "revision=2");
   return (await previewOf(deps.db, p.projectId, 2))?.siteHash ?? "";
@@ -89,7 +97,7 @@ describe("publish (Contract §6.4)", () => {
     expect((await project())?.currentVersion).toBe(1);
   }, 300_000);
 
-  it("refuses a hash the author did not see, a revision saved after its preview, and another account", async () => {
+  it("refuses a hash the author did not see, a revision made after its preview, and another account", async () => {
     const hash = await ready();
     expect((await publishing("0".repeat(64))).status).toBe(REFUSALS["preview-mismatch"].status);
     const other = await otherCookie(deps);
@@ -99,7 +107,7 @@ describe("publish (Contract §6.4)", () => {
       other,
     );
     expect(theirs.status).toBe(404);
-    await post(`/projects/${p.projectId}/revisions`, "baseRevision=2&contribution=Changed.");
+    await refreshed(deps, p.projectId);
     expect((await publishing(hash)).status).toBe(REFUSALS["stale-revision"].status);
     expect((await project())?.state).toBe("draft");
   }, 300_000);

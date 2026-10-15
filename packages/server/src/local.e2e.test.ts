@@ -42,6 +42,7 @@ function localSetup() {
   };
 }
 
+const CONTRIBUTION = "wrote 4 of the repository&#39;s 9 commits";
 let server: RunningServer | null = null;
 const logs: object[] = [];
 afterAll(async () => server?.close());
@@ -83,28 +84,18 @@ describe("local profile mode (M14g)", () => {
     expect(created.status, created.text).toBe(303);
     const projectPath = created.location ?? "";
     let page = await waitFor(me, projectPath, "Portfolio (revision 1)");
-    const saved = await me.go(`${projectPath}/revisions`, {
-      form: {
-        csrf,
-        baseRevision: "1",
-        tagline: field(page.text, "tagline"),
-        summary: "A made-up engine.",
-        contribution: "I wrote the signal pipeline.",
-      },
-    });
-    expect(saved.status, saved.text).toBe(303);
     const reviewed = await me.go(`${projectPath}/review`, {
-      form: { csrf, revision: "2", attest: "yes" },
+      form: { csrf, revision: "1", attest: "yes" },
     });
     expect(reviewed.status, reviewed.text).toBe(303);
-    expect((await me.go(`${projectPath}/preview`, { form: { csrf, revision: "2" } })).status).toBe(
+    expect((await me.go(`${projectPath}/preview`, { form: { csrf, revision: "1" } })).status).toBe(
       303,
     );
     page = await me.go(projectPath);
     const published = await me.go(`${projectPath}/publish`, {
       form: {
         csrf,
-        revision: "2",
+        revision: "1",
         expectedVersion: field(page.text, "expectedVersion"),
         previewHash: field(page.text, "previewHash"),
       },
@@ -117,6 +108,8 @@ describe("local profile mode (M14g)", () => {
     expect(project.text).toContain("Python 73% · TypeScript 27%");
     expect(project.text).toContain("15 files indexed");
     expect(project.text).toContain("4 of 9 commits");
+    // No model in import mode: the contribution is the facts paragraph (ADR-0012).
+    expect(project.text).toContain(CONTRIBUTION);
     expect((await reader.go("/ada/engine/docs/")).status).toBe(200);
 
     // A second project (Pro) for a repository with no local wiki fails, saying why in the log.
@@ -133,7 +126,7 @@ describe("local profile mode (M14g)", () => {
     server = null;
     base = await start(env);
     const back = browser(base);
-    expect((await back.go("/ada/engine")).text).toContain("I wrote the signal pipeline.");
+    expect((await back.go("/ada/engine")).text).toContain(CONTRIBUTION);
     const again = await me.go(`${base}/dashboard`);
     expect(again.status).toBe(200);
     expect(again.text).toContain("ada/engine");

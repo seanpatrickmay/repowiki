@@ -1,4 +1,4 @@
-import { EMPTY_OVERRIDES } from "./content.ts";
+import type { PortfolioContent } from "./content.ts";
 import type {
   Account,
   DraftRevision,
@@ -102,13 +102,19 @@ export const aGeneration = (patch: Partial<Generation> = {}): Generation => ({
   ...patch,
 });
 
+export const aContent = (patch: Partial<PortfolioContent> = {}): PortfolioContent => ({
+  tagline: "A citation-backed wiki for a git repository",
+  summary: "RepoWiki turns a repository into a wiki whose every claim cites the code.",
+  contribution: "I built the indexing and verification pipeline.",
+  highlights: [{ featureId: "indexing", blurb: "Indexes every file" }],
+  ...patch,
+});
+
 export const aRevision = (patch: Partial<DraftRevision> = {}): DraftRevision => ({
   projectId: ids.project,
   number: 1,
   generationId: ids.generation,
-  overrides: EMPTY_OVERRIDES,
-  flags: [],
-  source: "generation",
+  content: aContent(),
   createdAt: T0,
   ...patch,
 });

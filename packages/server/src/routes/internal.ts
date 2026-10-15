@@ -5,6 +5,7 @@ import {
   failJob,
   firstRevision,
   type Generation,
+  generatedContent,
   heartbeatJob,
   type Job,
   JobStep,
@@ -22,7 +23,8 @@ import { HttpError, readBody, readJson } from "../http/body.ts";
 import type { Reply, Route, RouteRequest } from "../http/router.ts";
 import { json } from "../http/server.ts";
 import { cancelBatches } from "../proxy/cancel.ts";
-import { generationById, latestRevision, saveGeneration, saveRevision } from "../store/drafts.ts";
+import { accountById } from "../store/accounts.ts";
+import { latestRevision, saveGeneration, saveRevision } from "../store/drafts.ts";
 import {
   jobSpec,
   markLeased,
@@ -228,12 +230,23 @@ export function internalRoutes(deps: Deps): Route[] {
         spentUsdMicros: done.spentUsdMicros,
         createdAt: now,
       };
+      // The revision's content is generated here, once (ADR-0012): the export was validated
+      // when it was uploaded, and the author's name is the account's.
+      const stored = await deps.objects.get(spec.export.key);
+      const account = await accountById(tx, project.accountId);
+      if (stored === null || account === null)
+        throw new Error("succeed lost its export or account");
+      const content = generatedContent({
+        suggestions: body.suggestions,
+        facts: body.facts,
+        exp: WikiExport.parse(JSON.parse(new TextDecoder().decode(stored.body))),
+        authorName: account.displayName || account.login,
+      });
       const latest = project.latestRevision === 0 ? null : await latestRevision(tx, project.id);
-      const previous = latest === null ? null : await generationById(tx, latest.generationId);
       const revised =
-        latest === null || previous === null
-          ? contract(firstRevision(project, generation, now))
-          : contract(refreshRevision(project, latest, previous, generation, now));
+        latest === null
+          ? contract(firstRevision(project, generation, content, now))
+          : contract(refreshRevision(project, latest, generation, content, now));
       await saveGeneration(tx, generation);
       await saveRevision(tx, revised.revision);
       await saveProject(tx, revised.project);

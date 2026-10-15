@@ -7,7 +7,15 @@ import { treeHash } from "../render/tree.ts";
 import { previewOf } from "../store/drafts.ts";
 import { draftRoutes } from "./drafts.ts";
 import { previewRoutes, serveTreeFile } from "./preview.ts";
-import { auditOutcomes, call, form, generatedProject, otherCookie, testDeps } from "./test-app.ts";
+import {
+  auditOutcomes,
+  call,
+  form,
+  generatedProject,
+  otherCookie,
+  refreshed,
+  testDeps,
+} from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
@@ -59,12 +67,11 @@ describe("serveTreeFile (spec 2 S13)", () => {
 describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
   it("builds the latest revision's exact tree under its hash and serves it to the owner only", async () => {
     const first = "deliverables";
-    await post(`/projects/${p.projectId}/revisions`, "baseRevision=1&contribution=Mine.");
-    const stale = await post(`/projects/${p.projectId}/preview`, "revision=1");
+    const stale = await post(`/projects/${p.projectId}/preview`, "revision=2");
     expect(stale.status).toBe(REFUSALS["stale-revision"].status);
-    expect((await post(`/projects/${p.projectId}/preview`, "revision=2")).status).toBe(303);
-    const preview = await previewOf(deps.db, p.projectId, 2);
-    expect(preview?.siteKey).toBe(`previews/${p.projectId}/r2/${preview?.siteHash}/`);
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    const preview = await previewOf(deps.db, p.projectId, 1);
+    expect(preview?.siteKey).toBe(`previews/${p.projectId}/r1/${preview?.siteHash}/`);
     // The stored tree is exactly what was hashed (A1).
     const keys = await deps.objects.list(preview?.siteKey ?? "x/");
     const files = await Promise.all(
@@ -75,11 +82,11 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     );
     expect(treeHash(files)).toBe(preview?.siteHash);
 
-    const base = `/preview/${p.projectId}/2/`;
+    const base = `/preview/${p.projectId}/1/`;
     const home = await get(base);
     expect(home.status).toBe(200);
     expect(String(home.body)).toContain("Preview: only you can see this page");
-    expect(String(home.body)).toContain("Mine.");
+    expect(String(home.body)).toContain("I wrote the ingest code.");
     expect(home.headers?.["cache-control"]).toBe("private, no-store");
     const wiki = await get(`${base}docs/`);
     expect(wiki.status).toBe(200);
@@ -91,18 +98,17 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect((await get(`${base}docs/wiki/${first}/`)).status).toBe(200);
     expect((await get(`${base}docs/wiki/signals/`)).status).toBe(200);
     expect((await get(`${base}portfolio.json`)).status).toBe(404);
-    expect((await get(`/preview/${p.projectId}/2`)).status).toBe(301);
+    expect((await get(`/preview/${p.projectId}/1`)).status).toBe(301);
 
     expect((await call(app, { path: base })).status).toBe(404);
     const other = await otherCookie(deps);
     expect((await get(base, other.cookie)).status).toBe(404);
-    expect((await get(`/preview/${p.projectId}/1/`)).status).toBe(404);
-    expect((await post(`/projects/${p.projectId}/preview`, "revision=2", other)).status).toBe(404);
+    expect((await get(`/preview/${p.projectId}/2/`)).status).toBe(404);
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1", other)).status).toBe(404);
   }, 300_000);
 
   it("audits a refused build, the stale-revision path included (spec 2 S5)", async () => {
-    await post(`/projects/${p.projectId}/revisions`, "baseRevision=1&contribution=Mine.");
-    const stale = await post(`/projects/${p.projectId}/preview`, "revision=1");
+    const stale = await post(`/projects/${p.projectId}/preview`, "revision=2");
     expect(stale.status).toBe(REFUSALS["stale-revision"].status);
     expect(await auditOutcomes(deps.db, "preview.build", p.projectId)).toEqual(["stale-revision"]);
   });
@@ -124,11 +130,7 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     app = createApp(deps, [...draftRoutes(deps), ...previewRoutes(deps, slow)]);
     const building = post(`/projects/${p.projectId}/preview`, "revision=1");
     await started;
-    const saved = await post(
-      `/projects/${p.projectId}/revisions`,
-      "baseRevision=1&contribution=Mine.",
-    );
-    expect(saved.status).toBe(303);
+    await refreshed(deps, p.projectId);
     release();
     expect((await building).status).toBe(REFUSALS["stale-revision"].status);
     expect(await previewOf(deps.db, p.projectId, 1)).toBeNull();

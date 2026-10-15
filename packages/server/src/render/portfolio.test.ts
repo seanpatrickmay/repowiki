@@ -42,13 +42,12 @@ const revision = {
   projectId: generation.projectId,
   number: 2,
   generationId: generation.id,
-  overrides: {
+  content: {
+    tagline: "Suggested tagline",
     summary: "My <summary> & more.",
-    contribution: "I built it.",
+    contribution: "Ada built it.",
     highlights: [{ featureId: ids[0] ?? "", blurb: "The core." }],
   },
-  flags: [],
-  source: "author",
   createdAt: "2026-10-14T12:00:00.000Z",
 } as DraftRevision;
 const data = portfolioData({ generation, revision, exp, repoFullName: "demo-dev/demo-repo" });
@@ -60,13 +59,14 @@ const published = (d = data) =>
   });
 
 describe("the portfolio layer (Contract §8)", () => {
-  it("resolves overrides over suggestions and names highlights by title", () => {
+  it("publishes the revision's generated content and names highlights by title", () => {
     expect(PortfolioData.safeParse(data).success).toBe(true);
     expect(data).toMatchObject({
       title: "Demo Repo",
       tagline: "Suggested tagline",
       summary: "My <summary> & more.",
-      contribution: "I built it.",
+      contribution: "Ada built it.",
+      contributionBy: "generated",
       repo: { fullName: "demo-dev/demo-repo", commitSha: SHA },
       highlights: [{ featureId: ids[0], blurb: "The core." }],
     });
@@ -117,6 +117,15 @@ describe("the portfolio layer (Contract §8)", () => {
     const at = order.map((marker) => page.indexOf(marker));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
+  });
+
+  it("labels a generated contribution, and never a stored author-written one (ADR-0012)", () => {
+    const label = `Generated from the git history at ${SHA.slice(0, 7)}; not written by the author.`;
+    expect(published()).toContain(label);
+    const { contributionBy: _, ...before } = data;
+    const old = PortfolioData.parse(before);
+    expect(old.contributionBy).toBe("author");
+    expect(published(old)).not.toContain("not written by the author");
   });
 
   it("uses the public stylesheet and no inline style", () => {

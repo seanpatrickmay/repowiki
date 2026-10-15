@@ -7,7 +7,6 @@ import {
   type RefusalCode,
   type Result,
   reviewRevision,
-  saveRevision as reviseDraft,
 } from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
 import type { Queryable } from "../db/db.ts";
@@ -25,11 +24,10 @@ import {
   previewOf,
   reviewOf,
   saveReview,
-  saveRevision,
   versionOf,
 } from "../store/drafts.ts";
 import { jobsOf } from "../store/jobs.ts";
-import { saveProject, usageFor } from "../store/projects.ts";
+import { usageFor } from "../store/projects.ts";
 import { liveEligibility, ownedProject, repoFullName } from "./live.ts";
 
 const titleCache = new Map<string, ReadonlyMap<string, string>>();
@@ -54,22 +52,6 @@ export async function featureTitles(
   if (titleCache.size >= 200) titleCache.clear();
   titleCache.set(generation.exportKey, titles);
   return titles;
-}
-
-/** The editor's form as the Contract's overrides input; a field equal to its suggestion is omitted. */
-export function overridesFrom(form: URLSearchParams, generation: Generation): unknown {
-  const s = generation.suggestions;
-  const text = (name: string) => (form.get(name) ?? "").replace(/\r\n?/g, "\n").trim();
-  const tagline = text("tagline");
-  const summary = text("summary");
-  return {
-    ...(tagline === "" || tagline === s.tagline ? {} : { tagline }),
-    ...(summary === "" || summary === s.summary ? {} : { summary }),
-    contribution: text("contribution"),
-    highlights: [...new Set(form.getAll("highlight"))]
-      .slice(0, 10)
-      .map((featureId) => ({ featureId, blurb: text(`blurb:${featureId}`) })),
-  };
 }
 
 /** One audit event by the author about a project. */
@@ -141,7 +123,7 @@ async function mutateDraft(
   });
 }
 
-/** The project page, saving the portfolio layer and review (spec 2 §7, Contract §6.3). */
+/** The project page and its review (spec 2 §7, Contract §6.3, ADR-0012). */
 export function draftRoutes(deps: Deps): Route[] {
   return [
     {
@@ -182,40 +164,6 @@ export function draftRoutes(deps: Deps): Route[] {
           session: shown,
         });
         return html(200, body, { "cache-control": "private, no-store" });
-      },
-    },
-    {
-      method: "POST",
-      pattern: "/projects/:id/revisions",
-      handler: async (request) => {
-        const { session, form } = await mutation(deps, request);
-        const baseRevision = Number(form.get("baseRevision"));
-        return mutateDraft(
-          deps,
-          session,
-          request.params.id ?? "",
-          "draft.save",
-          async (tx, project) => {
-            const latest = await latestRevision(tx, project.id);
-            const generation =
-              latest === null ? null : await generationById(tx, latest.generationId);
-            if (latest === null || generation === null)
-              return { ok: false, code: "invalid-transition" };
-            const input = overridesFrom(form, generation);
-            const revised = reviseDraft(
-              project,
-              latest,
-              generation,
-              baseRevision,
-              input,
-              deps.now(),
-            );
-            if (!revised.ok) return revised;
-            await saveRevision(tx, revised.value.revision);
-            await saveProject(tx, revised.value.project);
-            return { ok: true, value: true };
-          },
-        );
       },
     },
     {

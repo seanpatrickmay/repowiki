@@ -8,12 +8,18 @@ import { PUBLIC_STYLE_PATH } from "../pages/public-style.ts";
 export const CHECKED_STATEMENT = (sha: string) =>
   `Citations resolve to commit ${sha} with matching content hashes. Whether the cited code supports each claim is not verified automatically.`;
 
+/** How a generated contribution is labelled (ADR-0012). */
+export const GENERATED_LABEL = (sha: string) =>
+  `Generated from the git history at ${sha.slice(0, 7)}; not written by the author.`;
+
 /** The resolved portfolio layer, stored as `portfolio.json` in every preview and version. */
 export const PortfolioData = z.strictObject({
   title: z.string().min(1).max(120),
   tagline: z.string().max(90),
   summary: z.string().max(900),
   contribution: z.string().min(1).max(1200),
+  /** Who wrote the contribution; a version published before ADR-0012 has none: the author. */
+  contributionBy: z.enum(["author", "generated"]).default("author"),
   repo: z.strictObject({
     fullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
     commitSha: GitSha,
@@ -28,8 +34,8 @@ export const PortfolioData = z.strictObject({
 export type PortfolioData = z.infer<typeof PortfolioData>;
 
 /**
- * The layer a revision publishes (Contract §8): overrides over suggestions, highlight titles from
- * the export, and the facts. `exp` is the hosted export the site is built from, so `hasAbout`
+ * The layer a revision publishes (ADR-0012): its generated content, highlight titles from the
+ * export, and the facts. `exp` is the hosted export the site is built from, so `hasAbout`
  * matches the built site.
  */
 export function portfolioData(input: {
@@ -39,20 +45,21 @@ export function portfolioData(input: {
   repoFullName: string;
 }): PortfolioData {
   const { generation, revision, exp } = input;
-  const o = revision.overrides;
+  const c = revision.content;
   const known = new Set(generation.facts.featureIds);
   const titles = Object.fromEntries(
     exp.manifest.features.filter((f) => known.has(f.id)).map((f) => [f.id, f.title]),
   );
   return PortfolioData.parse({
     title: exp.architecture.at(-1)?.title ?? input.repoFullName.split("/")[1] ?? input.repoFullName,
-    tagline: o.tagline ?? generation.suggestions.tagline,
-    summary: o.summary ?? generation.suggestions.summary,
-    contribution: o.contribution,
+    tagline: c.tagline,
+    summary: c.summary,
+    contribution: c.contribution,
+    contributionBy: "generated",
     repo: { fullName: input.repoFullName, commitSha: generation.commitSha },
     facts: generation.facts,
     titles,
-    highlights: o.highlights.map((h) => ({
+    highlights: c.highlights.map((h) => ({
       featureId: h.featureId,
       title: titles[h.featureId] ?? h.featureId,
       blurb: h.blurb,
@@ -106,7 +113,7 @@ export function portfolioHtml(
 <header><h1>${e(data.title)}</h1><p class="tagline">${e(data.tagline)}</p><p class="meta"><a href="${e(repoUrl)}">${e(repo.fullName)} at ${e(repo.commitSha.slice(0, 7))}</a> · ${e(date)}<span class="badge">Author-reviewed</span></p></header>
 <section id="summary"><h2>Summary</h2>${paragraphs(data.summary)}</section>
 <section id="glance"><h2>At a glance</h2><dl><dt>Languages</dt><dd>${languages}</dd><dt>Size</dt><dd>${facts.indexedFiles} files indexed · ${facts.featureIds.length} features</dd>${about}</dl></section>
-<section id="contribution"><h2>My contribution</h2>${paragraphs(data.contribution)}<p class="meta">From the git history at ${e(repo.commitSha.slice(0, 7))}: ${a.commits} of ${a.totalCommits} commits (${percent(a.commits, a.totalCommits)}%) and ${a.currentLines} of ${a.totalLines} current lines (${percent(a.currentLines, a.totalLines)}%).</p>${touched ? `<dl>${touched}</dl>` : ""}</section>
+<section id="contribution"><h2>My contribution</h2>${paragraphs(data.contribution)}${data.contributionBy === "generated" ? `<p class="meta">${e(GENERATED_LABEL(repo.commitSha))}</p>` : ""}<p class="meta">From the git history at ${e(repo.commitSha.slice(0, 7))}: ${a.commits} of ${a.totalCommits} commits (${percent(a.commits, a.totalCommits)}%) and ${a.currentLines} of ${a.totalLines} current lines (${percent(a.currentLines, a.totalLines)}%).</p>${touched ? `<dl>${touched}</dl>` : ""}</section>
 <section id="highlights"><h2>Highlights</h2>${highlights ? `<div class="cards">${highlights}</div>` : `<p class="meta">No highlights chosen.</p>`}</section>
 <section id="wiki"><h2>The wiki</h2><p><a href="${e(docs)}">Read the full source-linked wiki</a></p></section>
 <section id="checked" class="checked"><h2>What is checked</h2><p>${e(CHECKED_STATEMENT(repo.commitSha))}</p></section>

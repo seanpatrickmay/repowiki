@@ -92,7 +92,6 @@ describe("who may do what (Contract spec §7.1)", () => {
     "job.retry",
     "draft.read",
     "preview.read",
-    "draft.save",
     "draft.review",
     "project.publish",
     "project.unpublish",
@@ -251,28 +250,22 @@ describe("refreshing, editing, publishing and restoring (Contract spec §7.1, C7
     });
   });
 
-  it("freezes refresh, save, review and publish when the plan is over its project count", () => {
+  it("freezes refresh, review and publish when the plan is over its project count", () => {
     const over = ctx({ caller: signedIn(pro), usage: usage({ activeProjects: 11 }) });
-    for (const action of [
-      "job.refresh",
-      "draft.save",
-      "draft.review",
-      "project.publish",
-    ] as const) {
+    for (const action of ["job.refresh", "draft.review", "project.publish"] as const) {
       expect(authorize(action, over), action).toMatchObject({ code: "frozen" });
     }
   });
 
-  it("accepts an hour-old check for saving and reviewing but not for publishing", () => {
+  it("accepts an hour-old check for reviewing but not for publishing", () => {
     const later = ctx({ now: "2026-10-14T12:59:00Z" });
-    expect(authorize("draft.save", later).ok).toBe(true);
     expect(authorize("draft.review", later).ok).toBe(true);
     expect(authorize("project.publish", later)).toMatchObject({ code: "invalid-input" });
-    expect(authorize("draft.save", ctx({ now: "2026-10-14T13:00:01Z" }))).toMatchObject({
+    expect(authorize("draft.review", ctx({ now: "2026-10-14T13:00:01Z" }))).toMatchObject({
       code: "invalid-input",
     });
     expect(
-      authorize("draft.save", ctx({ facts: eligibleFacts({ permission: "pull" }) })),
+      authorize("draft.review", ctx({ facts: eligibleFacts({ permission: "pull" }) })),
     ).toMatchObject({
       code: "repo-no-push",
     });
@@ -319,13 +312,7 @@ describe("eligibility must be the caller's, for the project's repository (final 
   });
 
   it("applies to every action that needs eligibility", () => {
-    const actions = [
-      "job.refresh",
-      "job.retry",
-      "draft.save",
-      "draft.review",
-      "project.publish",
-    ] as const;
+    const actions = ["job.refresh", "job.retry", "draft.review", "project.publish"] as const;
     for (const action of actions) {
       for (const facts of [otherUser, otherRepo]) {
         expect(authorize(action, ctx({ caller: signedIn(pro), facts })), action).toMatchObject({
@@ -389,7 +376,7 @@ describe("starting a generation for an existing project (final review I4)", () =
 
 describe("project-scoped actions need the project (final review I5, I9)", () => {
   it("throw when the caller forgets the project", () => {
-    for (const action of ["project.publish", "project.restore", "draft.save"] as const) {
+    for (const action of ["project.publish", "project.restore", "draft.review"] as const) {
       expect(() => authorize(action, ctx({ project: undefined }))).toThrow(
         "authorize needs project",
       );
@@ -405,7 +392,12 @@ describe("project-scoped actions need the project (final review I5, I9)", () => 
       unavailableSince: T0,
     });
     for (const project of [takenDown, purged]) {
-      for (const action of ["job.refresh", "job.retry", "draft.save", "project.publish"] as const) {
+      for (const action of [
+        "job.refresh",
+        "job.retry",
+        "draft.review",
+        "project.publish",
+      ] as const) {
         const result = authorize(action, ctx({ caller: signedIn(pro), project }));
         expect(result, `${action} on ${project.state}`).toMatchObject({
           code: "invalid-transition",
@@ -413,7 +405,7 @@ describe("project-scoped actions need the project (final review I5, I9)", () => 
       }
     }
     const mine = aProject({ state: "withdrawn", withdrawReason: "author", withdrawnAt: T0 });
-    expect(authorize("draft.save", ctx({ project: mine, usage: usage() })).ok).toBe(true);
+    expect(authorize("draft.review", ctx({ project: mine, usage: usage() })).ok).toBe(true);
   });
 });
 
