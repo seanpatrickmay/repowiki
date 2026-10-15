@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { callFailure } from "@repowiki/engine";
 import { createClaudeProvider, createLedger, resolveModels } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -58,14 +59,28 @@ describe("runCli (spec 2 S9)", () => {
     expect((await run(100_000, 1000)).stdout).toBeNull();
   });
 
-  it("kills a script that runs past its time limit", async () => {
+  it("kills a script that runs past its time limit, and the children it started", async () => {
     const run = await runCli({
-      script: script("setTimeout(() => {}, 60_000);"),
+      script: script(
+        `import { spawn } from "node:child_process"; const c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" }); process.stderr.write("pid " + c.pid + "\\n"); setTimeout(() => {}, 60_000);`,
+      ),
       args: [],
       env: {},
-      timeoutMs: 200,
+      timeoutMs: 1000,
     });
     expect(run).toMatchObject({ timedOut: true });
+    const pid = Number(/pid (\d+)/.exec(run.stderrTail)?.[1]);
+    expect(pid).toBeGreaterThan(0);
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; i < 50 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(alive()).toBe(false);
   });
 
   it("notices the proxy's cost refusal anywhere in stderr, not only in its tail", async () => {
@@ -145,14 +160,14 @@ describe("the proxy's cost refusal as an engine CLI prints it (Review Focus 1)",
     maxTokens: 10,
   };
 
-  it("keeps the refusal's message in the SDK's error, direct and batched", async () => {
+  it("keeps the refusal's mark in the engine's failure line, direct and batched", async () => {
     const direct = await provider()
       .generate(request)
       .catch((e: unknown) => e);
-    expect(String((direct as Error).message)).toContain(COST_CAP_MARK);
+    expect(callFailure(direct)).toContain(COST_CAP_MARK);
     const batched = await provider()
       .generate({ ...request, batch: true })
       .catch((e: unknown) => e);
-    expect(String((batched as Error).message)).toContain(COST_CAP_MARK);
+    expect(callFailure(batched)).toContain(COST_CAP_MARK);
   });
 });

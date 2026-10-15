@@ -160,11 +160,22 @@ export const errorClass = (error: unknown): string =>
   error instanceof Error ? error.constructor.name : typeof error;
 
 /**
- * A failed call as one line: the error class, and the message only of an LlmError, whose messages
- * RepoWiki writes itself. Any other error may carry a provider's response body.
+ * The hosted LLM proxy's cost refusal as the SDK's error message carries its body (spec 2 §10);
+ * the worker reads it in a CLI's stderr to fail the job as job-cost-cap.
  */
-export const callFailure = (error: unknown): string =>
-  error instanceof LlmError ? `${errorClass(error)}: ${error.message}` : errorClass(error);
+export const COST_CAP_MARK = '"message":"job-cost-cap"';
+
+/**
+ * A failed call as one line: the error class, and the message only of an LlmError, whose messages
+ * RepoWiki writes itself. Any other error may carry a provider's response body, so of it only
+ * COST_CAP_MARK is ever shown, when the message holds it: a direct call's refusal, which no
+ * LlmError wraps.
+ */
+export const callFailure = (error: unknown): string => {
+  if (error instanceof LlmError) return `${errorClass(error)}: ${error.message}`;
+  const capped = error instanceof Error && error.message.includes(COST_CAP_MARK);
+  return capped ? `${errorClass(error)}: ${COST_CAP_MARK}` : errorClass(error);
+};
 
 /**
  * Checks Wikipedia titles once for a round of claims. A check that throws leaves every title as
