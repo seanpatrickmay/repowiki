@@ -28,6 +28,11 @@ beforeAll(async () => {
     },
     {
       method: "GET",
+      pattern: "/bad-header",
+      handler: async () => ({ status: 302, headers: { location: "/x\r\nset-cookie: a=b" } }),
+    },
+    {
+      method: "GET",
       pattern: "/teapot",
       handler: async () => {
         throw new HttpError(418, "short and stout");
@@ -81,6 +86,14 @@ describe("listen (spec 2 S2)", () => {
       status: 500,
       error: "Error",
     });
+  });
+
+  it("answers 500 for a reply it cannot send, and keeps serving", async () => {
+    const response = await fetch(`${server.url}/bad-header`, { redirect: "manual" });
+    expect(response.status).toBe(500);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(logs.at(-1)).toMatchObject({ route: "/bad-header", status: 500 });
+    expect((await fetch(`${server.url}/hello/sean`)).status).toBe(200);
   });
 
   it("answers an HttpError with its status and message", async () => {
