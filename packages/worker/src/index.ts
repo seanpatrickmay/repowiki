@@ -51,6 +51,5 @@ export {
   cleanSuggestions,
   fallbackSuggestions,
   leadOf,
-  plainWords,
   suggest,
 } from "./suggestions.ts";

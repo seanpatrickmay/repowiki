@@ -70,7 +70,7 @@ async function walk(api: WorkerApi, stepMs: number): Promise<boolean> {
       summary:
         "This demo stands in for a real repository. RepoWiki indexed it, grouped its code into features, and wrote a cited wiki page for each one.",
       contributionDraft:
-        "I wrote most of the ingest and search code and set up the project's tests.",
+        "The author wrote most of the ingest and search code and set up the project's tests.",
       highlightCandidates: mine,
     },
     facts,
