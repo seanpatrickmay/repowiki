@@ -105,7 +105,14 @@ export {
   refusedBeta,
 } from "./proxy/request.ts";
 export { authRoutes } from "./routes/auth.ts";
-export { draftRoutes, featureTitles, storedExport } from "./routes/drafts.ts";
+export {
+  auditAuthor,
+  draftRoutes,
+  featureTitles,
+  mutation,
+  overridesFrom,
+  storedExport,
+} from "./routes/drafts.ts";
 export {
   EXPORT_LIMIT,
   exportKey,
@@ -114,7 +121,7 @@ export {
   type WorkerSpec,
 } from "./routes/internal.ts";
 export { type Held, heldJob, tokenFrom } from "./routes/job-token.ts";
-export { ownedProject, repoFullName } from "./routes/live.ts";
+export { type Live, liveEligibility, ownedProject, repoFullName } from "./routes/live.ts";
 export {
   anthropicError,
   anthropicShaped,

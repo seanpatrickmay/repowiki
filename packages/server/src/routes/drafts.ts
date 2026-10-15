@@ -1,15 +1,36 @@
 import { WikiExport } from "@repowiki/core";
-import { authorize, type Generation, projectUrl } from "@repowiki/hosted";
+import {
+  type Action,
+  authorize,
+  type Generation,
+  projectUrl,
+  type RefusalCode,
+  type Result,
+  reviewRevision,
+  saveRevision as reviseDraft,
+} from "@repowiki/hosted";
 import type { Deps } from "../app.ts";
-import type { Route } from "../http/router.ts";
+import type { Queryable } from "../db/db.ts";
+import { readForm } from "../http/body.ts";
+import type { Reply, Route, RouteRequest } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
-import { currentSession } from "../http/session.ts";
+import { checkMutation, currentSession, type Session } from "../http/session.ts";
 import { projectPage } from "../pages/project.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
 import { activeHandle } from "../store/accounts.ts";
-import { generationById, latestRevision, previewOf, reviewOf, versionOf } from "../store/drafts.ts";
+import { appendAudit } from "../store/audit.ts";
+import {
+  generationById,
+  latestRevision,
+  previewOf,
+  reviewOf,
+  saveReview,
+  saveRevision,
+  versionOf,
+} from "../store/drafts.ts";
 import { jobsOf } from "../store/jobs.ts";
-import { ownedProject, repoFullName } from "./live.ts";
+import { saveProject, usageFor } from "../store/projects.ts";
+import { liveEligibility, ownedProject, repoFullName } from "./live.ts";
 
 const titleCache = new Map<string, ReadonlyMap<string, string>>();
 
@@ -33,6 +54,92 @@ export async function featureTitles(
   if (titleCache.size >= 200) titleCache.clear();
   titleCache.set(generation.exportKey, titles);
   return titles;
+}
+
+/** The editor's form as the Contract's overrides input; a field equal to its suggestion is omitted. */
+export function overridesFrom(form: URLSearchParams, generation: Generation): unknown {
+  const s = generation.suggestions;
+  const text = (name: string) => (form.get(name) ?? "").replace(/\r\n?/g, "\n").trim();
+  const tagline = text("tagline");
+  const summary = text("summary");
+  return {
+    ...(tagline === "" || tagline === s.tagline ? {} : { tagline }),
+    ...(summary === "" || summary === s.summary ? {} : { summary }),
+    contribution: text("contribution"),
+    highlights: [...new Set(form.getAll("highlight"))]
+      .slice(0, 10)
+      .map((featureId) => ({ featureId, blurb: text(`blurb:${featureId}`) })),
+    hiddenFeatureIds: [...new Set(form.getAll("hidden"))].slice(0, 500),
+  };
+}
+
+/** One audit event by the author about a project. */
+export async function auditAuthor(
+  tx: Queryable,
+  deps: Deps,
+  action: string,
+  projectId: string,
+  outcome: RefusalCode | "allowed",
+): Promise<void> {
+  await appendAudit(tx, {
+    id: deps.newId(),
+    actor: "author",
+    action,
+    target: { entity: "project", id: projectId },
+    outcome,
+    createdAt: deps.now(),
+  });
+}
+
+/** The session, the form and the CSRF check every author mutation starts with (spec 2 S6). */
+export async function mutation(
+  deps: Deps,
+  request: RouteRequest,
+): Promise<{ session: Session; form: URLSearchParams }> {
+  const session = await currentSession(deps.db, deps.config, request, deps.now());
+  const form = await readForm(request.raw);
+  checkMutation(deps.config, request.headers, session, form.get("csrf"));
+  return { session, form };
+}
+
+/**
+ * One draft mutation (S5): the owner's project, a live eligibility check, then one transaction
+ * that locks the project, asks the policy, applies the change and audits it.
+ */
+async function mutateDraft(
+  deps: Deps,
+  session: Session,
+  projectId: string,
+  action: Action,
+  apply: (
+    tx: Queryable,
+    project: NonNullable<Awaited<ReturnType<typeof ownedProject>>>,
+  ) => Promise<Result<true>>,
+): Promise<Reply> {
+  const shown = pageSession(session);
+  const owned = await ownedProject(deps.db, session, projectId);
+  if (owned === null) return refusalPage("not-found", shown);
+  const live = await liveEligibility(deps, session, owned.githubRepoId);
+  if (!live.ok) return live.reply;
+  const back = `/projects/${owned.id}`;
+  const result = await deps.db.transaction(async (tx): Promise<Result<true>> => {
+    const project = await ownedProject(tx, session, owned.id, true);
+    if (project === null) return { ok: false, code: "not-found" };
+    const now = deps.now();
+    const usage = await usageFor(tx, session.account.id, now);
+    const caller = { kind: "account" as const, account: session.account };
+    const verdict = authorize(action, { now, caller, project, facts: live.facts, usage });
+    if (!verdict.ok) return verdict;
+    const applied = await apply(tx, project);
+    if (applied.ok) await auditAuthor(tx, deps, action, project.id, "allowed");
+    return applied;
+  });
+  if (result.ok) return redirect(back);
+  await deps.db.transaction((tx) => auditAuthor(tx, deps, action, owned.id, result.code));
+  return refusalPage(result.code, shown, {
+    back,
+    ...(result.detail ? { detail: result.detail } : {}),
+  });
 }
 
 /** The project page, saving the portfolio layer and review (spec 2 §7, Contract §6.3). */
@@ -76,6 +183,64 @@ export function draftRoutes(deps: Deps): Route[] {
           session: shown,
         });
         return html(200, body, { "cache-control": "private, no-store" });
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/projects/:id/revisions",
+      handler: async (request) => {
+        const { session, form } = await mutation(deps, request);
+        const baseRevision = Number(form.get("baseRevision"));
+        return mutateDraft(
+          deps,
+          session,
+          request.params.id ?? "",
+          "draft.save",
+          async (tx, project) => {
+            const latest = await latestRevision(tx, project.id);
+            const generation =
+              latest === null ? null : await generationById(tx, latest.generationId);
+            if (latest === null || generation === null)
+              return { ok: false, code: "invalid-transition" };
+            const input = overridesFrom(form, generation);
+            const revised = reviseDraft(
+              project,
+              latest,
+              generation,
+              baseRevision,
+              input,
+              deps.now(),
+            );
+            if (!revised.ok) return revised;
+            await saveRevision(tx, revised.value.revision);
+            await saveProject(tx, revised.value.project);
+            return { ok: true, value: true };
+          },
+        );
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/projects/:id/review",
+      handler: async (request) => {
+        const { session, form } = await mutation(deps, request);
+        const id = request.params.id ?? "";
+        if (form.get("attest") !== "yes") {
+          const detail = "Tick the declaration to record your review.";
+          return refusalPage("invalid-input", pageSession(session), {
+            detail,
+            back: `/projects/${id}`,
+          });
+        }
+        const revision = Number(form.get("revision"));
+        return mutateDraft(deps, session, id, "draft.review", async (tx, project) => {
+          const latest = await latestRevision(tx, project.id);
+          if (latest === null) return { ok: false, code: "invalid-transition" };
+          const review = reviewRevision(latest, revision, deps.now());
+          if (!review.ok) return review;
+          await saveReview(tx, review.value);
+          return { ok: true, value: true };
+        });
       },
     },
   ];
