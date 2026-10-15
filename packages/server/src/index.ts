@@ -105,6 +105,8 @@ export {
   MessageParams,
   refusedBeta,
 } from "./proxy/request.ts";
+export { hostedExport } from "./render/hosted-export.ts";
+export { readTree, type TreeFile, treeHash } from "./render/tree.ts";
 export { authRoutes } from "./routes/auth.ts";
 export {
   auditAuthor,
