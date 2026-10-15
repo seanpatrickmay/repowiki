@@ -116,7 +116,7 @@ export const aRevision = (patch: Partial<DraftRevision> = {}): DraftRevision => 
 export const aReview = (patch: Partial<Review> = {}): Review => ({
   projectId: ids.project,
   revision: 1,
-  attestationVersion: 1,
+  attestationVersion: 2,
   createdAt: T0,
   ...patch,
 });

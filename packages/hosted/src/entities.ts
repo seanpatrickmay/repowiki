@@ -164,7 +164,7 @@ export type DraftRevision = z.infer<typeof DraftRevision>;
 export const Review = z.strictObject({
   projectId: Uuid,
   revision: Ordinal,
-  attestationVersion: z.literal(1),
+  attestationVersion: z.literal(2),
   createdAt: IsoDateTime,
 });
 export type Review = z.infer<typeof Review>;

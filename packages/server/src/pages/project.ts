@@ -1,4 +1,5 @@
 import {
+  ATTESTATION_VERSION,
   ATTESTATIONS,
   type DraftRevision,
   type Generation,
@@ -119,7 +120,7 @@ function reviewSection(v: ProjectView): string {
   if (review !== null && review.revision === revision.number) {
     return `<section class="card"><h2>Review</h2><p>You reviewed revision ${revision.number}.</p></section>`;
   }
-  const inner = `${field("revision", revision.number)}<label><input type="checkbox" name="attest" value="yes"> ${e(ATTESTATIONS[1])}</label><button>Record review</button>`;
+  const inner = `${field("revision", revision.number)}<label><input type="checkbox" name="attest" value="yes"> ${e(ATTESTATIONS[ATTESTATION_VERSION])}</label><button>Record review</button>`;
   return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}</section>`;
 }
 
