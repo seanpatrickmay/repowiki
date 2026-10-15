@@ -152,6 +152,9 @@ importers:
       '@repowiki/hosted':
         specifier: workspace:*
         version: link:../hosted
+      '@repowiki/llm':
+        specifier: workspace:*
+        version: link:../llm
       '@repowiki/site':
         specifier: workspace:*
         version: link:../site

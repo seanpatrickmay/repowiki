@@ -83,6 +83,19 @@ export {
 } from "./objects/store.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 export { refusalPage } from "./pages/refusal.ts";
+export {
+  AnthropicUsage,
+  actualMicros,
+  OUTPUT_RESERVE_SHARE,
+  reserveMicros,
+} from "./proxy/cost.ts";
+export {
+  BatchCreate,
+  BETA_ALLOWLIST,
+  MAX_OUTPUT,
+  MessageParams,
+  refusedBeta,
+} from "./proxy/request.ts";
 export { authRoutes } from "./routes/auth.ts";
 export {
   EXPORT_LIMIT,
