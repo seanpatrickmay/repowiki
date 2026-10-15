@@ -102,7 +102,30 @@ describe("the image and the Fly configs (spec 2 §2)", () => {
         /sk-ant|TOKEN_KEY\s*=|SECRET\s*=|_KEY_ID\s*=|API_TOKEN\s*=|DATABASE_URL\s*=|ANTHROPIC_API_KEY\s*=/,
       );
     }
-    expect(read(".dockerignore")).toMatch(/^\.env$/m);
-    expect(read(".dockerignore")).toMatch(/^\.env\.\*$/m);
+  });
+
+  it("keeps secrets, local data and tool folders out of the build context at any depth", () => {
+    // A bare pattern matches only at the context root; `**/` matches in every package too.
+    const lines = read(".dockerignore").split("\n");
+    for (const pattern of [
+      ".env",
+      ".env.*",
+      "*.db",
+      "*.db-*",
+      "coverage",
+      "dist",
+      "node_modules",
+      ".repowiki",
+      ".git",
+      ".superpowers",
+      ".claude",
+    ]) {
+      expect(lines, pattern).toContain(`**/${pattern}`);
+    }
+    for (const root of [".env", ".env.*", ".git"]) expect(lines, root).toContain(root);
+    // The example file is the one exception, and it must come after the patterns it reopens.
+    const example = lines.indexOf("!**/.env.example");
+    expect(example).toBeGreaterThan(lines.indexOf("**/.env.*"));
+    expect(lines.slice(example + 1).some((l) => /\.env/.test(l))).toBe(false);
   });
 });
