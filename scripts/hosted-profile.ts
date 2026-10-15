@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -11,7 +12,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { WikiExport } from "@repowiki/core";
-import { takeProfile } from "@repowiki/server";
+import { avatarFileOf, takeAvatar, takeProfile } from "@repowiki/server";
 import { matchAuthor } from "@repowiki/worker";
 
 export const PROFILE_USAGE = "usage: pnpm hosted:profile <login> [--out file] [--exports dir]";
@@ -106,6 +107,16 @@ async function main(): Promise<void> {
   writeFileSync(args.out, `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 });
   chmodSync(args.out, 0o600);
   console.log(`wrote ${args.out}`);
+  // The avatar beside the snapshot, so local mode shows it without reaching GitHub (ADR-0013).
+  const avatar = await takeAvatar(profile, fetch);
+  const avatarFile = avatarFileOf(args.out);
+  rmSync(avatarFile, { force: true });
+  if (avatar === null) {
+    console.log("avatar: none");
+  } else {
+    writeFileSync(avatarFile, avatar, { mode: 0o600 });
+    console.log(`wrote ${avatarFile}`);
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { GitSha, WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { GitHubError, GitHubRepo, GitHubUser, githubApi } from "./api.ts";
+import { avatarSource, avatarType, fetchAvatar } from "./avatar.ts";
 import { GITHUB } from "./endpoints.ts";
 
 const MAX_SHAS = 100;
@@ -20,6 +21,8 @@ export const LocalProfile = z.strictObject({
     login: z.string().min(1).max(39),
     name: z.string().nullable(),
     created_at: z.iso.datetime({ offset: true }),
+    /** GitHub's avatar URL; its bytes are saved beside the snapshot (ADR-0013). */
+    avatar_url: z.string().max(500).optional(),
   }),
   repos: z.array(
     z.strictObject({
@@ -150,4 +153,24 @@ export async function takeProfile(options: TakeProfileOptions): Promise<LocalPro
 /** The snapshot at `path`, parsed. */
 export function loadProfile(path: string): LocalProfile {
   return LocalProfile.parse(JSON.parse(readFileSync(path, "utf8")));
+}
+
+/** The user's avatar for the snapshot, checked as sign-in checks it; null when there is none. */
+export async function takeAvatar(
+  profile: LocalProfile,
+  fetchFn: typeof fetch,
+): Promise<Uint8Array | null> {
+  const source = avatarSource(profile.user.avatar_url);
+  return source === null ? null : ((await fetchAvatar(fetchFn, source))?.bytes ?? null);
+}
+
+/** Where the avatar of the snapshot at `path` is saved. */
+export const avatarFileOf = (path: string) => `${path}.avatar`;
+
+/** The avatar saved beside the snapshot at `path`, when there is one and it is an image. */
+export function loadAvatar(path: string): Uint8Array | null {
+  const file = avatarFileOf(path);
+  if (!existsSync(file)) return null;
+  const bytes = new Uint8Array(readFileSync(file));
+  return avatarType(bytes) === null ? null : bytes;
 }
