@@ -34,7 +34,7 @@ describe("route sets (spec 2 S1)", () => {
     expect(top(sets.public).has("llm")).toBe(false);
     expect([...top(sets.worker)].sort()).toEqual(["internal", "llm"]);
     expect(sets.public[0]?.pattern).toBe("/");
-    expect(sets.public.at(-1)?.pattern).toBe("/:handle/:slug/*");
+    expect(sets.public.slice(-2).map((r) => r.pattern)).toEqual(["/:handle/:slug/*", "/:handle/*"]);
     await deps.db.close();
   });
 
