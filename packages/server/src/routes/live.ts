@@ -32,6 +32,7 @@ export async function liveEligibility(
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const isUuid = (id: string) => UUID.test(id);
 
 /** The session's own project, or null: another account's id is indistinguishable from none (C10). */
 export async function ownedProject(
