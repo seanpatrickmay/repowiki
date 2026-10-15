@@ -307,7 +307,9 @@ describe("createRepoTools against hostile config and content", () => {
 
   it("takes a pattern or a path that looks like an option or pathspec magic as text", () => {
     const tools = createRepoTools(hostile.dir, sha);
-    expect(tools.run("grep", { pattern: "-n" }).text).toBe("No matches.\n");
+    // An option-like pattern no fixture contains: the fixture's .gitmodules holds a random
+    // temporary path, which contains "-n" whenever its suffix starts with "n".
+    expect(tools.run("grep", { pattern: "--no-such-flag" }).text).toBe("No matches.\n");
     expect(tools.run("grep", { pattern: "hello", path: ":(top)" }).text).toBe("No matches.\n");
     expect(tools.run("list_files", { path: "sm" })).toEqual({
       text: 'no files under "sm"',
