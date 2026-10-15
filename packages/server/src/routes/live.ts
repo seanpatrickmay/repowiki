@@ -1,7 +1,35 @@
-import type { Project } from "@repowiki/hosted";
+import type { EligibilityFacts, Project } from "@repowiki/hosted";
+import type { Deps } from "../app.ts";
 import type { Queryable } from "../db/db.ts";
+import { type GitHubRepo, githubApi } from "../github/api.ts";
+import { eligibilityFacts } from "../github/facts.ts";
+import type { Reply } from "../http/router.ts";
+import { redirect } from "../http/server.ts";
 import type { Session } from "../http/session.ts";
+import { readGitHubToken } from "../store/github-tokens.ts";
 import { projectById } from "../store/projects.ts";
+
+export type Live =
+  | { ok: true; facts: EligibilityFacts; repo: GitHubRepo | null; token: string }
+  | { ok: false; reply: Reply };
+
+/** A live eligibility check as the signed-in user (spec 2 S8), or the reply to send instead. */
+export async function liveEligibility(
+  deps: Deps,
+  session: Session,
+  githubRepoId: number,
+): Promise<Live> {
+  const token = await readGitHubToken(deps.db, deps.config.tokenKey, session.account.id);
+  if (token === null) return { ok: false, reply: redirect("/auth/github") };
+  const { facts, repo } = await eligibilityFacts(githubApi(deps.fetch, deps.github), token, {
+    githubUserId: session.account.githubUserId,
+    login: session.account.login,
+    githubRepoId,
+    now: deps.now(),
+    indexedFiles: null,
+  });
+  return { ok: true, facts, repo, token };
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
