@@ -7,7 +7,7 @@ import { treeHash } from "../render/tree.ts";
 import { previewOf } from "../store/drafts.ts";
 import { draftRoutes } from "./drafts.ts";
 import { previewRoutes, serveTreeFile } from "./preview.ts";
-import { call, form, generatedProject, otherCookie, testDeps } from "./test-app.ts";
+import { auditOutcomes, call, form, generatedProject, otherCookie, testDeps } from "./test-app.ts";
 
 let deps: Deps;
 let app: App;
@@ -102,6 +102,41 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect((await post(`/projects/${p.projectId}/preview`, "revision=2", other)).status).toBe(404);
   }, 300_000);
 
+  it("audits a refused build, the stale-revision path included (spec 2 S5)", async () => {
+    await post(`/projects/${p.projectId}/revisions`, "baseRevision=1&contribution=Mine.");
+    const stale = await post(`/projects/${p.projectId}/preview`, "revision=1");
+    expect(stale.status).toBe(REFUSALS["stale-revision"].status);
+    expect(await auditOutcomes(deps.db, "preview.build", p.projectId)).toEqual(["stale-revision"]);
+  });
+
+  it("saves no preview for a revision that stopped being the latest while it built", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const slow: typeof buildTree = async (input) => {
+      entered();
+      await held;
+      return buildTree(input);
+    };
+    app = createApp(deps, [...draftRoutes(deps), ...previewRoutes(deps, slow)]);
+    const building = post(`/projects/${p.projectId}/preview`, "revision=1");
+    await started;
+    const saved = await post(
+      `/projects/${p.projectId}/revisions`,
+      "baseRevision=1&contribution=Mine.",
+    );
+    expect(saved.status).toBe(303);
+    release();
+    expect((await building).status).toBe(REFUSALS["stale-revision"].status);
+    expect(await previewOf(deps.db, p.projectId, 1)).toBeNull();
+    expect(await auditOutcomes(deps.db, "preview.build", p.projectId)).toEqual(["stale-revision"]);
+  }, 300_000);
+
   it("allows one preview build in flight per account (A3)", async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
@@ -117,6 +152,7 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     const second = await post(`/projects/${p.projectId}/preview`, "revision=1");
     expect(second.status).toBe(429);
     expect(String(second.body)).toContain("A preview is already being built.");
+    expect(second.headers?.["cache-control"]).toBe("private, no-store");
     release();
     expect((await first).status).toBe(303);
   }, 300_000);

@@ -30,12 +30,14 @@ export type PortfolioData = z.infer<typeof PortfolioData>;
 /**
  * The layer a revision publishes (Contract §8): overrides over suggestions, highlight titles from
  * the export, and the facts, which hiding never removes. `exp` is the hosted export the site is
- * built from, so `hasAbout` matches the built site.
+ * built from, so `hasAbout` matches the built site; `full` is the generation's whole export, so a
+ * hidden feature in the facts keeps its title (Contract §8).
  */
 export function portfolioData(input: {
   generation: Generation;
   revision: DraftRevision;
   exp: WikiExport;
+  full: WikiExport;
   repoFullName: string;
 }): PortfolioData {
   const { generation, revision, exp } = input;
@@ -43,7 +45,7 @@ export function portfolioData(input: {
   const hidden = new Set(o.hiddenFeatureIds);
   const known = new Set(generation.facts.featureIds);
   const titles = Object.fromEntries(
-    exp.manifest.features.filter((f) => known.has(f.id)).map((f) => [f.id, f.title]),
+    input.full.manifest.features.filter((f) => known.has(f.id)).map((f) => [f.id, f.title]),
   );
   return PortfolioData.parse({
     title: exp.architecture.at(-1)?.title ?? input.repoFullName.split("/")[1] ?? input.repoFullName,

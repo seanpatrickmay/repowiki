@@ -131,9 +131,13 @@ export function publishRoutes(deps: Deps): Route[] {
           return { ok: true, value: true };
         });
         const back = `/projects/${id}`;
-        return result.ok
-          ? redirect(back)
-          : refusalPage(result.code, pageSession(session), { back });
+        if (result.ok) return redirect(back);
+        if ((await ownedProject(deps.db, session, id)) !== null) {
+          await deps.db.transaction((tx) =>
+            auditAuthor(tx, deps, "project.unpublish", id, result.code),
+          );
+        }
+        return refusalPage(result.code, pageSession(session), { back });
       },
     },
   ];

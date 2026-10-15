@@ -64,7 +64,15 @@ export function jobRoutes(deps: Deps): Route[] {
           await auditAuthor(tx, deps, "job.cancel", projectId, "allowed");
           return ok(batches);
         });
-        if (!result.ok) return refusalPage(result.code, pageSession(session), { back });
+        if (!result.ok) {
+          // A refusal is audited in its own transaction, against a project the caller owns (S5).
+          if ((await ownedProject(deps.db, session, projectId)) !== null) {
+            await deps.db.transaction((tx) =>
+              auditAuthor(tx, deps, "job.cancel", projectId, result.code),
+            );
+          }
+          return refusalPage(result.code, pageSession(session), { back });
+        }
         await cancelBatches(deps.anthropic, result.value, logOf(deps));
         return redirect(back);
       },
