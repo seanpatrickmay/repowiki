@@ -7,7 +7,8 @@ interface ClientLike {
 
 /** The part of `pg.Pool` the seam uses, so its transaction handling is testable without a server. */
 export interface PoolLike extends ClientLike {
-  connect(): Promise<ClientLike & { release(): void }>;
+  /** `release(error)` discards the client instead of returning it to the pool. */
+  connect(): Promise<ClientLike & { release(error?: Error): void }>;
   end(): Promise<void>;
 }
 
@@ -28,16 +29,20 @@ export function poolDb(pool: PoolLike): Db {
     transaction: (fn) =>
       withRetries(async () => {
         const client = await pool.connect();
+        let broken: Error | undefined;
         try {
           await client.query("BEGIN");
           const value = await fn(queryable(client));
           await client.query("COMMIT");
           return value;
         } catch (error) {
-          await client.query("ROLLBACK").catch(() => undefined);
+          // A client that cannot even roll back is in an unknown state: never reuse it.
+          await client.query("ROLLBACK").catch((rollback: unknown) => {
+            broken = rollback instanceof Error ? rollback : new Error("rollback failed");
+          });
           throw error;
         } finally {
-          client.release();
+          client.release(broken);
         }
       }),
     close: () => pool.end(),

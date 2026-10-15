@@ -6,27 +6,26 @@ export const BODY_LIMIT = 65_536;
 /** An error a handler means the client to see, with its status and message. */
 export class HttpError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly headers: Readonly<Record<string, string>>;
+  constructor(status: number, message: string, headers: Record<string, string> = {}) {
     super(message);
     this.status = status;
+    this.headers = headers;
   }
 }
+
+/** Refused bodies are not drained: the reply closes the connection instead. */
+const tooLarge = () => new HttpError(413, "Request body too large.", { connection: "close" });
 
 /** The request body, refused with 413 past `limit` whether declared or streamed. */
 export async function readBody(raw: IncomingMessage, limit: number): Promise<Buffer> {
   const declared = Number(raw.headers["content-length"] ?? Number.NaN);
-  if (Number.isFinite(declared) && declared > limit) {
-    raw.resume();
-    throw new HttpError(413, "Request body too large.");
-  }
+  if (Number.isFinite(declared) && declared > limit) throw tooLarge();
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of raw) {
     size += (chunk as Buffer).length;
-    if (size > limit) {
-      raw.resume();
-      throw new HttpError(413, "Request body too large.");
-    }
+    if (size > limit) throw tooLarge();
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks);

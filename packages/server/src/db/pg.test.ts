@@ -10,7 +10,7 @@ function fakePool(failOn?: string) {
       if (sql === failOn) throw Object.assign(new Error(`failed ${sql}`), { code: "XX000" });
       return { rows: [{ sql }] };
     },
-    release: () => log.push("release"),
+    release: (error?: unknown) => log.push(error === undefined ? "release" : "release(discard)"),
   };
   const pool: PoolLike = {
     query: client.query,
@@ -35,6 +35,17 @@ describe("poolDb (spec 2 S3)", () => {
     const db = poolDb(pool);
     await expect(db.transaction(async (tx) => tx.query("SELECT 2"))).rejects.toThrow("failed");
     expect(log).toEqual(["BEGIN", "SELECT 2", "ROLLBACK", "release"]);
+  });
+
+  it("discards the client when even the rollback fails", async () => {
+    const { pool, log } = fakePool("ROLLBACK");
+    const db = poolDb(pool);
+    await expect(
+      db.transaction(async () => {
+        throw new Error("work failed");
+      }),
+    ).rejects.toThrow("work failed");
+    expect(log).toEqual(["BEGIN", "ROLLBACK", "release(discard)"]);
   });
 
   it("queries the pool outside a transaction and ends it on close", async () => {
