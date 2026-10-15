@@ -32,15 +32,14 @@ primary_region = "iad"
   auto_start_machines = false
   min_machines_running = 1
 
-  # The check names the app host: the server answers 404 to any host it does not serve.
+  # /healthz answers "ok" on any host, before host routing (every other path is 404 on a host
+  # the server does not serve), so the check needs no hostname.
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
     grace_period = "20s"
     method = "GET"
-    path = "/"
-    [http_service.checks.headers]
-      Host = "app.repowiki.app"
+    path = "/healthz"
 
 [[vm]]
   size = "shared-cpu-2x"

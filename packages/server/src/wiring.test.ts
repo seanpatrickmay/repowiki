@@ -114,7 +114,7 @@ describe("listeners (spec 2 S1)", () => {
     expect((await call(pub.app, { path: "/", headers: { host: "app.repowiki.dev" } })).status).toBe(
       200,
     );
-    // Fly's health check names the app host (deploy/fly.server.toml); no host is a 404.
+    // No host is a 404; Fly's health check uses /healthz, which answers on any host.
     expect((await call(pub.app, { path: "/" })).status).toBe(404);
     expect((await call(worker.app, { method: "POST", path: "/internal/job/lease" })).status).toBe(
       401,

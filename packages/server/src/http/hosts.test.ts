@@ -66,3 +66,31 @@ describe("routing by Host (ADR-0012)", () => {
     expect(reply.headers?.["content-security-policy"]).toBe("default-src 'self'");
   });
 });
+
+describe("the health check (review fix)", () => {
+  it("answers ok on any host, before routing, never cached", async () => {
+    for (const headers of [APP, PAGES, { host: "fly-internal:8787" }, {}]) {
+      const reply = await call(app, { path: "/healthz", headers });
+      expect(reply.status, JSON.stringify(headers)).toBe(200);
+      expect(reply.body).toBe("ok");
+      expect(reply.headers?.["cache-control"]).toBe("no-store");
+      expect(reply.headers?.["set-cookie"]).toBeUndefined();
+    }
+  });
+});
+
+describe("a repeated Host header (review fix)", () => {
+  it("is no host at all: 404", async () => {
+    const request = {
+      method: "GET" as const,
+      path: "/",
+      params: {},
+      query: new URLSearchParams(),
+      headers: { host: "127.0.0.1:9002" },
+      raw: { headersDistinct: { host: ["127.0.0.1:9002", "localhost:9002"] } } as never,
+    };
+    expect((await app(request)).status).toBe(404);
+    const once = { ...request, raw: { headersDistinct: { host: ["127.0.0.1:9002"] } } as never };
+    expect((await app(once)).status).toBe(200);
+  });
+});

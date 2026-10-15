@@ -122,7 +122,9 @@ describe("the image and the Fly configs (spec 2 §2)", () => {
     const ports = [...server.matchAll(/^[ \t]*internal_port[ \t]*=[ \t]*"?(\d+)"?/gm)];
     expect(ports.map((m) => m[1])).toEqual(["8787"]);
     expect(server).toMatch(/^[ \t]*PORT[ \t]*=[ \t]*"8787"/m);
-    expect(server).toMatch(/path = "\/"/);
+    // The health check needs no hostname: /healthz answers on any host (review fix).
+    expect(server).toMatch(/path = "\/healthz"/);
+    expect(server).not.toMatch(/^[ \t]*Host[ \t]*=/m);
     expect(read("deploy/fly.worker.toml")).not.toContain("[[services]]");
     expect(read("deploy/fly.worker.toml")).not.toContain("[http_service]");
   });
