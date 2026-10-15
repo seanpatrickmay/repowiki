@@ -33,6 +33,7 @@ export {
   type SnapshotFacts,
 } from "./facts.ts";
 export { AUTHOR_ID, authorEmails, peopleFile } from "./people-file.ts";
+export { HEARTBEAT_MS, heartbeater, type PhaseDeps, phase1 } from "./run.ts";
 export {
   cleanSuggestions,
   fallbackSuggestions,
