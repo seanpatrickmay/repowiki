@@ -158,6 +158,26 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
     expect(setCookie(out, "session")).toBe("");
     expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
   });
+
+  it("does not renew the session cookie it is clearing on sign-out", async () => {
+    const { session } = await signInFlow();
+    const [row] = await deps.db.query<{ csrf: string }>("SELECT csrf FROM sessions");
+    const later = { ...deps, now: () => "2026-10-20T12:00:00.000Z" };
+    const out = await call(createApp(later, authRoutes(later)), {
+      method: "POST",
+      path: "/auth/signout",
+      headers: {
+        cookie: `session=${session}`,
+        "content-type": "application/x-www-form-urlencoded",
+        origin: deps.config.origin,
+      },
+      body: `csrf=${row?.csrf}`,
+    });
+    expect(out.status).toBe(303);
+    expect([out.headers?.["set-cookie"]].flat()).toEqual([
+      "session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly",
+    ]);
+  });
 });
 
 describe("GitHub sign-in when GitHub misbehaves (spec 2 S7)", () => {

@@ -2,8 +2,9 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db/db.ts";
 import type { GitHubEndpoints } from "./github/endpoints.ts";
 import { fakeAuthorizeRoute } from "./github/fake.ts";
-import { createRouter, type Route } from "./http/router.ts";
+import { createRouter, type Reply, type Route } from "./http/router.ts";
 import { type App, html, text } from "./http/server.ts";
+import { renewalCookie } from "./http/session.ts";
 import { escapeHtml, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 
 /** Everything a route needs from outside (spec 2 §4); tests pass fakes. */
@@ -29,6 +30,15 @@ const styleRoute: Route = {
   }),
 };
 
+/** The reply plus a slid session's cookie, unless the reply already sets or clears that cookie. */
+function withRenewal(reply: Reply, cookie: string | undefined): Reply {
+  if (cookie === undefined) return reply;
+  const name = `${cookie.slice(0, cookie.indexOf("="))}=`;
+  const set = [reply.headers?.["set-cookie"] ?? []].flat();
+  if (set.some((c) => c.startsWith(name))) return reply;
+  return { ...reply, headers: { ...reply.headers, "set-cookie": [...set, cookie] } };
+}
+
 /** The routes, the style sheet, and in fake mode the fake GitHub's authorize page. */
 export function createApp(deps: Deps, routes: readonly Route[]): App {
   const fake =
@@ -36,7 +46,10 @@ export function createApp(deps: Deps, routes: readonly Route[]): App {
   const route = createRouter([styleRoute, ...fake, ...routes]);
   return async (request) => {
     const found = route(request.method, request.path);
-    if ("handler" in found) return found.handler({ ...request, params: found.params });
+    if ("handler" in found) {
+      const reply = await found.handler({ ...request, params: found.params });
+      return withRenewal(reply, renewalCookie(request.headers));
+    }
     if (found.status === 405) return text(405, "Method not allowed.");
     const body = `<h1>Not found</h1><p class="muted">${escapeHtml(request.path)} is not a page on RepoWiki.</p>`;
     return html(404, page({ title: "Not found", body, session: null }));

@@ -64,6 +64,7 @@ export {
 export {
   checkMutation,
   currentSession,
+  renewalCookie,
   type Session,
   secureCookies,
   sessionSetCookie,
