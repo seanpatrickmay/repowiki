@@ -1,4 +1,4 @@
-import type { Project } from "@repowiki/hosted";
+import { type Project, profileUrl } from "@repowiki/hosted";
 import { type Deps, logOf, nameOf } from "../app.ts";
 import { type GitHubRepo, githubApi, TokenRevoked } from "../github/api.ts";
 import { eligibilityFacts } from "../github/facts.ts";
@@ -8,23 +8,34 @@ import { html, redirect } from "../http/server.ts";
 import { checkMutation, currentSession, type Session } from "../http/session.ts";
 import { escapeHtml, page } from "../pages/layout.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
+import { activeHandle } from "../store/accounts.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
 import { projectsOf } from "../store/projects.ts";
 import { startGeneration, startRefresh } from "../store/start.ts";
 import { ownedProject } from "./live.ts";
 
-function dashboard(session: Session, repos: GitHubRepo[], projects: string): string {
+function dashboard(
+  session: Session,
+  repos: GitHubRepo[],
+  projects: string,
+  profile: string | null,
+): string {
   const csrf = escapeHtml(session.csrf);
   const choices = repos
     .map(
       (
         r,
       ) => `<li class="card"><strong>${escapeHtml(r.full_name)}</strong><p class="muted">${escapeHtml(r.description ?? "")}</p>
-<form method="post" action="/projects"><input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="githubRepoId" value="${r.id}"><button>Build project page</button></form></li>`,
+<form method="post" action="/projects"><input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="githubRepoId" value="${r.id}"><button>Build its wiki</button></form></li>`,
     )
     .join("");
-  return `<h1>Your projects</h1>${projects || `<p class="muted">No projects yet.</p>`}
-<h2>Your public repositories</h2><p class="muted">RepoWiki builds a page for a public repository you can push to and have commits in.</p><ul class="plain">${choices || "<li>No public repositories found.</li>"}</ul>`;
+  // The biography exists once a project is published (ADR-0013).
+  const link =
+    profile === null
+      ? `<p class="muted">Your profile appears once you publish a project.</p>`
+      : `<p><a href="${escapeHtml(profile)}">View your profile</a></p>`;
+  return `<h1>Your projects</h1>${link}${projects || `<p class="muted">No projects yet.</p>`}
+<h2>Your public repositories</h2><p class="muted">RepoWiki builds a wiki for a public repository you can push to and have commits in.</p><ul class="plain">${choices || "<li>No public repositories found.</li>"}</ul>`;
 }
 
 /** The dashboard and starting a project (spec 2 §7). */
@@ -96,13 +107,19 @@ export function projectRoutes(deps: Deps): Route[] {
           if (error instanceof TokenRevoked) return redirect("/auth/github");
           throw error;
         }
-        const projects = (await projectsOf(deps.db, session.account.id))
+        const owned = await projectsOf(deps.db, session.account.id);
+        const handle = await activeHandle(deps.db, session.account.id);
+        const profile =
+          handle !== null && owned.some((p) => p.state === "published")
+            ? profileUrl(deps.config.publicOrigin, handle)
+            : null;
+        const projects = owned
           .map(
             (p) =>
               `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${escapeHtml(p.state)}</span></li>`,
           )
           .join("");
-        const body = dashboard(session, repos, projects && `<ul>${projects}</ul>`);
+        const body = dashboard(session, repos, projects && `<ul>${projects}</ul>`, profile);
         return html(200, page({ title: "Dashboard", body, session: pageSession(session) }));
       },
     },

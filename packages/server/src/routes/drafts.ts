@@ -30,28 +30,12 @@ import { jobsOf } from "../store/jobs.ts";
 import { usageFor } from "../store/projects.ts";
 import { liveEligibility, ownedProject, repoFullName } from "./live.ts";
 
-const titleCache = new Map<string, ReadonlyMap<string, string>>();
-
 /** A generation's stored export, parsed; null when the object is missing. */
 export async function storedExport(deps: Deps, generation: Generation): Promise<WikiExport | null> {
   const object = await deps.objects.get(generation.exportKey);
   return object === null
     ? null
     : WikiExport.parse(JSON.parse(new TextDecoder().decode(object.body)));
-}
-
-/** Feature titles from a generation's export, cached by export key (an export never changes). */
-export async function featureTitles(
-  deps: Deps,
-  generation: Generation,
-): Promise<ReadonlyMap<string, string>> {
-  const cached = titleCache.get(generation.exportKey);
-  if (cached !== undefined) return cached;
-  const exp = await storedExport(deps, generation);
-  const titles = new Map((exp?.manifest.features ?? []).map((f) => [f.id as string, f.title]));
-  if (titleCache.size >= 200) titleCache.clear();
-  titleCache.set(generation.exportKey, titles);
-  return titles;
 }
 
 /** One audit event by the author about a project. */
@@ -164,7 +148,6 @@ export function draftRoutes(deps: Deps): Route[] {
           review: revision === null ? null : await reviewOf(deps.db, project.id, revision.number),
           preview: revision === null ? null : await previewOf(deps.db, project.id, revision.number),
           current,
-          titles: generation === null ? new Map() : await featureTitles(deps, generation),
           session: shown,
         });
         return html(200, body, { "cache-control": "private, no-store" });

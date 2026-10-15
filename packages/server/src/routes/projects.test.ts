@@ -49,6 +49,20 @@ describe("the dashboard (spec 2 §7)", () => {
     const started = await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
     const reply = await call(app, { path: "/dashboard", headers: { cookie } });
     expect(String(reply.body)).toContain(`href="${started.headers?.location}"`);
+    // No biography until a project is published (ADR-0013).
+    expect(String(reply.body)).not.toContain("View your profile");
+  });
+
+  it("links to the biography on the pages origin once a project is published", async () => {
+    const { cookie, csrf } = await signedInCookie(deps);
+    await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"published","currentVersion":1}'::jsonb`,
+    );
+    const reply = await call(app, { path: "/dashboard", headers: { cookie } });
+    expect(String(reply.body)).toContain(
+      `<a href="${deps.config.publicOrigin}/demo-dev">View your profile</a>`,
+    );
   });
 });
 

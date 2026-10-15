@@ -132,7 +132,7 @@ describe("the worker's internal API (spec 2 §6)", () => {
     // The revision holds the generated content (ADR-0012): the model's draft, as written.
     expect(revision).toMatchObject({
       number: 1,
-      content: { tagline: "A tiny demo", contribution: "I wrote it.", highlights: [] },
+      content: { contribution: "I wrote it." },
     });
     expect(await generationById(deps.db, revision?.generationId ?? "")).toMatchObject({
       jobId: job.jobId,

@@ -55,7 +55,6 @@ export {
   documentationFeatures,
   generatedContent,
   generatedContribution,
-  generatedHighlights,
 } from "./generated.ts";
 export {
   cancelJob,

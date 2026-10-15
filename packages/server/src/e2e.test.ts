@@ -37,12 +37,12 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
 
     // The fixture worker runs as a child process and reports back over HTTP.
     let page = await me.go(projectPath);
-    for (let i = 0; i < 120 && !page.text.includes("Portfolio (revision 1)"); i++) {
+    for (let i = 0; i < 120 && !page.text.includes("<h2>Revision 1</h2>"); i++) {
       await sleep(500);
       page = await me.go(projectPath);
     }
     expect(page.text, JSON.stringify(logs.filter((l) => "worker" in l))).toContain(
-      "Portfolio (revision 1)",
+      "<h2>Revision 1</h2>",
     );
 
     // Every wiki page is public (ADR-0012): there is nothing to hide.
