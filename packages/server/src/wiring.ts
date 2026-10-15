@@ -3,8 +3,9 @@ import { fileURLToPath } from "node:url";
 import { createApp, type Deps } from "./app.ts";
 import { type Config, ConfigError } from "./config.ts";
 import { openDatabase } from "./db/migrate.ts";
-import { fakeEndpoints, GITHUB } from "./github/endpoints.ts";
-import { fakeGitHubFetch } from "./github/fake.ts";
+import { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
+import { fakeGitHubFetch, profileGitHubFetch } from "./github/fake.ts";
+import { loadProfile } from "./github/profile.ts";
 import type { Route } from "./http/router.ts";
 import { type App, type AppServer, listen } from "./http/server.ts";
 import { objectStoreFor } from "./objects/open.ts";
@@ -57,6 +58,14 @@ function runnerFor(config: Config, log: (line: object) => void): JobRunner {
   });
 }
 
+/** Real GitHub, the demo's fake, or the fake serving a local profile (M14g). */
+function githubFetch(config: Config, github: GitHubEndpoints): typeof fetch {
+  if (config.github.kind === "oauth") return fetch;
+  return config.localProfile === null
+    ? fakeGitHubFetch(github)
+    : profileGitHubFetch(github, loadProfile(config.localProfile));
+}
+
 /**
  * Every production seam, or its local stand-in in development and demo (spec 2 S17, S18). An
  * override replaces a seam without building it (tests pass a database).
@@ -68,7 +77,7 @@ export async function buildDeps(config: Config, overrides: Partial<Deps> = {}): 
   return {
     config,
     db: overrides.db ?? (await openDatabase(config.database)),
-    fetch: config.github.kind === "fake" ? fakeGitHubFetch(github) : fetch,
+    fetch: githubFetch(config, github),
     github,
     now: () => new Date().toISOString(),
     newId: randomUUID,

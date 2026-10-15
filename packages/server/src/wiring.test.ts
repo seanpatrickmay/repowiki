@@ -1,6 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "./config.ts";
+import { githubApi } from "./github/api.ts";
 import { GITHUB } from "./github/endpoints.ts";
+import { FAKE_TOKEN } from "./github/fake.ts";
+import { adaProfile, writeProfile } from "./github/test-profile.ts";
 import { call, freePort } from "./routes/test-app.ts";
 import { freshDb } from "./store/test-db.ts";
 import {
@@ -32,6 +38,7 @@ const PRODUCTION = {
   REPOWIKI_ENGINE_VERSION: "abc1234",
 };
 
+const dataDir = () => mkdtempSync(join(tmpdir(), "repowiki-wiring-"));
 const top = (routes: { pattern: string }[]) => new Set(routes.map((r) => r.pattern.split("/")[1]));
 
 describe("route sets (spec 2 S1)", () => {
@@ -55,8 +62,21 @@ describe("route sets (spec 2 S1)", () => {
     await deps.db.close();
   });
 
+  it("serves a local profile's user from the fake GitHub", async () => {
+    const config = loadConfig({
+      REPOWIKI_MODE: "development",
+      DATA_DIR: dataDir(),
+      REPOWIKI_PROFILE: writeProfile(adaProfile()),
+    });
+    const deps = await buildDeps(config, { db: await freshDb() });
+    expect(await githubApi(deps.fetch, deps.github).user(FAKE_TOKEN)).toMatchObject({
+      login: "ada",
+    });
+    await deps.db.close();
+  });
+
   it("runs the engine locally only with real GitHub and a model key", () => {
-    const dev = { REPOWIKI_MODE: "development", DATA_DIR: "/tmp/rw" };
+    const dev = { REPOWIKI_MODE: "development", DATA_DIR: dataDir() };
     const oauth = { GITHUB_CLIENT_ID: "Iv1.dev", GITHUB_CLIENT_SECRET: "dev" };
     expect(workerMode(loadConfig(dev))).toBe("fixture");
     expect(workerMode(loadConfig({ ...dev, ...oauth }))).toBe("fixture");

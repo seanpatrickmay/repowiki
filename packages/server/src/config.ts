@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Origin } from "@repowiki/hosted";
+import { Origin, Plan } from "@repowiki/hosted";
+import { loadProfile } from "./github/profile.ts";
 
 export class ConfigError extends Error {}
 
@@ -27,6 +29,10 @@ export interface Config {
     | { kind: "fly"; apiToken: string; app: string; image: string; internalUrl: string }
     | { kind: "local"; internalUrl: string };
   github: { kind: "oauth"; clientId: string; clientSecret: string } | { kind: "fake" };
+  /** A GitHub snapshot the fake GitHub serves (`REPOWIKI_PROFILE`, development only, M14g). */
+  localProfile: string | null;
+  /** New accounts' plan (`REPOWIKI_LOCAL_PLAN`); never set in production. */
+  localPlan: Plan;
 }
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -56,6 +62,9 @@ export function loadConfig(env: Env): Config {
   }
 
   if (mode === "production") {
+    for (const name of ["REPOWIKI_PROFILE", "REPOWIKI_LOCAL_PLAN"]) {
+      if (env[name] !== undefined) throw new ConfigError(`${name} is for local testing only.`);
+    }
     const origin = need("PUBLIC_ORIGIN");
     const internalPort = portOf(env.INTERNAL_PORT, 8788, "INTERNAL_PORT");
     if (internalPort === port) throw new ConfigError("INTERNAL_PORT must differ from PORT.");
@@ -89,6 +98,8 @@ export function loadConfig(env: Env): Config {
         clientId: need("GITHUB_CLIENT_ID"),
         clientSecret: need("GITHUB_CLIENT_SECRET"),
       },
+      localProfile: null,
+      localPlan: "free",
     };
     const key = need("TOKEN_KEY");
     if (missing.length > 0) {
@@ -112,6 +123,17 @@ export function loadConfig(env: Env): Config {
   const scratch = dataDir ?? join(tmpdir(), `repowiki-demo-${process.pid}`);
   const clientId = env.GITHUB_CLIENT_ID?.trim();
   const clientSecret = env.GITHUB_CLIENT_SECRET?.trim();
+  const plan = Plan.safeParse(env.REPOWIKI_LOCAL_PLAN ?? "free");
+  if (!plan.success) throw new ConfigError("REPOWIKI_LOCAL_PLAN must be free or pro.");
+  const localProfile = env.REPOWIKI_PROFILE?.trim() || null;
+  const signupAllowlist = allowlist(env.SIGNUP_ALLOWLIST);
+  if (localProfile !== null) {
+    if (mode !== "development") throw new ConfigError("REPOWIKI_PROFILE is for development only.");
+    if (clientId || clientSecret) {
+      throw new ConfigError("REPOWIKI_PROFILE serves a fake GitHub; unset GITHUB_CLIENT_ID.");
+    }
+    signupAllowlist.push(profileLogin(localProfile));
+  }
   return {
     mode,
     origin,
@@ -119,8 +141,12 @@ export function loadConfig(env: Env): Config {
     internalPort: null,
     host: "127.0.0.1",
     engineVersion,
-    tokenKey: env.TOKEN_KEY ? tokenKey(env.TOKEN_KEY) : randomBytes(32),
-    signupAllowlist: allowlist(env.SIGNUP_ALLOWLIST),
+    tokenKey: env.TOKEN_KEY
+      ? tokenKey(env.TOKEN_KEY)
+      : dataDir === null
+        ? randomBytes(32)
+        : storedTokenKey(dataDir),
+    signupAllowlist,
     anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() || null,
     database: { kind: "pglite", dataDir: dataDir === null ? null : join(dataDir, "db") },
     objects: { kind: "fs", root: join(scratch, "objects") },
@@ -129,7 +155,40 @@ export function loadConfig(env: Env): Config {
       mode !== "demo" && clientId && clientSecret
         ? { kind: "oauth", clientId, clientSecret }
         : { kind: "fake" },
+    localProfile,
+    localPlan: plan.data,
   };
+}
+
+/** The profile's login, lowercased like the allowlist; a snapshot that does not load is refused. */
+function profileLogin(path: string): string {
+  try {
+    return loadProfile(path).user.login.toLowerCase();
+  } catch {
+    throw new ConfigError("REPOWIKI_PROFILE must name a snapshot from pnpm hosted:profile.");
+  }
+}
+
+/**
+ * Development's token key, kept in `<dataDir>/token-key` (mode 0600) so GitHub tokens stored in
+ * one run decrypt in the next; created on first use.
+ */
+function storedTokenKey(dataDir: string): Buffer {
+  const path = join(dataDir, "token-key");
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    writeFileSync(path, randomBytes(32).toString("base64"), { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  chmodSync(path, 0o600);
+  try {
+    return tokenKey(readFileSync(path, "utf8").trim());
+  } catch {
+    throw new ConfigError(
+      `${path} must hold 32 bytes, base64-encoded; delete it to make a new one.`,
+    );
+  }
 }
 
 function portOf(value: string | undefined, fallback: number, name: string): number {

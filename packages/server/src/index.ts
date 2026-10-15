@@ -25,6 +25,7 @@ export {
   FAKE_USER,
   fakeAuthorizeRoute,
   fakeGitHubFetch,
+  profileGitHubFetch,
 } from "./github/fake.ts";
 export {
   authorizeUrl,

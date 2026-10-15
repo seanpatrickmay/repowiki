@@ -1,5 +1,11 @@
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "./config.ts";
+import { adaProfile, writeProfile } from "./github/test-profile.ts";
+
+const scratch = () => mkdtempSync(join(tmpdir(), "repowiki-config-"));
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
 const production = {
@@ -129,12 +135,13 @@ describe("loadConfig (spec 2 S17)", () => {
   });
 
   it("runs development on loopback with local twins and nothing required", () => {
-    const config = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: "/tmp/rw" });
+    const dir = scratch();
+    const config = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: dir });
     expect(config).toMatchObject({
       mode: "development",
       origin: "http://127.0.0.1:8787",
-      database: { kind: "pglite", dataDir: "/tmp/rw/db" },
-      objects: { kind: "fs", root: "/tmp/rw/objects" },
+      database: { kind: "pglite", dataDir: join(dir, "db") },
+      objects: { kind: "fs", root: join(dir, "objects") },
       runner: { kind: "local" },
       github: { kind: "fake" },
       anthropicApiKey: null,
@@ -145,7 +152,7 @@ describe("loadConfig (spec 2 S17)", () => {
   it("uses real GitHub OAuth in development when it is configured", () => {
     const config = loadConfig({
       REPOWIKI_MODE: "development",
-      DATA_DIR: "/tmp/rw",
+      DATA_DIR: scratch(),
       GITHUB_CLIENT_ID: "Iv1.dev",
       GITHUB_CLIENT_SECRET: "dev",
     });
@@ -163,5 +170,55 @@ describe("loadConfig (spec 2 S17)", () => {
     expect(() =>
       loadConfig({ REPOWIKI_MODE: "development", PUBLIC_ORIGIN: "http://example.com" }),
     ).toThrow(ConfigError);
+  });
+});
+
+describe("local profile mode (M14g)", () => {
+  it("keeps development's token key in the data directory, so tokens survive a restart", () => {
+    const dir = scratch();
+    const first = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: dir });
+    const again = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: dir });
+    expect(again.tokenKey).toEqual(first.tokenKey);
+    expect(statSync(join(dir, "token-key")).mode & 0o777).toBe(0o600);
+    expect(loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: scratch() }).tokenKey).not.toEqual(
+      first.tokenKey,
+    );
+    writeFileSync(join(dir, "token-key"), "short");
+    expect(() => loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: dir })).toThrow(ConfigError);
+  });
+
+  it("serves a profile in development and admits its login", () => {
+    const path = writeProfile(adaProfile());
+    const config = loadConfig({
+      REPOWIKI_MODE: "development",
+      DATA_DIR: scratch(),
+      REPOWIKI_PROFILE: path,
+      REPOWIKI_LOCAL_PLAN: "pro",
+      SIGNUP_ALLOWLIST: "friend",
+    });
+    expect(config).toMatchObject({
+      localProfile: path,
+      localPlan: "pro",
+      github: { kind: "fake" },
+    });
+    expect(config.signupAllowlist).toEqual(["friend", "ada"]);
+    const plain = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: scratch() });
+    expect(plain).toMatchObject({ localProfile: null, localPlan: "free" });
+  });
+
+  it("refuses the local variables in production, a bad plan, a bad profile and OAuth with one", () => {
+    const path = writeProfile(adaProfile());
+    const dev = { REPOWIKI_MODE: "development", DATA_DIR: scratch() };
+    for (const env of [
+      { ...production, REPOWIKI_PROFILE: path },
+      { ...production, REPOWIKI_LOCAL_PLAN: "pro" },
+      { ...production, REPOWIKI_LOCAL_PLAN: "free" },
+      { REPOWIKI_MODE: "demo", REPOWIKI_PROFILE: path },
+      { ...dev, REPOWIKI_LOCAL_PLAN: "enterprise" },
+      { ...dev, REPOWIKI_PROFILE: join(scratch(), "missing.json") },
+      { ...dev, REPOWIKI_PROFILE: path, GITHUB_CLIENT_ID: "Iv1.x", GITHUB_CLIENT_SECRET: "x" },
+    ]) {
+      expect(() => loadConfig(env), JSON.stringify(env)).toThrow(ConfigError);
+    }
   });
 });
