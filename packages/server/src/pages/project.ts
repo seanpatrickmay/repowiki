@@ -120,13 +120,37 @@ function reviewSection(v: ProjectView): string {
   return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}</section>`;
 }
 
+function publishSection(v: ProjectView): string {
+  const { revision, preview, project, session, current, publicUrl } = v;
+  if (revision === null) return "";
+  const base = `/projects/${project.id}`;
+  const live =
+    project.state === "published"
+      ? `<p>Live at <a href="${e(publicUrl)}">${e(publicUrl)}</a> (version ${project.currentVersion}).</p>${form(`${base}/unpublish`, session, `<button class="secondary">Unpublish</button>`)}`
+      : "";
+  const build = form(
+    `${base}/preview`,
+    session,
+    `${field("revision", revision.number)}<button class="secondary">Build preview of revision ${revision.number}</button>`,
+  );
+  const ready =
+    preview !== null && preview.revision === revision.number
+      ? `<p><a href="/preview/${e(project.id)}/${revision.number}/">Open the preview of revision ${revision.number}</a></p>${form(
+          `${base}/publish`,
+          session,
+          `${field("revision", revision.number)}${field("expectedVersion", current?.version ?? project.currentVersion)}${field("previewHash", preview.siteHash)}<button>Publish revision ${revision.number}</button>`,
+        )}`
+      : `<p class="muted">Build a preview of the latest revision before publishing.</p>`;
+  return `<section class="card"><h2>Preview and publish</h2>${live}${build}${ready}</section>`;
+}
+
 /** The author's working page for one project (spec 2 §7); refreshes itself while a job runs. */
 export function projectPage(v: ProjectView): string {
   const repo = v.repoFullName === null ? "" : `<p class="muted">${e(v.repoFullName)}</p>`;
   return page({
     title: v.project.slug,
     head: isActive(v.job) ? '<meta http-equiv="refresh" content="3">' : "",
-    body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${editor(v)}${reviewSection(v)}`,
+    body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${editor(v)}${reviewSection(v)}${publishSection(v)}`,
     session: v.session,
   });
 }

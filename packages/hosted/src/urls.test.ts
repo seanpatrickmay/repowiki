@@ -4,6 +4,7 @@ import {
   HandleName,
   type HandleRecord,
   handleFor,
+  isReservedHandle,
   lookupHandle,
   Origin,
   profileUrl,
@@ -43,7 +44,7 @@ describe("handles (Contract spec §9)", () => {
 
   it("are never one of the reserved route names", () => {
     expect(RESERVED_HANDLES.has("api")).toBe(true);
-    expect(RESERVED_HANDLES.size).toBe(27);
+    expect(RESERVED_HANDLES.size).toBe(31);
     for (const name of RESERVED_HANDLES) expect(HandleName.safeParse(name).success).toBe(false);
   });
 
@@ -172,6 +173,14 @@ describe("URLs (Contract spec §9)", () => {
       "https://x.workers.dev",
     ]) {
       expect(Origin.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+});
+
+describe("app paths are reserved handles (spec 2 §7)", () => {
+  it("reserves every top-level path the server routes", () => {
+    for (const name of ["internal", "llm", "preview", "projects"]) {
+      expect(isReservedHandle(name)).toBe(true);
     }
   });
 });
