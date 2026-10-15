@@ -68,6 +68,14 @@ export {
   secureCookies,
   sessionSetCookie,
 } from "./http/session.ts";
+export { fsObjectStore } from "./objects/fs-store.ts";
+export {
+  assertKey,
+  contentTypeFor,
+  copyPrefix,
+  isKey,
+  type ObjectStore,
+} from "./objects/store.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 export { authRoutes } from "./routes/auth.ts";
 export {
