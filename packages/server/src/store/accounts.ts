@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   Account,
   Handle,
@@ -7,6 +8,7 @@ import {
   lookupHandle,
 } from "@repowiki/hosted";
 import { type Db, isUniqueViolation, type Queryable } from "../db/db.ts";
+import { appendAudit } from "./audit.ts";
 import { asJson, parsedBody } from "./rows.ts";
 
 export interface GitHubProfile {
@@ -118,6 +120,14 @@ async function signInOnce(
       account.id,
       asJson(handle),
     ]);
+    await appendAudit(tx, {
+      id: randomUUID(),
+      actor: "author",
+      action: "account.create",
+      target: { entity: "account", id: account.id },
+      outcome: "allowed",
+      createdAt: options.now,
+    });
     return { account, handle: handle.handle, created: true };
   });
 }
@@ -130,7 +140,7 @@ export async function accountById(db: Queryable, id: string): Promise<Account | 
 /** The account's current handle, if it has one. */
 export async function activeHandle(db: Queryable, accountId: string): Promise<string | null> {
   const rows = await db.query<{ handle: string }>(
-    "SELECT handle FROM handles WHERE account_id = $1 AND body->>'state' = 'active'",
+    "SELECT handle FROM handles WHERE account_id = $1 AND body->>'state' = 'active' ORDER BY handle LIMIT 1",
     [accountId],
   );
   return rows[0]?.handle ?? null;

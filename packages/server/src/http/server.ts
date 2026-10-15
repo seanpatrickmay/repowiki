@@ -55,6 +55,11 @@ function routablePath(path: string): boolean {
   });
 }
 
+/** Header names in lower case, so a reply's own header replaces the default it names. */
+function lowercased(headers: Reply["headers"]): Record<string, string | string[]> {
+  return Object.fromEntries(Object.entries(headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+}
+
 async function respond(
   app: App,
   raw: IncomingMessage,
@@ -86,7 +91,8 @@ async function respond(
       });
     } catch (e) {
       if (e instanceof HttpError) {
-        reply = text(e.status, e.message);
+        const base = text(e.status, e.message);
+        reply = { ...base, headers: { ...base.headers, ...e.headers } };
       } else {
         error = e instanceof Error ? e.name : "unknown";
         reply = text(500, "Something went wrong.");
@@ -94,7 +100,7 @@ async function respond(
     }
   }
   try {
-    res.writeHead(reply.status, { ...SECURITY_HEADERS, ...reply.headers });
+    res.writeHead(reply.status, { ...SECURITY_HEADERS, ...lowercased(reply.headers) });
     res.end(method === "HEAD" ? undefined : reply.body);
   } catch (e) {
     // A reply Node refuses to send (a header holding CR or LF) must not become an unhandled

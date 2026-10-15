@@ -120,8 +120,12 @@ function allowlist(value: string | undefined): string[] {
     .filter((login) => login !== "");
 }
 
+/** 32 bytes in standard, padded base64; `Buffer.from` alone would skip stray characters. */
+const TOKEN_KEY = /^[A-Za-z0-9+/]{43}=$/;
+
 function tokenKey(value: string): Buffer {
   const key = Buffer.from(value, "base64");
-  if (key.length !== 32) throw new ConfigError("TOKEN_KEY must be 32 bytes, base64-encoded.");
+  if (!TOKEN_KEY.test(value) || key.length !== 32)
+    throw new ConfigError("TOKEN_KEY must be 32 bytes, base64-encoded.");
   return key;
 }

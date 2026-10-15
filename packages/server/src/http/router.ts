@@ -26,7 +26,7 @@ export interface Route {
   handler: Handler;
 }
 
-/** A decoded path segment, or null when it is empty, malformed, or hides a "/" or NUL. */
+/** A decoded path segment, or null when it is empty, malformed, a dot segment, or hides "/" or NUL. */
 function decode(segment: string): string | null {
   let value: string;
   try {
@@ -34,7 +34,8 @@ function decode(segment: string): string | null {
   } catch {
     return null;
   }
-  return value === "" || value.includes("/") || value.includes("\0") ? null : value;
+  const bad = value === "" || value === "." || value === ".." || /[/\0]/.test(value);
+  return bad ? null : value;
 }
 
 /**

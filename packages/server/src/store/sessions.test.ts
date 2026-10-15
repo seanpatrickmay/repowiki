@@ -29,13 +29,22 @@ describe("sessions (spec 2 S6)", () => {
     expect(expiresAt).toBe("2026-11-13T12:00:00.000Z");
     const rows = await db.query<{ id_hash: string }>("SELECT id_hash FROM sessions");
     expect(rows[0]?.id_hash).not.toBe(token);
-    expect(await readSession(db, token, T0)).toMatchObject({ account: { id: A1 }, csrf });
+    expect(await readSession(db, token, T0)).toMatchObject({
+      account: { id: A1 },
+      csrf,
+      renewed: false,
+    });
     expect(await readSession(db, "forged", T0)).toBeNull();
   });
 
   it("refuse and delete an expired session, and slide a live one", async () => {
     const { token } = await createSession(db, A1, T0);
-    expect(await readSession(db, token, "2026-11-01T00:00:00.000Z")).not.toBeNull();
+    expect(await readSession(db, token, "2026-10-15T11:00:00.000Z")).toMatchObject({
+      renewed: false,
+    });
+    expect(await readSession(db, token, "2026-11-01T00:00:00.000Z")).toMatchObject({
+      renewed: true,
+    });
     const rows = await db.query<{ expires_at: Date }>("SELECT expires_at FROM sessions");
     expect(rows[0]?.expires_at.toISOString()).toBe("2026-12-01T00:00:00.000Z");
     expect(await readSession(db, token, "2027-01-01T00:00:00.000Z")).toBeNull();

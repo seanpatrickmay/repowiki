@@ -131,4 +131,40 @@ describe("signIn (spec 2 S7)", () => {
     await redirect("loop-b", "loop-a");
     expect(await resolveHandle(db, "loop-a")).toEqual({ kind: "missing" });
   });
+
+  it("keeps at most one active handle per account (spec 2 S4)", async () => {
+    await signIn(db, sean, { newAccountId: A1, allowNew: yes, now: T0 });
+    const second = db.query(
+      "INSERT INTO handles (handle, account_id, body) VALUES ($1, $2, $3::jsonb)",
+      [
+        "another",
+        A1,
+        JSON.stringify({
+          handle: "another",
+          accountId: A1,
+          state: "active",
+          redirectTo: null,
+          createdAt: T0,
+        }),
+      ],
+    );
+    await expect(second).rejects.toMatchObject({ code: "23505" });
+  });
+
+  it("audits an account's creation in the same transaction, and only its creation", async () => {
+    await signIn(db, sean, { newAccountId: A1, allowNew: yes, now: T0 });
+    await signIn(db, sean, { newAccountId: A2, allowNew: yes, now: T0 });
+    const events = await db.query<{ body: Record<string, unknown> }>(
+      "SELECT body FROM audit_events",
+    );
+    expect(events.map((e) => e.body)).toEqual([
+      expect.objectContaining({
+        actor: "author",
+        action: "account.create",
+        target: { entity: "account", id: A1 },
+        outcome: "allowed",
+        createdAt: T0,
+      }),
+    ]);
+  });
 });

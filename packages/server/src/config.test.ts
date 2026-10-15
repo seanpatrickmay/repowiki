@@ -64,6 +64,23 @@ describe("loadConfig (spec 2 S17)", () => {
     expect(() => loadConfig({ ...production, TOKEN_KEY: short })).toThrow(ConfigError);
   });
 
+  it("takes TOKEN_KEY only as 32 bytes of standard, padded base64", () => {
+    for (const bad of [
+      `${KEY.slice(0, 10)}!${KEY.slice(10)}`,
+      KEY.replace("=", ""),
+      Buffer.alloc(32, 0xfb).toString("base64url"),
+      `${KEY}=`,
+    ]) {
+      expect(() => loadConfig({ ...production, TOKEN_KEY: bad }), bad).toThrow(ConfigError);
+      expect(() => loadConfig({ REPOWIKI_MODE: "development", TOKEN_KEY: bad }), bad).toThrow(
+        ConfigError,
+      );
+    }
+    expect(
+      loadConfig({ ...production, TOKEN_KEY: Buffer.alloc(32, 0xfb).toString("base64") }).tokenKey,
+    ).toEqual(Buffer.alloc(32, 0xfb));
+  });
+
   it("runs development on loopback with local twins and nothing required", () => {
     const config = loadConfig({ REPOWIKI_MODE: "development", DATA_DIR: "/tmp/rw" });
     expect(config).toMatchObject({

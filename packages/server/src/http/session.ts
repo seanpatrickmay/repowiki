@@ -1,8 +1,8 @@
 import type { Account } from "@repowiki/hosted";
 import type { Config } from "../config.ts";
 import { safeEqual } from "../crypto.ts";
-import type { Db } from "../db/db.ts";
-import { readSession } from "../store/sessions.ts";
+import type { Queryable } from "../db/db.ts";
+import { readSession, SESSION_DAYS } from "../store/sessions.ts";
 import { HttpError } from "./body.ts";
 import { parseCookies, serializeCookie, sessionCookieName } from "./cookies.ts";
 
@@ -25,9 +25,16 @@ export function secureCookies(config: Config): boolean {
   return config.origin.startsWith("https://");
 }
 
-/** The signed-in session for a request's cookie, or null. */
+/** The cookie to re-issue for a request whose session just slid; read by `createApp`. */
+const renewals = new WeakMap<object, string>();
+
+export function renewalCookie(headers: Headers): string | undefined {
+  return renewals.get(headers);
+}
+
+/** The signed-in session for a request's cookie, or null; a slid session's cookie is re-issued. */
 export async function currentSession(
-  db: Db,
+  db: Queryable,
   config: Config,
   headers: Headers,
   now: string,
@@ -37,7 +44,9 @@ export async function currentSession(
   );
   if (token === undefined || token === "") return null;
   const found = await readSession(db, token, now);
-  return found === null ? null : { ...found, token };
+  if (found === null) return null;
+  if (found.renewed) renewals.set(headers, sessionSetCookie(config, token, SESSION_DAYS * 86_400));
+  return { account: found.account, csrf: found.csrf, token };
 }
 
 export function sessionSetCookie(config: Config, token: string, maxAgeSeconds: number): string {

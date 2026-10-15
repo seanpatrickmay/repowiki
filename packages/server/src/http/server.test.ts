@@ -33,6 +33,15 @@ beforeAll(async () => {
     },
     {
       method: "GET",
+      pattern: "/own-csp",
+      handler: async () => ({
+        status: 200,
+        headers: { "Content-Security-Policy": "default-src 'none'" },
+        body: "x",
+      }),
+    },
+    {
+      method: "GET",
       pattern: "/teapot",
       handler: async () => {
         throw new HttpError(418, "short and stout");
@@ -68,8 +77,11 @@ describe("listen (spec 2 S2)", () => {
   });
 
   it("refuses dot segments and doubled slashes before routing", async () => {
-    const raw = await rawRequest("GET /hello/%2E%2E/boom HTTP/1.1\r\nHost: x\r\n\r\n");
-    expect(raw).toMatch(/^HTTP\/1\.1 404/);
+    // Each of these has /hello/:name's shape, so only the dot-segment check can refuse it.
+    for (const path of ["/hello/%2E%2E", "/hello/.", "/hello/..", "/hello/%2e"]) {
+      const raw = await rawRequest(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`);
+      expect(raw, path).toMatch(/^HTTP\/1\.1 404/);
+    }
     expect(await rawRequest("GET //hello/sean HTTP/1.1\r\nHost: x\r\n\r\n")).toMatch(
       /^HTTP\/1\.1 404/,
     );
@@ -94,6 +106,12 @@ describe("listen (spec 2 S2)", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(logs.at(-1)).toMatchObject({ route: "/bad-header", status: 500 });
     expect((await fetch(`${server.url}/hello/sean`)).status).toBe(200);
+  });
+
+  it("sends one CSP, the reply's own, whatever the case of its header name", async () => {
+    const raw = await rawRequest("GET /own-csp HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    const csp = raw.split("\r\n").filter((line) => /^content-security-policy:/i.test(line));
+    expect(csp).toEqual([expect.stringMatching(/: default-src 'none'$/)]);
   });
 
   it("answers an HttpError with its status and message", async () => {
@@ -134,6 +152,27 @@ describe("bodies over HTTP (spec 2 S2)", () => {
       socket.on("error", reject);
     });
     expect(reply).toMatch(/^HTTP\/1\.1 413/);
+  });
+});
+
+describe("a declared oversized body (spec 2 S2)", () => {
+  it("is refused at once and the connection closed rather than drained", async () => {
+    const { connect } = await import("node:net");
+    const { port } = new URL(server.url);
+    const reply = await new Promise<string>((resolve, reject) => {
+      const socket = connect(Number(port), "127.0.0.1", () => {
+        socket.write(
+          `POST /json HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: ${BODY_LIMIT * 100}\r\n\r\n{"n":`,
+        );
+      });
+      socket.once("data", (data) => {
+        resolve(data.toString());
+        socket.destroy();
+      });
+      socket.on("error", reject);
+    });
+    expect(reply).toMatch(/^HTTP\/1\.1 413/);
+    expect(reply).toMatch(/\r\nconnection: close\r\n/i);
   });
 });
 

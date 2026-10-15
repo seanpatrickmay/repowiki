@@ -1,6 +1,6 @@
 import { Account } from "@repowiki/hosted";
 import { randomToken, sha256Hex } from "../crypto.ts";
-import type { Db } from "../db/db.ts";
+import type { Queryable } from "../db/db.ts";
 import { parsedBody } from "./rows.ts";
 
 export const SESSION_DAYS = 30;
@@ -12,7 +12,7 @@ const plusDays = (now: string, days: number) =>
   new Date(Date.parse(now) + days * DAY_MS).toISOString();
 
 export async function createSession(
-  db: Db,
+  db: Queryable,
   accountId: string,
   now: string,
 ): Promise<{ token: string; csrf: string; expiresAt: string }> {
@@ -26,12 +26,15 @@ export async function createSession(
   return { token, csrf, expiresAt };
 }
 
-/** The signed-in account for a session cookie; an expired session is deleted. */
+/**
+ * The signed-in account for a session cookie; an expired session is deleted. `renewed` says the
+ * expiry just slid to 30 days from `now` (at most once a day), so the cookie should be re-issued.
+ */
 export async function readSession(
-  db: Db,
+  db: Queryable,
   token: string,
   now: string,
-): Promise<{ account: Account; csrf: string } | null> {
+): Promise<{ account: Account; csrf: string; renewed: boolean } | null> {
   const rows = await db.query<{ csrf: string; expires_at: Date; body: unknown }>(
     "SELECT s.csrf, s.expires_at, a.body FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.id_hash = $1",
     [sha256Hex(token)],
@@ -43,15 +46,16 @@ export async function readSession(
     await endSession(db, token);
     return null;
   }
-  if (left < SLIDE_BELOW_MS) {
+  const renewed = left < SLIDE_BELOW_MS;
+  if (renewed) {
     await db.query("UPDATE sessions SET expires_at = $2 WHERE id_hash = $1", [
       sha256Hex(token),
       plusDays(now, SESSION_DAYS),
     ]);
   }
-  return { account: parsedBody(Account, row.body, "account"), csrf: row.csrf };
+  return { account: parsedBody(Account, row.body, "account"), csrf: row.csrf, renewed };
 }
 
-export async function endSession(db: Db, token: string): Promise<void> {
+export async function endSession(db: Queryable, token: string): Promise<void> {
   await db.query("DELETE FROM sessions WHERE id_hash = $1", [sha256Hex(token)]);
 }
