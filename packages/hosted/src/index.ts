@@ -1,4 +1,16 @@
 export {
+  type Biography,
+  BiographyEntry,
+  type BiographyProject,
+  biography,
+  biographyEntry,
+  GENERATED_LABEL,
+  nounPhrase,
+  type Paragraph,
+  type Run,
+  surnameOf,
+} from "./biography.ts";
+export {
   ATTESTATION_VERSION,
   ATTESTATIONS,
   AuthorFacts,
