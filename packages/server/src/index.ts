@@ -83,6 +83,16 @@ export {
 } from "./objects/store.ts";
 export { escapeHtml, type PageSession, page, STYLE, STYLE_PATH } from "./pages/layout.ts";
 export { authRoutes } from "./routes/auth.ts";
+export { type LocalRunnerOptions, localRunner } from "./runner/local-runner.ts";
+export { type JobRunner, recordingRunner, type StartRequest } from "./runner/runner.ts";
+export {
+  MAX_STARTS_PER_ATTEMPT,
+  RESTART_AFTER_MS,
+  type SweepDeps,
+  type Swept,
+  startSweeper,
+  sweep,
+} from "./runner/sweeper.ts";
 export {
   accountById,
   activeHandle,
