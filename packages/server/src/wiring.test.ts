@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.ts";
+import { ConfigError, loadConfig } from "./config.ts";
 import { GITHUB } from "./github/endpoints.ts";
 import { call, freePort } from "./routes/test-app.ts";
 import { freshDb } from "./store/test-db.ts";
-import { buildDeps, listenersFor, routeSets, startServer, workerMode } from "./wiring.ts";
+import {
+  buildDeps,
+  listenersFor,
+  routeSets,
+  startServer,
+  startupFailure,
+  workerMode,
+} from "./wiring.ts";
 
 const DEMO = { REPOWIKI_MODE: "demo" };
 const PRODUCTION = {
@@ -117,4 +124,23 @@ describe("startServer", () => {
       await first.close();
     }
   }, 60_000);
+});
+
+describe("startupFailure (spec 2 S17)", () => {
+  it("names the error and its system code, never its message", () => {
+    const refused = Object.assign(new Error("connect ECONNREFUSED postgres://u:secret@db"), {
+      code: "ECONNREFUSED",
+    });
+    expect(startupFailure(refused)).toBe("The server failed to start (Error, ECONNREFUSED).");
+    const taken = Object.assign(new Error("listen EADDRINUSE"), { code: "EADDRINUSE" });
+    expect(startupFailure(taken)).toBe("The server failed to start (Error, EADDRINUSE).");
+    expect(startupFailure(new TypeError("token sk-ant-x"))).toBe(
+      "The server failed to start (TypeError).",
+    );
+    // A code that is not a plain identifier could carry anything, so it is left out.
+    const odd = Object.assign(new Error("x"), { code: "password=hunter2 " });
+    expect(startupFailure(odd)).toBe("The server failed to start (Error).");
+    expect(startupFailure("boom")).toBe("The server failed to start (unknown).");
+    expect(startupFailure(new ConfigError("PORT is invalid."))).toBe("PORT is invalid.");
+  });
 });
