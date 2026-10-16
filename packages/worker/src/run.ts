@@ -10,6 +10,7 @@ import { buildFacts, type FileFacts, indexedCount } from "./facts.ts";
 import { countTree, indexInChild, TREE_FACTOR } from "./indexing.ts";
 import { authorEmails, peopleFile } from "./people-file.ts";
 import { suggest } from "./suggestions.ts";
+import type { TreeTechnologies } from "./technologies.ts";
 
 /** One CLI may run this long. */
 export const CLI_TIMEOUT_MS = 90 * 60_000;
@@ -42,7 +43,7 @@ export interface PhaseDeps {
     rev: string,
     home: string,
     signal?: AbortSignal,
-  ) => Promise<{ files: readonly FileFacts[] }>;
+  ) => Promise<{ files: readonly FileFacts[] } & Partial<TreeTechnologies>>;
   emails?: (repo: string, shas: readonly string[], home: string) => string[];
   provider?: (spec: WorkerSpec, token: string) => Provider;
 }
@@ -257,6 +258,17 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
     )(where.repo, spec.commitSha, where.home, lost.signal);
     if (lost.signal.aborted) throw new LeaseLost();
     if ((await deps.api.indexed(indexedCount(index.files))) === "too-large") return false;
+    const unparsed = index.unparsed ?? [];
+    const tooLarge = index.tooLarge ?? [];
+    // Paths in the repository, never contents: a manifest that was skipped contributed nothing.
+    if (unparsed.length + tooLarge.length > 0) {
+      deps.log({
+        phase: 2,
+        technologies: "unread",
+        unparsed: unparsed.slice(0, 20),
+        tooLarge: tooLarge.slice(0, 20),
+      });
+    }
     await beat.step("manifest");
     await cli(CLI.manifest, [where.repo, spec.commitSha, "--out", where.out]);
     await beat.step("write");
@@ -286,7 +298,7 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
       deps.log({ phase: 2, incomplete: true, costCapped: capped });
       throw new CliFailed(capped ? "job-cost-cap" : "job-failed", "the wiki is incomplete");
     }
-    const facts = buildFacts(index.files, exp);
+    const facts = buildFacts(index.files, exp, index.technologies ?? []);
     const provider = (deps.provider ?? defaultProvider)(spec, deps.token);
     const { suggestions, model } = await suggest(provider, exp, facts, spec.author.login);
     await beat.step("render");

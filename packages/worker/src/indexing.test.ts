@@ -29,6 +29,18 @@ describe("the index child (spec 2 S9)", () => {
     ]);
   }, 60_000);
 
+  it("detects the tree's technologies from its manifests and imports (ADR-0014)", async () => {
+    repo.write("package.json", JSON.stringify({ dependencies: { react: "18", axios: "1" } }));
+    repo.write("web/c.tsx", 'import { useState } from "react";\nexport const c = useState;\n');
+    repo.write("pyproject.toml", "[project\n");
+    const next = repo.commit("a manifest");
+    const found = await indexInChild({ repo: repo.dir, sha: next, home });
+    expect(found.technologies).toEqual([
+      { id: "react", evidence: { path: "package.json" }, importingFiles: 1 },
+    ]);
+    expect(found.unparsed).toEqual(["pyproject.toml"]);
+  }, 60_000);
+
   it("runs under a heap limit with only the isolated git environment", async () => {
     const seen: Parameters<typeof runCli>[0][] = [];
     const run: typeof runCli = async (input) => {
@@ -41,7 +53,12 @@ describe("the index child (spec 2 S9)", () => {
         stdout: '{"indexed":0,"files":[]}',
       };
     };
-    expect(await indexInChild({ repo: repo.dir, sha, home, run })).toEqual({ files: [] });
+    expect(await indexInChild({ repo: repo.dir, sha, home, run })).toEqual({
+      files: [],
+      technologies: [],
+      unparsed: [],
+      tooLarge: [],
+    });
     expect(seen[0]?.script).toBe(INDEX_CHILD);
     expect(seen[0]?.args).toEqual([repo.dir, sha]);
     expect(seen[0]?.nodeArgs).toEqual([`--max-old-space-size=${INDEX_HEAP_MB}`]);

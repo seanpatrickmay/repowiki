@@ -38,6 +38,7 @@ const exp = {
   ],
 };
 const facts = (author: Partial<Facts["author"]> = {}): Facts => ({
+  technologies: [],
   languages: [{ name: "Python", share: 1 }],
   indexedFiles: 40,
   featureIds: ["cli", "arena", "perf", "notes", "user-guide"],

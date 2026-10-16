@@ -62,6 +62,18 @@ describe("facts (Contract spec §8)", () => {
     const features = [{ featureId: "elsewhere", commits: 1, currentLines: 1 }];
     expect(ok(Facts, { ...facts, author: { ...facts.author, features } })).toBe(false);
   });
+
+  it("read stored facts without technologies as none, and bound them (ADR-0014)", () => {
+    const { technologies: _, ...old } = facts;
+    expect(Facts.parse(old).technologies).toEqual([]);
+    const react = { id: "react", evidence: { path: "web/package.json" }, importingFiles: 3 };
+    expect(Facts.parse({ ...facts, technologies: [react] }).technologies).toEqual([react]);
+    expect(ok(Facts, { ...facts, technologies: [react, react] })).toBe(false);
+    const many = Array.from({ length: 61 }, (_, i) => ({ ...react, id: `t-${i}` }));
+    expect(ok(Facts, { ...facts, technologies: many })).toBe(false);
+    const escaping = { ...react, evidence: { path: "../etc/passwd" } };
+    expect(ok(Facts, { ...facts, technologies: [escaping] })).toBe(false);
+  });
 });
 
 it("keeps attestation 1's wording and words attestation 2 for generated content (ADR-0012)", () => {

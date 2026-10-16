@@ -1,5 +1,6 @@
 import { FeatureId, INVISIBLE_CHARACTERS } from "@repowiki/core";
 import { z } from "zod";
+import { MAX_TECHNOLOGIES, TechnologyUse } from "./detect.ts";
 
 /** Control and invisible characters (core's shared rule), tested once with no global state. */
 const INVISIBLE = new RegExp(INVISIBLE_CHARACTERS.source, "u");
@@ -57,6 +58,12 @@ export const Facts = z
     indexedFiles: count,
     featureIds: z.array(FeatureId).refine(distinct, "duplicate feature"),
     author: AuthorFacts,
+    /** What the tree is built with (ADR-0014); generations stored before it have none. */
+    technologies: z
+      .array(TechnologyUse)
+      .max(MAX_TECHNOLOGIES)
+      .refine((ts) => distinct(ts.map((t) => t.id)), "duplicate technology")
+      .default([]),
   })
   .refine((f) => f.languages.reduce((sum, l) => sum + l.share, 0) <= 1 + 1e-9, "shares over 1")
   .refine(

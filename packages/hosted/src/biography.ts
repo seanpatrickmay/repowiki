@@ -1,6 +1,8 @@
 import { GitSha, IsoDateTime, type WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { Facts, plainText } from "./content.ts";
+import { MAX_TECHNOLOGIES, TechnologyUse } from "./detect.ts";
+import { technologyById } from "./technologies.ts";
 import { firstClause, plainWords, sentencesOf } from "./text.ts";
 
 /** One published project as the author's biography reads it (ADR-0013), stored as `entry.json`. */
@@ -18,6 +20,8 @@ export const BiographyEntry = z.strictObject({
   lead: plainText(2000),
   contribution: plainText(1200),
   facts: Facts,
+  /** The facts' technologies the table knew at preview time (ADR-0014); none in older entries. */
+  technologies: z.array(TechnologyUse).max(MAX_TECHNOLOGIES).default([]),
 });
 export type BiographyEntry = z.infer<typeof BiographyEntry>;
 
@@ -50,6 +54,9 @@ export function biographyEntry(input: {
     lead: lead.replace(/\s+/g, " ").trim(),
     contribution: input.contribution,
     facts: input.generation.facts,
+    technologies: input.generation.facts.technologies.filter(
+      (t) => technologyById(t.id) !== undefined,
+    ),
   });
 }
 
