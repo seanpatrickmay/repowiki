@@ -100,6 +100,7 @@ async function main(): Promise<void> {
     login: args.login,
     fetch,
     exportsDir: args.exports,
+    warn: (line) => console.error(`warning: ${line}`),
     ...(token ? { token } : {}),
   });
   for (const entry of profile.repos) console.log(repoLine(entry, profile.user));

@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type PeopleSnapshot, WikiExport } from "@repowiki/core";
 import { pathLanguageName } from "@repowiki/engine";
-import { detectTechnologies, Facts, type JobStep, type TechnologyUse } from "@repowiki/hosted";
+import {
+  detectTechnologies,
+  Facts,
+  type JobStep,
+  SnapshotTechnology,
+  type TechnologyUse,
+} from "@repowiki/hosted";
 import { z } from "zod";
 import { ApiError, type WorkerApi, workerApi } from "./api.ts";
 import { authorFacts, type FileFacts, languageShares, pageFeatureIds } from "./facts.ts";
@@ -30,12 +36,7 @@ export const ImportProfile = z.object({
       repo: z.object({ full_name: z.string(), description: z.string().nullish() }),
       export: z.string().nullable(),
       /** The snapshot's technology paths and files (ADR-0014); absent from older snapshots. */
-      technology: z
-        .object({
-          paths: z.array(z.string()),
-          files: z.array(z.object({ path: z.string(), text: z.string() })),
-        })
-        .optional(),
+      technology: SnapshotTechnology.optional(),
     }),
   ),
 });

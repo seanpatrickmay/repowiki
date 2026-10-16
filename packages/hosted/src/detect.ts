@@ -15,13 +15,15 @@ import {
 /** A generation stores at most this many technologies (ADR-0014). */
 export const MAX_TECHNOLOGIES = 60;
 
+const EvidencePath = z.string().max(1000).pipe(RepoPath);
+
 /** One technology a project uses, the file that proves it, and how many indexed files import it. */
 export const TechnologyUse = z.strictObject({
   id: z
     .string()
     .max(40)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  evidence: z.strictObject({ path: z.string().max(1000).pipe(RepoPath) }),
+  evidence: z.strictObject({ path: EvidencePath }),
   /** Null when none of the technology's ecosystems has import data. */
   importingFiles: z.int().nonnegative().nullable(),
 });
@@ -41,6 +43,44 @@ export function technologyPaths(paths: readonly string[]): string[] {
   return kept(paths).filter(
     (p) => manifestKind(p) !== null || PATH_RULES.some(({ re }) => re.test(p)),
   );
+}
+
+/** What a local profile snapshot keeps of a tree for detection (ADR-0014). */
+export const SNAPSHOT_PATHS = 500;
+export const SNAPSHOT_FILES = 30;
+export const SNAPSHOT_FILE_BYTES = 64 * 1024;
+
+/** A snapshot's technology paths and files, bounded wherever it is read (review M8). */
+export const SnapshotTechnology = z.strictObject({
+  paths: z.array(z.string().min(1).max(1000)).max(SNAPSHOT_PATHS),
+  files: z
+    .array(
+      z.strictObject({
+        path: z.string().min(1).max(1000),
+        text: z.string().max(SNAPSHOT_FILE_BYTES),
+      }),
+    )
+    .max(SNAPSHOT_FILES),
+});
+export type SnapshotTechnology = z.infer<typeof SnapshotTechnology>;
+
+/**
+ * The technology paths a snapshot keeps: at most SNAPSHOT_PATHS in tree order, always including
+ * the first path each path rule matches, so a long run of one kind (600 `.tf` files) never
+ * hides another (review M7).
+ */
+export function snapshotPaths(paths: readonly string[]): string[] {
+  const all = technologyPaths(paths);
+  const firsts = new Set(
+    PATH_RULES.flatMap(({ re }) => all.find((p) => re.test(p)) ?? []).slice(0, SNAPSHOT_PATHS),
+  );
+  let room = SNAPSHOT_PATHS - firsts.size;
+  return all.filter((p) => {
+    if (firsts.has(p)) return true;
+    if (room <= 0) return false;
+    room -= 1;
+    return true;
+  });
 }
 
 /** The paths whose contents detection needs, shallowest first, at most `max`. */
@@ -128,8 +168,9 @@ const technologyForImage = (image: string) => {
 
 interface Found {
   tech: Technology;
-  declared?: string;
-  file?: string;
+  /** Declaring manifests and infrastructure files, shallowest first. */
+  declared: string[];
+  files: string[];
   importers: Set<string>;
 }
 
@@ -150,7 +191,12 @@ export function detectTechnologies(input: {
   const paths = kept(input.paths);
   const found = new Map<string, Found>();
   const entry = (tech: Technology) => {
-    const known = found.get(tech.id) ?? { tech, importers: new Set<string>() };
+    const known = found.get(tech.id) ?? {
+      tech,
+      declared: [],
+      files: [],
+      importers: new Set<string>(),
+    };
     found.set(tech.id, known);
     return known;
   };
@@ -163,15 +209,15 @@ export function detectTechnologies(input: {
     }
     for (const { ecosystem, name } of read.declared) {
       const tech = technologyForPackage(ecosystem, name);
-      if (tech !== null) entry(tech).declared ??= path;
+      if (tech !== null) entry(tech).declared.push(path);
     }
     for (const image of read.images) {
       const tech = technologyForImage(image);
-      if (tech !== null) entry(tech).file ??= path;
+      if (tech !== null) entry(tech).files.push(path);
     }
   }
   for (const path of [...paths].sort(byDepth)) {
-    for (const { tech, re } of PATH_RULES) if (re.test(path)) entry(tech).file ??= path;
+    for (const { tech, re } of PATH_RULES) if (re.test(path)) entry(tech).files.push(path);
   }
   const names = new Map<string, Technology | null>();
   for (const { from, specifier } of input.imports ?? []) {
@@ -190,15 +236,19 @@ export function detectTechnologies(input: {
       (e) => input.imports !== null && paths.some((p) => PARSED[e]?.test(p)),
     ),
   );
-  const technologies = [...found.values()].flatMap(({ tech, declared, file, importers }) => {
+  const technologies = [...found.values()].flatMap(({ tech, declared, files, importers }) => {
     const ecosystems = (Object.keys(tech.packages) as Ecosystem[]).concat(
       Object.keys(tech.imports ?? {}) as Ecosystem[],
     );
     const hasData = ecosystems.some((e) => withData.has(e)) || importers.size > 0;
     const shown = isTool(tech)
       ? true
-      : importers.size > 0 || file !== undefined || (declared !== undefined && !hasData);
-    const evidence = declared ?? file ?? [...importers].sort()[0];
+      : importers.size > 0 || files.length > 0 || (declared.length > 0 && !hasData);
+    // The first candidate the facts accept: a path with a backslash or over 1,000 characters
+    // is never stored (review I3).
+    const evidence = [...declared, ...files, ...[...importers].sort()].find(
+      (path) => EvidencePath.safeParse(path).success,
+    );
     if (!shown || evidence === undefined) return [];
     return [
       {

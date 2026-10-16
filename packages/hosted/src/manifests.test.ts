@@ -199,3 +199,20 @@ features = ["derive"]
     expect(readManifest("README.md", "# hi")).toEqual({ declared: [], images: [] });
   });
 });
+
+describe("readManifest on hostile and lenient input (review I2, M6)", () => {
+  it("strips a compose comment in linear time", () => {
+    const text = `services:\n  db:\n    image: a${" ".repeat(128 * 1024)}b # c\n`;
+    const started = performance.now();
+    expect(readManifest("compose.yml", text)?.images).toHaveLength(1);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it("reads a file that starts with a byte-order mark", () => {
+    expect(names("package.json", '\uFEFF{"dependencies":{"react":"1"}}')).toEqual(["npm:react"]);
+    expect(names("pyproject.toml", '\uFEFF[project]\ndependencies = ["fastapi"]\n')).toEqual([
+      "pypi:fastapi",
+    ]);
+    expect(names("requirements.txt", "\uFEFFfastapi\n")).toEqual(["pypi:fastapi"]);
+  });
+});

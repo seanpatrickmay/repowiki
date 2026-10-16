@@ -17,6 +17,10 @@ export interface TomlTable {
 class TomlError extends Error {}
 const BARE_KEY = /[A-Za-z0-9_-]+/y;
 const BARE_VALUE = /[^\s,\]}#]+/y;
+/** The time of a date-time written with a space (`1979-05-27 07:32:00Z`). */
+const SPACED_TIME = / \d{2}:\d{2}[^\s,\]}#]*/y;
+/** Arrays and inline tables nest at most this deep; manifests never come close (review I1). */
+const MAX_DEPTH = 64;
 
 /** The subset of TOML that manifests use; inline tables keep only their keys. */
 function parseToml(text: string): TomlTable[] {
@@ -88,7 +92,8 @@ function parseToml(text: string): TomlTable[] {
       i++;
     }
   };
-  const value = (): TomlValue => {
+  const value = (depth = 0): TomlValue => {
+    if (depth > MAX_DEPTH) fail();
     if (text[i] === '"' || text[i] === "'") return { kind: "string", value: string() };
     if (text[i] === "[") {
       i++;
@@ -97,7 +102,7 @@ function parseToml(text: string): TomlTable[] {
         skipAll();
         if (text[i] === "]") break;
         if (i >= text.length) fail();
-        items.push(value());
+        items.push(value(depth + 1));
         skipAll();
         if (text[i] === ",") i++;
         else if (text[i] !== "]") fail();
@@ -115,7 +120,7 @@ function parseToml(text: string): TomlTable[] {
         if (text[i] !== "=") fail();
         i++;
         skipSpace();
-        value();
+        value(depth + 1);
         skipAll();
         if (text[i] === ",") i++;
         else if (text[i] !== "}") fail();
@@ -123,7 +128,12 @@ function parseToml(text: string): TomlTable[] {
       i++;
       return { kind: "table", keys };
     }
-    sticky(BARE_VALUE);
+    const bare = sticky(BARE_VALUE);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bare)) {
+      SPACED_TIME.lastIndex = i;
+      const time = SPACED_TIME.exec(text);
+      if (time !== null) i += time[0].length;
+    }
     return { kind: "other" };
   };
 
@@ -151,12 +161,14 @@ function parseToml(text: string): TomlTable[] {
   }
 }
 
-/** A TOML document's tables, or null when it is outside the subset or malformed. */
+/**
+ * A TOML document's tables, or null when it is outside the subset, malformed, or breaks the
+ * reader in any other way: a manifest never fails a job (review I1).
+ */
 export function tomlTables(text: string): TomlTable[] | null {
   try {
     return parseToml(text);
-  } catch (error) {
-    if (error instanceof TomlError) return null;
-    throw error;
+  } catch {
+    return null;
   }
 }

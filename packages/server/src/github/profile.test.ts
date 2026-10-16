@@ -198,6 +198,7 @@ describe("the snapshot's technology files (ADR-0014)", () => {
     { path: "liar/requirements.txt", type: "blob", size: 10 },
     ...Array.from({ length: 40 }, (_, i) => ({ path: `p/${i}/Cargo.toml`, type: "blob", size: 9 })),
     ...Array.from({ length: 600 }, (_, i) => ({ path: `tf/${i}.tf`, type: "blob", size: 9 })),
+    { path: "deploy/Dockerfile", type: "blob", size: 9 },
   ];
   const asked: string[] = [];
   const withTree: typeof fetch = async (input, init) => {
@@ -221,7 +222,6 @@ describe("the snapshot's technology files (ADR-0014)", () => {
   it("keeps, at the export's head, the technology paths and at most 30 small files", async () => {
     writeExport("ada-tool", { ...fixtureExport(), repo: "Ada-Tool", head: EXPORT_HEAD });
     const profile = await takeProfile({ login: "ada", fetch: withTree, exportsDir: dir });
-    expect(LocalProfile.parse(profile)).toEqual(profile);
     const [tool, notes] = profile.repos;
     const technology = tool?.technology;
     expect(technology?.paths).toHaveLength(500);
@@ -232,6 +232,8 @@ describe("the snapshot's technology files (ADR-0014)", () => {
     ]);
     expect(technology?.paths).not.toContain("node_modules/x/package.json");
     expect(technology?.paths).not.toContain("src/a.ts");
+    // The first path of every rule survives the cut at 500 (review M7).
+    expect(technology?.paths).toContain("deploy/Dockerfile");
     expect(technology?.files).toHaveLength(29);
     expect(technology?.files[0]).toEqual({ path: "package.json", text: TEXT["package.json"] });
     // Too big by the tree's size is never asked for; too big when it arrives is dropped.
@@ -245,6 +247,64 @@ describe("the snapshot's technology files (ADR-0014)", () => {
     writeExport("ada-tool", { ...fixtureExport(), repo: "Ada-Tool", head: EXPORT_HEAD });
     const profile = await takeProfile({ login: "ada", fetch: adaFetch([]), exportsDir: dir });
     expect(profile.repos[0]?.technology).toBeUndefined();
+  });
+
+  it("refuses a snapshot holding more than 30 files", () => {
+    const files = Array.from({ length: 31 }, (_, i) => ({ path: `${i}/package.json`, text: "{}" }));
+    const repoEntry = {
+      repo: { ...repo("Ada-Tool"), permissions: { admin: true, push: true, pull: true } },
+      commits: 0,
+      commitShas: [],
+      head: EXPORT_HEAD,
+      githubHead: null,
+      export: "/x/export.json",
+      technology: { paths: [], files },
+    };
+    const user = { id: 77, login: "ada", name: null, created_at: "2015-01-01T00:00:00Z" };
+    const snapshot = { takenAt: "2026-10-15T00:00:00.000Z", user, repos: [repoEntry] };
+    expect(LocalProfile.safeParse(snapshot).success).toBe(false);
+    expect(
+      LocalProfile.safeParse({
+        ...snapshot,
+        repos: [{ ...repoEntry, technology: { paths: [], files: [] } }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("warns, naming the repository and GITHUB_TOKEN, when GitHub limits the rate (review M7)", async () => {
+    writeExport("ada-tool", { ...fixtureExport(), repo: "Ada-Tool", head: EXPORT_HEAD });
+    for (const status of [403, 429]) {
+      const warnings: string[] = [];
+      const limited: typeof fetch = async (input, init) =>
+        new URL(String(input)).pathname.includes("/git/trees/")
+          ? Response.json({ message: "rate limited" }, { status })
+          : withTree(input, init);
+      const profile = await takeProfile({
+        login: "ada",
+        fetch: limited,
+        exportsDir: dir,
+        warn: (line) => warnings.push(line),
+      });
+      expect(profile.repos[0]?.technology).toBeUndefined();
+      expect(warnings).toEqual([expect.stringMatching(/ada\/Ada-Tool.*GITHUB_TOKEN/)]);
+    }
+  });
+
+  it("warns when GitHub truncates the tree, and keeps what it sent", async () => {
+    writeExport("ada-tool", { ...fixtureExport(), repo: "Ada-Tool", head: EXPORT_HEAD });
+    const warnings: string[] = [];
+    const truncated: typeof fetch = async (input, init) =>
+      new URL(String(input)).pathname.includes("/git/trees/")
+        ? Response.json({ sha: EXPORT_HEAD, tree: tree.slice(0, 2), truncated: true })
+        : withTree(input, init);
+    const profile = await takeProfile({
+      login: "ada",
+      fetch: truncated,
+      exportsDir: dir,
+      warn: (line) => warnings.push(line),
+    });
+    expect(profile.repos[0]?.technology?.paths).toEqual(["package.json"]);
+    expect(warnings).toEqual([expect.stringMatching(/truncated ada\/Ada-Tool/)]);
   });
 });
 

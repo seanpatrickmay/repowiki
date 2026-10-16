@@ -32,9 +32,8 @@ export async function treeTechnologies(input: {
   const paths = blobs.map((b) => b.path);
   const wanted = sourcePaths(paths, Number.POSITIVE_INFINITY);
   const tooLarge = wanted.filter((p) => (size.get(p) ?? 0) > maxBytes);
-  const read = wanted
-    .filter((p) => !tooLarge.includes(p))
-    .slice(0, input.maxFiles ?? MAX_SOURCE_FILES);
+  const skipped = new Set(tooLarge);
+  const read = wanted.filter((p) => !skipped.has(p)).slice(0, input.maxFiles ?? MAX_SOURCE_FILES);
   const sources =
     read.length === 0
       ? new Map<string, string>()

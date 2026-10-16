@@ -158,7 +158,9 @@ function composeImages(text: string): string[] | null {
       if (end === -1) return null;
       image = image.slice(1, end);
     } else {
-      image = image.replace(/\s+#.*$/, "").trim();
+      // A comment starts at the first " #"; found by search, never a backtracking regex (review I2).
+      const comment = image.search(/\s#/);
+      image = (comment === -1 ? image : image.slice(0, comment)).trim();
     }
     if (image !== "") images.push(image);
   }
@@ -197,8 +199,9 @@ const MAX_NAME = 214;
  * What the file at `path` declares: packages for a manifest, images for a compose file, nothing
  * for any other path. Null when the file will not parse.
  */
-export function readManifest(path: string, text: string): ManifestRead | null {
+export function readManifest(path: string, raw: string): ManifestRead | null {
   const kind = manifestKind(path);
+  const text = raw.replace(/^\uFEFF/, "");
   if (kind === null) return { declared: [], images: [] };
   if (text.includes("\u0000")) return null;
   if (kind === "compose") {
