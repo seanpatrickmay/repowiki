@@ -397,6 +397,26 @@ describe("phase 2 (spec 2 S9, §8)", () => {
     expect(succeeded()?.suggestions.tagline).toBe("A tool");
   });
 
+  it("stores the index child's technologies and logs the manifests it could not read (ADR-0014)", async () => {
+    const { api, succeeded } = fakeApi();
+    const react = { id: "react", evidence: { path: "package.json" }, importingFiles: 4 };
+    const d = deps(api, okRun);
+    const indexRepo = async () => ({
+      files: [{ language: "typescript", loc: 10, skipped: null }],
+      technologies: [react],
+      unparsed: ["Cargo.toml"],
+      tooLarge: ["big/package.json"],
+    });
+    expect(await phase2({ ...d, indexRepo })).toBe(true);
+    expect(succeeded()?.facts.technologies).toEqual([react]);
+    expect(d.lines).toContainEqual({
+      phase: 2,
+      technologies: "unread",
+      unparsed: ["Cargo.toml"],
+      tooLarge: ["big/package.json"],
+    });
+  });
+
   it("stops without a model call or a second failure when the server finds the repository too large", async () => {
     const { api, calls } = fakeApi("too-large");
     const d = deps(api, okRun);

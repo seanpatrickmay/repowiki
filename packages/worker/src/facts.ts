@@ -1,5 +1,5 @@
 import type { WikiExport } from "@repowiki/core";
-import { type AuthorFacts, Facts } from "@repowiki/hosted";
+import { type AuthorFacts, Facts, type TechnologyUse } from "@repowiki/hosted";
 import { AUTHOR_ID } from "./people-file.ts";
 
 /** What facts need of an engine `IndexedFile`. */
@@ -77,13 +77,21 @@ export function pageFeatureIds(exp: WikiExport): string[] {
   return [...new Set(exp.pages.map((p) => p.featureId))];
 }
 
-/** A generation's facts (spec 2 §8) from the indexed files and the built export. */
-export function buildFacts(files: readonly FileFacts[], exp: WikiExport): Facts {
+/**
+ * A generation's facts (spec 2 §8) from the indexed files, the built export and the technologies
+ * the index child detected (ADR-0014).
+ */
+export function buildFacts(
+  files: readonly FileFacts[],
+  exp: WikiExport,
+  technologies: readonly TechnologyUse[] = [],
+): Facts {
   const featureIds = pageFeatureIds(exp);
   return Facts.parse({
     languages: languageShares(files),
     indexedFiles: indexedCount(files),
     featureIds,
     author: authorFacts(exp.people?.snapshot ?? null, featureIds),
+    technologies,
   });
 }

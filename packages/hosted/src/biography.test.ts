@@ -171,6 +171,20 @@ describe("biographyEntry", () => {
     expect(entry.repo).toEqual({ fullName: "ada/mailbox", commitSha: sha("c") });
   });
 
+  it("keeps the technologies the table knows, and reads old entries as having none (ADR-0014)", () => {
+    const react = { id: "react", evidence: { path: "package.json" }, importingFiles: 2 };
+    const gone = { id: "no-such-entry", evidence: { path: "package.json" }, importingFiles: 1 };
+    const entry = biographyEntry({
+      generation: { ...generation, facts: { ...generation.facts, technologies: [react, gone] } },
+      contribution: "Lovelace wrote it.",
+      exp,
+      repoFullName: "ada/mailbox",
+    });
+    expect(entry.technologies).toEqual([react]);
+    const { technologies: _, ...old } = entry;
+    expect(BiographyEntry.parse(old).technologies).toEqual([]);
+  });
+
   it("falls back to the repository's name and the export's date", () => {
     const entry = biographyEntry({
       generation,

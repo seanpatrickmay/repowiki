@@ -73,5 +73,8 @@ describe("generation facts (spec 2 §8, Contract §8)", () => {
     expect(facts.featureIds).toEqual(pageFeatureIds(exp));
     expect(facts.featureIds.length).toBeGreaterThan(0);
     expect(facts.indexedFiles).toBe(1);
+    expect(facts.technologies).toEqual([]);
+    const react = { id: "react", evidence: { path: "package.json" }, importingFiles: 2 };
+    expect(buildFacts([file("python", 120)], exp, [react]).technologies).toEqual([react]);
   });
 });

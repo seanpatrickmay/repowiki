@@ -94,6 +94,7 @@ export const aGeneration = (patch: Partial<Generation> = {}): Generation => ({
       totalLines: 41_000,
       features: [{ featureId: "indexing", commits: 120, currentLines: 9000 }],
     },
+    technologies: [],
   },
   engineVersion: "0.0.0",
   models: ["claude-haiku-4-5"],

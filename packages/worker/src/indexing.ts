@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { MAX_TECHNOLOGIES, TechnologyUse } from "@repowiki/hosted";
 import { z } from "zod";
 import { gitEnv } from "./clone.ts";
 import { runCli } from "./engine.ts";
 import type { FileFacts } from "./facts.ts";
+import type { TreeTechnologies } from "./technologies.ts";
 
 export const INDEX_CHILD = fileURLToPath(new URL("./index-child.ts", import.meta.url));
 /** The index child's limits: 15 minutes and a 2 GiB heap (spec 2 S9). */
@@ -28,6 +30,9 @@ const IndexFacts = z.object({
       skipped: z.string().nullable(),
     }),
   ),
+  technologies: z.array(TechnologyUse).max(MAX_TECHNOLOGIES).default([]),
+  unparsed: z.array(z.string().max(1000)).max(1000).default([]),
+  tooLarge: z.array(z.string().max(1000)).max(1000).default([]),
 });
 
 /** Indexes `sha` in a child (index-child.ts) under the time and heap limits; throws on any failure. */
@@ -39,7 +44,7 @@ export async function indexInChild(input: {
   /** Aborting it kills the child's process group. */
   signal?: AbortSignal;
   run?: typeof runCli;
-}): Promise<{ files: FileFacts[] }> {
+}): Promise<{ files: FileFacts[] } & TreeTechnologies> {
   const run = await (input.run ?? runCli)({
     script: INDEX_CHILD,
     args: [input.repo, input.sha],
@@ -52,7 +57,8 @@ export async function indexInChild(input: {
   if (run.status !== 0 || typeof run.stdout !== "string") {
     throw new Error(`the index ${run.timedOut ? "timed out" : `exited ${run.status}`}`);
   }
-  return { files: IndexFacts.parse(JSON.parse(run.stdout)).files };
+  const { files, technologies, unparsed, tooLarge } = IndexFacts.parse(JSON.parse(run.stdout));
+  return { files, technologies, unparsed, tooLarge };
 }
 
 /**
