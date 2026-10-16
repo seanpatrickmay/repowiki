@@ -2,7 +2,13 @@ import { GitSha, IsoDateTime, type WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { Facts, plainText } from "./content.ts";
 import { MAX_TECHNOLOGIES, TechnologyUse } from "./detect.ts";
-import { isTool, kindLabel, type Technology, technologyById } from "./technologies.ts";
+import {
+  isTool,
+  KIND_PRIORITY,
+  kindLabel,
+  type Technology,
+  technologyById,
+} from "./technologies.ts";
 import { firstClause, plainWords, sentencesOf } from "./text.ts";
 
 /** One published project as the author's biography reads it (ADR-0013), stored as `entry.json`. */
@@ -231,10 +237,12 @@ interface ProjectTechnology {
 
 /** Libraries and frameworks before tools (testing, build, infrastructure): the owner's ruling. */
 const toolGroup = (tech: Technology) => (isTool(tech) ? 1 : 0);
+/** Ties fall to kinds before names: machine learning and AI APIs first (owner ruling). */
+const kindRank = (tech: Technology) => KIND_PRIORITY.indexOf(tech.kind);
 
 /**
  * A project's technologies the table still knows: libraries before tools, then by importing
- * files, then by name.
+ * files, then by kind, then by name.
  */
 function technologiesOf(entry: BiographyEntry): ProjectTechnology[] {
   return entry.technologies
@@ -248,13 +256,14 @@ function technologiesOf(entry: BiographyEntry): ProjectTechnology[] {
       (a, b) =>
         toolGroup(a.tech) - toolGroup(b.tech) ||
         b.importingFiles - a.importingFiles ||
+        kindRank(a.tech) - kindRank(b.tech) ||
         a.tech.name.localeCompare(b.tech.name),
     );
 }
 
 /**
- * Technologies across projects: libraries before tools, then by projects using them, then
- * importing files, then name.
+ * Technologies across projects: libraries before tools, then by projects using them, then by
+ * kind, then importing files, then name.
  */
 function rankedTechnologies(projects: readonly BiographyProject[]) {
   const ranked = new Map<string, { tech: Technology; files: number; users: BiographyProject[] }>();
@@ -270,6 +279,7 @@ function rankedTechnologies(projects: readonly BiographyProject[]) {
     (a, b) =>
       toolGroup(a.tech) - toolGroup(b.tech) ||
       b.users.length - a.users.length ||
+      kindRank(a.tech) - kindRank(b.tech) ||
       b.files - a.files ||
       a.tech.name.localeCompare(b.tech.name),
   );
