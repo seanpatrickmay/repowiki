@@ -181,6 +181,73 @@ describe("takeProfile", () => {
   });
 });
 
+describe("the snapshot's technology files (ADR-0014)", () => {
+  const TEXT: Record<string, string> = {
+    "package.json": '{"dependencies":{"react":"18"}}',
+    "web/package.json": '{"devDependencies":{"vite":"5"}}',
+    "liar/requirements.txt": "x".repeat(70_000),
+  };
+  const tree = [
+    { path: "package.json", type: "blob", size: 31 },
+    { path: "web", type: "tree" },
+    { path: "web/package.json", type: "blob", size: 32 },
+    { path: "node_modules/x/package.json", type: "blob", size: 10 },
+    { path: ".github/workflows/ci.yml", type: "blob", size: 10 },
+    { path: "src/a.ts", type: "blob", size: 10 },
+    { path: "big/requirements.txt", type: "blob", size: 70_000 },
+    { path: "liar/requirements.txt", type: "blob", size: 10 },
+    ...Array.from({ length: 40 }, (_, i) => ({ path: `p/${i}/Cargo.toml`, type: "blob", size: 9 })),
+    ...Array.from({ length: 600 }, (_, i) => ({ path: `tf/${i}.tf`, type: "blob", size: 9 })),
+  ];
+  const asked: string[] = [];
+  const withTree: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const treePath = `/repos/ada/Ada-Tool/git/trees/${EXPORT_HEAD}`;
+    if (url.pathname === treePath) {
+      expect(url.searchParams.get("recursive")).toBe("1");
+      return Response.json({ sha: EXPORT_HEAD, tree, truncated: false });
+    }
+    const contents = "/repos/ada/Ada-Tool/contents/";
+    if (url.pathname.startsWith(contents)) {
+      const path = decodeURIComponent(url.pathname.slice(contents.length));
+      asked.push(path);
+      expect(url.searchParams.get("ref")).toBe(EXPORT_HEAD);
+      expect(new Headers(init?.headers).get("accept")).toBe("application/vnd.github.raw");
+      return new Response(TEXT[path] ?? "[dependencies]\nserde = '1'\n");
+    }
+    return adaFetch([])(input, init);
+  };
+
+  it("keeps, at the export's head, the technology paths and at most 30 small files", async () => {
+    writeExport("ada-tool", { ...fixtureExport(), repo: "Ada-Tool", head: EXPORT_HEAD });
+    const profile = await takeProfile({ login: "ada", fetch: withTree, exportsDir: dir });
+    expect(LocalProfile.parse(profile)).toEqual(profile);
+    const [tool, notes] = profile.repos;
+    const technology = tool?.technology;
+    expect(technology?.paths).toHaveLength(500);
+    expect(technology?.paths.slice(0, 3)).toEqual([
+      "package.json",
+      "web/package.json",
+      ".github/workflows/ci.yml",
+    ]);
+    expect(technology?.paths).not.toContain("node_modules/x/package.json");
+    expect(technology?.paths).not.toContain("src/a.ts");
+    expect(technology?.files).toHaveLength(29);
+    expect(technology?.files[0]).toEqual({ path: "package.json", text: TEXT["package.json"] });
+    // Too big by the tree's size is never asked for; too big when it arrives is dropped.
+    expect(asked).not.toContain("big/requirements.txt");
+    expect(asked).toHaveLength(30);
+    expect(technology?.files.map((f) => f.path)).not.toContain("liar/requirements.txt");
+    expect(notes?.technology).toBeUndefined();
+  });
+
+  it("goes on without the files when GitHub will not list the tree", async () => {
+    writeExport("ada-tool", { ...fixtureExport(), repo: "Ada-Tool", head: EXPORT_HEAD });
+    const profile = await takeProfile({ login: "ada", fetch: adaFetch([]), exportsDir: dir });
+    expect(profile.repos[0]?.technology).toBeUndefined();
+  });
+});
+
 describe("loadProfile", () => {
   it("reads a saved snapshot and refuses one that does not parse", async () => {
     const profile = await takeProfile({ login: "ada", fetch: adaFetch([]), exportsDir: dir });
