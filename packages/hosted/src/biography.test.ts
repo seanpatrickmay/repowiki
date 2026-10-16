@@ -534,11 +534,11 @@ describe("biography", () => {
       ]);
     });
 
-    it("gives each work its top 3, libraries before tools, then by importing files and name", () => {
+    it("gives each work its top 3, libraries before tools, then by importing files, kind and name", () => {
       expect(withTech.works.map((w) => [w.title, w.builtWith])).toEqual([
         ["Mailbox", "FastAPI, React, pytest"],
         ["Planner", "FastAPI, PostgreSQL, Docker"],
-        ["Engine", "React, Docker, Vite"],
+        ["Engine", "React, Vite, Docker"],
       ]);
       const testHeavy = project("Suite", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", {
         technologies: [
@@ -592,7 +592,7 @@ describe("biography", () => {
         "React developers",
       ]);
       expect(words(single.technical.libraries?.paragraph ?? [])).toBe(
-        "Lovelace's project is built with React, Docker and Vite.",
+        "Lovelace's project is built with React, Vite and Docker.",
       );
     });
 
@@ -603,6 +603,39 @@ describe("biography", () => {
       expect(
         bio.categories.some((c) => c.endsWith(" developers") && c !== "Software developers"),
       ).toBe(false);
+    });
+
+    it("breaks ties by kind before name, so no import data still reads well (owner ruling)", () => {
+      const p = (title: string, ids: string[]) =>
+        project(title, "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", {
+          technologies: ids.map((id): [string, null] => [id, null]),
+        });
+      const owner = [
+        p("One", ["fastapi", "pytorch", "alembic"]),
+        p("Two", ["fastapi", "react", "pydantic", "alembic"]),
+        p("Three", ["fastapi", "pytorch", "react", "pydantic"]),
+        p("Four", ["alembic", "apscheduler", "aws-sdk", "fastapi", "react", "openai"]),
+      ];
+      // In the first three: FastAPI in three projects; PyTorch, React, Pydantic and Alembic in two.
+      const ranked = biography({ person: ADA, projects: owner.slice(0, 3), asOf: AS_OF });
+      expect(ranked.infobox.technologies).toEqual([
+        "FastAPI",
+        "PyTorch",
+        "React",
+        "Pydantic",
+        "Alembic",
+      ]);
+      expect(ranked.categories.filter((c) => c.endsWith(" developers")).slice(1)).toEqual([
+        "FastAPI developers",
+        "PyTorch developers",
+        "React developers",
+      ]);
+      const four = biography({
+        person: ADA,
+        projects: [owner[3] as BiographyProject],
+        asOf: AS_OF,
+      });
+      expect(four.works[0]?.builtWith).toBe("OpenAI API, FastAPI, React");
     });
   });
 });

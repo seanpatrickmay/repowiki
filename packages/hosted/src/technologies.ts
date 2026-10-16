@@ -20,15 +20,15 @@ export const TECHNOLOGY_KINDS = [
 ] as const;
 export type TechnologyKind = (typeof TECHNOLOGY_KINDS)[number];
 
-/** Within a project, frameworks come before tools (ADR-0014). */
+/** Ties between technologies fall to their kinds in this order, before names (ADR-0014). */
 export const KIND_PRIORITY: readonly TechnologyKind[] = [
-  "web framework",
-  "UI library",
   "machine learning",
   "AI API",
+  "web framework",
+  "UI library",
+  "graphics",
   "data",
   "database",
-  "graphics",
   "CLI",
   "other",
   "testing",

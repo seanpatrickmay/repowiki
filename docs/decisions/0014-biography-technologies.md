@@ -172,11 +172,16 @@ Each ruling is "Ruling: X — why — cost if wrong".
 
 - **Ranking.** Ruling (the owner's, after review): frameworks and libraries always come before
   tools (testing, build tool, infrastructure, and entries marked `tool`). Across projects (the
-  infobox and the "Libraries and tools" table), technologies rank by that group, then by the
-  number of projects using them, then by importing files summed (null as 0), then by name; within
-  a project (the Works column), by that group, then by importing files (null as 0), then by name.
-  — A reader learns more from "FastAPI, React" than from "Vitest, Docker", however many test
-  files import Vitest. — Cost if wrong: one comparator each.
+  infobox, the "Libraries and tools" table and the profile sentence), technologies rank by that
+  group, then by the number of projects using them, then by kind, then by importing files summed
+  (null as 0), then by name; within a project (the Works column), by that group, then by
+  importing files (null as 0), then by kind, then by name. The kind order is machine learning,
+  AI API, web framework, UI library, graphics, data, database, CLI, other, then the tools'
+  testing, build tool and infrastructure; it also orders the 60 a generation keeps, and the
+  categories follow it. — A reader learns more from "FastAPI, React" than from "Vitest, Docker",
+  however many test files import Vitest; and with no import data (local mode) the kind, not the
+  alphabet, decides, so "OpenAI API, FastAPI, React" leads rather than "Alembic, APScheduler, AWS
+  SDK". — Cost if wrong: one list and two comparators.
 - **Infobox and Works.** Ruling: a "Technologies" row after "Languages" lists the top 5 across
   projects (no row when there are none); a "Built with" column after "Main languages" lists the
   project's top 3, or "—". — Cost if wrong: one row and one column.

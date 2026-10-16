@@ -238,8 +238,8 @@ describe("detectTechnologies", () => {
     );
     expect(new Set(every.map((n) => technologyForPackage("npm", n)?.id)).size).toBeGreaterThan(60);
     expect(all.technologies).toHaveLength(MAX_TECHNOLOGIES);
-    // With no counts, kinds decide (web frameworks first), then names.
-    expect(all.technologies.slice(0, 2).map((t) => t.id)).toEqual(["astro", "express"]);
+    // With no counts, kinds decide (machine learning first), then names.
+    expect(all.technologies.slice(0, 2).map((t) => t.id)).toEqual(["transformers", "onnx-runtime"]);
     for (const t of all.technologies) expect(TechnologyUse.safeParse(t).success).toBe(true);
   });
 
