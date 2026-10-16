@@ -100,7 +100,7 @@ Each ruling is "Ruling: X — why — cost if wrong".
 - **Bounds.** Ruling: production reads at most 100 manifest and compose files, shallowest first
   and then by path, each at most 128 KB (a larger one is skipped and logged); the child lists at
   most 100 unparsed and 100 too-large paths, none over 1,000 characters; a generation stores
-  at most 60 technologies, ranked as the Works column ranks them. — A monorepo with many
+  at most 60 technologies, kept by importing files, then kind, then name. — A monorepo with many
   packages still fits; the stored facts stay small. — Cost if wrong: a monorepo with more than 100
   manifests loses its deepest ones.
 - **Import data, per ecosystem.** Ruling: imports count for an ecosystem only when imports were
@@ -170,11 +170,13 @@ Each ruling is "Ruling: X — why — cost if wrong".
 
 ### On the biography
 
-- **Ranking.** Ruling: across projects, technologies rank by the number of projects using them,
-  then by importing files summed (null as 0), then by name; within a project, by importing files
-  (null as 0), then by kind (web framework, UI library, machine learning, AI API, data, database,
-  graphics, CLI, other, testing, build tool, infrastructure), then by name. — The owner's order,
-  with frameworks before tools. — Cost if wrong: one comparator.
+- **Ranking.** Ruling (the owner's, after review): frameworks and libraries always come before
+  tools (testing, build tool, infrastructure, and entries marked `tool`). Across projects (the
+  infobox and the "Libraries and tools" table), technologies rank by that group, then by the
+  number of projects using them, then by importing files summed (null as 0), then by name; within
+  a project (the Works column), by that group, then by importing files (null as 0), then by name.
+  — A reader learns more from "FastAPI, React" than from "Vitest, Docker", however many test
+  files import Vitest. — Cost if wrong: one comparator each.
 - **Infobox and Works.** Ruling: a "Technologies" row after "Languages" lists the top 5 across
   projects (no row when there are none); a "Built with" column after "Main languages" lists the
   project's top 3, or "—". — Cost if wrong: one row and one column.
@@ -187,8 +189,9 @@ Each ruling is "Ruling: X — why — cost if wrong".
   the existing reference list. With no technologies the sub-section is left out. No pronoun is
   used. — Every row is checkable in one click. — Cost if wrong: the references list grows by up
   to one entry per project per row.
-- **Categories.** Ruling: "<Name> developers" for the top 3 technologies used by two or more
-  projects, or for the top 2 overall when none is, after the language categories. — Cost if
+- **Categories.** Ruling: never a tool. "<Name> developers" for the top 3 libraries or frameworks
+  used by two or more projects, or for the top 2 libraries or frameworks overall when none is,
+  after the language categories. — "pytest developers" says nothing about a person. — Cost if
   wrong: one filter.
 
 ## Consequences

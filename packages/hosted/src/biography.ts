@@ -2,7 +2,7 @@ import { GitSha, IsoDateTime, type WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { Facts, plainText } from "./content.ts";
 import { MAX_TECHNOLOGIES, TechnologyUse } from "./detect.ts";
-import { KIND_PRIORITY, kindLabel, type Technology, technologyById } from "./technologies.ts";
+import { isTool, kindLabel, type Technology, technologyById } from "./technologies.ts";
 import { firstClause, plainWords, sentencesOf } from "./text.ts";
 
 /** One published project as the author's biography reads it (ADR-0013), stored as `entry.json`. */
@@ -229,7 +229,13 @@ interface ProjectTechnology {
   path: string;
 }
 
-/** A project's technologies the table still knows, by importing files, then kind, then name. */
+/** Libraries and frameworks before tools (testing, build, infrastructure): the owner's ruling. */
+const toolGroup = (tech: Technology) => (isTool(tech) ? 1 : 0);
+
+/**
+ * A project's technologies the table still knows: libraries before tools, then by importing
+ * files, then by name.
+ */
 function technologiesOf(entry: BiographyEntry): ProjectTechnology[] {
   return entry.technologies
     .flatMap((t) => {
@@ -240,13 +246,16 @@ function technologiesOf(entry: BiographyEntry): ProjectTechnology[] {
     })
     .sort(
       (a, b) =>
+        toolGroup(a.tech) - toolGroup(b.tech) ||
         b.importingFiles - a.importingFiles ||
-        KIND_PRIORITY.indexOf(a.tech.kind) - KIND_PRIORITY.indexOf(b.tech.kind) ||
         a.tech.name.localeCompare(b.tech.name),
     );
 }
 
-/** Technologies across projects: by projects using them, then importing files, then name. */
+/**
+ * Technologies across projects: libraries before tools, then by projects using them, then
+ * importing files, then name.
+ */
 function rankedTechnologies(projects: readonly BiographyProject[]) {
   const ranked = new Map<string, { tech: Technology; files: number; users: BiographyProject[] }>();
   for (const p of projects) {
@@ -259,6 +268,7 @@ function rankedTechnologies(projects: readonly BiographyProject[]) {
   }
   return [...ranked.values()].sort(
     (a, b) =>
+      toolGroup(a.tech) - toolGroup(b.tech) ||
       b.users.length - a.users.length ||
       b.files - a.files ||
       a.tech.name.localeCompare(b.tech.name),
@@ -506,8 +516,10 @@ export function biography(input: {
           ],
           rows: libraryRows,
         };
-  const shared = ranked.filter((r) => r.users.length >= 2).slice(0, 3);
-  const developers = (shared.length > 0 ? shared : ranked.slice(0, 2)).map(
+  // A category names a library or framework, never a tool.
+  const libraryRanks = ranked.filter((r) => !isTool(r.tech));
+  const shared = libraryRanks.filter((r) => r.users.length >= 2).slice(0, 3);
+  const developers = (shared.length > 0 ? shared : libraryRanks.slice(0, 2)).map(
     (r) => `${r.tech.name} developers`,
   );
 
