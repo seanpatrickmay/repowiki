@@ -36,6 +36,7 @@ ${row("GitHub", `<a class="external" href="${e(i.github.href)}">@${e(i.github.lo
 ${row("Years active", e(i.yearsActive))}
 ${row("Known for", known)}
 ${i.languages.length === 0 ? "" : row("Languages", e(i.languages.join(", ")))}
+${i.technologies.length === 0 ? "" : row("Technologies", e(i.technologies.join(", ")))}
 ${row("Projects", e(i.projects))}
 ${row("Commits", e(i.commits))}
 </tbody></table>`;
@@ -58,12 +59,12 @@ function works(bio: Biography): string {
   const rows = bio.works
     .map(
       (w) =>
-        `<tr><td>${e(w.years)}</td><td><a href="${e(w.href)}">${e(w.title)}</a></td><td>${e(w.description)}</td><td>${e(w.languages)}</td><td class="num">${e(w.commits)}</td><td><a href="${e(w.href)}">Read the wiki</a></td></tr>`,
+        `<tr><td>${e(w.years)}</td><td><a href="${e(w.href)}">${e(w.title)}</a></td><td>${e(w.description)}</td><td>${e(w.languages)}</td><td>${e(w.builtWith)}</td><td class="num">${e(w.commits)}</td><td><a href="${e(w.href)}">Read the wiki</a></td></tr>`,
     )
     .join("\n");
   return `<h2 id="works">Works</h2>
 <div class="table-scroll"><table class="wikitable"><caption>Public projects documented by RepoWiki</caption>
-<thead><tr><th scope="col">Year</th><th scope="col">Project</th><th scope="col">Description</th><th scope="col">Main languages</th><th scope="col">Commits by ${e(bio.surname)}</th><th scope="col">Wiki</th></tr></thead>
+<thead><tr><th scope="col">Year</th><th scope="col">Project</th><th scope="col">Description</th><th scope="col">Main languages</th><th scope="col">Built with</th><th scope="col">Commits by ${e(bio.surname)}</th><th scope="col">Wiki</th></tr></thead>
 <tbody>${rows}</tbody></table></div>`;
 }
 
@@ -94,7 +95,20 @@ function technical(bio: Biography): string {
               `<tr><td>${e(r.language)}</td><td class="num">${e(r.share)}</td><td>${e(r.projects.join(", "))}</td></tr>`,
           )
           .join("")}</tbody></table></div>`;
-  return `<h2 id="technical-profile">Technical profile</h2>\n<p>${runs(paragraph)}</p>\n${table}`;
+  return `<h2 id="technical-profile">Technical profile</h2>\n<p>${runs(paragraph)}</p>\n${table}${libraries(bio)}`;
+}
+
+/** "Libraries and tools" (ADR-0014): a sentence and a table, each project cited to its evidence. */
+function libraries(bio: Biography): string {
+  const found = bio.technical.libraries;
+  if (found === null) return "";
+  const rows = found.rows
+    .map((r) => `<tr><td>${e(r.name)}</td><td>${e(r.kind)}</td><td>${runs(r.projects)}</td></tr>`)
+    .join("");
+  return `
+<h3 id="libraries-and-tools">Libraries and tools</h3>
+<p>${runs(found.paragraph)}</p>
+<div class="table-scroll"><table class="wikitable"><thead><tr><th scope="col">Technology</th><th scope="col">Kind</th><th scope="col">Projects</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function references(bio: Biography): string {
