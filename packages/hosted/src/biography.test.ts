@@ -515,6 +515,7 @@ describe("biography", () => {
         technologies: [
           ["fastapi", null, "requirements.txt"],
           ["postgresql", null, "docker compose.yml"],
+          ["docker", null, "Dockerfile"],
           ["no-such-entry", 99],
         ],
       }),
@@ -522,33 +523,42 @@ describe("biography", () => {
     const withTech = biography({ person: ADA, projects: built, asOf: AS_OF });
     const libraries = withTech.technical.libraries;
 
-    it("ranks the infobox's top 5 by projects, importing files, then name", () => {
+    it("ranks the infobox's top 5 libraries before tools, then by projects, files and name", () => {
+      // Docker is in two projects, PostgreSQL in one: libraries still come first (owner, review).
       expect(withTech.infobox.technologies).toEqual([
         "FastAPI",
         "React",
-        "Docker",
         "PostgreSQL",
+        "Docker",
         "pytest",
       ]);
     });
 
-    it("gives each work its top 3 by importing files, then frameworks before tools", () => {
+    it("gives each work its top 3, libraries before tools, then by importing files and name", () => {
       expect(withTech.works.map((w) => [w.title, w.builtWith])).toEqual([
         ["Mailbox", "FastAPI, React, pytest"],
-        ["Planner", "FastAPI, PostgreSQL"],
-        ["Engine", "React, Vite, Docker"],
+        ["Planner", "FastAPI, PostgreSQL, Docker"],
+        ["Engine", "React, Docker, Vite"],
       ]);
+      const testHeavy = project("Suite", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", {
+        technologies: [
+          ["vitest", 40],
+          ["react", 3],
+        ],
+      });
+      const one = biography({ person: ADA, projects: [testHeavy], asOf: AS_OF });
+      expect(one.works[0]?.builtWith).toBe("React, Vitest");
     });
 
     it("tables the top 15 with kinds and a citation per project to the evidence", () => {
       expect(words(libraries?.paragraph ?? [])).toBe(
-        "Lovelace's projects are built most often with FastAPI, React and Docker.",
+        "Lovelace's projects are built most often with FastAPI, React and PostgreSQL.",
       );
       expect(libraries?.rows.map((r) => [r.name, r.kind, words(r.projects)])).toEqual([
         ["FastAPI", "Web framework", "Mailbox, Planner"],
         ["React", "UI library", "Mailbox, Engine"],
-        ["Docker", "Infrastructure", "Engine"],
         ["PostgreSQL", "Database", "Planner"],
+        ["Docker", "Infrastructure", "Planner, Engine"],
         ["pytest", "Testing", "Mailbox"],
         ["Vite", "Build tool", "Engine"],
       ]);
@@ -559,13 +569,14 @@ describe("biography", () => {
       expect(withTech.references.find((r) => r.url.endsWith("/api/pyproject.toml"))?.label).toBe(
         `Mailbox: api/pyproject.toml at commit ${"7".repeat(7)}`,
       );
-      // One reference per URL: Mailbox's FastAPI and pytest share theirs.
+      // One reference per URL: Mailbox's FastAPI and pytest share theirs, cited twice.
       expect(new Set(urls).size).toBe(urls.length);
+      expect(withTech.references.find((r) => r.url.endsWith("/api/pyproject.toml"))?.uses).toBe(2);
       const cited = new Set(allRuns(withTech).flatMap((r) => ("cite" in r ? [r.cite] : [])));
       expect(withTech.references.every((r) => cited.has(r.n))).toBe(true);
     });
 
-    it("names developer categories for technologies shared by two projects, else the top 2", () => {
+    it("names developer categories for libraries shared by two projects, never tools", () => {
       expect(withTech.categories.filter((c) => c.endsWith("developers"))).toEqual([
         "Software developers",
         "FastAPI developers",
@@ -579,7 +590,6 @@ describe("biography", () => {
       expect(single.categories.filter((c) => c.endsWith(" developers"))).toEqual([
         "Software developers",
         "React developers",
-        "Docker developers",
       ]);
       expect(words(single.technical.libraries?.paragraph ?? [])).toBe(
         "Lovelace's project is built with React, Docker and Vite.",

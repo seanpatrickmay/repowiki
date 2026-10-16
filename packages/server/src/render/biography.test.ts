@@ -163,7 +163,8 @@ describe("libraries and tools on the biography (ADR-0014)", () => {
       `href="https://github.com/ada/5/blob/${"c".repeat(40)}/api/%3Cx%3E.toml"`,
     );
     expect(page).toContain(`Gamma: api/&lt;x&gt;.toml at commit ${"c".repeat(7)}`);
-    expect(page).toContain("<li>FastAPI developers</li><li>Docker developers</li>");
+    // Docker is a tool: never a category (owner ruling, review).
+    expect(page).toContain("<li>FastAPI developers</li></ul>");
   });
 });
 
