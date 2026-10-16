@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type PeopleSnapshot, WikiExport } from "@repowiki/core";
 import { pathLanguageName } from "@repowiki/engine";
-import { Facts, type JobStep } from "@repowiki/hosted";
+import { detectTechnologies, Facts, type JobStep, type TechnologyUse } from "@repowiki/hosted";
 import { z } from "zod";
 import { ApiError, type WorkerApi, workerApi } from "./api.ts";
 import { authorFacts, type FileFacts, languageShares, pageFeatureIds } from "./facts.ts";
@@ -29,6 +29,13 @@ export const ImportProfile = z.object({
     z.object({
       repo: z.object({ full_name: z.string(), description: z.string().nullish() }),
       export: z.string().nullable(),
+      /** The snapshot's technology paths and files (ADR-0014); absent from older snapshots. */
+      technology: z
+        .object({
+          paths: z.array(z.string()),
+          files: z.array(z.object({ path: z.string(), text: z.string() })),
+        })
+        .optional(),
     }),
   ),
 });
@@ -99,7 +106,11 @@ const NOT_CODE = new Set([
  * each has, evenly when none can be told; a page with no code language is left out of the
  * shares), the author's share from People. Zeros when People is off or does not name the author.
  */
-export function exportFacts(exp: WikiExport, author: Author): Facts {
+export function exportFacts(
+  exp: WikiExport,
+  author: Author,
+  technologies: readonly TechnologyUse[] = [],
+): Facts {
   const counts = new Map<string, Map<string, number>>();
   for (const [path, { featureId }] of Object.entries(exp.manifest.membership)) {
     const raw = pathLanguageName(path);
@@ -141,7 +152,26 @@ export function exportFacts(exp: WikiExport, author: Author): Facts {
       snapshot && { ...snapshot, people: person === null ? [] : [{ ...person, id: AUTHOR_ID }] },
       featureIds,
     ),
+    technologies,
   });
+}
+
+/**
+ * The technologies the snapshot's files show, detected as production detects them but with no
+ * import data, so every declared library in the table counts (ADR-0014); none without files.
+ */
+export function snapshotTechnologies(
+  technology: ImportProfile["repos"][number]["technology"],
+  log: (line: object) => void = () => {},
+): TechnologyUse[] {
+  if (technology === undefined) return [];
+  const found = detectTechnologies({
+    paths: technology.paths,
+    sources: new Map(technology.files.map((f) => [f.path, f.text])),
+    imports: null,
+  });
+  if (found.unparsed.length > 0) log({ import: "unparsed manifests", paths: found.unparsed });
+  return found.technologies;
 }
 
 /** Why an import cannot go on; the message is the whole log line (no secret is in it). */
@@ -183,7 +213,8 @@ export async function runImport(
   try {
     const spec = await api.lease();
     const exp = localWiki(profile, spec.repo.fullName, spec.commitSha);
-    const facts = exportFacts(exp, profile.user);
+    const technology = entryFor(profile, spec.repo.fullName)?.technology;
+    const facts = exportFacts(exp, profile.user, snapshotTechnologies(technology, log));
     for (const step of STEPS) {
       await beats.step(step);
       if (step === "index" && (await api.indexed(facts.indexedFiles)) === "too-large") return false;

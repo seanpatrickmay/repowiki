@@ -178,6 +178,28 @@ describe("runImport", () => {
     expect(succeeded?.suggestions.highlightCandidates[0]).toBe("signals");
   });
 
+  it("detects technologies over the snapshot's files, with no import data (ADR-0014)", async () => {
+    const exp = peopleExport();
+    const path = join(mkdtempSync(join(tmpdir(), "repowiki-import-")), "export.json");
+    writeFileSync(path, JSON.stringify(exp));
+    const technology = {
+      paths: ["requirements.txt", "Dockerfile"],
+      files: [{ path: "requirements.txt", text: "fastapi\nleft-pad\n" }],
+    };
+    const fake = fakeApi(exp.head);
+    const profile = profileWith(path);
+    const withFiles = { ...profile, repos: [{ ...profile.repos[0], technology }] };
+    expect(await runImport(fake.api, withFiles as typeof profile, { stepMs: 0 })).toBe(true);
+    expect(fake.result().succeeded?.facts.technologies).toEqual([
+      { id: "fastapi", evidence: { path: "requirements.txt" }, importingFiles: null },
+      { id: "docker", evidence: { path: "Dockerfile" }, importingFiles: null },
+    ]);
+    // A snapshot taken before ADR-0014 has no files, so no technologies.
+    const old = fakeApi(exp.head);
+    expect(await runImport(old.api, profile, { stepMs: 0 })).toBe(true);
+    expect(old.result().succeeded?.facts.technologies).toEqual([]);
+  });
+
   it("takes the tagline from the repository's own description when it has one", async () => {
     const exp = peopleExport();
     const path = join(mkdtempSync(join(tmpdir(), "repowiki-import-")), "export.json");

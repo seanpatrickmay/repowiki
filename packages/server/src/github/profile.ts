@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GitSha, WikiExport } from "@repowiki/core";
+import { sourcePaths, technologyPaths } from "@repowiki/hosted";
 import { z } from "zod";
 import { GitHubError, GitHubRepo, GitHubUser, githubApi } from "./api.ts";
 import { avatarSource, avatarType, fetchAvatar } from "./avatar.ts";
@@ -9,6 +10,16 @@ import { GITHUB } from "./endpoints.ts";
 const MAX_SHAS = 100;
 const MAX_REPO_PAGES = 10;
 const OWNER = { admin: true, maintain: true, push: true, triage: true, pull: true };
+/** What a snapshot keeps of each tree for detection (ADR-0014). */
+export const SNAPSHOT_PATHS = 500;
+export const SNAPSHOT_FILES = 30;
+export const SNAPSHOT_FILE_BYTES = 64 * 1024;
+
+const GitTree = z.object({
+  tree: z.array(
+    z.object({ path: z.string(), type: z.string(), size: z.int().nonnegative().optional() }),
+  ),
+});
 
 /**
  * A snapshot of one GitHub user's public repositories for local testing (M14g), beside the
@@ -35,6 +46,23 @@ export const LocalProfile = z.strictObject({
       githubHead: GitSha.nullable(),
       /** Absolute path of the mapped export.json. */
       export: z.string().min(1).nullable(),
+      /**
+       * The tree's technology paths and its manifest and compose files at `head`, for the import
+       * worker's detection (ADR-0014); only with an export, and absent from older snapshots.
+       */
+      technology: z
+        .strictObject({
+          paths: z.array(z.string().min(1).max(1000)).max(SNAPSHOT_PATHS),
+          files: z
+            .array(
+              z.strictObject({
+                path: z.string().min(1).max(1000),
+                text: z.string().max(SNAPSHOT_FILE_BYTES),
+              }),
+            )
+            .max(SNAPSHOT_FILES),
+        })
+        .optional(),
     }),
   ),
 });
@@ -132,11 +160,50 @@ export async function takeProfile(options: TakeProfileOptions): Promise<LocalPro
     if (batch.length < 100) break;
   }
 
+  /**
+   * The technology paths and files of `fullName` at `sha`: the git-tree API, recursive, then the
+   * contents API, raw, for at most SNAPSHOT_FILES files of at most SNAPSHOT_FILE_BYTES each,
+   * shallowest first. Undefined when GitHub will not list the tree; a file it will not give is
+   * left out.
+   */
+  async function technologyOf(fullName: string, sha: string) {
+    const repoPath = fullName.split("/").map(encodeURIComponent).join("/");
+    let listed: z.infer<typeof GitTree> | null;
+    try {
+      listed = await read(`/repos/${repoPath}/git/trees/${sha}?recursive=1`, GitTree);
+    } catch {
+      return undefined;
+    }
+    if (listed === null) return undefined;
+    const blobs = listed.tree.filter((e) => e.type === "blob");
+    const size = new Map(blobs.map((b) => [b.path, b.size ?? 0]));
+    const all = blobs.map((b) => b.path);
+    const wanted = sourcePaths(
+      all.filter((p) => (size.get(p) ?? 0) <= SNAPSHOT_FILE_BYTES),
+      SNAPSHOT_FILES,
+    );
+    const files: { path: string; text: string }[] = [];
+    for (const path of wanted) {
+      const file = path.split("/").map(encodeURIComponent).join("/");
+      const response = await authed(`${api}/repos/${repoPath}/contents/${file}?ref=${sha}`, {
+        headers: { accept: "application/vnd.github.raw", "user-agent": "RepoWiki" },
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => null);
+      if (response === null || !response.ok) continue;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > SNAPSHOT_FILE_BYTES) continue;
+      files.push({ path, text: new TextDecoder().decode(bytes) });
+    }
+    return { paths: technologyPaths(all).slice(0, SNAPSHOT_PATHS), files };
+  }
+
   const exports = chooseExports(options.exportsDir);
   const entries: LocalProfile["repos"] = [];
   for (const repo of repos) {
     const mapped = exports.get(repo.name.toLowerCase());
     const githubHead = await gh.headSha(token, repo.full_name, repo.default_branch);
+    const technology =
+      mapped === undefined ? undefined : await technologyOf(repo.full_name, mapped.head);
     entries.push({
       repo: { ...repo, permissions: OWNER },
       commits: await gh.countCommits(token, repo.full_name, user.login),
@@ -144,6 +211,7 @@ export async function takeProfile(options: TakeProfileOptions): Promise<LocalPro
       head: mapped?.head ?? githubHead,
       githubHead,
       export: mapped?.path ?? null,
+      ...(technology === undefined ? {} : { technology }),
     });
   }
   const now = options.now ?? (() => new Date());
