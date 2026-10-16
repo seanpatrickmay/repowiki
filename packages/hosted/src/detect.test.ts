@@ -43,11 +43,8 @@ describe("importName (ADR-0014)", () => {
       name: "google.cloud.aiplatform",
     });
     expect(importName("a.py", ".sibling")).toBeNull();
-    expect(importName("src/lib.rs", "serde_json::Value")).toEqual({
-      ecosystem: "crates",
-      name: "serde_json",
-    });
-    expect(importName("src/lib.rs", "crate::engine")).toBeNull();
+    // Rust crates are used through paths as often as through `use`: never counted (review M4).
+    expect(importName("src/lib.rs", "serde_json::Value")).toBeNull();
     expect(importName("main.js", "react")).toBeNull();
   });
 });
@@ -256,5 +253,65 @@ describe("detectTechnologies", () => {
     expect(fallback.technologies).toEqual([
       { id: "vitest", evidence: { path: "web/package.json" }, importingFiles: null },
     ]);
+  });
+
+  it("gates each library on the ecosystems that declared or imported it (review I5)", () => {
+    const d = detect(
+      {
+        "backend/requirements.txt": "fastapi\n",
+        "frontend/package.json": pkg({ openai: "4", stripe: "14" }),
+      },
+      [["backend/app.py", "fastapi"]],
+      ["backend/app.py", "frontend/src/index.js"],
+    );
+    expect(use(d, "openai")).toEqual({
+      id: "openai",
+      evidence: { path: "frontend/package.json" },
+      importingFiles: null,
+    });
+    expect(use(d, "stripe")?.importingFiles).toBeNull();
+    expect(use(d, "fastapi")?.importingFiles).toBe(1);
+  });
+
+  it("counts a namespace import of a declared library's module path (review I4)", () => {
+    const d = detect(
+      {
+        "requirements.txt": "google-genai\ngoogle-cloud-aiplatform\ngoogle-cloud-translate\n",
+      },
+      [
+        ["app.py", "google"],
+        ["ai.py", "google.cloud"],
+        ["x.py", "goo"],
+      ],
+      ["app.py", "ai.py", "x.py"],
+    );
+    expect(Object.fromEntries(d.technologies.map((t) => [t.id, t.importingFiles]))).toEqual({
+      gemini: 1,
+      "vertex-ai": 2,
+      "cloud-translation": 2,
+    });
+    // Undeclared, a bare namespace names nothing.
+    expect(detect({}, [["app.py", "google"]], ["app.py"]).technologies).toEqual([]);
+  });
+
+  it("shows declared crates on their declaration: Rust has no import data (review M4)", () => {
+    const d = detect(
+      { "Cargo.toml": '[dependencies]\ntokio = "1"\nserde_json = "1"\n' },
+      [["src/main.rs", "serde_json::Value"]],
+      ["src/main.rs"],
+    );
+    expect(d.technologies).toEqual([
+      { id: "serde", evidence: { path: "Cargo.toml" }, importingFiles: null },
+      { id: "tokio", evidence: { path: "Cargo.toml" }, importingFiles: null },
+    ]);
+  });
+
+  it("takes no npm import data from declaration or config files (review M5)", () => {
+    const d = detect(
+      { "package.json": pkg({ zod: "4" }) },
+      [],
+      ["src/types.d.ts", "vite.config.ts", "src/app.js"],
+    );
+    expect(use(d, "zod")?.importingFiles).toBeNull();
   });
 });

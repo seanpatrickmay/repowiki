@@ -97,15 +97,24 @@ Each ruling is "Ruling: X — why — cost if wrong".
   packages still fits; the stored facts stay small. — Cost if wrong: a monorepo with more than 100
   manifests loses its deepest ones.
 - **Import data, per ecosystem.** Ruling: imports count for an ecosystem only when imports were
-  given and the tree has a file the engine parses for it (npm: `.ts`, `.tsx`, `.mts`, `.cts`;
-  PyPI: `.py`; crates: `.rs`); Go is never parsed. With no import data for its ecosystem a
-  declared library is shown, with `importingFiles: null`. An import's name is the npm package root
-  (`@scope/pkg`), the Python module path matched by dotted prefix (`google.cloud.aiplatform`
-  matches an alias `google.cloud.aiplatform`, `numpy.linalg` matches `numpy`), or the Rust
-  crate before `::`. PyPI names are compared PEP 503-normalised and crate names with `-` and `_`
-  equal. — The engine does not parse JavaScript, so a JavaScript-only project would otherwise show
-  no library at all. — Cost if wrong: in a TypeScript project, a library imported only from
-  `.js`, `.vue` or `.svelte` files is hidden.
+  given and the tree has a file the engine parses for it: npm, a `.ts`, `.tsx`, `.mts` or `.cts`
+  file that is neither a declaration (`.d.ts`) nor a tool's config (`*.config.ts`); PyPI, a
+  `.py` file. Go and Rust never have import data: the engine does not parse Go, and a Rust crate
+  is used through paths (`#[tokio::main]`, `serde_json::to_string`) as often as through `use`,
+  so a declared crate shows on its declaration. A library is gated only on the ecosystems that
+  declared or imported it: declared in any ecosystem without import data, it is shown with
+  `importingFiles: null` (a Python backend's imports say nothing about a JavaScript frontend's
+  `package.json`). An import's name is the npm package root (`@scope/pkg`) or the Python module
+  path, matched by dotted prefix (`numpy.linalg` matches `numpy`). A namespace import of a
+  declared library (`from google import genai` records `google`, `from google.cloud import
+  aiplatform` records `google.cloud`) counts for each declared library one of whose module
+  aliases it is a whole-segment prefix of. PyPI names are compared PEP 503-normalised and crate
+  names with `-` and `_` equal. — The engine does not parse JavaScript, so a JavaScript-only
+  project would otherwise show no library at all. — Cost if wrong: in a TypeScript project, a
+  library imported only from `.js`, `.vue`, `.svelte` or config files is hidden; a project with
+  only declaration and config files in TypeScript counts as having no npm import data, so its
+  declared npm libraries all show; a Rust crate declared but unused shows; one namespace import
+  counts for every declared library under that namespace.
 - **Imported but undeclared.** Ruling: a library in the table imported by an indexed file but
   declared nowhere is shown, its evidence the first importing file by path. — Script repositories
   often have no manifest; the import is the proof. — Cost if wrong: an internal module that the
