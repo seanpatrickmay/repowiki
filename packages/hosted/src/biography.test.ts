@@ -31,6 +31,7 @@ function project(
     languages?: Facts["languages"];
     lead?: string;
     contribution?: string;
+    technologies?: [id: string, importingFiles: number | null, path?: string][];
   } = {},
 ): BiographyProject {
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -60,6 +61,11 @@ function project(
           features: [],
         },
       },
+      technologies: (patch.technologies ?? []).map(([id, importingFiles, path]) => ({
+        id,
+        evidence: { path: path ?? "package.json" },
+        importingFiles,
+      })),
     }),
   };
 }
@@ -97,6 +103,8 @@ function allRuns(bio: Biography): Run[] {
       ...p.projects.flatMap((x) => [...x.lead, ...x.contribution]),
     ]),
     ...bio.technical.paragraph,
+    ...(bio.technical.libraries?.paragraph ?? []),
+    ...(bio.technical.libraries?.rows.flatMap((r) => r.projects) ?? []),
   ];
 }
 /** The template's own words: the subject's bold name (their own words) left out. */
@@ -107,6 +115,7 @@ function templateText(bio: Biography): string {
     ...bio.lead.map(templateWords),
     ...bio.career.map((p) => words(p.intro)),
     words(bio.technical.paragraph),
+    words(bio.technical.libraries?.paragraph ?? []),
     bio.infobox.yearsActive,
     bio.infobox.projects,
     bio.infobox.commits,
@@ -470,7 +479,13 @@ describe("biography", () => {
               `Tool ${String.fromCharCode(65 + i)}`,
               `${2023 + (i % 3)}-02-01T00:00:00Z`,
               `${2025 + (i % 2)}-03-01T00:00:00Z`,
-              { lines: (i + 1) * 100, commits: i, languages, lead: i % 2 ? "" : undefined },
+              {
+                lines: (i + 1) * 100,
+                commits: i,
+                languages,
+                lead: i % 2 ? "" : undefined,
+                technologies: i % 3 ? [["react", i]] : [],
+              },
             ),
           );
           const out = biography({ person: { login: "q", displayName }, projects, asOf: AS_OF });
@@ -478,5 +493,106 @@ describe("biography", () => {
         }
       }
     }
+  });
+
+  describe("libraries and tools (ADR-0014)", () => {
+    const built = [
+      project("Engine", "2025-03-01T00:00:00Z", "2025-06-01T00:00:00Z", {
+        technologies: [
+          ["react", 5],
+          ["vite", 0],
+          ["docker", null, "deploy/Dockerfile"],
+        ],
+      }),
+      project("Mailbox", "2026-01-10T00:00:00Z", "2026-10-01T00:00:00Z", {
+        technologies: [
+          ["pytest", 0, "api/pyproject.toml"],
+          ["react", 2, "web/package.json"],
+          ["fastapi", 10, "api/pyproject.toml"],
+        ],
+      }),
+      project("Planner", "2026-05-01T00:00:00Z", "2026-07-01T00:00:00Z", {
+        technologies: [
+          ["fastapi", null, "requirements.txt"],
+          ["postgresql", null, "docker compose.yml"],
+          ["no-such-entry", 99],
+        ],
+      }),
+    ];
+    const withTech = biography({ person: ADA, projects: built, asOf: AS_OF });
+    const libraries = withTech.technical.libraries;
+
+    it("ranks the infobox's top 5 by projects, importing files, then name", () => {
+      expect(withTech.infobox.technologies).toEqual([
+        "FastAPI",
+        "React",
+        "Docker",
+        "PostgreSQL",
+        "pytest",
+      ]);
+    });
+
+    it("gives each work its top 3 by importing files, then frameworks before tools", () => {
+      expect(withTech.works.map((w) => [w.title, w.builtWith])).toEqual([
+        ["Mailbox", "FastAPI, React, pytest"],
+        ["Planner", "FastAPI, PostgreSQL"],
+        ["Engine", "React, Vite, Docker"],
+      ]);
+    });
+
+    it("tables the top 15 with kinds and a citation per project to the evidence", () => {
+      expect(words(libraries?.paragraph ?? [])).toBe(
+        "Lovelace's projects are built most often with FastAPI, React and Docker.",
+      );
+      expect(libraries?.rows.map((r) => [r.name, r.kind, words(r.projects)])).toEqual([
+        ["FastAPI", "Web framework", "Mailbox, Planner"],
+        ["React", "UI library", "Mailbox, Engine"],
+        ["Docker", "Infrastructure", "Engine"],
+        ["PostgreSQL", "Database", "Planner"],
+        ["pytest", "Testing", "Mailbox"],
+        ["Vite", "Build tool", "Engine"],
+      ]);
+      const urls = withTech.references.map((r) => r.url);
+      expect(urls).toContain(
+        `https://github.com/ada/planner/blob/${"7".repeat(40)}/docker%20compose.yml`,
+      );
+      expect(withTech.references.find((r) => r.url.endsWith("/api/pyproject.toml"))?.label).toBe(
+        `Mailbox: api/pyproject.toml at commit ${"7".repeat(7)}`,
+      );
+      // One reference per URL: Mailbox's FastAPI and pytest share theirs.
+      expect(new Set(urls).size).toBe(urls.length);
+      const cited = new Set(allRuns(withTech).flatMap((r) => ("cite" in r ? [r.cite] : [])));
+      expect(withTech.references.every((r) => cited.has(r.n))).toBe(true);
+    });
+
+    it("names developer categories for technologies shared by two projects, else the top 2", () => {
+      expect(withTech.categories.filter((c) => c.endsWith("developers"))).toEqual([
+        "Software developers",
+        "FastAPI developers",
+        "React developers",
+      ]);
+      const single = biography({
+        person: ADA,
+        projects: [built[0] as BiographyProject],
+        asOf: AS_OF,
+      });
+      expect(single.categories.filter((c) => c.endsWith(" developers"))).toEqual([
+        "Software developers",
+        "React developers",
+        "Docker developers",
+      ]);
+      expect(words(single.technical.libraries?.paragraph ?? [])).toBe(
+        "Lovelace's project is built with React, Docker and Vite.",
+      );
+    });
+
+    it("leaves it all out when no project has a technology", () => {
+      expect(bio.technical.libraries).toBeNull();
+      expect(bio.infobox.technologies).toEqual([]);
+      expect(bio.works.every((w) => w.builtWith === "—")).toBe(true);
+      expect(
+        bio.categories.some((c) => c.endsWith(" developers") && c !== "Software developers"),
+      ).toBe(false);
+    });
   });
 });
