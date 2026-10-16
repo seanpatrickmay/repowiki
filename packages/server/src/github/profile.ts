@@ -1,7 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GitSha, WikiExport } from "@repowiki/core";
-import { sourcePaths, technologyPaths } from "@repowiki/hosted";
+import {
+  SNAPSHOT_FILE_BYTES,
+  SNAPSHOT_FILES,
+  SnapshotTechnology,
+  snapshotPaths,
+  sourcePaths,
+} from "@repowiki/hosted";
 import { z } from "zod";
 import { GitHubError, GitHubRepo, GitHubUser, githubApi } from "./api.ts";
 import { avatarSource, avatarType, fetchAvatar } from "./avatar.ts";
@@ -10,16 +16,38 @@ import { GITHUB } from "./endpoints.ts";
 const MAX_SHAS = 100;
 const MAX_REPO_PAGES = 10;
 const OWNER = { admin: true, maintain: true, push: true, triage: true, pull: true };
-/** What a snapshot keeps of each tree for detection (ADR-0014). */
-export const SNAPSHOT_PATHS = 500;
-export const SNAPSHOT_FILES = 30;
-export const SNAPSHOT_FILE_BYTES = 64 * 1024;
 
 const GitTree = z.object({
   tree: z.array(
     z.object({ path: z.string(), type: z.string(), size: z.int().nonnegative().optional() }),
   ),
+  truncated: z.boolean().optional(),
 });
+
+/** A response's body, read as it streams and abandoned past `max` bytes (null then). */
+async function cappedBody(response: Response, max: number): Promise<Uint8Array | null> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
 
 /**
  * A snapshot of one GitHub user's public repositories for local testing (M14g), beside the
@@ -50,19 +78,7 @@ export const LocalProfile = z.strictObject({
        * The tree's technology paths and its manifest and compose files at `head`, for the import
        * worker's detection (ADR-0014); only with an export, and absent from older snapshots.
        */
-      technology: z
-        .strictObject({
-          paths: z.array(z.string().min(1).max(1000)).max(SNAPSHOT_PATHS),
-          files: z
-            .array(
-              z.strictObject({
-                path: z.string().min(1).max(1000),
-                text: z.string().max(SNAPSHOT_FILE_BYTES),
-              }),
-            )
-            .max(SNAPSHOT_FILES),
-        })
-        .optional(),
+      technology: SnapshotTechnology.optional(),
     }),
   ),
 });
@@ -118,11 +134,14 @@ export interface TakeProfileOptions {
   exportsDir: string;
   api?: string;
   now?: () => Date;
+  /** Told when a repository's technology files could not be read whole (rate limit, truncation). */
+  warn?: (line: string) => void;
 }
 
 /** Reads `login`'s public, non-fork repositories from GitHub's REST API (the script only). */
 export async function takeProfile(options: TakeProfileOptions): Promise<LocalProfile> {
   const api = options.api ?? GITHUB.api;
+  const warn = options.warn ?? (() => {});
   const token = options.token ?? "";
   // githubApi always sends a bearer token; send the real one, or none for an anonymous snapshot.
   const authed: typeof fetch = (input, init) => {
@@ -166,16 +185,30 @@ export async function takeProfile(options: TakeProfileOptions): Promise<LocalPro
    * shallowest first. Undefined when GitHub will not list the tree; a file it will not give is
    * left out.
    */
-  async function technologyOf(fullName: string, sha: string) {
+  async function technologyOf(
+    fullName: string,
+    sha: string,
+  ): Promise<SnapshotTechnology | undefined> {
     const repoPath = fullName.split("/").map(encodeURIComponent).join("/");
-    let listed: z.infer<typeof GitTree> | null;
-    try {
-      listed = await read(`/repos/${repoPath}/git/trees/${sha}?recursive=1`, GitTree);
-    } catch {
+    const limited = (status: number) =>
+      warn(
+        `GitHub limited the rate (${status}) while reading ${fullName}'s files; it has no technologies. Set GITHUB_TOKEN and take the snapshot again.`,
+      );
+    const listing = await authed(`${api}/repos/${repoPath}/git/trees/${sha}?recursive=1`, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "RepoWiki" },
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    if (listing?.status === 403 || listing?.status === 429) {
+      limited(listing.status);
       return undefined;
     }
-    if (listed === null) return undefined;
-    const blobs = listed.tree.filter((e) => e.type === "blob");
+    if (listing === null || !listing.ok) return undefined;
+    const parsed = GitTree.safeParse(await listing.json().catch(() => undefined));
+    if (!parsed.success) return undefined;
+    if (parsed.data.truncated === true) {
+      warn(`GitHub truncated ${fullName}'s tree; its technologies may be incomplete.`);
+    }
+    const blobs = parsed.data.tree.filter((e) => e.type === "blob");
     const size = new Map(blobs.map((b) => [b.path, b.size ?? 0]));
     const all = blobs.map((b) => b.path);
     const wanted = sourcePaths(
@@ -189,12 +222,15 @@ export async function takeProfile(options: TakeProfileOptions): Promise<LocalPro
         headers: { accept: "application/vnd.github.raw", "user-agent": "RepoWiki" },
         signal: AbortSignal.timeout(10_000),
       }).catch(() => null);
+      if (response?.status === 403 || response?.status === 429) {
+        limited(response.status);
+        return undefined;
+      }
       if (response === null || !response.ok) continue;
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > SNAPSHOT_FILE_BYTES) continue;
-      files.push({ path, text: new TextDecoder().decode(bytes) });
+      const bytes = await cappedBody(response, SNAPSHOT_FILE_BYTES);
+      if (bytes !== null) files.push({ path, text: new TextDecoder().decode(bytes) });
     }
-    return { paths: technologyPaths(all).slice(0, SNAPSHOT_PATHS), files };
+    return { paths: snapshotPaths(all), files };
   }
 
   const exports = chooseExports(options.exportsDir);

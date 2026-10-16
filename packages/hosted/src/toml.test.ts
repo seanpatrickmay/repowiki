@@ -39,3 +39,15 @@ describe("tomlTables on malformed input", () => {
     }
   });
 });
+
+describe("tomlTables on hostile and lenient input (review I1, M6)", () => {
+  it("gives null, never a thrown stack overflow, for deep nesting", () => {
+    expect(tomlTables(`x = ${"[".repeat(20_000)}`)).toBeNull();
+    expect(tomlTables(`x = ${"{a=".repeat(20_000)}`)).toBeNull();
+    expect(tomlTables(`x = ${"[".repeat(60)}${"]".repeat(60)}`)).not.toBeNull();
+  });
+
+  it("reads a date-time written with a space", () => {
+    expect(tomlTables("when = 1979-05-27 07:32:00Z\nx = 1\n")?.[0]?.entries).toHaveLength(2);
+  });
+});

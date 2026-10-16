@@ -77,8 +77,12 @@ Each ruling is "Ruling: X — why — cost if wrong".
   Cargo's `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`,
   `[workspace.dependencies]`, `[target.*.dependencies]` and `[dependencies.<name>]`; requirement
   lines take the PEP 508 name and skip options, URLs and comments; `go.mod` reads `require` lines
-  and blocks. Compose files are read for `image:` values only. A file that will not parse
-  contributes nothing and its path is logged; detection never fails a job. — Each format needs a
+  and blocks. Compose files are read for `image:` values only. A leading byte-order mark is
+  dropped, and a TOML date-time written with a space reads as one value. A file that will not
+  parse contributes nothing and its path is logged; detection never fails a job: the TOML reader
+  stops past 64 levels of nesting and turns any error into "did not parse", compose comments are
+  cut in linear time, and the index child reports its index with no technologies (and one stderr
+  line) if detection throws at all. — Each format needs a
   few dozen lines of reading, and a full TOML or YAML parser is a dependency to review for no
   benefit. — Cost if wrong: an unusual layout (a dotted key such as `dependencies.serde.version =`,
   or a YAML anchor for an image) is missed for that file.
@@ -87,7 +91,8 @@ Each ruling is "Ruling: X — why — cost if wrong".
   built copies are not the project's own choices. — Cost if wrong: a project whose real code
   lives in a `build/` directory loses its manifests there.
 - **Bounds.** Ruling: production reads at most 100 manifest and compose files, shallowest first
-  and then by path, each at most 128 KB (a larger one is skipped and logged); a generation stores
+  and then by path, each at most 128 KB (a larger one is skipped and logged); the child lists at
+  most 100 unparsed and 100 too-large paths, none over 1,000 characters; a generation stores
   at most 60 technologies, ranked as the Works column ranks them. — A monorepo with many
   packages still fits; the stored facts stay small. — Cost if wrong: a monorepo with more than 100
   manifests loses its deepest ones.
@@ -107,7 +112,9 @@ Each ruling is "Ruling: X — why — cost if wrong".
   engine could not resolve and that shares a table name (say a folder called `torch`) shows as
   the library.
 - **Evidence.** Ruling: a technology's evidence is its shallowest declaring manifest (then by
-  path), else its first infrastructure file, else its first importing file; `importingFiles` is
+  path), else its first infrastructure file, else its first importing file, skipping any path the
+  facts would refuse (a backslash, or over 1,000 characters), and dropping the technology when
+  none is left; `importingFiles` is
   the number of distinct indexed files importing any of its names, or null when none of its
   ecosystems has import data. Compose `image:` values are matched by repository name without
   registry or tag (`postgres:16-alpine` and `docker.io/library/postgres` are `postgres`;
@@ -132,8 +139,12 @@ Each ruling is "Ruling: X — why — cost if wrong".
 
 - **The snapshot carries the files.** Ruling: `pnpm hosted:profile` saves, for each repository
   with a local export, the technology paths of the tree at the export's `head` (the git-tree API,
-  recursive; at most 500 paths) and the contents of at most 30 of its manifest and compose files,
-  at most 64 KB each, shallowest first (the contents API, raw). The import worker runs the same
+  recursive; at most 500 paths, always keeping the first path each path rule matches) and the
+  contents of at most 30 of its manifest and compose files, at most 64 KB each, shallowest first
+  (the contents API, raw, read as a stream and abandoned past the cap). A 403 or 429 prints a
+  warning naming the repository and suggesting `GITHUB_TOKEN`, and that repository gets no files;
+  a truncated tree prints a warning and keeps what GitHub sent. The import worker reads the same
+  bounds (`SnapshotTechnology`). The import worker runs the same
   detection over them with `imports: null`, so every library in the table that is declared is
   shown and `importingFiles` is null. A snapshot taken before this change has none and gives `[]`.
   — The owner sees his real technologies locally without a clone. — Cost if wrong: locally,

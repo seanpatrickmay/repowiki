@@ -4,6 +4,8 @@ import {
   imageCandidates,
   importName,
   MAX_TECHNOLOGIES,
+  SnapshotTechnology,
+  snapshotPaths,
   sourcePaths,
   TechnologyUse,
   technologyPaths,
@@ -68,6 +70,27 @@ describe("paths detection reads", () => {
       "infra/main.tf",
       "Dockerfile",
     ]);
+  });
+
+  it("keeps the first path of every rule when a snapshot cuts the list at 500 (review M7)", () => {
+    const paths = [
+      ...Array.from({ length: 600 }, (_, i) => `tf/${i}.tf`),
+      "deploy/Dockerfile",
+      ".github/workflows/ci.yml",
+    ];
+    const kept = snapshotPaths(paths);
+    expect(kept).toHaveLength(500);
+    expect(kept).toEqual(expect.arrayContaining(["deploy/Dockerfile", ".github/workflows/ci.yml"]));
+    expect(kept[0]).toBe("tf/0.tf");
+  });
+
+  it("bounds a snapshot's technology files wherever it is read (review M8)", () => {
+    const ok = { paths: ["package.json"], files: [{ path: "package.json", text: "{}" }] };
+    expect(SnapshotTechnology.safeParse(ok).success).toBe(true);
+    const many = { ...ok, paths: Array.from({ length: 501 }, (_, i) => `${i}.tf`) };
+    expect(SnapshotTechnology.safeParse(many).success).toBe(false);
+    const big = { ...ok, files: [{ path: "package.json", text: "x".repeat(64 * 1024 + 1) }] };
+    expect(SnapshotTechnology.safeParse(big).success).toBe(false);
   });
 
   it("lists the files whose contents it needs, shallowest first, up to a limit", () => {
@@ -221,5 +244,17 @@ describe("detectTechnologies", () => {
     // With no counts, kinds decide (web frameworks first), then names.
     expect(all.technologies.slice(0, 2).map((t) => t.id)).toEqual(["astro", "express"]);
     for (const t of all.technologies) expect(TechnologyUse.safeParse(t).success).toBe(true);
+  });
+
+  it("never stores an evidence path the facts would refuse, falling back to the next (review I3)", () => {
+    const vitest = JSON.stringify({ devDependencies: { vitest: "1" } });
+    const backslash = detect({ "we\\ird/package.json": vitest }, null);
+    expect(backslash.technologies).toEqual([]);
+    const long = detect({ [`${"a/".repeat(500)}package.json`]: vitest }, null);
+    expect(long.technologies).toEqual([]);
+    const fallback = detect({ "we\\ird/package.json": vitest, "web/package.json": vitest }, null);
+    expect(fallback.technologies).toEqual([
+      { id: "vitest", evidence: { path: "web/package.json" }, importingFiles: null },
+    ]);
   });
 });

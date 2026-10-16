@@ -7,7 +7,7 @@ import { Facts } from "@repowiki/hosted";
 import { fixtureExport } from "@repowiki/site/test-fixtures";
 import { describe, expect, it } from "vitest";
 import type { FailCode, Succeeded, WorkerApi, WorkerSpec } from "./api.ts";
-import { exportFacts, matchAuthor, runImport } from "./import.ts";
+import { exportFacts, ImportProfile, matchAuthor, runImport } from "./import.ts";
 
 const ADA = { login: "ada", name: "Ada Lovelace" };
 const peopleExport = () =>
@@ -198,6 +198,13 @@ describe("runImport", () => {
     const old = fakeApi(exp.head);
     expect(await runImport(old.api, profile, { stepMs: 0 })).toBe(true);
     expect(old.result().succeeded?.facts.technologies).toEqual([]);
+  });
+
+  it("bounds the snapshot's technology files as the snapshot does (review M8)", () => {
+    const profile = profileWith(null);
+    const paths = Array.from({ length: 501 }, (_, i) => `${i}.tf`);
+    const over = { ...profile, repos: [{ ...profile.repos[0], technology: { paths, files: [] } }] };
+    expect(ImportProfile.safeParse(over).success).toBe(false);
   });
 
   it("takes the tagline from the repository's own description when it has one", async () => {
