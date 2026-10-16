@@ -95,17 +95,24 @@ export function sourcePaths(paths: readonly string[], max: number): string[] {
 const PARSED: Partial<Record<Ecosystem, RegExp>> = {
   npm: /\.(?:tsx|[cm]?ts)$/,
   pypi: /\.py$/,
-  crates: /\.rs$/,
+};
+/**
+ * Files whose presence gives an ecosystem import data: a declaration file or a tool's config file
+ * says nothing about what the code imports (review M5). Rust never has any: a crate is used
+ * through paths (`#[tokio::main]`, `serde_json::to_string`) as often as through `use` (M4).
+ */
+const IMPORT_DATA: Partial<Record<Ecosystem, (path: string) => boolean>> = {
+  npm: (p) =>
+    /\.(?:tsx|[cm]?ts)$/.test(p) && !/\.d\.[cm]?ts$/.test(p) && !/\.config\.[cm]?ts$/.test(p),
+  pypi: (p) => p.endsWith(".py"),
 };
 const NPM_PACKAGE = /^(?:@[a-z0-9][\w.~-]*\/)?[a-z0-9][\w.~-]*$/;
 const PYTHON_MODULE = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/;
-const RUST_CRATE = /^[A-Za-z_]\w*$/;
-const RUST_LOCAL = new Set(["crate", "self", "super", "std", "core", "alloc"]);
 
 /**
- * The package an import in `from` names: the npm package root, the whole Python module path, or
- * the Rust crate; null for a relative, built-in or malformed specifier, or a file the engine
- * does not parse.
+ * The package an import in `from` names: the npm package root or the whole Python module path;
+ * null for a relative, built-in or malformed specifier, a Rust file, or a file the engine does
+ * not parse.
  */
 export function importName(
   from: string,
@@ -113,12 +120,6 @@ export function importName(
 ): { ecosystem: Ecosystem; name: string } | null {
   if (PARSED.pypi?.test(from)) {
     return PYTHON_MODULE.test(specifier) ? { ecosystem: "pypi", name: specifier } : null;
-  }
-  if (PARSED.crates?.test(from)) {
-    const crate = specifier.split("::")[0] ?? "";
-    return RUST_CRATE.test(crate) && !RUST_LOCAL.has(crate)
-      ? { ecosystem: "crates", name: crate }
-      : null;
   }
   if (!PARSED.npm?.test(from)) return null;
   const spec = specifier.replace(/[?#][\s\S]*$/, "").toLowerCase();
@@ -170,6 +171,8 @@ interface Found {
   tech: Technology;
   /** Declaring manifests and infrastructure files, shallowest first. */
   declared: string[];
+  /** The ecosystems whose manifests declared it or whose files imported it (review I5). */
+  ecosystems: Set<Ecosystem>;
   files: string[];
   importers: Set<string>;
 }
@@ -194,6 +197,7 @@ export function detectTechnologies(input: {
     const known = found.get(tech.id) ?? {
       tech,
       declared: [],
+      ecosystems: new Set<Ecosystem>(),
       files: [],
       importers: new Set<string>(),
     };
@@ -209,7 +213,9 @@ export function detectTechnologies(input: {
     }
     for (const { ecosystem, name } of read.declared) {
       const tech = technologyForPackage(ecosystem, name);
-      if (tech !== null) entry(tech).declared.push(path);
+      if (tech === null) continue;
+      entry(tech).declared.push(path);
+      entry(tech).ecosystems.add(ecosystem);
     }
     for (const image of read.images) {
       const tech = technologyForImage(image);
@@ -219,31 +225,53 @@ export function detectTechnologies(input: {
   for (const path of [...paths].sort(byDepth)) {
     for (const { tech, re } of PATH_RULES) if (re.test(path)) entry(tech).files.push(path);
   }
-  const names = new Map<string, Technology | null>();
+  // A namespace import (`from google import genai` records `google`) counts for each declared
+  // library one of whose module aliases it is a whole-segment prefix of (review I4).
+  const declaredPython = [...found.values()].filter((f) => f.ecosystems.has("pypi"));
+  const namespaceOf = (name: string) =>
+    declaredPython
+      .filter((f) =>
+        (f.tech.imports?.pypi ?? []).some((alias) =>
+          alias.toLowerCase().startsWith(`${name.toLowerCase()}.`),
+        ),
+      )
+      .map((f) => f.tech);
+  const names = new Map<string, Technology[]>();
   for (const { from, specifier } of input.imports ?? []) {
     if (SKIPPED.test(from)) continue;
     const imported = importName(from, specifier);
     if (imported === null) continue;
     const key = `${imported.ecosystem}:${imported.name}`;
-    if (!names.has(key)) names.set(key, importedTechnology(imported.ecosystem, imported.name));
-    const tech = names.get(key);
-    if (tech) entry(tech).importers.add(from);
+    if (!names.has(key)) {
+      const tech = importedTechnology(imported.ecosystem, imported.name);
+      names.set(
+        key,
+        tech !== null ? [tech] : imported.ecosystem === "pypi" ? namespaceOf(imported.name) : [],
+      );
+    }
+    for (const tech of names.get(key) ?? []) {
+      entry(tech).importers.add(from);
+      entry(tech).ecosystems.add(imported.ecosystem);
+    }
   }
 
-  // An ecosystem has import data when there is an index and the tree has a file it parses.
+  // An ecosystem has import data when there is an index and the tree has a file of it the engine
+  // parses for imports.
   const withData = new Set(
-    (Object.keys(PARSED) as Ecosystem[]).filter(
-      (e) => input.imports !== null && paths.some((p) => PARSED[e]?.test(p)),
+    (Object.keys(IMPORT_DATA) as Ecosystem[]).filter(
+      (e) => input.imports !== null && paths.some((p) => IMPORT_DATA[e]?.(p)),
     ),
   );
-  const technologies = [...found.values()].flatMap(({ tech, declared, files, importers }) => {
-    const ecosystems = (Object.keys(tech.packages) as Ecosystem[]).concat(
-      Object.keys(tech.imports ?? {}) as Ecosystem[],
-    );
-    const hasData = ecosystems.some((e) => withData.has(e)) || importers.size > 0;
+  const technologies = [...found.values()].flatMap((f) => {
+    const { tech, declared, files, importers } = f;
+    // Gated only on the ecosystems that declared or imported it: a Python backend's imports say
+    // nothing about a JavaScript frontend's dependencies (review I5).
+    const ecosystems = [...f.ecosystems];
+    const hasData = ecosystems.some((e) => withData.has(e));
+    const undatedDeclaration = ecosystems.some((e) => !withData.has(e));
     const shown = isTool(tech)
       ? true
-      : importers.size > 0 || files.length > 0 || (declared.length > 0 && !hasData);
+      : importers.size > 0 || files.length > 0 || (declared.length > 0 && undatedDeclaration);
     // The first candidate the facts accept: a path with a backslash or over 1,000 characters
     // is never stored (review I3).
     const evidence = [...declared, ...files, ...[...importers].sort()].find(
