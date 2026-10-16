@@ -138,13 +138,18 @@ const listedText = (items: readonly string[]) => listed(items, (t) => [{ text: t
 
 /**
  * What a project is, from its About lead (ADR-0013): the first sentence without its leading
- * "<Title> is", cut at a clause within 110 characters; null when the sentence starts otherwise.
+ * "<Title> is", cut when long at its first comma (never inside a list), else at a clause within 110
+ * characters; null when the sentence starts otherwise.
  */
 export function nounPhrase(lead: string, title: string): string | null {
   const first = sentencesOf(plainWords(lead, 4000).replace(/\s+/g, " "))[0] ?? "";
   const subject = new RegExp(`^(?:the\\s+)?${escapeRe(title)}\\s+(?:is|was|are)\\s+`, "i");
   if (!subject.test(first)) return null;
-  const phrase = firstClause(first.replace(subject, ""), 110).replace(/[.!?]+$/, "");
+  const rest = first.replace(subject, "");
+  const comma = rest.indexOf(", ", 30);
+  // A long phrase ends at its first comma, so a list after it is never cut in half.
+  const cut = rest.length > 110 && comma !== -1 && comma < 110 ? rest.slice(0, comma) : rest;
+  const phrase = firstClause(cut, 110).replace(/[.!?]+$/, "");
   return phrase === "" ? null : phrase;
 }
 
