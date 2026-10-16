@@ -19,6 +19,10 @@ const entry = (title: string, first: string, last: string, sha: string) =>
       featureIds: [],
       author: { commits: 3, totalCommits: 4, currentLines: 10, totalLines: 10, features: [] },
     },
+    technologies: [
+      { id: "fastapi", evidence: { path: "api/<x>.toml" }, importingFiles: 4 },
+      { id: "docker", evidence: { path: "Dockerfile" }, importingFiles: null },
+    ],
   });
 const projects: BiographyProject[] = [
   {
@@ -117,6 +121,51 @@ function tokens(css: string, from = 0): Map<string, string> {
     ]),
   );
 }
+
+describe("libraries and tools on the biography (ADR-0014)", () => {
+  it("adds a Technologies infobox row after Languages", () => {
+    expect(page).toMatch(
+      /<th scope="row">Languages<\/th><td>Python<\/td><\/tr>\n<tr><th scope="row">Technologies<\/th><td>FastAPI, Docker<\/td><\/tr>/,
+    );
+  });
+
+  it("adds a Built with column after Main languages, with a dash when there is nothing", () => {
+    expect(page).toContain(
+      '<th scope="col">Main languages</th><th scope="col">Built with</th><th scope="col">Commits by',
+    );
+    expect(page).toContain("<td>Python</td><td>FastAPI, Docker</td>");
+    const bare = biography({
+      person: { login: "ada", displayName: "Ada" },
+      projects: projects.map((p) => ({ ...p, entry: { ...p.entry, technologies: [] } })),
+      asOf: "2026-10-15T00:00:00Z",
+    });
+    const plain = biographyHtml(bare, options);
+    expect(plain).toContain("<td>Python</td><td>—</td>");
+    expect(plain).not.toContain("Libraries and tools");
+    expect(plain).not.toContain('<th scope="row">Technologies</th>');
+  });
+
+  it("tables them after the languages, cited to the file at the commit", () => {
+    const at = (m: string) => page.indexOf(m);
+    expect(at("Share of lines")).toBeLessThan(
+      at('<h3 id="libraries-and-tools">Libraries and tools</h3>'),
+    );
+    expect(at("Libraries and tools</h3>")).toBeLessThan(at('id="references"'));
+    // The fixture's hostile display name, "Ada <b>Lovelace</b>", leaves the surname "b".
+    expect(page).toContain("b&#39;s projects are built most often with FastAPI and Docker.");
+    expect(page).toContain(
+      '<th scope="col">Technology</th><th scope="col">Kind</th><th scope="col">Projects</th>',
+    );
+    expect(page).toMatch(
+      /<tr><td>FastAPI<\/td><td>Web framework<\/td><td>Gamma<sup class="reference"/,
+    );
+    expect(page).toContain(
+      `href="https://github.com/ada/5/blob/${"c".repeat(40)}/api/%3Cx%3E.toml"`,
+    );
+    expect(page).toContain(`Gamma: api/&lt;x&gt;.toml at commit ${"c".repeat(7)}`);
+    expect(page).toContain("<li>FastAPI developers</li><li>Docker developers</li>");
+  });
+});
 
 describe("BIOGRAPHY_STYLE", () => {
   it("runs each section heading below the infobox, as in the mockup (review M2)", () => {
