@@ -127,10 +127,6 @@ export const TECHNOLOGIES: readonly Technology[] = [
   t("zod", "Zod", "data", { npm: ["zod"] }),
   t("graphql", "GraphQL", "data", { npm: ["graphql"], pypi: ["graphene", "strawberry-graphql"] }),
   t("apollo", "Apollo GraphQL", "data", { npm: ["@apollo/*"] }),
-  t("axios", "Axios", "other", { npm: ["axios"] }),
-  t("date-fns", "date-fns", "other", { npm: ["date-fns"] }),
-  t("day-js", "Day.js", "other", { npm: ["dayjs"] }),
-  t("lodash", "Lodash", "other", { npm: ["lodash", "lodash-es"] }),
   t("rxjs", "RxJS", "other", { npm: ["rxjs"] }),
   t("socket-io", "Socket.IO", "other", {
     npm: ["socket.io", "socket.io-client"],
@@ -138,11 +134,6 @@ export const TECHNOLOGIES: readonly Technology[] = [
     imports: { pypi: ["socketio"] },
   }),
   t("stripe", "Stripe", "other", { npm: ["stripe", "@stripe/*"], pypi: ["stripe"] }),
-  t("dotenv", "dotenv", "other", {
-    npm: ["dotenv"],
-    pypi: ["python-dotenv"],
-    imports: { pypi: ["dotenv"] },
-  }),
   t("commander", "Commander.js", "CLI", { npm: ["commander"] }),
   t("yargs", "yargs", "CLI", { npm: ["yargs"] }),
   t("ink", "Ink", "CLI", { npm: ["ink"] }),
@@ -230,24 +221,13 @@ export const TECHNOLOGIES: readonly Technology[] = [
   t("gunicorn", "Gunicorn", "infrastructure", { pypi: ["gunicorn"], tool: true }),
   t("mangum", "Mangum", "other", { pypi: ["mangum"] }),
   t("pydantic", "Pydantic", "data", { pypi: ["pydantic", "pydantic-settings"] }),
-  t("httpx", "HTTPX", "other", { pypi: ["httpx"] }),
-  t("requests", "Requests", "other", { pypi: ["requests"] }),
   t("websockets", "websockets", "other", { pypi: ["websockets"] }),
   t("celery", "Celery", "other", { pypi: ["celery"] }),
   t("apscheduler", "APScheduler", "other", { pypi: ["apscheduler"] }),
-  t("tenacity", "Tenacity", "other", { pypi: ["tenacity"] }),
-  t("loguru", "Loguru", "other", { pypi: ["loguru"] }),
-  t("dateutil", "dateutil", "other", {
-    pypi: ["python-dateutil"],
-    imports: { pypi: ["dateutil"] },
-  }),
-  t("cryptography", "cryptography", "other", { pypi: ["cryptography"] }),
-  t("pyjwt", "PyJWT", "other", { pypi: ["pyjwt"], imports: { pypi: ["jwt"] } }),
   t("click", "Click", "CLI", { pypi: ["click"] }),
   t("typer", "Typer", "CLI", { pypi: ["typer"] }),
   t("rich", "Rich", "CLI", { pypi: ["rich"] }),
   t("textual", "Textual", "CLI", { pypi: ["textual"] }),
-  t("tqdm", "tqdm", "CLI", { pypi: ["tqdm"] }),
   t("beautiful-soup", "Beautiful Soup", "data", {
     pypi: ["beautifulsoup4"],
     imports: { pypi: ["bs4"] },
@@ -434,7 +414,6 @@ export const TECHNOLOGIES: readonly Technology[] = [
   t("leptos", "Leptos", "web framework", { crates: ["leptos"] }),
   t("yew", "Yew", "UI library", { crates: ["yew"] }),
   t("egui", "egui", "UI library", { crates: ["egui", "eframe"] }),
-  t("reqwest", "reqwest", "other", { crates: ["reqwest"] }),
   t("rayon", "Rayon", "other", { crates: ["rayon"] }),
   t("clap", "clap", "CLI", { crates: ["clap"] }),
   t("ratatui", "Ratatui", "CLI", { crates: ["ratatui"] }),
@@ -484,7 +463,7 @@ export const TECHNOLOGIES: readonly Technology[] = [
     npm: ["wrangler", "@cloudflare/*"],
     paths: [file("wrangler.toml"), file("wrangler.json"), file("wrangler.jsonc")],
   }),
-  t("firebase", "Firebase", "infrastructure", {
+  t("firebase", "Firebase", "database", {
     npm: ["firebase", "firebase-admin", "firebase-tools"],
     pypi: ["firebase-admin"],
     paths: [file("firebase.json")],
@@ -505,12 +484,12 @@ export const TECHNOLOGIES: readonly Technology[] = [
     pypi: ["aws-cdk-lib"],
     paths: [file("cdk.json")],
   }),
-  t("aws-sdk", "AWS SDK", "infrastructure", {
+  t("aws-sdk", "AWS SDK", "other", {
     npm: ["aws-sdk", "@aws-sdk/*"],
     pypi: ["boto3", "botocore", "aioboto3"],
     crates: ["aws-sdk-*", "aws-config"],
   }),
-  t("google-cloud-storage", "Cloud Storage", "infrastructure", {
+  t("google-cloud-storage", "Cloud Storage", "database", {
     pypi: ["google-cloud-storage"],
     npm: ["@google-cloud/storage"],
     imports: { pypi: ["google.cloud.storage"] },
@@ -521,24 +500,24 @@ export const TECHNOLOGIES: readonly Technology[] = [
   }),
   t("nginx", "nginx", "infrastructure", { images: ["nginx"], paths: [file("nginx.conf")] }),
   t("caddy", "Caddy", "infrastructure", { images: ["caddy"], paths: [file("Caddyfile")] }),
-  t("kafka", "Apache Kafka", "infrastructure", {
+  t("kafka", "Apache Kafka", "other", {
     npm: ["kafkajs"],
     pypi: ["kafka-python", "confluent-kafka"],
     crates: ["rdkafka"],
     images: ["confluentinc/cp-kafka", "bitnami/kafka", "apache/kafka"],
   }),
-  t("rabbitmq", "RabbitMQ", "infrastructure", {
+  t("rabbitmq", "RabbitMQ", "other", {
     npm: ["amqplib"],
     pypi: ["pika", "aio-pika"],
     crates: ["lapin"],
     images: ["rabbitmq"],
   }),
-  t("minio", "MinIO", "infrastructure", {
+  t("minio", "MinIO", "database", {
     npm: ["minio"],
     pypi: ["minio"],
     images: ["minio/minio"],
   }),
-  t("prometheus", "Prometheus", "infrastructure", {
+  t("prometheus", "Prometheus", "other", {
     npm: ["prom-client"],
     pypi: ["prometheus-client"],
     images: ["prom/prometheus"],
@@ -573,12 +552,13 @@ export function packageMatches(pattern: string, name: string): boolean {
 /** The entry that declares `name` in `ecosystem`, or null. */
 export function technologyForPackage(ecosystem: Ecosystem, name: string): Technology | null {
   const wanted = normalizedName(ecosystem, name);
+  const names = (tech: Technology) =>
+    (tech.packages[ecosystem] ?? []).map((p) => normalizedName(ecosystem, p));
+  // An exact name beats a prefix pattern: `flask-sqlalchemy` is SQLAlchemy, not Flask (review M1).
   return (
-    TECHNOLOGIES.find((tech) =>
-      (tech.packages[ecosystem] ?? []).some((p) =>
-        packageMatches(normalizedName(ecosystem, p), wanted),
-      ),
-    ) ?? null
+    TECHNOLOGIES.find((tech) => names(tech).includes(wanted)) ??
+    TECHNOLOGIES.find((tech) => names(tech).some((p) => packageMatches(p, wanted))) ??
+    null
   );
 }
 

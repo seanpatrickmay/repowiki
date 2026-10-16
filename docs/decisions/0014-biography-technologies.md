@@ -31,7 +31,7 @@ Each ruling is "Ruling: X — why — cost if wrong".
 
 ### The table
 
-- **A curated table in `@repowiki/hosted`.** Ruling: `technologies.ts` lists about 260 entries
+- **A curated table in `@repowiki/hosted`.** Ruling: `technologies.ts` lists about 245 entries
   (more than the 150 first proposed, since a missing entry is the table's one failure), each
   with an `id`, a display `name`, a `kind` (web framework, UI library, machine learning, data,
   database, testing, build tool, infrastructure, AI API, graphics, CLI, other), its package
@@ -46,17 +46,24 @@ Each ruling is "Ruling: X — why — cost if wrong".
   recorded it, so the project needs a refresh before it shows.
 - **What is not an entry.** Ruling: languages and their compilers (`typescript`, `@types/*`),
   linters, formatters and type checkers (ESLint, Prettier, Biome, Ruff, Black, isort, mypy,
-  Pylint, Flake8), git-hook tools (Husky, lint-staged) and small utilities are not entries.
+  Pylint, Flake8), git-hook tools (Husky, lint-staged) and small utilities (dotenv, HTTP clients
+  such as Axios, Requests, HTTPX and reqwest, Lodash, date-fns, Day.js, dateutil, tqdm, Loguru,
+  Tenacity, cryptography, PyJWT) are not entries.
   Sub-packages and plugins fold into their parent: `react-dom` is React, `@vitejs/plugin-*` is
   Vite, `pydantic-settings` is Pydantic, `pytest-*` is pytest, `tree-sitter-*` is Tree-sitter, and
   a database driver (`psycopg2`, `asyncpg`, `pg`, `better-sqlite3`) is its database. — The
   biography is about what the work is built with; a formatter says nothing about that, and the
   Languages row already names the language. — Cost if wrong: a reader misses that a project is
-  linted; one table line restores an entry.
+  linted; one table line restores an entry. When a package name matches one entry exactly and
+  another's prefix pattern, the exact entry wins (`flask-sqlalchemy` is SQLAlchemy, not Flask).
 - **Tools.** Ruling: the kinds testing, build tool and infrastructure are tools, and so is an
   entry marked `tool` because it is used through a command or configuration rather than an
-  import (Tailwind CSS, Uvicorn, Gunicorn). A tool is shown on its declaration or file alone. — Rule 4's third case; Tailwind and Uvicorn are almost
-  never imported by a parsed file. — Cost if wrong: a declared but unused tool is shown.
+  import (Tailwind CSS, Uvicorn, Gunicorn, Jupyter). A tool is shown on its declaration or file
+  alone. A client library for a service (the AWS SDK, Cloud Storage, Firebase, Kafka, RabbitMQ,
+  MinIO and Prometheus clients) has a library kind (database or other), so its imports gate it
+  like any library; the service's image or file still shows it. — Rule 4's third case; Tailwind
+  and Uvicorn are almost never imported by a parsed file. — Cost if wrong: a declared but unused
+  tool is shown.
 
 ### Detection
 
@@ -119,7 +126,8 @@ Each ruling is "Ruling: X — why — cost if wrong".
   declared nowhere is shown, its evidence the first importing file by path. — Script repositories
   often have no manifest; the import is the proof. — Cost if wrong: an internal module that the
   engine could not resolve and that shares a table name (say a folder called `torch`) shows as
-  the library.
+  the library. The table's riskiest such names are `motor`, `ray`, `notebook`, `mcp` and `dash`,
+  common words for a project's own modules; they stay, as known costs (review M9).
 - **Evidence.** Ruling: a technology's evidence is its shallowest declaring manifest (then by
   path), else its first infrastructure file, else its first importing file, skipping any path the
   facts would refuse (a backslash, or over 1,000 characters), and dropping the technology when
