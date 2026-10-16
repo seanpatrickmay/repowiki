@@ -22,6 +22,15 @@ export {
   Suggestions,
 } from "./content.ts";
 export {
+  detectTechnologies,
+  imageCandidates,
+  importName,
+  MAX_TECHNOLOGIES,
+  sourcePaths,
+  TechnologyUse,
+  technologyPaths,
+} from "./detect.ts";
+export {
   ACTIONS,
   Account,
   Action,
@@ -80,6 +89,7 @@ export {
   Plan,
   type PlanLimits,
 } from "./limits.ts";
+export { type Declared, type ManifestKind, manifestKind, readManifest } from "./manifests.ts";
 export {
   authorize,
   type Caller,
