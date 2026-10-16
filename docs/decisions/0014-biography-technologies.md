@@ -31,9 +31,10 @@ Each ruling is "Ruling: X — why — cost if wrong".
 
 ### The table
 
-- **A curated table in `@repowiki/hosted`.** Ruling: `technologies.ts` lists about 150 entries,
-  each with an `id`, a display `name`, a `kind` (web framework, UI library, machine learning,
-  data, database, testing, build tool, infrastructure, AI API, graphics, CLI, other), its package
+- **A curated table in `@repowiki/hosted`.** Ruling: `technologies.ts` lists about 260 entries
+  (more than the 150 first proposed, since a missing entry is the table's one failure), each
+  with an `id`, a display `name`, a `kind` (web framework, UI library, machine learning, data,
+  database, testing, build tool, infrastructure, AI API, graphics, CLI, other), its package
   names per ecosystem (npm, PyPI, crates.io, Go modules; a trailing `*` matches a prefix, as in
   `@radix-ui/*`), import aliases where the import name differs from the package (`sklearn`,
   `cv2`, `PIL`, `bs4`), container image names, and path patterns for infrastructure files. The
