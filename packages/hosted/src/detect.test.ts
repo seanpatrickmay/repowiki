@@ -108,7 +108,7 @@ describe("paths detection reads", () => {
 describe("detectTechnologies", () => {
   it("shows a declared library its files import, with the importing count", () => {
     const d = detect(
-      { "package.json": pkg({ react: "18", "react-dom": "18", axios: "1" }) },
+      { "package.json": pkg({ react: "18", "react-dom": "18", zod: "4" }) },
       [
         ["src/a.tsx", "react"],
         ["src/a.tsx", "react-dom/client"],
@@ -121,8 +121,8 @@ describe("detectTechnologies", () => {
       evidence: { path: "package.json" },
       importingFiles: 2,
     });
-    // Axios is declared but no TypeScript file imports it.
-    expect(ids(d)).not.toContain("axios");
+    // Zod is declared but no TypeScript file imports it.
+    expect(ids(d)).not.toContain("zod");
   });
 
   it("shows declared libraries with a null count when their ecosystem has no import data", () => {

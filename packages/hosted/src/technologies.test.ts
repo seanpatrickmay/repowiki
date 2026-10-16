@@ -4,6 +4,7 @@ import {
   isTool,
   KIND_PRIORITY,
   kindLabel,
+  normalizedName,
   packageMatches,
   TECHNOLOGIES,
   TECHNOLOGY_KINDS,
@@ -59,6 +60,57 @@ describe("the curated table (ADR-0014)", () => {
     expect(clash).toEqual([]);
   });
 
+  it("resolves every literal package name to its own entry, whatever patterns overlap (review M1)", () => {
+    const misresolved = TECHNOLOGIES.flatMap((t) =>
+      ECOSYSTEMS.flatMap((e) =>
+        (t.packages[e] ?? [])
+          .filter((p) => !p.endsWith("*"))
+          .flatMap((p) => {
+            const got = technologyForPackage(e, normalizedName(e, p))?.id;
+            return got === t.id ? [] : [`${e}:${p} -> ${got} (not ${t.id})`];
+          }),
+      ),
+    );
+    expect(misresolved).toEqual([]);
+    expect(technologyForPackage("pypi", "flask-sqlalchemy")?.id).toBe("sqlalchemy");
+    expect(technologyForPackage("pypi", "Flask_Login")?.id).toBe("flask");
+  });
+
+  it("gives client libraries a library kind, so their imports gate them (review M2)", () => {
+    for (const id of [
+      "aws-sdk",
+      "google-cloud-storage",
+      "firebase",
+      "kafka",
+      "rabbitmq",
+      "minio",
+      "prometheus",
+    ]) {
+      expect(isTool(entry(id)), id).toBe(false);
+    }
+  });
+
+  it("leaves out small utilities (review M3)", () => {
+    const utilities = [
+      ["npm", "dotenv"],
+      ["pypi", "python-dotenv"],
+      ["npm", "axios"],
+      ["npm", "lodash"],
+      ["npm", "date-fns"],
+      ["npm", "dayjs"],
+      ["pypi", "tqdm"],
+      ["pypi", "loguru"],
+      ["pypi", "tenacity"],
+      ["pypi", "python-dateutil"],
+      ["pypi", "requests"],
+      ["pypi", "httpx"],
+      ["crates", "reqwest"],
+      ["pypi", "cryptography"],
+      ["pypi", "pyjwt"],
+    ] as const;
+    expect(utilities.filter(([e, p]) => technologyForPackage(e, p) !== null)).toEqual([]);
+  });
+
   it("leaves out type packages, compilers, linters, formatters and hook tools", () => {
     const excluded = [
       ["npm", "@types/node"],
@@ -98,8 +150,6 @@ describe("the curated table (ADR-0014)", () => {
         "react-router-dom",
         "recharts",
         "react-markdown",
-        "axios",
-        "date-fns",
         "zod",
         "mermaid",
         "pagefind",
@@ -125,17 +175,10 @@ describe("the curated table (ADR-0014)", () => {
         "psycopg2-binary",
         "aiosqlite",
         "redis",
-        "httpx",
-        "requests",
         "aiohttp",
         "websockets",
-        "tenacity",
-        "loguru",
         "apscheduler",
         "feedparser",
-        "python-dateutil",
-        "python-dotenv",
-        "cryptography",
         "boto3",
         "mangum",
         "aws-cdk-lib",

@@ -6,7 +6,7 @@ let repo: TestRepo;
 let sha: string;
 beforeEach(() => {
   repo = createTestRepo();
-  repo.write("package.json", JSON.stringify({ dependencies: { react: "18", axios: "1" } }));
+  repo.write("package.json", JSON.stringify({ dependencies: { react: "18", zod: "4" } }));
   repo.write("web/package.json", JSON.stringify({ devDependencies: { vitest: "5" } }));
   repo.write("huge/package.json", JSON.stringify({ dependencies: { vue: "x".repeat(300) } }));
   repo.write("crate/Cargo.toml", "[dependencies\nserde = 1\n");
@@ -40,6 +40,6 @@ describe("treeTechnologies (ADR-0014)", () => {
 
   it("reads at most maxFiles manifests, shallowest first", async () => {
     const found = await treeTechnologies({ repo: repo.dir, sha, imports: null, maxFiles: 1 });
-    expect(found.technologies.map((t) => t.id)).toEqual(["react", "axios", "github-actions"]);
+    expect(found.technologies.map((t) => t.id)).toEqual(["react", "zod", "github-actions"]);
   }, 30_000);
 });
