@@ -2,7 +2,7 @@ import { GitSha, IsoDateTime, type WikiExport } from "@repowiki/core";
 import { z } from "zod";
 import { Facts, plainText } from "./content.ts";
 import { MAX_TECHNOLOGIES, TechnologyUse } from "./detect.ts";
-import { technologyById } from "./technologies.ts";
+import { KIND_PRIORITY, kindLabel, type Technology, technologyById } from "./technologies.ts";
 import { firstClause, plainWords, sentencesOf } from "./text.ts";
 
 /** One published project as the author's biography reads it (ADR-0013), stored as `entry.json`. */
@@ -83,6 +83,8 @@ export interface Biography {
     yearsActive: string;
     knownFor: { title: string; href: string }[];
     languages: string[];
+    /** The top 5 technologies across projects (ADR-0014). */
+    technologies: string[];
     projects: string;
     commits: string;
   };
@@ -94,6 +96,8 @@ export interface Biography {
     href: string;
     description: string;
     languages: string;
+    /** The project's top 3 technologies, or "—". */
+    builtWith: string;
     commits: string;
   }[];
   career: {
@@ -114,6 +118,11 @@ export interface Biography {
   technical: {
     paragraph: Paragraph;
     rows: { language: string; share: string; projects: string[] }[];
+    /** "Libraries and tools" (ADR-0014); null when no project has a technology. */
+    libraries: {
+      paragraph: Paragraph;
+      rows: { name: string; kind: string; projects: Paragraph }[];
+    } | null;
   };
   references: { n: number; label: string; url: string; uses: number }[];
   navbox: { group: string; projects: { title: string; href: string }[] }[];
@@ -214,6 +223,55 @@ function languageLines(projects: readonly BiographyProject[]) {
     .map(([language, n]) => ({ language, share: n / total }));
 }
 
+interface ProjectTechnology {
+  tech: Technology;
+  importingFiles: number;
+  path: string;
+}
+
+/** A project's technologies the table still knows, by importing files, then kind, then name. */
+function technologiesOf(entry: BiographyEntry): ProjectTechnology[] {
+  return entry.technologies
+    .flatMap((t) => {
+      const tech = technologyById(t.id);
+      return tech === undefined
+        ? []
+        : [{ tech, importingFiles: t.importingFiles ?? 0, path: t.evidence.path }];
+    })
+    .sort(
+      (a, b) =>
+        b.importingFiles - a.importingFiles ||
+        KIND_PRIORITY.indexOf(a.tech.kind) - KIND_PRIORITY.indexOf(b.tech.kind) ||
+        a.tech.name.localeCompare(b.tech.name),
+    );
+}
+
+/** Technologies across projects: by projects using them, then importing files, then name. */
+function rankedTechnologies(projects: readonly BiographyProject[]) {
+  const ranked = new Map<string, { tech: Technology; files: number; users: BiographyProject[] }>();
+  for (const p of projects) {
+    for (const { tech, importingFiles } of technologiesOf(p.entry)) {
+      const row = ranked.get(tech.id) ?? { tech, files: 0, users: [] };
+      row.files += importingFiles;
+      row.users.push(p);
+      ranked.set(tech.id, row);
+    }
+  }
+  return [...ranked.values()].sort(
+    (a, b) =>
+      b.users.length - a.users.length ||
+      b.files - a.files ||
+      a.tech.name.localeCompare(b.tech.name),
+  );
+}
+
+/** The URL of a file in a project's repository at its commit, each path segment encoded. */
+const blob = (e: BiographyEntry, path: string) =>
+  `https://github.com/${e.repo.fullName}/blob/${e.repo.commitSha}/${path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+
 /**
  * The biography of `person` from their published projects (ADR-0013): every sentence a template
  * over the entries, the subject named by surname and never by a pronoun. `asOf` is the newest
@@ -306,6 +364,11 @@ export function biography(input: {
         p.entry.facts.languages
           .slice(0, 2)
           .map((l) => l.name)
+          .join(", ") || "—",
+      builtWith:
+        technologiesOf(p.entry)
+          .slice(0, 3)
+          .map((t) => t.tech.name)
           .join(", ") || "—",
       commits: thousands(p.entry.facts.author.commits),
     };
@@ -413,6 +476,41 @@ export function biography(input: {
             { text: "." },
           ];
 
+  const ranked = rankedTechnologies(projects);
+  const libraryRows = ranked.slice(0, 15).map(({ tech, users }) => ({
+    name: tech.name,
+    kind: kindLabel(tech.kind),
+    projects: users.flatMap((p, i): Run[] => {
+      const path = technologiesOf(p.entry).find((t) => t.tech.id === tech.id)?.path ?? "";
+      const sha7 = p.entry.repo.commitSha.slice(0, 7);
+      return [
+        ...(i === 0 ? [] : [{ text: ", " }]),
+        { text: p.entry.title },
+        cite(`${p.entry.title}: ${path} at commit ${sha7}`, blob(p.entry, path)),
+      ];
+    }),
+  }));
+  const libraries =
+    libraryRows.length === 0
+      ? null
+      : {
+          paragraph: [
+            {
+              text:
+                projects.length === 1
+                  ? `${possessive} project is built with `
+                  : `${possessive} projects are built most often with `,
+            },
+            ...listedText(ranked.slice(0, 3).map((r) => r.tech.name)),
+            { text: "." },
+          ],
+          rows: libraryRows,
+        };
+  const shared = ranked.filter((r) => r.users.length >= 2).slice(0, 3);
+  const developers = (shared.length > 0 ? shared : ranked.slice(0, 2)).map(
+    (r) => `${r.tech.name} developers`,
+  );
+
   const latestLast =
     projects
       .map((p) => p.entry.lastCommitAt)
@@ -430,13 +528,14 @@ export function biography(input: {
         : years(yearOf(earliest), yearOf(latestLast)),
       knownFor: known.map((p) => ({ title: p.entry.title, href: p.href })),
       languages: languages.slice(0, 4).map((l) => l.language),
+      technologies: ranked.slice(0, 5).map((r) => r.tech.name),
       projects: `${projects.length} documented`,
       commits: `${thousands(commits)} ${projects.length === 1 ? "in that project" : "across those projects"}`,
     },
     lead: [lead1, lead2],
     works,
     career,
-    technical: { paragraph, rows },
+    technical: { paragraph, rows, libraries },
     references: refs,
     navbox: career.map((c) => ({
       group: c.id === "career-earlier" ? "Earlier" : c.heading,
@@ -445,6 +544,7 @@ export function biography(input: {
     categories: [
       "Software developers",
       ...languages.filter((l) => l.share >= 0.1).map((l) => `${l.language} programmers`),
+      ...developers,
     ],
   };
 }
