@@ -23,6 +23,18 @@ describe("the proxy's request shape (spec 2 S11, M14c A1)", () => {
     ).toBe(true);
   });
 
+  it("accepts a low effort and the extra output room the engine asks of Haiku 5.5, and no thinking settings", () => {
+    const format = { type: "json_schema", schema: { type: "object" } };
+    expect(
+      accepts(message({ model: "claude-haiku-5-5", output_config: { format, effort: "low" } })),
+    ).toBe(true);
+    expect(accepts(message({ max_tokens: 20_000 }))).toBe(true);
+    expect(accepts(message({ max_tokens: 20_001 }))).toBe(false);
+    // Only the effort the engine sends: a higher one buys thinking the reservation never priced.
+    expect(accepts(message({ output_config: { format, effort: "high" } }))).toBe(false);
+    expect(accepts(message({ thinking: { type: "adaptive" } }))).toBe(false);
+  });
+
   it("refuses streams, tools, non-text blocks, a cache TTL and unknown fields", () => {
     expect(accepts(message({ stream: true }))).toBe(false);
     expect(accepts(message({ tools: [] }))).toBe(false);

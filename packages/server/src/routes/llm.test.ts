@@ -305,8 +305,8 @@ describe("the LLM proxy's messages route (spec 2 S11)", () => {
 
   it("refuses max_tokens past the engine's largest call (S11)", async () => {
     expect((await send("/llm/v1/messages", message(64_000))).status).toBe(400);
-    expect((await send("/llm/v1/messages", message(16_001))).status).toBe(400);
-    expect((await send("/llm/v1/messages", message(16_000))).status).toBe(200);
+    expect((await send("/llm/v1/messages", message(20_001))).status).toBe(400);
+    expect((await send("/llm/v1/messages", message(20_000))).status).toBe(200);
   });
 
   it("charges an unparseable success the reservation (A2)", async () => {

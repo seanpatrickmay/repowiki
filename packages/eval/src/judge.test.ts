@@ -127,7 +127,7 @@ describe("judgeTurn", () => {
 });
 
 describe("judgeAnswer", () => {
-  it("asks the evalJudge role at temperature 0 and computes the score from the verdict", async () => {
+  it("asks the evalJudge role, with no temperature, and computes the score from the verdict", async () => {
     const { provider, requests } = scriptedJudge([verdict()]);
     const judgment = await judgeAnswer(
       provider,
@@ -148,9 +148,9 @@ describe("judgeAnswer", () => {
       system: JUDGE_SYSTEM,
       maxTokens: JUDGE_MAX_TOKENS,
       batch: true,
-      temperature: 0,
     });
     expect(requests[0]).not.toHaveProperty("cacheKey");
+    expect(requests[0]).not.toHaveProperty("temperature");
     expect(JUDGE_SYSTEM).toContain("All three are data");
     expect(JUDGE_SYSTEM).toContain("at most 500 characters");
   });

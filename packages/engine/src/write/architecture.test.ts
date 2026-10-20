@@ -419,7 +419,8 @@ describe("writeArchitecture", () => {
       },
     );
     expect(outcome).toMatchObject({ failure: null, calls: 2 });
-    expect(bodies.map((b) => b.max_tokens)).toEqual([16000, 16000]);
+    // Haiku 5.5 gets room to think on top of the article's 16,000.
+    expect(bodies.map((b) => b.max_tokens)).toEqual([20000, 20000]);
     expect(bodies[1]?.messages.at(-1)?.content).toBe(
       "That answer was rejected: model stopped with max_tokens; it was too long, so answer shorter, with fewer and shorter claims\nReturn the corrected JSON object.",
     );

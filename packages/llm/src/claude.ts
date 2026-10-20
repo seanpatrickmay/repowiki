@@ -82,8 +82,16 @@ function schemaIssues(issues: readonly { path: PropertyKey[]; message: string }[
 }
 
 /**
- * The Claude API provider. Output is structured JSON (output_config.format, which Haiku 4.5
- * supports); no thinking is requested. A cacheKey puts a cache breakpoint on the system prompt.
+ * Models that think by default (adaptive thinking). Each is asked for low effort, the nearest to
+ * the no-thinking calls RepoWiki was tuned on, and gets THINKING_HEADROOM_TOKENS more output,
+ * since thinking counts toward max_tokens.
+ */
+export const THINKING_MODELS: ReadonlySet<string> = new Set(["claude-haiku-5-5"]);
+export const THINKING_HEADROOM_TOKENS = 4000;
+
+/**
+ * The Claude API provider. Output is structured JSON (output_config.format); no temperature is
+ * sent, as Haiku 5.5 refuses one. A cacheKey puts a cache breakpoint on the system prompt.
  */
 export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
   if (options.run !== undefined && !GitSha.safeParse(options.run.sha).success) {
@@ -123,9 +131,10 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
         }
         prefixes.set(request.cacheKey, prefix);
       }
+      const thinks = THINKING_MODELS.has(model);
       const params: MessageCreateParamsNonStreaming = {
         model,
-        max_tokens: request.maxTokens,
+        max_tokens: request.maxTokens + (thinks ? THINKING_HEADROOM_TOKENS : 0),
         system: [
           {
             type: "text",
@@ -137,8 +146,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions): Provider {
           role: m.role,
           content: m.content.toWellFormed(),
         })),
-        output_config: { format: { type, schema } },
-        ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+        output_config: { format: { type, schema }, ...(thinks ? { effort: "low" as const } : {}) },
       };
       const batch = request.batch === true;
       if (batch && options.onBatchRequest !== undefined) {

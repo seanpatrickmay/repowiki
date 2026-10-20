@@ -4,8 +4,8 @@
       "method": "POST",
       "path": "/v1/messages",
       "body": {
-        "model": "claude-haiku-4-5",
-        "max_tokens": 1500,
+        "model": "claude-haiku-5-5",
+        "max_tokens": 5500,
         "system": [
           {
             "type": "text",
@@ -60,14 +60,15 @@
               ],
               "description": "{$schema: \"https://json-schema.org/draft/2020-12/schema\"}"
             }
-          }
+          },
+          "effort": "low"
         }
       }
     },
     "response": {
       "status": 200,
       "contentType": "application/json",
-      "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_011CfkksaS6t2KjWpUvfuvdd\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"claims\\\": [{\\\"text\\\": \\\"The pull request removes a limit that stops processing after `MAX_SIGNALS` signals are collected and removes an associated TODO comment about paging through long chunks instead of truncating.\\\", \\\"cite\\\": [\\\"src/signals/ingest.py:18-21\\\"], \\\"features\\\": [\\\"signals\\\"]}]}\"}],\"container\":null,\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":2519,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":72,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"},\"diagnostics\":null}"
+      "body": "{\"model\":\"claude-haiku-5-5\",\"id\":\"msg_011CgDxQ5djgfw3xgC4onMQj\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"claims\\\":[{\\\"text\\\":\\\"The loop in `ingest_chunk()` builds one `Signal` for each non-empty sentence of a chunk, appends it to `signals`, and saves every collected signal with `save_signal()` before returning the list.\\\",\\\"cite\\\":[\\\"src/signals/ingest.py:15-21\\\"],\\\"features\\\":[\\\"signals\\\"]},{\\\"text\\\":\\\"Empty or whitespace-only sentences are skipped with `continue`, so only sentences with text become signals.\\\",\\\"cite\\\":[\\\"src/signals/ingest.py:15-16\\\"],\\\"features\\\":[\\\"signals\\\"]},{\\\"text\\\":\\\"This pull request removes the three-line check that stopped collection once `signals` reached `MAX_SIGNALS` and the TODO comment above it, so the loop no longer breaks at that limit.\\\",\\\"cite\\\":[\\\"src/signals/ingest.py:18-19\\\"],\\\"features\\\":[\\\"signals\\\"]}]}\"}],\"container\":null,\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":3303,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":278,\"output_tokens_details\":{\"thinking_tokens\":0},\"service_tier\":\"standard\",\"inference_geo\":\"global\",\"speed\":\"standard\"},\"diagnostics\":null}"
     }
   },
   {
@@ -75,8 +76,8 @@
       "method": "POST",
       "path": "/v1/messages",
       "body": {
-        "model": "claude-haiku-4-5",
-        "max_tokens": 1500,
+        "model": "claude-haiku-5-5",
+        "max_tokens": 5500,
         "system": [
           {
             "type": "text",
@@ -131,14 +132,15 @@
               ],
               "description": "{$schema: \"https://json-schema.org/draft/2020-12/schema\"}"
             }
-          }
+          },
+          "effort": "low"
         }
       }
     },
     "response": {
       "status": 200,
       "contentType": "application/json",
-      "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_011CfkksaR73LeoEY3sxP9Xi\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"claims\\\": [{\\\"text\\\": \\\"`src/signals/ingest.py` removes the condition that stops appending signals after `MAX_SIGNALS` (50) signals are collected and the associated early loop termination.\\\", \\\"cite\\\": [\\\"src/signals/ingest.py:18-21\\\"], \\\"features\\\": [\\\"signals\\\"]}]}\"}],\"container\":null,\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":2493,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":75,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"},\"diagnostics\":null}"
+      "body": "{\"model\":\"claude-haiku-5-5\",\"id\":\"msg_011CgDxQ5fj4wyy9C7mKXt7y\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"claims\\\":[{\\\"text\\\":\\\"`ingest_chunk()` creates one signal per non-empty sentence of a chunk and appends each signal to a list that is returned after every signal is saved.\\\",\\\"cite\\\":[\\\"src/signals/ingest.py:15-21\\\"],\\\"features\\\":[\\\"signals\\\"]},{\\\"text\\\":\\\"The pull request removes the check that stopped `ingest_chunk()` once the list reached `MAX_SIGNALS` signals, so the function no longer truncates a chunk at that limit.\\\",\\\"cite\\\":[\\\"src/signals/ingest.py:18-21\\\"],\\\"features\\\":[\\\"signals\\\"]},{\\\"text\\\":\\\"A TODO comment that was removed in this pull request noted that long chunks were truncated instead of paged; the head version no longer contains it.\\\",\\\"cite\\\":[\\\"src/signals/ingest.py:18-21\\\"],\\\"features\\\":[\\\"signals\\\"]}]}\"}],\"container\":null,\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":3266,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":266,\"output_tokens_details\":{\"thinking_tokens\":0},\"service_tier\":\"standard\",\"inference_geo\":\"global\",\"speed\":\"standard\"},\"diagnostics\":null}"
     }
   }
 ]

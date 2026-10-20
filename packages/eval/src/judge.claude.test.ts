@@ -39,7 +39,7 @@ describe("the judge with Claude (cassette)", () => {
       );
       expect(judgments.map((j) => j.score)).toEqual([1, 0, 0]);
       expect(
-        judgments.every((j) => j.verdict !== null && j.model?.startsWith("claude-haiku-4-5")),
+        judgments.every((j) => j.verdict !== null && j.model?.startsWith("claude-haiku-5-5")),
       ).toBe(true);
     },
     TIMEOUT_MS,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { BatchJournal, JournalEntry } from "./batcher.ts";
 import { cannedBatchApi, cannedMessagesApi, succeededLine } from "./canned.ts";
 import type { FetchLike } from "./cassette.ts";
-import { createClaudeProvider, MAX_REPORTED_ISSUES } from "./claude.ts";
+import { createClaudeProvider, MAX_REPORTED_ISSUES, THINKING_HEADROOM_TOKENS } from "./claude.ts";
 import { createLedger, type TokenLedger } from "./ledger.ts";
 import { DEFAULT_MODELS, LlmError, LlmOutputError, MAX_TOKENS_STOP_REASON } from "./provider.ts";
 
@@ -47,18 +47,32 @@ describe("createClaudeProvider", () => {
     });
   });
 
-  it("sends a temperature only when the request gives one", async () => {
+  it("asks Haiku 5.5 for low effort with room to think, and never sends a temperature", async () => {
     const { bodies, fetch } = cannedMessagesApi(PARIS);
     const { provider } = setup(fetch);
-    await provider.generate({ ...request, temperature: 0 });
     await provider.generate(request);
-    expect(bodies[0]?.temperature).toBe(0);
-    expect(bodies[1]).not.toHaveProperty("temperature");
+    expect(bodies[0]).toMatchObject({
+      model: "claude-haiku-5-5",
+      max_tokens: 50 + THINKING_HEADROOM_TOKENS,
+      output_config: { effort: "low", format: { type: "json_schema" } },
+    });
+    expect(bodies[0]).not.toHaveProperty("temperature");
+    expect(bodies[0]).not.toHaveProperty("thinking");
+  });
+
+  it("sends a model that does not think by default neither an effort nor extra output room", async () => {
+    const { bodies, fetch } = cannedMessagesApi(PARIS);
+    const { provider } = setup(fetch, { ...DEFAULT_MODELS, manifest: "claude-haiku-4-5" });
+    await provider.generate(request);
+    expect(bodies[0]?.max_tokens).toBe(50);
+    expect(bodies[0]?.output_config).toEqual({
+      format: { type: "json_schema", schema: expect.any(Object) },
+    });
   });
 
   it("asks for JSON matching the schema with the role's model, and ledgers the call", async () => {
     const { bodies, fetch } = cannedMessagesApi(PARIS);
-    const { ledger, provider } = setup(fetch, { ...DEFAULT_MODELS, write: "claude-sonnet-5-5" });
+    const { ledger, provider } = setup(fetch, { ...DEFAULT_MODELS, write: "claude-haiku-4-5" });
     const result = await provider.generate({ ...request, purpose: "write", featureId: "capitals" });
     expect(result).toEqual({
       output: { city: "Paris", country: "France" },
@@ -66,7 +80,7 @@ describe("createClaudeProvider", () => {
       model: "claude-haiku-4-5-20251001",
     });
     expect(bodies[0]).toMatchObject({
-      model: "claude-sonnet-5-5",
+      model: "claude-haiku-4-5",
       max_tokens: 50,
       system: [{ type: "text", text: "Answer with JSON only." }],
       messages: [{ role: "user", content: "What is the capital of France?" }],

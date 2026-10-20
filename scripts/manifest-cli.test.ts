@@ -56,7 +56,7 @@ describe("parseManifestArgs", () => {
 
 describe("loadModels", () => {
   it("uses the defaults without a file and applies a file's overrides", () => {
-    expect(loadModels(null).manifest).toBe("claude-haiku-4-5");
+    expect(loadModels(null).manifest).toBe("claude-haiku-5-5");
     const file = join(dir, "c.json");
     writeFileSync(file, '{"models":{"manifest":"claude-sonnet-5-5"}}');
     expect(loadModels(file).manifest).toBe("claude-sonnet-5-5");

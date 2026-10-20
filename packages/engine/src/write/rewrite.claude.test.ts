@@ -64,7 +64,7 @@ describe("rewritePages with Claude (cassette)", () => {
           runKind: "update",
           sha: wiki.index.sha,
         });
-        expect(e.model.startsWith("claude-haiku-4-5")).toBe(true);
+        expect(e.model.startsWith("claude-haiku-5-5")).toBe(true);
       }
     },
     TIMEOUT_MS,

@@ -54,7 +54,7 @@ describe("writePages with Claude (cassette)", () => {
         true,
       );
       expect(entries.every((e) => e.sha === testWiki().index.sha)).toBe(true);
-      expect(entries.every((e) => e.model.startsWith("claude-haiku-4-5"))).toBe(true);
+      expect(entries.every((e) => e.model.startsWith("claude-haiku-5-5"))).toBe(true);
     },
     TIMEOUT_MS,
   );

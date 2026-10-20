@@ -31,6 +31,27 @@ describe("pricing", () => {
   ])("prices a million tokens of %s", (_name, tokens, batch, usd) => {
     expect(callCostUsd("claude-haiku-4-5-20251001", tokens, batch)).toBeCloseTo(usd, 10);
   });
+
+  it("prices Haiku 5.5 at its short-prompt rate up to 100,000 prompt tokens and its long rate past it", () => {
+    const short = { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 };
+    const long = { input: 0.5, output: 2.5, cacheWrite: 0.625, cacheRead: 0.05 };
+    expect(priceFor("claude-haiku-5-5")).toEqual(short);
+    expect(priceFor("claude-haiku-5-5", 100_000)).toEqual(short);
+    expect(priceFor("claude-haiku-5-5", 100_001)).toEqual(long);
+    // Haiku 4.5 has one rate whatever the prompt.
+    expect(priceFor("claude-haiku-4-5", 500_000)).toEqual(priceFor("claude-haiku-4-5"));
+    // The prompt is every input token, cached or not.
+    const cached = { in: 10_000, out: 1_000_000, cacheRead: 60_000, cacheWrite: 40_000 };
+    expect(callCostUsd("claude-haiku-5-5", cached, false)).toBeCloseTo(
+      (10_000 * 0.5 + 1_000_000 * 2.5 + 60_000 * 0.05 + 40_000 * 0.625) / 1e6,
+      10,
+    );
+    const small = { in: 50_000, out: 1000, cacheRead: 0, cacheWrite: 0 };
+    expect(callCostUsd("claude-haiku-5-5", small, true)).toBeCloseTo(
+      ((50_000 * 0.1 + 1000 * 0.5) / 1e6) * 0.5,
+      10,
+    );
+  });
 });
 
 describe("createLedger", () => {
@@ -63,8 +84,10 @@ describe("createLedger", () => {
 });
 
 describe("resolveModels", () => {
-  it("defaults every role to Haiku 4.5 and applies per-role overrides", () => {
-    expect(Object.values(DEFAULT_MODELS)).toEqual(Array(8).fill("claude-haiku-4-5"));
+  it("defaults every role but the eval agent to Haiku 5.5 and applies per-role overrides", () => {
+    const { evalAgent, ...rest } = DEFAULT_MODELS;
+    expect(Object.values(rest)).toEqual(Array(7).fill("claude-haiku-5-5"));
+    expect(evalAgent).toBe("claude-haiku-4-5");
     expect(resolveModels({ models: { write: "claude-sonnet-5-5" } })).toEqual({
       ...DEFAULT_MODELS,
       write: "claude-sonnet-5-5",
