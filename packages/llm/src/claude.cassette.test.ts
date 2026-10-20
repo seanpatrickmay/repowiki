@@ -10,6 +10,8 @@ import { DEFAULT_MODELS } from "./provider.ts";
 const mode = cassetteMode();
 /** A live batch can take over an hour (two recordings took about 70 minutes); a replay is instant. */
 const BATCH_TIMEOUT_MS = mode === "record" ? 14_400_000 : 5_000;
+/** One live call; replays use the default timeout. */
+const CALL_TIMEOUT_MS = mode === "record" ? 300_000 : undefined;
 /** Two live calls and a cache write; replays use the default timeout. */
 const CACHE_TIMEOUT_MS = mode === "record" ? 60_000 : undefined;
 const cassette = (name: string) =>
@@ -40,19 +42,23 @@ const GLOSSARY = Array.from(
 const Capital = z.object({ city: z.string(), country: z.string() });
 
 describe("createClaudeProvider against recorded Claude API exchanges", () => {
-  it("returns schema-checked JSON output", async () => {
-    const { ledger, provider } = setup("structured-output");
-    const result = await provider.generate({
-      purpose: "manifest",
-      system: "Answer with JSON only.",
-      messages: [{ role: "user", content: "What is the capital of France?" }],
-      schema: Capital,
-      maxTokens: 200,
-    });
-    expect(result.output.city).toBe("Paris");
-    expect(result.model).toMatch(/^claude-haiku-4-5/);
-    expect(ledger.entries()[0]?.tokens.in).toBeGreaterThan(0);
-  });
+  it(
+    "returns schema-checked JSON output",
+    async () => {
+      const { ledger, provider } = setup("structured-output");
+      const result = await provider.generate({
+        purpose: "manifest",
+        system: "Answer with JSON only.",
+        messages: [{ role: "user", content: "What is the capital of France?" }],
+        schema: Capital,
+        maxTokens: 200,
+      });
+      expect(result.output.city).toBe("Paris");
+      expect(result.model).toMatch(/^claude-haiku-5-5/);
+      expect(ledger.entries()[0]?.tokens.in).toBeGreaterThan(0);
+    },
+    CALL_TIMEOUT_MS,
+  );
 
   it(
     "caches a long prefix: the second call reads what the first wrote",

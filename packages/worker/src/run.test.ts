@@ -375,7 +375,7 @@ describe("phase 2 (spec 2 S9, §8)", () => {
     });
     expect(Suggestions.safeParse(body?.suggestions).success).toBe(true);
     expect(body?.engineVersion).toBe("test");
-    expect(body?.models).toEqual(["claude-haiku-4-5"]);
+    expect(body?.models).toEqual(["claude-haiku-5-5"]);
   });
 
   it("lists the suggestions call's model beside the CLIs' models (A3)", async () => {
@@ -393,7 +393,7 @@ describe("phase 2 (spec 2 S9, §8)", () => {
       }),
     };
     expect(await phase2({ ...deps(api, okRun), provider: () => answered })).toBe(true);
-    expect(succeeded()?.models).toEqual(["claude-haiku-4-5", "claude-haiku-4-5-20251001"]);
+    expect(succeeded()?.models).toEqual(["claude-haiku-5-5", "claude-haiku-4-5-20251001"]);
     expect(succeeded()?.suggestions.tagline).toBe("A tool");
   });
 

@@ -138,8 +138,8 @@ export class JudgeError extends Error {
 const NO_TOKENS: TokenUsage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
 
 /**
- * Judges one answer against its question's reference (spec §9) with one `evalJudge` call at
- * temperature 0, asked again once if its output is unusable; the retry adds the problem as a
+ * Judges one answer against its question's reference (spec §9) with one `evalJudge` call, asked
+ * again once if its output is unusable; the retry adds the problem as a
  * second user turn (retryTurn). The usage counts each call made once. An empty answer scores 0
  * with no call. The judge is not told which agent wrote the answer.
  */
@@ -163,7 +163,6 @@ export async function judgeAnswer(
         schema: JudgeVerdict,
         maxTokens: JUDGE_MAX_TOKENS,
         batch,
-        temperature: 0,
       });
       usage = add(usage, result.usage);
       const verdict = result.output;

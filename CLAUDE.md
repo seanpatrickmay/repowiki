@@ -8,8 +8,8 @@ This repo is also RepoWiki's own test subject, so its history must read cleanly.
 - `pnpm install` — install dependencies (Node 24, pnpm 10)
 - `pnpm check` — typecheck + lint + test; must pass before every commit
 - `pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format`
-- `pnpm manifest:build <repo> [rev] [--out dir]` — index, cluster, and build the manifest live (Haiku 4.5 via the Batches API); writes only under `~/.repowiki/<repo>/` or `--out`
-- `pnpm wiki:build <repo> [rev] [--out dir] [--dry-run]` — write, verify and link every page from the stored manifest, then the project's About article (Haiku 4.5 via the Batches API), and write `export.json`; prints the cost estimate first; writes only under `~/.repowiki/<repo>/` or `--out`
+- `pnpm manifest:build <repo> [rev] [--out dir]` — index, cluster, and build the manifest live (Haiku 5.5 via the Batches API); writes only under `~/.repowiki/<repo>/` or `--out`
+- `pnpm wiki:build <repo> [rev] [--out dir] [--dry-run]` — write, verify and link every page from the stored manifest, then the project's About article (Haiku 5.5 via the Batches API), and write `export.json`; prints the cost estimate first; writes only under `~/.repowiki/<repo>/` or `--out`
 - `pnpm wiki:check <repo> [--out dir]` — check the stored wiki and its About article: every citation resolves with a matching hash, no link points nowhere
 - `pnpm wiki:update <repo> <rev> [--out dir] [--dry-run]` — move a stored wiki to a newer commit, rewriting only pages with stale claims, coverage gaps or changed files (live; prints its estimate first)
 - `pnpm site:build --export <export.json> [--out dir] [--base path] [--repo-url url]` · `pnpm site:preview` · `pnpm site:demo` — build and serve the static reader; no API key

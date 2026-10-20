@@ -23,6 +23,8 @@ export const CLI_TIMEOUT_MS = 90 * 60_000;
 export const WIKI_DEADLINE_MINUTES = 20;
 export const WIKI_BATCH_ROUNDS = 4;
 /** A quarter of the server's 120-second lease. */
+/** The model roles a job's CLIs and its suggestions call use; the eval and ask roles never run. */
+export const PIPELINE_ROLES = ["manifest", "write", "tieBreak", "inflight", "people"] as const;
 export const HEARTBEAT_MS = 30_000;
 
 export interface PhaseDeps {
@@ -303,9 +305,14 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
     const { suggestions, model } = await suggest(provider, exp, facts, spec.author.login);
     await beat.step("render");
     await deps.api.putExport(bytes);
-    // The CLIs run with no config file, so their models are resolveModels()'s (A3).
+    // The CLIs run with no config file, so their models are resolveModels()'s for the roles they
+    // call (A3); the eval and ask roles never run in a job.
+    const configured = resolveModels();
     const models = [
-      ...new Set([...Object.values(resolveModels()), ...(model === null ? [] : [model])]),
+      ...new Set([
+        ...PIPELINE_ROLES.map((role) => configured[role]),
+        ...(model === null ? [] : [model]),
+      ]),
     ].slice(0, 8);
     await deps.api.succeed({ suggestions, facts, engineVersion: deps.engineVersion, models });
     return true;

@@ -70,7 +70,7 @@ describe("writeArchitecture with Claude (cassette)", () => {
           runKind: "build",
           sha: input.index.sha,
         });
-        expect(e.model.startsWith("claude-haiku-4-5")).toBe(true);
+        expect(e.model.startsWith("claude-haiku-5-5")).toBe(true);
       }
     },
     TIMEOUT_MS,

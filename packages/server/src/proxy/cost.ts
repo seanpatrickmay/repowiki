@@ -31,7 +31,7 @@ export function reserveMicros(
   maxTokens: number,
   batch: boolean,
 ): number | null {
-  const price = priceFor(model);
+  const price = priceFor(model, inputTokens);
   if (price === null) return null;
   const input = inputTokens * Math.max(price.input, price.cacheWrite);
   return micros(input + maxTokens * OUTPUT_RESERVE_SHARE * price.output, batch);
@@ -39,13 +39,15 @@ export function reserveMicros(
 
 /** What a call actually cost, in micro-dollars rounded up; null for a model with no price. */
 export function actualMicros(model: string, usage: AnthropicUsage, batch: boolean): number | null {
-  const price = priceFor(model);
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const price = priceFor(model, usage.input_tokens + cacheRead + cacheWrite);
   if (price === null) return null;
   return micros(
     usage.input_tokens * price.input +
       usage.output_tokens * price.output +
-      (usage.cache_read_input_tokens ?? 0) * price.cacheRead +
-      (usage.cache_creation_input_tokens ?? 0) * price.cacheWrite,
+      cacheRead * price.cacheRead +
+      cacheWrite * price.cacheWrite,
     batch,
   );
 }

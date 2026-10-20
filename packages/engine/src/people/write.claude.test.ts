@@ -161,7 +161,7 @@ describe("writePeople with Claude (cassette)", () => {
           runKind: "people",
           sha: fx.feb,
         });
-        expect(e.model.startsWith("claude-haiku-4-5")).toBe(true);
+        expect(e.model.startsWith("claude-haiku-5-5")).toBe(true);
       }
       // The recordings hold the packs, never an author's address (R10).
       for (const name of ["team-people", "team-people-append"])

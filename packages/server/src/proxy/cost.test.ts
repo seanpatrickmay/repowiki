@@ -11,6 +11,17 @@ describe("proxy cost arithmetic (spec 2 S11, M14c A2)", () => {
     expect(reserveMicros("gpt-4", 1, 1, false)).toBeNull();
   });
 
+  it("reserves and prices Haiku 5.5 at its long-prompt rate past 100,000 prompt tokens", () => {
+    // Short prompts: $0.125 per million cache-write and $0.50 output; long: $0.625 and $2.50.
+    expect(reserveMicros("claude-haiku-5-5", 100_000, 8000, false)).toBe(12_500 + 1000);
+    expect(reserveMicros("claude-haiku-5-5", 100_001, 8000, false)).toBe(62_501 + 5000);
+    const long = { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 100_000 };
+    expect(actualMicros("claude-haiku-5-5", long, false)).toBe(500 + 2500 + 5000);
+    expect(
+      actualMicros("claude-haiku-5-5", { input_tokens: 1000, output_tokens: 1000 }, false),
+    ).toBe(100 + 500);
+  });
+
   it("prices actual usage with cache tokens, rounding up", () => {
     const usage = {
       input_tokens: 1000,

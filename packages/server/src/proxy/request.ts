@@ -2,9 +2,10 @@ import { z } from "zod";
 
 /**
  * The most output a proxied request may ask for: the engine's largest call (the manifest and the
- * architecture page, 16,000). It bounds how far in-flight requests can pass a job's cap (S11).
+ * architecture page, 16,000) plus the 4,000 a thinking model gets on top (packages/llm
+ * THINKING_HEADROOM_TOKENS). It bounds how far in-flight requests can pass a job's cap (S11).
  */
-export const MAX_PROXY_OUTPUT_TOKENS = 16_000;
+export const MAX_PROXY_OUTPUT_TOKENS = 20_000;
 /** The most requests one batch may carry; with two batches in flight it bounds a job's overshoot. */
 export const MAX_BATCH_REQUESTS = 1000;
 
@@ -39,6 +40,8 @@ export const MessageParams = z.strictObject({
         type: z.literal("json_schema"),
         schema: z.record(z.string(), z.unknown()),
       }),
+      // The engine asks a thinking model for low effort; a higher one buys unpriced thinking.
+      effort: z.literal("low").optional(),
     })
     .optional(),
   temperature: z.number().min(0).max(1).optional(),

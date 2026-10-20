@@ -23,8 +23,6 @@ export interface GenerateRequest<T> {
   cacheKey?: string;
   /** Route through the Message Batches API (50% price, answer within 24h). */
   batch?: boolean;
-  /** Sampling temperature; the API's default when absent. */
-  temperature?: number;
 }
 
 export interface GenerateResult<T> {
@@ -90,16 +88,19 @@ export class LlmOutputError extends LlmError {
 
 export type ModelConfig = Readonly<Record<LlmRole, string>>;
 
-/** Every role defaults to the cheapest current model (spec §4). */
+/**
+ * Every role defaults to the cheapest current model (spec §4), Haiku 5.5, except the eval agent:
+ * its tool loop (tools.ts) does not yet hand Haiku 5.5's thinking blocks back with tool results.
+ */
 export const DEFAULT_MODELS: ModelConfig = {
-  manifest: "claude-haiku-4-5",
-  write: "claude-haiku-4-5",
-  tieBreak: "claude-haiku-4-5",
+  manifest: "claude-haiku-5-5",
+  write: "claude-haiku-5-5",
+  tieBreak: "claude-haiku-5-5",
   evalAgent: "claude-haiku-4-5",
-  evalJudge: "claude-haiku-4-5",
-  ask: "claude-haiku-4-5",
-  inflight: "claude-haiku-4-5",
-  people: "claude-haiku-4-5",
+  evalJudge: "claude-haiku-5-5",
+  ask: "claude-haiku-5-5",
+  inflight: "claude-haiku-5-5",
+  people: "claude-haiku-5-5",
 };
 
 /** Merges a parsed config file over the defaults; throws a ZodError on an invalid file. */

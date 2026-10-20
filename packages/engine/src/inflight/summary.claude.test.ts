@@ -127,7 +127,7 @@ describe("summarize with Claude (cassette)", () => {
           featureId: null,
           runKind: "inflight",
         });
-        expect(e.model.startsWith("claude-haiku-4-5")).toBe(true);
+        expect(e.model.startsWith("claude-haiku-5-5")).toBe(true);
         expect(e.tokens.out).toBeLessThanOrEqual(1500);
       }
     },

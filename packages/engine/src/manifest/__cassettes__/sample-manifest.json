@@ -4,8 +4,8 @@
       "method": "POST",
       "path": "/v1/messages",
       "body": {
-        "model": "claude-haiku-4-5",
-        "max_tokens": 16000,
+        "model": "claude-haiku-5-5",
+        "max_tokens": 20000,
         "system": [
           {
             "type": "text",
@@ -85,14 +85,15 @@
               ],
               "description": "{$schema: \"https://json-schema.org/draft/2020-12/schema\"}"
             }
-          }
+          },
+          "effort": "low"
         }
       }
     },
     "response": {
       "status": 200,
       "contentType": "application/json",
-      "body": "{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_011CfbvCwySVMYTu7AdWKkZ9\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"features\\\": [{\\\"id\\\": \\\"http-api\\\", \\\"title\\\": \\\"HTTP API\\\", \\\"aliases\\\": [\\\"REST API\\\", \\\"FastAPI\\\", \\\"routes\\\", \\\"endpoints\\\", \\\"app.py\\\", \\\"create_app\\\", \\\"router\\\"]}, {\\\"id\\\": \\\"web-client\\\", \\\"title\\\": \\\"Web client\\\", \\\"aliases\\\": [\\\"React\\\", \\\"TypeScript\\\", \\\"frontend\\\", \\\"UI\\\", \\\"main.tsx\\\", \\\"fetchJson\\\"]}], \\\"clusters\\\": [{\\\"cluster\\\": \\\"c01\\\", \\\"feature\\\": \\\"http-api\\\", \\\"role\\\": \\\"core\\\"}, {\\\"cluster\\\": \\\"c02\\\", \\\"feature\\\": \\\"http-api\\\", \\\"role\\\": \\\"supporting\\\"}, {\\\"cluster\\\": \\\"c03\\\", \\\"feature\\\": \\\"web-client\\\", \\\"role\\\": \\\"core\\\"}]}\"}],\"container\":null,\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":1280,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":165,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"},\"diagnostics\":null}"
+      "body": "{\"model\":\"claude-haiku-5-5\",\"id\":\"msg_011CgE1dnpgmHysFwFdjA15F\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"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\"},{\"type\":\"text\",\"text\":\"{\\\"features\\\":[{\\\"id\\\":\\\"http-api\\\",\\\"title\\\":\\\"HTTP API\\\",\\\"aliases\\\":[\\\"FastAPI application\\\",\\\"create_app\\\",\\\"API routes\\\",\\\"router\\\",\\\"REST API\\\",\\\"Backend API\\\",\\\"app.py\\\"]},{\\\"id\\\":\\\"web-frontend\\\",\\\"title\\\":\\\"Web frontend\\\",\\\"aliases\\\":[\\\"React frontend\\\",\\\"Main component\\\",\\\"fetchJson\\\",\\\"web client\\\",\\\"TypeScript UI\\\",\\\"web/src\\\"]}],\\\"clusters\\\":[{\\\"cluster\\\":\\\"c01\\\",\\\"feature\\\":\\\"http-api\\\",\\\"role\\\":\\\"core\\\"},{\\\"cluster\\\":\\\"c02\\\",\\\"feature\\\":\\\"http-api\\\",\\\"role\\\":\\\"core\\\"},{\\\"cluster\\\":\\\"c03\\\",\\\"feature\\\":\\\"web-frontend\\\",\\\"role\\\":\\\"core\\\"}]}\"}],\"container\":null,\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":23,\"cache_creation_input_tokens\":1614,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":1614,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":639,\"output_tokens_details\":{\"thinking_tokens\":437},\"service_tier\":\"standard\",\"inference_geo\":\"global\",\"speed\":\"standard\"},\"diagnostics\":null}"
     }
   }
 ]
