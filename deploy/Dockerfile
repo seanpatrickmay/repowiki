@@ -10,7 +10,11 @@ WORKDIR /app
 # The whole repository (minus .dockerignore): sources run directly via type stripping, and the
 # server's SQL migrations live under packages/server/src/db/migrations.
 COPY . .
-RUN pnpm install --frozen-lockfile && rm -rf /root/.cache /root/.npm
+# better-sqlite3 compiles when no prebuilt binary matches this Node; the compilers leave in the same layer.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+ && pnpm install --frozen-lockfile \
+ && apt-get purge -y python3 make g++ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* /root/.cache /root/.npm
 
 FROM base AS server
 ENV REPOWIKI_MODE=production NODE_ENV=production
