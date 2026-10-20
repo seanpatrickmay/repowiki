@@ -171,3 +171,38 @@ describe("the image and the Fly configs (spec 2 §2)", () => {
     expect(lines.slice(example + 1).some((l) => /\.env/.test(l))).toBe(false);
   });
 });
+
+describe("the server's settings file (deploy/.env.example)", () => {
+  const example = read("deploy/.env.example");
+  const names = [...example.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]);
+  const required = [...read("packages/server/src/config.ts").matchAll(/need\("([A-Z0-9_]+)"\)/g)]
+    .map((m) => m[1])
+    .filter((name) => name !== "REPOWIKI_ENGINE_VERSION");
+
+  it("lists every setting the production server requires, once", () => {
+    expect(required.length).toBeGreaterThan(10);
+    for (const name of required) expect(names, name).toContain(name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("holds no real secret and nothing the Fly config or the deploy command already sets", () => {
+    for (const name of [
+      "PORT",
+      "INTERNAL_PORT",
+      "HOST",
+      "REPOWIKI_MODE",
+      "REPOWIKI_ENGINE_VERSION",
+    ]) {
+      expect(names, name).not.toContain(name);
+    }
+    expect(example).not.toMatch(
+      /sk-ant-[A-Za-z0-9]|FlyV1 [A-Za-z0-9]|postgres(?:ql)?:\/\/[^<\s]*@/,
+    );
+  });
+
+  it("stays out of git and the image once copied to deploy/.env", () => {
+    const status = spawnSync("git", ["check-ignore", "-q", "deploy/.env"], { cwd: ROOT }).status;
+    expect(status).toBe(0);
+    expect(read(".dockerignore").split("\n")).toContain("**/.env");
+  });
+});
