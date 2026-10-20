@@ -104,6 +104,23 @@ describe("the image and the Fly configs (spec 2 §2)", () => {
     expect(docker).toContain("--frozen-lockfile");
   });
 
+  it("can compile native modules during install, and drops the compilers in the same layer", () => {
+    // better-sqlite3 has no prebuilt binary for every Node release, and bookworm-slim has no
+    // compiler: the first real build failed in node-gyp (2026-10-19).
+    const base = docker.slice(docker.indexOf("AS base"), docker.indexOf("FROM base AS server"));
+    const install =
+      base
+        .replaceAll("\\\n", " ")
+        .split("\n")
+        .find((line) => line.includes("pnpm install")) ?? "";
+    expect(install).toMatch(/apt-get install[^&]* python3[^&]* make[^&]* g\+\+/);
+    expect(install.indexOf("apt-get install")).toBeLessThan(install.indexOf("pnpm install"));
+    expect(install).toMatch(
+      /pnpm install[^&]*&&[^\n]*apt-get purge[^&]* python3[^&]* make[^&]* g\+\+/,
+    );
+    expect(install).toContain("rm -rf /var/lib/apt/lists/*");
+  });
+
   it("lets the server's site builds write their caches before dropping to the node user (A1)", () => {
     const server = docker.slice(
       docker.indexOf("FROM base AS server"),
