@@ -26,6 +26,7 @@ describe("migrations (spec 2 S4)", () => {
     expect(tables.map((t) => t.name)).toEqual([
       "accounts",
       "audit_events",
+      "billing",
       "generations",
       "github_tokens",
       "handles",
@@ -42,6 +43,7 @@ describe("migrations (spec 2 S4)", () => {
       "revisions",
       "schema_migrations",
       "sessions",
+      "stripe_events",
     ]);
   });
 });
