@@ -48,7 +48,8 @@ export function flyRunner(options: FlyRunnerOptions): JobRunner {
                 REPOWIKI_WORKER_MODE: "engine",
                 REPOWIKI_ENGINE_VERSION: options.engineVersion,
               },
-              guest: { cpu_kind: "shared", cpus: 2, memory_mb: 4096 },
+              // Dedicated CPUs: a shared machine throttled the People step's blame to 32 minutes.
+              guest: { cpu_kind: "performance", cpus: 2, memory_mb: 4096 },
               auto_destroy: true,
               restart: { policy: "no" },
               metadata: { repowiki_job: jobId, repowiki_attempt: String(attempt) },
