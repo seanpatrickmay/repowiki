@@ -12,7 +12,8 @@ import { freshDb } from "./test-db.ts";
 // The job is created late on the last day of September; "now" is early on 1 October.
 const CREATED = "2026-09-30T23:50:00.000Z";
 const NOW = "2026-10-01T00:30:00.000Z";
-const CAP = 1_000_000;
+/** A Free job's cap: its estimate times the cap multiplier. */
+const CAP = 420_000;
 let db: Db;
 let account: Account;
 let job: Job;

@@ -55,6 +55,16 @@ beforeEach(async () => {
 });
 afterEach(async () => db.close());
 
+describe("estimateFor (spec 2 S15)", () => {
+  it("prices the plan's largest repository at Haiku 5.5's measured cost, with the cap's margin", () => {
+    // Measured on Haiku 5.5: AlphaSettler, 120 files, $0.028 for its whole build.
+    expect(estimateFor("free")).toBe(280_000);
+    expect(estimateFor("pro")).toBe(780_000);
+    // Several Pro builds fit a month's $4 ceiling, not one.
+    expect(Math.floor(4_000_000 / estimateFor("pro"))).toBeGreaterThanOrEqual(5);
+  });
+});
+
 describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
   it("creates the project, its first job and the worker's spec", async () => {
     const started = await startGeneration(db, input());
@@ -71,7 +81,7 @@ describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
       status: "queued",
       commitSha: SHA,
       estimateUsdMicros: estimateFor("free"),
-      capUsdMicros: 1_000_000,
+      capUsdMicros: 420_000,
     });
     expect(await jobSpec(db, started.value.job.id)).toMatchObject({
       repo: { fullName: FAKE_REPO.full_name, cloneUrl: FAKE_REPO.clone_url },
@@ -138,8 +148,8 @@ describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
       refreshesThisMonth: 0,
       inFlightGenerations: 1,
       inFlightRefreshes: 0,
-      monthUsdMicros: 1_000_000,
-      platformDayUsdMicros: 1_000_000,
+      monthUsdMicros: 420_000,
+      platformDayUsdMicros: 420_000,
     });
   });
 
