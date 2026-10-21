@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createApp, type Deps } from "./app.ts";
+import { stripeApi } from "./billing/stripe.ts";
 import { type Config, ConfigError } from "./config.ts";
 import { openDatabase } from "./db/migrate.ts";
 import { fakeEndpoints, GITHUB, type GitHubEndpoints } from "./github/endpoints.ts";
@@ -13,6 +14,7 @@ import { objectStoreFor } from "./objects/open.ts";
 import { fakeAnthropicFetch } from "./proxy/fake-anthropic.ts";
 import { buildTree } from "./render/build.ts";
 import { authRoutes } from "./routes/auth.ts";
+import { billingRoutes } from "./routes/billing.ts";
 import { draftRoutes } from "./routes/drafts.ts";
 import { internalRoutes } from "./routes/internal.ts";
 import { landingRoutes } from "./routes/landing.ts";
@@ -88,6 +90,7 @@ export async function buildDeps(config: Config, overrides: Partial<Deps> = {}): 
     newId: randomUUID,
     runner: overrides.runner ?? runnerFor(config, log),
     objects: overrides.objects ?? objectStoreFor(config.objects, fetch),
+    stripe: config.stripe === null ? null : stripeApi(fetch, config.stripe.secretKey),
     anthropic: fakeModel
       ? {
           url: "https://api.anthropic.test",
@@ -114,6 +117,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...jobRoutes(deps),
       ...previewRoutes(deps, buildTree, { waitMs: PREVIEW_WAIT_MS }),
       ...publishRoutes(deps),
+      ...billingRoutes(deps),
     ],
     pages: [...previewPageRoutes(deps), ...publicRoutes(deps)],
     worker: [...internalRoutes(deps), ...llmRoutes(deps)],

@@ -1,3 +1,4 @@
+import type { StripeApi } from "./billing/stripe.ts";
 import type { Config } from "./config.ts";
 import type { Db } from "./db/db.ts";
 import type { GitHubEndpoints } from "./github/endpoints.ts";
@@ -29,6 +30,8 @@ export interface Deps {
   runner: JobRunner;
   /** Exports, previews and published sites (spec 2 S12). */
   objects: ObjectStore;
+  /** Stripe, when billing is on (billing spec B10, B11); null turns billing off. */
+  stripe: StripeApi | null;
   /** Where the LLM proxy forwards model calls; `key` null means no provider is configured. */
   anthropic: { url: string; key: string | null; fetch: typeof fetch };
   /** One JSON line per event; never given a secret. Defaults to stderr. */
