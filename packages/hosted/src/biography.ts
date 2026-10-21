@@ -158,20 +158,36 @@ function listed<T>(items: readonly T[], run: (item: T) => Run[]): Run[] {
 }
 const listedText = (items: readonly string[]) => listed(items, (t) => [{ text: t }]);
 
+/** A Works row's description: room for a whole first sentence, which wraps in its cell. */
+const WORKS_DESCRIPTION_MAX = 180;
+/** A relative clause opening: "… that …", "… which …", "… where …", "… who …". */
+const RELATIVE = / (?:that|which|where|who) /g;
+/** The shortest phrase worth ending at a relative clause: "a full-stack application" is too bland. */
+const MIN_PHRASE = 25;
+
 /**
  * What a project is, from its About lead (ADR-0013): the first sentence without its leading
- * "<Title> is", cut when long at its first comma (never inside a list), else at a clause within 110
- * characters; null when the sentence starts otherwise.
+ * "<Title> is", whole when it fits `max` characters. A longer one whose first comma opens a list
+ * ends before the relative clause the list belongs to ("a Catan bot", not "a Catan bot that
+ * combines a Rust engine"), unless that leaves under 25 characters; otherwise it ends at the first
+ * comma, else at a clause within `max`. Null when the sentence starts otherwise.
  */
-export function nounPhrase(lead: string, title: string): string | null {
+export function nounPhrase(lead: string, title: string, max = 110): string | null {
   const first = sentencesOf(plainWords(lead, 4000).replace(/\s+/g, " "))[0] ?? "";
   const subject = new RegExp(`^(?:the\\s+)?${escapeRe(title)}\\s+(?:is|was|are)\\s+`, "i");
   if (!subject.test(first)) return null;
-  const rest = first.replace(subject, "");
+  const rest = first.replace(subject, "").replace(/[.!?]+$/, "");
+  let cut = rest;
   const comma = rest.indexOf(", ", 30);
-  // A long phrase ends at its first comma, so a list after it is never cut in half.
-  const cut = rest.length > 110 && comma !== -1 && comma < 110 ? rest.slice(0, comma) : rest;
-  const phrase = firstClause(cut, 110).replace(/[.!?]+$/, "");
+  if (rest.length > max && comma !== -1 && comma < max) {
+    const list = /\b(?:and|or)\b/.test(rest.slice(comma));
+    const clause = [...rest.slice(0, comma).matchAll(RELATIVE)].at(-1);
+    cut =
+      list && clause !== undefined && clause.index >= MIN_PHRASE
+        ? rest.slice(0, clause.index)
+        : rest.slice(0, comma);
+  }
+  const phrase = firstClause(cut, max).replace(/[.!?]+$/, "");
   return phrase === "" ? null : phrase;
 }
 
@@ -369,10 +385,10 @@ export function biography(input: {
   const firstYear = (p: BiographyProject) => yearOf(p.entry.firstCommitAt);
   const years = (from: string, to: string) => (from === to ? from : `${from}–${to}`);
   const works = projects.map((p) => {
-    const phrase = nounPhrase(p.entry.lead, p.entry.title);
+    const phrase = nounPhrase(p.entry.lead, p.entry.title, WORKS_DESCRIPTION_MAX);
     const description =
       phrase === null
-        ? firstClause(p.entry.lead, 110)
+        ? firstClause(p.entry.lead, WORKS_DESCRIPTION_MAX)
         : `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}`;
     return {
       slug: p.slug,

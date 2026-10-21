@@ -204,3 +204,14 @@ Each ruling is "Ruling: X — why — cost if wrong".
 - A preview whose account has no active handle answers 404, and `healthz` is a reserved handle.
 - `publishedEntries` asks the `public.read` policy for each project rather than reading the
   state itself.
+
+## Amendment (2026-10-21): where a noun phrase ends
+
+A recruiter reading an entry took "a four-player Settlers of Catan bot that combines a Rust rules
+engine" for a sentence cut short: ending at the first comma kept a list's first item and dropped
+the rest. Ruling: a noun phrase is the whole sentence when it fits. A longer one whose first comma
+opens a list ("… and …" or "… or …" follows it) ends before the relative clause ("that", "which",
+"where", "who") that the list belongs to, unless that leaves under 25 characters; otherwise it ends
+at the first comma, as before. The lead keeps 110 characters ("AlphaSettler, a four-player Settlers
+of Catan bot"); a Works row's description gets 180, so most rows read the whole first sentence. —
+Cost if wrong: a bland lead phrase, or a Works cell three lines tall.

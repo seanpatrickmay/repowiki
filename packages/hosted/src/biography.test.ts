@@ -209,11 +209,27 @@ describe("biographyEntry", () => {
 });
 
 describe("nounPhrase", () => {
-  it("cuts a long phrase at its first comma, never inside the list that follows (local feedback)", () => {
+  const alpha =
+    "AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search over hidden hands, and a graph network trained by self-play.";
+
+  it("ends a long phrase before the clause that opens a list, never after its first item (recruiter review)", () => {
     const lead =
       "Life Dashboard is a self-hosted wellness application that aggregates health metrics from Garmin, tracks nutrition intake, and surfaces AI-generated insights through a Monet-inspired interface. More.";
-    expect(nounPhrase(lead, "Life Dashboard")).toBe(
-      "a self-hosted wellness application that aggregates health metrics from Garmin",
+    expect(nounPhrase(lead, "Life Dashboard")).toBe("a self-hosted wellness application");
+    expect(nounPhrase(alpha, "AlphaSettler")).toBe("a four-player Settlers of Catan bot");
+  });
+
+  it("keeps the whole phrase when it fits the limit", () => {
+    expect(nounPhrase(alpha, "AlphaSettler", 180)).toBe(
+      "a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search over hidden hands, and a graph network trained by self-play",
+    );
+  });
+
+  it("cuts at the first comma when the clause before a list leaves too short a phrase (local feedback)", () => {
+    const lecteur =
+      "LecteurAide is a full-stack application that ingests French book PDFs, processes them with Google's Gemini models, and presents them in a reading interface.";
+    expect(nounPhrase(lecteur, "LecteurAide")).toBe(
+      "a full-stack application that ingests French book PDFs",
     );
     const repowiki =
       "RepoWiki is a system that generates Wikipedia-style wiki articles documenting a git repository's architecture, features and contributors using large language models.";
@@ -227,10 +243,10 @@ describe("nounPhrase", () => {
       "a tool that writes wikis",
     );
     const long =
-      "AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search and a neural network.";
-    const cut = nounPhrase(long, "AlphaSettler") ?? "";
+      "PokerML is a simulation-driven heads-up and multiplayer no-limit hold'em engine that blends heuristic game-tree search with configurable card and action abstractions.";
+    const cut = nounPhrase(long, "PokerML") ?? "";
     expect(cut.length).toBeLessThanOrEqual(110);
-    expect(cut).toBe("a four-player Settlers of Catan bot that combines a Rust rules engine");
+    expect(cut).toBe("a simulation-driven heads-up and multiplayer no-limit hold'em engine");
   });
 
   it("ends without a full stop, question or exclamation mark (review M6)", () => {
@@ -349,6 +365,22 @@ describe("biography", () => {
         ],
       },
     ]);
+  });
+
+  it("describes a Works row with the whole phrase, and names the project in the lead by its short one (recruiter review)", () => {
+    const lead =
+      "AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search over hidden hands, and a graph network trained by self-play. More.";
+    const out = biography({
+      person: ADA,
+      projects: [project("AlphaSettler", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", { lead })],
+      asOf: AS_OF,
+    });
+    expect(out.works[0]?.description).toBe(
+      "A four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search over hidden hands, and a graph network trained by self-play",
+    );
+    expect(words(out.lead[0] ?? [])).toContain(
+      "AlphaSettler, a four-player Settlers of Catan bot.",
+    );
   });
 
   it("keeps an abbreviation inside the career's two sentences (review M6)", () => {
