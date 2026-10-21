@@ -22,9 +22,13 @@ import { appendAudit } from "./audit.ts";
 import { activeJob, issueToken, saveJob, saveJobSpec } from "./jobs.ts";
 import { projectById, projectFor, saveProject, saveRepository, usageFor } from "./projects.ts";
 
-/** Measured cost (owner's nine builds): about $0.09 per 100 indexed files, plus the About article. */
-const PER_FILE_MICROS = 900;
-const BASE_MICROS = 100_000;
+/**
+ * Measured cost on Haiku 5.5 (AlphaSettler, 120 files: $0.028 for the whole build, against
+ * $0.297 on Haiku 4.5): about $0.023 per 100 indexed files. The estimate allows about that per
+ * file, and the job's cap adds half again (PLATFORM.jobCapMultiplier).
+ */
+const PER_FILE_MICROS = 250;
+const BASE_MICROS = 30_000;
 
 /** A job's estimate before its files are counted: the plan's largest repository (spec 2 S15). */
 export function estimateFor(plan: Plan): number {
