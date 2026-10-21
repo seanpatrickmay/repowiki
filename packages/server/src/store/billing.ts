@@ -123,3 +123,9 @@ export async function pruneEvents(q: Queryable, now: string): Promise<number> {
   );
   return rows.length;
 }
+
+/** Whether a Stripe event id was already handled (billing spec B8). */
+export async function eventSeen(q: Queryable, id: string): Promise<boolean> {
+  const rows = await q.query<{ id: string }>("SELECT id FROM stripe_events WHERE id = $1", [id]);
+  return rows.length === 1;
+}

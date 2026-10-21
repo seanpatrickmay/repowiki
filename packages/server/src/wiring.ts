@@ -15,6 +15,7 @@ import { fakeAnthropicFetch } from "./proxy/fake-anthropic.ts";
 import { buildTree } from "./render/build.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { billingRoutes } from "./routes/billing.ts";
+import { billingWebhookRoutes } from "./routes/billing-webhook.ts";
 import { draftRoutes } from "./routes/drafts.ts";
 import { internalRoutes } from "./routes/internal.ts";
 import { landingRoutes } from "./routes/landing.ts";
@@ -118,6 +119,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...previewRoutes(deps, buildTree, { waitMs: PREVIEW_WAIT_MS }),
       ...publishRoutes(deps),
       ...billingRoutes(deps),
+      ...billingWebhookRoutes(deps),
     ],
     pages: [...previewPageRoutes(deps), ...publicRoutes(deps)],
     worker: [...internalRoutes(deps), ...llmRoutes(deps)],
