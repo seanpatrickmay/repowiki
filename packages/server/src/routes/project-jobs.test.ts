@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
 import { recordingRunner, type StartRequest } from "../runner/runner.ts";
-import { jobById, tokenJob } from "../store/jobs.ts";
+import { jobById, jobsOf, tokenJob } from "../store/jobs.ts";
 import { draftRoutes } from "./drafts.ts";
 import { internalRoutes } from "./internal.ts";
 import { jobRoutes } from "./project-jobs.ts";
@@ -137,17 +137,22 @@ describe("retry (M14e A2)", () => {
 });
 
 describe("refresh (M14e A2)", () => {
-  it("is refused on Free", async () => {
+  it("gives Free one rebuild before publishing, then refuses (marketing review)", async () => {
     const fresh = await testDeps();
     const p = await generatedProject(fresh);
     const freshApp = createApp(fresh, projectRoutes(fresh));
-    const reply = await call(freshApp, {
-      method: "POST",
-      path: `/projects/${p.projectId}/refresh`,
-      headers: form(p.cookie, fresh.config.appOrigin),
-      body: `csrf=${p.csrf}`,
-    });
-    expect(reply.status).toBe(REFUSALS["plan-refresh-limit"].status);
+    const refresh = () =>
+      call(freshApp, {
+        method: "POST",
+        path: `/projects/${p.projectId}/refresh`,
+        headers: form(p.cookie, fresh.config.appOrigin),
+        body: `csrf=${p.csrf}`,
+      });
+    expect((await refresh()).status).toBe(303);
+    // A second click while it runs returns the same job rather than starting another.
+    expect((await refresh()).status).toBe(303);
+    const kinds = (await jobsOf(fresh.db, p.projectId)).map((j) => j.kind);
+    expect(kinds.filter((k) => k === "refresh")).toHaveLength(1);
     const other = await otherCookie(fresh);
     const theirs = await call(freshApp, {
       method: "POST",

@@ -5,6 +5,7 @@ import {
   type Caller,
   checkEligibility,
   type PolicyContext,
+  rebuildOffer,
   type Usage,
 } from "./policy.ts";
 import { anAccount, aProject, eligibleFacts, ids, T0 } from "./test-fixtures.ts";
@@ -250,6 +251,27 @@ describe("refreshing, editing, publishing and restoring (Contract spec §7.1, C7
     });
   });
 
+  it("gives Free one rebuild of its project before it is ever published (marketing review)", () => {
+    const draft = aProject({ state: "draft", currentVersion: 0, latestRevision: 1 });
+    expect(authorize("job.refresh", ctx({ project: draft }))).toEqual({ ok: true, value: true });
+    const rebuilt = aProject({ state: "draft", currentVersion: 0, latestRevision: 2 });
+    expect(authorize("job.refresh", ctx({ project: rebuilt }))).toMatchObject({
+      code: "plan-refresh-limit",
+    });
+    const running = usage({ activeProjects: 1, inFlightRefreshes: 1 });
+    expect(authorize("job.refresh", ctx({ project: draft, usage: running }))).toMatchObject({
+      code: "plan-refresh-limit",
+    });
+    const building = aProject({ state: "draft", currentVersion: 0, latestRevision: 0 });
+    expect(authorize("job.refresh", ctx({ project: building }))).toMatchObject({
+      code: "plan-refresh-limit",
+    });
+    const unpublished = aProject({ state: "draft", currentVersion: 1, latestRevision: 1 });
+    expect(authorize("job.refresh", ctx({ project: unpublished }))).toMatchObject({
+      code: "plan-refresh-limit",
+    });
+  });
+
   it("freezes refresh, review and publish when the plan is over its project count", () => {
     const over = ctx({ caller: signedIn(pro), usage: usage({ activeProjects: 11 }) });
     for (const action of ["job.refresh", "draft.review", "project.publish"] as const) {
@@ -428,5 +450,20 @@ describe("quotas count jobs still in flight (final review I7)", () => {
     expect(authorize("job.refresh", ctx({ caller: signedIn(pro), usage: used }))).toMatchObject({
       code: "plan-refresh-limit",
     });
+  });
+});
+
+describe("rebuildOffer (marketing review)", () => {
+  it("offers Free its one rebuild before publishing, and Pro its refreshes", () => {
+    const draft = aProject({ state: "draft", currentVersion: 0, latestRevision: 1 });
+    expect(rebuildOffer("free", draft)).toBe("rebuild");
+    expect(rebuildOffer("free", aProject({ state: "draft", latestRevision: 2 }))).toBeNull();
+    expect(rebuildOffer("free", live)).toBeNull();
+    expect(rebuildOffer("pro", live)).toBe("refresh");
+    expect(rebuildOffer("pro", draft)).toBe("refresh");
+  });
+
+  it("offers nothing before a first revision exists", () => {
+    expect(rebuildOffer("pro", aProject({ state: "draft", latestRevision: 0 }))).toBeNull();
   });
 });

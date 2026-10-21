@@ -8,6 +8,7 @@ describe("plan limits (Contract spec §10)", () => {
       generationsLifetime: 1,
       generationsPerMonth: 1,
       refreshesPerMonth: 0,
+      rebuildsBeforePublish: 1,
       maxIndexedFiles: 1000,
       monthlyUsdMicros: 1_000_000,
     });
@@ -16,6 +17,7 @@ describe("plan limits (Contract spec §10)", () => {
       generationsLifetime: null,
       generationsPerMonth: 10,
       refreshesPerMonth: 30,
+      rebuildsBeforePublish: 0,
       maxIndexedFiles: 3000,
       monthlyUsdMicros: 4_000_000,
     });

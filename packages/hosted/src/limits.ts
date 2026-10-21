@@ -11,6 +11,8 @@ export interface PlanLimits {
   generationsLifetime: number | null;
   generationsPerMonth: number;
   refreshesPerMonth: number;
+  /** Rebuilds of a project before it is ever published, outside the monthly refreshes (ADR-0015). */
+  rebuildsBeforePublish: number;
   maxIndexedFiles: number;
   /** The hard monthly model-cost ceiling. */
   monthlyUsdMicros: number;
@@ -23,6 +25,7 @@ export const PLANS: Readonly<Record<Plan, PlanLimits>> = {
     generationsLifetime: 1,
     generationsPerMonth: 1,
     refreshesPerMonth: 0,
+    rebuildsBeforePublish: 1,
     maxIndexedFiles: 1000,
     monthlyUsdMicros: 1_000_000,
   },
@@ -31,6 +34,7 @@ export const PLANS: Readonly<Record<Plan, PlanLimits>> = {
     generationsLifetime: null,
     generationsPerMonth: 10,
     refreshesPerMonth: 30,
+    rebuildsBeforePublish: 0,
     maxIndexedFiles: 3000,
     monthlyUsdMicros: 4_000_000,
   },

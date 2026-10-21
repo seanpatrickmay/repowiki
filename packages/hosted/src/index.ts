@@ -101,6 +101,7 @@ export {
   checkEligibility,
   type EligibilitySubject,
   type PolicyContext,
+  rebuildOffer,
   type Usage,
 } from "./policy.ts";
 export {

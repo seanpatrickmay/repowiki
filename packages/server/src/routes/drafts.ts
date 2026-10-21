@@ -150,6 +150,7 @@ export function draftRoutes(deps: Deps): Route[] {
           preview: revision === null ? null : await previewOf(deps.db, project.id, revision.number),
           previewBuild: previewBuildState(deps, project.id),
           current,
+          plan: session.account.plan,
           session: shown,
         });
         return html(200, body, { "cache-control": "private, no-store" });
