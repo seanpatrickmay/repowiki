@@ -30,6 +30,7 @@ beforeAll(async () => {
     preview: null,
     previewBuild: null,
     current: null,
+    plan: "free",
     session: { csrf: "c", login: "demo-dev" },
   };
 });
@@ -60,5 +61,21 @@ describe("the project page's content (ADR-0013)", () => {
     expect(body).toContain("not written by the author");
     expect(body).toContain("biography");
     for (const gone of ["Tagline", "Summary", "Highlights"]) expect(body).not.toContain(gone);
+  });
+});
+
+describe("the project page's rebuild (marketing review)", () => {
+  it("offers Free its one rebuild before publishing, and says what it is", () => {
+    const body = projectPage({ ...view, project: { ...view.project, latestRevision: 1 } });
+    expect(body).toContain(`action="/projects/${view.project.id}/refresh"`);
+    expect(body).toContain("one rebuild before you publish");
+  });
+
+  it("offers Free nothing once its project is published, and Pro a refresh", () => {
+    const published = { ...view.project, latestRevision: 1, currentVersion: 1 };
+    expect(projectPage({ ...view, project: published })).not.toContain("/refresh");
+    expect(projectPage({ ...view, project: published, plan: "pro" })).toContain(
+      "Refresh from the latest commit",
+    );
   });
 });

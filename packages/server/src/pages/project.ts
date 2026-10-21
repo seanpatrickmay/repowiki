@@ -7,11 +7,13 @@ import {
   JOB_STEPS,
   type Job,
   PLATFORM,
+  type Plan,
   type Preview,
   type Project,
   type PublishedVersion,
   REFUSALS,
   type Review,
+  rebuildOffer,
 } from "@repowiki/hosted";
 import type { PreviewBuildState } from "../routes/preview-state.ts";
 import { escapeHtml as e, type PageSession, page } from "./layout.ts";
@@ -28,6 +30,8 @@ export interface ProjectView {
   /** A preview build still running in the background, or why the last one saved nothing. */
   previewBuild: PreviewBuildState | null;
   current: PublishedVersion | null;
+  /** The owner's plan: what the page offers after a build (rebuildOffer). */
+  plan: Plan;
   session: PageSession;
 }
 
@@ -38,7 +42,26 @@ const form = (action: string, session: PageSession, inner: string, cls = "") =>
 const isActive = (job: Job | null) =>
   job !== null && (job.status === "queued" || job.status === "running");
 
-/** What the author can do about the last job: cancel it, retry it, or start again (M14e A2). */
+/** The rebuild or refresh the plan offers, as a form; empty when it offers neither. */
+function rebuildForm(v: ProjectView): string {
+  const offer = rebuildOffer(v.plan, v.project);
+  if (offer === null) return "";
+  const action = `/projects/${v.project.id}/refresh`;
+  if (offer === "refresh") {
+    return form(
+      action,
+      v.session,
+      `<button class="secondary">Refresh from the latest commit</button>`,
+    );
+  }
+  return form(
+    action,
+    v.session,
+    `<button class="secondary">Rebuild from the latest commit</button><p class="muted">Free includes one rebuild before you publish. It writes the entry again; a rebuild that fails doesn't count.</p>`,
+  );
+}
+
+/** What the author can do about the last job: cancel it, retry it, rebuild, or start again (M14e A2). */
 function jobActions(v: ProjectView): string {
   const { job, project, session } = v;
   if (job === null) return "";
@@ -50,7 +73,7 @@ function jobActions(v: ProjectView): string {
       `<button class="secondary">Cancel</button>`,
     );
   }
-  if (job.status !== "failed") return "";
+  if (job.status !== "failed") return rebuildForm(v);
   const retryable =
     job.refusal !== null &&
     REFUSALS[job.refusal].retryable &&
@@ -63,11 +86,7 @@ function jobActions(v: ProjectView): string {
       `${field("githubRepoId", project.githubRepoId)}<button>Start over</button>`,
     );
   }
-  return form(
-    `${base}/refresh`,
-    session,
-    `<button class="secondary">Refresh from the latest commit</button>`,
-  );
+  return rebuildForm(v);
 }
 
 function jobSection(v: ProjectView): string {

@@ -1,5 +1,5 @@
 import type { Account, Action, EligibilityFacts, Project } from "./entities.ts";
-import { DAY_MS, isFrozen, jobCap, PLANS, PLATFORM } from "./limits.ts";
+import { DAY_MS, isFrozen, jobCap, PLANS, PLATFORM, type Plan, type PlanLimits } from "./limits.ts";
 import { ok, type Result, refused } from "./result.ts";
 
 /** Who is asking: nobody, a signed-in account, the worker or scheduler, or the service owner. */
@@ -209,13 +209,37 @@ function startGeneration(account: Account, ctx: PolicyContext): Result<true> {
   return withinSizeAndCost(account, eligible.value, usage, ctx);
 }
 
+/**
+ * What the project page offers once a revision exists: Free's one rebuild of a never-published
+ * project, or a plan's monthly refreshes; null when neither applies. `authorize` still decides
+ * each click, with the live eligibility check and the month's counts.
+ */
+export function rebuildOffer(plan: Plan, project: Project): "rebuild" | "refresh" | null {
+  if (project.latestRevision === 0) return null;
+  const limits = PLANS[plan];
+  if (limits.refreshesPerMonth > 0) return "refresh";
+  return rebuildLeft(limits, project, 0) ? "rebuild" : null;
+}
+
+/**
+ * Whether a never-published project with a revision has a rebuild left: its revisions past the
+ * first are its rebuilds, with those in flight, and a failed one adds no revision.
+ */
+function rebuildLeft(limits: PlanLimits, project: Project, inFlight: number): boolean {
+  if (project.latestRevision === 0 || project.currentVersion !== 0) return false;
+  return project.latestRevision - 1 + inFlight < limits.rebuildsBeforePublish;
+}
+
 function startRefresh(
   account: Account,
   facts: EligibilityFacts,
   usage: Usage,
   ctx: PolicyContext,
 ): Result<true> {
+  const plan = PLANS[account.plan];
+  const project = need(ctx.project, "project");
+  const rebuild = rebuildLeft(plan, project, usage.inFlightRefreshes);
   const used = usage.refreshesThisMonth + usage.inFlightRefreshes;
-  if (used >= PLANS[account.plan].refreshesPerMonth) return refused("plan-refresh-limit");
+  if (!rebuild && used >= plan.refreshesPerMonth) return refused("plan-refresh-limit");
   return withinSizeAndCost(account, facts, usage, ctx);
 }
