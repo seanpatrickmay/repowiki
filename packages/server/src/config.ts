@@ -36,6 +36,15 @@ export interface Config {
   localProfile: string | null;
   /** New accounts' plan (`REPOWIKI_LOCAL_PLAN`); never set in production. */
   localPlan: Plan;
+  /** Stripe billing (billing spec B11), or null when the keys are unset: billing is off. */
+  stripe: StripeConfig | null;
+}
+
+export interface StripeConfig {
+  secretKey: string;
+  webhookSecret: string;
+  /** A sandbox key: no real charges, and the billing pages say so. */
+  testMode: boolean;
 }
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -105,6 +114,7 @@ export function loadConfig(env: Env): Config {
       },
       localProfile: null,
       localPlan: "free",
+      stripe: stripeOf(env),
     };
     const key = need("TOKEN_KEY");
     if (missing.length > 0) {
@@ -177,7 +187,25 @@ export function loadConfig(env: Env): Config {
         : { kind: "fake" },
     localProfile,
     localPlan: plan.data,
+    stripe: stripeOf(env),
   };
+}
+
+/** Both Stripe keys or neither (billing spec B11); a key is checked by its prefix, never echoed. */
+function stripeOf(env: Env): StripeConfig | null {
+  const secretKey = env.STRIPE_SECRET_KEY?.trim() || null;
+  const webhookSecret = env.STRIPE_WEBHOOK_SECRET?.trim() || null;
+  if (secretKey === null && webhookSecret === null) return null;
+  if (secretKey === null || webhookSecret === null) {
+    throw new ConfigError("Set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither.");
+  }
+  if (!/^(?:sk|rk)_(?:live|test)_[A-Za-z0-9]+$/.test(secretKey)) {
+    throw new ConfigError("STRIPE_SECRET_KEY must be a secret (sk_) or restricted (rk_) key.");
+  }
+  if (!/^whsec_[A-Za-z0-9]+$/.test(webhookSecret)) {
+    throw new ConfigError("STRIPE_WEBHOOK_SECRET must be a webhook signing secret (whsec_).");
+  }
+  return { secretKey, webhookSecret, testMode: /^(?:sk|rk)_test_/.test(secretKey) };
 }
 
 /** The app and its public pages on different hosts: cookies are scoped by host, not port. */

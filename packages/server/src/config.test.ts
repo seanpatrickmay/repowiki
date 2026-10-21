@@ -260,3 +260,42 @@ describe("local profile mode (M14g)", () => {
     }
   });
 });
+
+describe("Stripe keys (billing spec B11)", () => {
+  const keys = { STRIPE_SECRET_KEY: "rk_live_abc123", STRIPE_WEBHOOK_SECRET: "whsec_abc123" };
+
+  it("turns billing off when neither key is set, in every mode", () => {
+    expect(loadConfig(production).stripe).toBeNull();
+    expect(loadConfig({ REPOWIKI_MODE: "demo" }).stripe).toBeNull();
+  });
+
+  it("turns billing on with both keys, and knows a test key", () => {
+    expect(loadConfig({ ...production, ...keys }).stripe).toEqual({
+      secretKey: "rk_live_abc123",
+      webhookSecret: "whsec_abc123",
+      testMode: false,
+    });
+    const test = { STRIPE_SECRET_KEY: "rk_test_abc", STRIPE_WEBHOOK_SECRET: "whsec_x" };
+    expect(loadConfig({ ...production, ...test }).stripe?.testMode).toBe(true);
+    expect(loadConfig({ REPOWIKI_MODE: "development", ...test }).stripe?.testMode).toBe(true);
+  });
+
+  it("refuses one key without the other, or keys of the wrong kind, never echoing them", () => {
+    for (const env of [
+      { STRIPE_SECRET_KEY: "rk_test_abc" },
+      { STRIPE_WEBHOOK_SECRET: "whsec_abc" },
+      { STRIPE_SECRET_KEY: "pk_test_abc", STRIPE_WEBHOOK_SECRET: "whsec_abc" },
+      { STRIPE_SECRET_KEY: "rk_test_abc", STRIPE_WEBHOOK_SECRET: "abc" },
+    ]) {
+      let message = "";
+      try {
+        loadConfig({ ...production, ...env });
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        message = (error as Error).message;
+      }
+      expect(message).toMatch(/STRIPE_/);
+      expect(message).not.toMatch(/abc/);
+    }
+  });
+});
