@@ -11,12 +11,13 @@ import type { Route } from "./http/router.ts";
 import { type App, type AppServer, listen } from "./http/server.ts";
 import { objectStoreFor } from "./objects/open.ts";
 import { fakeAnthropicFetch } from "./proxy/fake-anthropic.ts";
+import { buildTree } from "./render/build.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { draftRoutes } from "./routes/drafts.ts";
 import { internalRoutes } from "./routes/internal.ts";
 import { landingRoutes } from "./routes/landing.ts";
 import { llmRoutes } from "./routes/llm.ts";
-import { previewPageRoutes, previewRoutes } from "./routes/preview.ts";
+import { PREVIEW_WAIT_MS, previewPageRoutes, previewRoutes } from "./routes/preview.ts";
 import { jobRoutes } from "./routes/project-jobs.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { publicRoutes } from "./routes/public.ts";
@@ -111,7 +112,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...projectRoutes(deps),
       ...draftRoutes(deps),
       ...jobRoutes(deps),
-      ...previewRoutes(deps),
+      ...previewRoutes(deps, buildTree, { waitMs: PREVIEW_WAIT_MS }),
       ...publishRoutes(deps),
     ],
     pages: [...previewPageRoutes(deps), ...publicRoutes(deps)],

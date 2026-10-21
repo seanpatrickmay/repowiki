@@ -3,9 +3,10 @@ import {
   biographyEntry,
   biographyName,
   type Project,
+  REFUSALS,
   type RefusalCode,
 } from "@repowiki/hosted";
-import type { Deps } from "../app.ts";
+import { type Deps, logOf, nameOf } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
 import type { Session } from "../http/session.ts";
@@ -21,6 +22,7 @@ import { projectById } from "../store/projects.ts";
 import { biographyPage, publishedEntries, storedEntry } from "./biography-page.ts";
 import { auditAuthor, mutation, storedExport } from "./drafts.ts";
 import { ownedProject, repoFullName } from "./live.ts";
+import { previewBuildStates } from "./preview-state.ts";
 
 /** Built-site responses (Pagefind needs WebAssembly; Mermaid sets inline styles). */
 export const SITE_CSP =
@@ -72,24 +74,45 @@ export async function serveTreeFile(
   return { body: text, contentType: object.contentType };
 }
 
+/**
+ * How long a preview request waits for its build before answering and letting the build finish
+ * in the background: a site build can take minutes on a shared CPU.
+ */
+/** What the project page says when a background build failed for no stated reason. */
+const BUILD_FAILED = "The preview could not be built. Try again.";
+
+export const PREVIEW_WAIT_MS = 2000;
+
+export interface PreviewRouteOptions {
+  /** Milliseconds a request waits for its build (PREVIEW_WAIT_MS in production); default: all. */
+  waitMs?: number;
+}
+
 /** Building a revision's exact site and serving it privately to its owner (spec 2 S13, §7). */
-export function previewRoutes(deps: Deps, build = buildTree): Route[] {
+export function previewRoutes(
+  deps: Deps,
+  build = buildTree,
+  options: PreviewRouteOptions = {},
+): Route[] {
   /** Accounts with a preview build in flight; one each (M14e A3). */
   const building = new Set<string>();
+  const states = previewBuildStates(deps);
+  const waitMs = options.waitMs ?? Number.POSITIVE_INFINITY;
   const handleOf = async (session: Session) =>
     (await activeHandle(deps.db, session.account.id)) ?? session.account.login.toLowerCase();
 
+  /** The build's answer, and its refusal code when it saved no preview. */
   async function buildPreview(
     session: Session,
     project: Project,
     revision: number,
-  ): Promise<Reply> {
+  ): Promise<{ reply: Reply; code: RefusalCode | null }> {
     const shown = pageSession(session);
     const back = `/projects/${project.id}`;
     /** A refusal, audited in its own transaction (spec 2 S5). */
     const refused = async (code: RefusalCode) => {
       await deps.db.transaction((tx) => auditAuthor(tx, deps, "preview.build", project.id, code));
-      return refusalPage(code, shown, { back });
+      return { reply: refusalPage(code, shown, { back }), code };
     };
     const latest = await latestRevision(deps.db, project.id);
     if (latest === null || latest.number !== revision) return refused("stale-revision");
@@ -138,7 +161,7 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
       await auditAuthor(tx, deps, "preview.build", project.id, "allowed");
       return null;
     });
-    return saved === null ? redirect(back) : refused(saved);
+    return saved === null ? { reply: redirect(back), code: null } : refused(saved);
   }
 
   return [
@@ -166,11 +189,36 @@ export function previewRoutes(deps: Deps, build = buildTree): Route[] {
           });
         }
         building.add(account);
-        try {
-          return await buildPreview(session, project, Number(form.get("revision")));
-        } finally {
-          building.delete(account);
-        }
+        const revision = Number(form.get("revision"));
+        states.set(project.id, { kind: "building", revision });
+        const settled = buildPreview(session, project, revision)
+          .then(
+            ({ reply, code }) => {
+              if (code === null) states.delete(project.id);
+              else
+                states.set(project.id, {
+                  kind: "failed",
+                  revision,
+                  message: REFUSALS[code].message,
+                });
+              return reply;
+            },
+            (error: unknown) => {
+              states.set(project.id, { kind: "failed", revision, message: BUILD_FAILED });
+              throw error;
+            },
+          )
+          .finally(() => building.delete(account));
+        if (waitMs === Number.POSITIVE_INFINITY) return settled;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const waited = new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), waitMs);
+        });
+        const first = await Promise.race([settled, waited]).finally(() => clearTimeout(timer));
+        if (first !== null) return first;
+        // Too slow to wait for: the project page shows it building, then its outcome.
+        settled.catch((error: unknown) => logOf(deps)({ preview: "failed", error: nameOf(error) }));
+        return redirect(`/projects/${project.id}`);
       },
     },
     {
