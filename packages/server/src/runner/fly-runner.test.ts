@@ -47,6 +47,15 @@ describe("the Fly runner (spec 2 S16)", () => {
     expect(JSON.stringify(body)).not.toContain("fly-secret");
   });
 
+  it("asks for dedicated CPUs, which a shared machine throttles to a fraction of a core", async () => {
+    // On a throttled shared-cpu-2x the People step's blame ran 32 minutes and hit its 120 s
+    // per-file limit on 3 files; on performance-2x it takes minutes and never does.
+    const { fetchFn, calls } = fake();
+    await flyRunner({ ...options, fetch: fetchFn }).start({ jobId: "j1", attempt: 1, token: "t" });
+    const body = JSON.parse(String(calls[0]?.init?.body));
+    expect(body.config.guest).toEqual({ cpu_kind: "performance", cpus: 2, memory_mb: 4096 });
+  });
+
   it("logs the created machine's id with the job, never a token", async () => {
     const lines: object[] = [];
     const log = (line: object) => lines.push(line);
