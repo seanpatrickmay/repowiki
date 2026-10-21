@@ -42,6 +42,7 @@ describe("the dashboard (spec 2 §7)", () => {
     expect(String(reply.body)).toContain(FAKE_REPO.full_name);
     expect(String(reply.body)).toContain(`name="githubRepoId" value="${FAKE_REPO.id}"`);
     expect(String(reply.body)).not.toContain("style=");
+    expect(String(reply.body)).toContain('Plan: Free · <a href="/billing">See Pro</a>');
   });
 
   it("lists the user's projects once one is started", async () => {

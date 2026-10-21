@@ -34,7 +34,11 @@ function dashboard(
     profile === null
       ? `<p class="muted">Your profile appears once you publish a project.</p>`
       : `<p><a href="${escapeHtml(profile)}">View your profile</a></p>`;
-  return `<h1>Your projects</h1>${link}${projects || `<p class="muted">No projects yet.</p>`}
+  const plan =
+    session.account.plan === "pro"
+      ? `<p class="muted">Plan: Pro · <a href="/billing">Billing</a></p>`
+      : `<p class="muted">Plan: Free · <a href="/billing">See Pro</a></p>`;
+  return `<h1>Your projects</h1>${plan}${link}${projects || `<p class="muted">No projects yet.</p>`}
 <h2>Your public repositories</h2><p class="muted">RepoWiki builds a wiki for a public repository you can push to and have commits in.</p><ul class="plain">${choices || "<li>No public repositories found.</li>"}</ul>`;
 }
 

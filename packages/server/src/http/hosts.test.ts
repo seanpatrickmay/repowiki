@@ -49,6 +49,14 @@ describe("routing by Host (ADR-0012)", () => {
     expect(csp).toBe(appCsp(config));
     expect(appCsp(config)).toContain(`form-action 'self' ${config.publicOrigin}`);
     expect(appCsp(config)).toContain("default-src 'self'");
+    expect(appCsp(config)).not.toContain("stripe.com");
+  });
+
+  it("lets billing's forms lead to Stripe Checkout and the portal when billing is on", () => {
+    const stripe = { secretKey: "rk_test_x", webhookSecret: "whsec_x", testMode: true };
+    expect(appCsp({ ...config, stripe })).toContain(
+      `form-action 'self' ${config.publicOrigin} https://checkout.stripe.com https://billing.stripe.com`,
+    );
   });
 
   it("gives pages their own policy unless a reply sets one (a built site's)", async () => {

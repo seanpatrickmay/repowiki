@@ -12,7 +12,10 @@ export const PAGES_CSP =
  * since browsers check `form-action` on the open-preview redirect there (ADR-0012).
  */
 export const appCsp = (config: Config) =>
-  `default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${config.publicOrigin}`;
+  `default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${config.publicOrigin}${config.stripe === null ? "" : ` ${STRIPE_PAGES}`}`;
+
+/** Where billing's form posts redirect (billing spec B5, B7): Stripe Checkout and the portal. */
+export const STRIPE_PAGES = "https://checkout.stripe.com https://billing.stripe.com";
 
 /** `reply` with `csp` unless it names its own policy. */
 function withPolicy(reply: Reply, csp: string): Reply {
