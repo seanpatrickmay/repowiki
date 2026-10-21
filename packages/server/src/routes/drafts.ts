@@ -29,6 +29,7 @@ import {
 import { jobsOf } from "../store/jobs.ts";
 import { usageFor } from "../store/projects.ts";
 import { liveEligibility, ownedProject, repoFullName } from "./live.ts";
+import { previewBuildState } from "./preview-state.ts";
 
 /** A generation's stored export, parsed; null when the object is missing. */
 export async function storedExport(deps: Deps, generation: Generation): Promise<WikiExport | null> {
@@ -147,6 +148,7 @@ export function draftRoutes(deps: Deps): Route[] {
           generation,
           review: revision === null ? null : await reviewOf(deps.db, project.id, revision.number),
           preview: revision === null ? null : await previewOf(deps.db, project.id, revision.number),
+          previewBuild: previewBuildState(deps, project.id),
           current,
           session: shown,
         });

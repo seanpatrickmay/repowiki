@@ -45,7 +45,15 @@ export function browser(base: string) {
     }
     return reply;
   }
-  return { go, follow };
+  /** Reload `path` the way the page's own refresh does, until `done` holds for its text. */
+  async function reloadUntil(path: string, done: (text: string) => boolean, ms = 240_000) {
+    for (const start = Date.now(); ; await sleep(250)) {
+      const reply = await go(path);
+      if (done(reply.text)) return reply;
+      if (Date.now() - start > ms) throw new Error(`${path} never became ready`);
+    }
+  }
+  return { go, follow, reloadUntil };
 }
 
 export const field = (html: string, name: string) =>

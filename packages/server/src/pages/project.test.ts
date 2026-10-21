@@ -28,6 +28,7 @@ beforeAll(async () => {
     generation: await generationById(deps.db, revision.generationId),
     review: null,
     preview: null,
+    previewBuild: null,
     current: null,
     session: { csrf: "c", login: "demo-dev" },
   };

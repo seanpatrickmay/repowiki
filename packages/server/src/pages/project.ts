@@ -13,6 +13,7 @@ import {
   REFUSALS,
   type Review,
 } from "@repowiki/hosted";
+import type { PreviewBuildState } from "../routes/preview-state.ts";
 import { escapeHtml as e, type PageSession, page } from "./layout.ts";
 
 export interface ProjectView {
@@ -24,6 +25,8 @@ export interface ProjectView {
   generation: Generation | null;
   review: Review | null;
   preview: Preview | null;
+  /** A preview build still running in the background, or why the last one saved nothing. */
+  previewBuild: PreviewBuildState | null;
   current: PublishedVersion | null;
   session: PageSession;
 }
@@ -117,11 +120,15 @@ function publishSection(v: ProjectView): string {
     project.state === "published"
       ? `<p>Live at <a href="${e(publicUrl)}">${e(publicUrl)}</a> (version ${project.currentVersion}).</p>${form(`${base}/unpublish`, session, `<button class="secondary">Unpublish</button>`)}`
       : "";
-  const build = form(
-    `${base}/preview`,
-    session,
-    `${field("revision", revision.number)}<button class="secondary">Build preview of revision ${revision.number}</button>`,
-  );
+  const state = v.previewBuild?.revision === revision.number ? v.previewBuild : null;
+  const build =
+    state?.kind === "building"
+      ? `<p>Building the preview of revision ${revision.number}. This page refreshes when it is ready.</p>`
+      : `${state?.kind === "failed" ? `<p class="error">${e(state.message)}</p>` : ""}${form(
+          `${base}/preview`,
+          session,
+          `${field("revision", revision.number)}<button class="secondary">Build preview of revision ${revision.number}</button>`,
+        )}`;
   const ready =
     preview !== null && preview.revision === revision.number
       ? `${form(`${base}/preview/open`, session, `${field("revision", revision.number)}<button class="secondary">Open the preview of revision ${revision.number}</button>`)}<p class="muted">The preview opens on the public pages' site at a private link that works for an hour.</p>${form(
@@ -141,7 +148,11 @@ export function projectPage(v: ProjectView): string {
   const repo = v.repoFullName === null ? "" : `<p class="muted">${e(v.repoFullName)}</p>`;
   return page({
     title: v.project.slug,
-    head: isActive(v.job) && v.revision === null ? '<meta http-equiv="refresh" content="3">' : "",
+    head:
+      (isActive(v.job) && v.revision === null) ||
+      (v.previewBuild?.kind === "building" && v.previewBuild.revision === v.revision?.number)
+        ? '<meta http-equiv="refresh" content="3">'
+        : "",
     body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${content(v)}${reviewSection(v)}${publishSection(v)}`,
     session: v.session,
   });

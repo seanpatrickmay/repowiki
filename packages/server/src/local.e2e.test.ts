@@ -93,7 +93,7 @@ describe("local profile mode (M14g)", () => {
     expect((await me.go(`${projectPath}/preview`, { form: { csrf, revision: "1" } })).status).toBe(
       303,
     );
-    page = await me.go(projectPath);
+    page = await me.reloadUntil(projectPath, (text) => text.includes('name="previewHash"'));
     const published = await me.go(`${projectPath}/publish`, {
       form: {
         csrf,

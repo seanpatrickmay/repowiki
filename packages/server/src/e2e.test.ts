@@ -57,7 +57,8 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     expect(reviewed.status, reviewed.text).toBe(303);
     const previewed = await me.go(`${projectPath}/preview`, { form: { csrf, revision: "1" } });
     expect(previewed.status, previewed.text).toBe(303);
-    page = await me.go(projectPath);
+    // A build past the request's wait finishes in the background; the page reloads until it is.
+    page = await me.reloadUntil(projectPath, (text) => text.includes('name="previewHash"'));
     const previewHash = field(page.text, "previewHash");
     expect(previewHash).toMatch(/^[0-9a-f]{64}$/);
     const id = projectPath.split("/").at(-1) ?? "";

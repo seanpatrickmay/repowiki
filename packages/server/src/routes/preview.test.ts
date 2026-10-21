@@ -39,6 +39,14 @@ beforeEach(async () => {
 });
 afterEach(async () => deps.db.close());
 
+/** Polls `done` until it holds; a background build has no completion signal of its own. */
+async function until(done: () => Promise<boolean>, ms = 120_000) {
+  for (const start = Date.now(); !(await done()); ) {
+    if (Date.now() - start > ms) throw new Error("timed out waiting");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 describe("serveTreeFile (spec 2 S13)", () => {
   it("rewrites the public base in text files only, serves directories, refuses escapes", async () => {
     const html =
@@ -237,6 +245,76 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     await deps.db.query("UPDATE handles SET body = jsonb_set(body, '{state}', '\"tombstoned\"')");
     expect((await call(pages, { path: base })).status).toBe(404);
     expect((await call(pages, { path: `${base}demo-repo/` })).status).toBe(404);
+  }, 300_000);
+
+  it("answers a slow build at once, shows it building, and finishes it in the background", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: typeof buildTree = async (input) => {
+      await held;
+      return buildTree(input);
+    };
+    app = createApp(deps, [...draftRoutes(deps), ...previewRoutes(deps, slow, { waitMs: 20 })]);
+    const answered = await post(`/projects/${p.projectId}/preview`, "revision=1");
+    expect(answered.status).toBe(303);
+    expect(answered.headers?.location).toBe(`/projects/${p.projectId}`);
+    const building = String((await get(`/projects/${p.projectId}`)).body);
+    expect(building).toContain("Building the preview of revision 1");
+    expect(building).toContain('<meta http-equiv="refresh"');
+    expect(building).not.toContain("Build preview of revision 1</button>");
+    release();
+    await until(async () => (await previewOf(deps.db, p.projectId, 1)) !== null);
+    const ready = String((await get(`/projects/${p.projectId}`)).body);
+    expect(ready).toContain("Open the preview of revision 1");
+    expect(ready).not.toContain("Building the preview");
+  }, 300_000);
+
+  it("says a build that failed in the background failed, and offers to build again", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const broken: typeof buildTree = async () => {
+      await held;
+      throw new Error("astro exploded");
+    };
+    const logged: object[] = [];
+    deps.log = (line) => logged.push(line);
+    app = createApp(deps, [...draftRoutes(deps), ...previewRoutes(deps, broken, { waitMs: 20 })]);
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    release();
+    await until(async () => logged.length > 0);
+    const shown = String((await get(`/projects/${p.projectId}`)).body);
+    expect(shown).toContain("The preview could not be built. Try again.");
+    expect(shown).toContain("Build preview of revision 1</button>");
+    expect(shown).not.toContain("Building the preview");
+    // The log names the error, never its message.
+    expect(JSON.stringify(logged)).not.toContain("astro exploded");
+  }, 300_000);
+
+  it("shows nothing of a background build once its revision is no longer the latest", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: typeof buildTree = async (input) => {
+      await held;
+      return buildTree(input);
+    };
+    app = createApp(deps, [...draftRoutes(deps), ...previewRoutes(deps, slow, { waitMs: 20 })]);
+    expect((await post(`/projects/${p.projectId}/preview`, "revision=1")).status).toBe(303);
+    await refreshed(deps, p.projectId);
+    release();
+    await until(
+      async () => (await auditOutcomes(deps.db, "preview.build", p.projectId)).length > 0,
+    );
+    expect(await auditOutcomes(deps.db, "preview.build", p.projectId)).toEqual(["stale-revision"]);
+    const shown = String((await get(`/projects/${p.projectId}`)).body);
+    expect(shown).not.toContain("Building the preview");
+    expect(shown).not.toContain(REFUSALS["stale-revision"].message);
+    expect(await previewOf(deps.db, p.projectId, 1)).toBeNull();
   }, 300_000);
 
   it("allows one preview build in flight per account (A3)", async () => {
