@@ -168,7 +168,9 @@ export function authRoutes(deps: Deps): Route[] {
           },
           {
             newAccountId: deps.newId(),
-            allowNew: (login) => deps.config.mode === "demo" || allowlist.has(login),
+            // `*` opens sign-up to everyone; no GitHub login can be `*` (ADR-0016).
+            allowNew: (login) =>
+              deps.config.mode === "demo" || allowlist.has("*") || allowlist.has(login),
             now: deps.now(),
             plan: deps.config.localPlan,
           },

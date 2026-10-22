@@ -35,6 +35,11 @@ and a recruiter persona.
   until it is a feature. — Stripe reviews these before it activates an account. — Cost if wrong:
   text, but a promise here is one the product must keep.
 
+- **Open sign-up.** Ruling: `SIGNUP_ALLOWLIST=*` admits every GitHub account, replacing spec 2
+  S7's allowlist once billing (spec 4) and the Free limits are live; a list of logins still admits
+  only them. Production stays on the list until the owner switches it. — One variable, and `*`
+  cannot be a GitHub login. — Cost if wrong: a config change back to a list.
+
 ## Consequences
 
 - `repowiki.app/` is a page, not a redirect, so it is what a shared link or a search result shows.
