@@ -16,11 +16,63 @@ import { describe, expect, it } from "vitest";
 import type { CommitInfo } from "../index/index.ts";
 import { verifyClaim } from "../verify/index.ts";
 import { buildPack } from "./pack.ts";
-import { assembleRevision, computeInfobox, pageSections, type RevisionParts } from "./page.ts";
+import {
+  assembleRevision,
+  computeInfobox,
+  oldestFirst,
+  pageSections,
+  type RevisionParts,
+} from "./page.ts";
 import { signalsDraft } from "./test-provider.ts";
 import { testVerifyContext, testWiki } from "./test-wiki.ts";
 
 const claims = (entries: [SectionKey, ReturnType<typeof bodyClaim>[]][]) => new Map(entries);
+
+describe("oldestFirst", () => {
+  const sha = (n: number) => String(n).repeat(40);
+  const commit = (n: number, date: string): CommitInfo => ({
+    sha: sha(n),
+    parents: [],
+    date,
+    subject: `commit ${n}`,
+    files: [],
+    pr: null,
+  });
+  const told = (id: string, ...ns: number[]) =>
+    bodyClaim({
+      id,
+      kind: "history",
+      citations: ns.map((n) => commitCitation({ sha: sha(n) })),
+    });
+
+  it("tells a History in the order its commits were made, by each claim's first commit", () => {
+    const commits = [
+      commit(3, "2026-05-01T09:00:00+00:00"),
+      commit(2, "2026-03-01T09:00:00+00:00"),
+      commit(1, "2026-01-01T09:00:00+00:00"),
+    ];
+    const ids = oldestFirst([told("may", 3), told("march-may", 3, 2), told("jan", 1)], commits).map(
+      (c) => c.id,
+    );
+    expect(ids).toEqual(["jan", "march-may", "may"]);
+  });
+
+  it("compares the moments, not the text, of dates in different offsets", () => {
+    const commits = [
+      commit(1, "2026-01-01T23:00:00-05:00"),
+      commit(2, "2026-01-02T01:00:00+00:00"),
+    ];
+    expect(oldestFirst([told("a", 1), told("b", 2)], commits).map((c) => c.id)).toEqual(["b", "a"]);
+  });
+
+  it("keeps the order of claims with the same date, and puts a claim with no known commit last", () => {
+    const commits = [commit(1, "2026-01-01T09:00:00+00:00")];
+    const ids = oldestFirst([told("unknown", 9), told("x", 1), told("y", 1)], commits).map(
+      (c) => c.id,
+    );
+    expect(ids).toEqual(["x", "y", "unknown"]);
+  });
+});
 
 describe("pageSections", () => {
   it("puts the lead claim that names the subject in bold first, as Wikipedia's lead does (ADR-0019)", () => {
@@ -353,6 +405,7 @@ describe("assembleRevision", () => {
       claims,
       diagram: draft.diagram,
       pack,
+      history: wiki.history,
       neighbours: new Map([["signals", new Map([["deliverables", 2]])]]),
       wikipedia: new Map([["Message queue", null]]),
     };

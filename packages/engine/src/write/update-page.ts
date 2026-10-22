@@ -3,7 +3,13 @@ import type { CommitInfo, RepoIndex } from "../index/index.ts";
 import { linkViolations, seeAlsoFor } from "../link/index.ts";
 import { diagramProblems } from "../verify/index.ts";
 import { renderDiagram } from "./diagram.ts";
-import { computeInfobox, createClaimLinker, pageSections, SECTION_ORDER } from "./page.ts";
+import {
+  computeInfobox,
+  createClaimLinker,
+  oldestFirst,
+  pageSections,
+  SECTION_ORDER,
+} from "./page.ts";
 import type { RewriteOutcome } from "./rewrite.ts";
 import type { PageRewrite } from "./update-pack.ts";
 
@@ -31,9 +37,15 @@ export type AssembledUpdate =
   | { revision: null; why: string };
 
 /** The page's claims by section, in page order. */
-function bySection(claims: readonly { key: SectionKey; claim: Claim }[]): Map<SectionKey, Claim[]> {
+function bySection(
+  claims: readonly { key: SectionKey; claim: Claim }[],
+  history: readonly CommitInfo[],
+): Map<SectionKey, Claim[]> {
   return new Map(
-    SECTION_ORDER.map((key) => [key, claims.filter((c) => c.key === key).map((c) => c.claim)]),
+    SECTION_ORDER.map((key) => {
+      const mine = claims.filter((c) => c.key === key).map((c) => c.claim);
+      return [key, key === "history" ? oldestFirst(mine, history) : mine];
+    }),
   );
 }
 
@@ -71,7 +83,7 @@ export function assembleUpdate(parts: UpdateParts): AssembledUpdate {
 
   const link = createClaimLinker(manifest, rewrite.featureId, parts.wikipedia);
   const assemble = (claims: readonly { key: SectionKey; claim: Claim }[]) => {
-    const ordered = pageSections(bySection(claims));
+    const ordered = pageSections(bySection(claims, parts.history));
     if (ordered === null) return null;
     let blank = false;
     const linked = ordered.map((s) => ({
