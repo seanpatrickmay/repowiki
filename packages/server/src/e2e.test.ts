@@ -23,7 +23,12 @@ afterAll(async () => server.close());
 describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
   it("signs in, generates, reviews, previews, publishes, reads signed out, and unpublishes", async () => {
     const me = browser(base);
-    expect((await me.go("/")).status).toBe(200);
+    const front = await me.go("/");
+    expect(front.status).toBe(302);
+    expect(front.location).toBe(`${pages}/`);
+    expect((await browser(pages).go("/")).text).toContain(
+      "Show recruiters what you actually built.",
+    );
     const dashboard = await me.follow("/auth/github");
     expect(dashboard.status, JSON.stringify(logs.slice(-5))).toBe(200);
     expect(dashboard.text).toContain("demo-dev/demo-repo");
