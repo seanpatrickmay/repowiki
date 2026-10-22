@@ -40,24 +40,32 @@ export const SECTION_ORDER: readonly SectionKey[] = [
   "known-limitations",
 ];
 
+/** A claim that opens by naming its subject in bold: "**Signal ingestion** is …". */
+const BOLD_OPENING = /^\*\*[^*]+\*\*/;
+
 /**
  * Puts verified claims into page order and gives them the page's own ids (c1, c2, …, lead
- * first), mapping lead supports to the new ids. Lead supports resolve against body claim ids only,
- * so a lead claim may share an id with a body claim. A lead claim left supporting no surviving
+ * first, the claim that names the subject in bold before the other lead claims), mapping lead
+ * supports to the new ids. Lead supports resolve against body claim ids only, so a lead claim may
+ * share an id with a body claim. A lead claim left supporting no surviving
  * body claim is dropped, and so is an empty section. Null when no lead or no body claim survives:
  * such a page is not stored (spec §6.3). `order` lists the section keys, "lead" among them; a
  * feature page's is SECTION_ORDER, the Architecture article's its own.
  */
-export function orderedSections<K extends string, C extends { id: string; supports: string[] }>(
-  order: readonly K[],
-  claims: ReadonlyMap<K, readonly C[]>,
-): { key: K; claims: C[] }[] | null {
+export function orderedSections<
+  K extends string,
+  C extends { id: string; text: string; supports: string[] },
+>(order: readonly K[], claims: ReadonlyMap<K, readonly C[]>): { key: K; claims: C[] }[] | null {
   const leadKey = order.find((k) => k === "lead");
   const bodyKeys = order.filter((k) => k !== "lead" && (claims.get(k) ?? []).length > 0);
   const bodyIds = new Set(bodyKeys.flatMap((k) => (claims.get(k) ?? []).map((c) => c.id)));
-  const lead = (leadKey === undefined ? [] : (claims.get(leadKey) ?? []))
+  const kept = (leadKey === undefined ? [] : (claims.get(leadKey) ?? []))
     .map((c) => ({ ...c, supports: [...new Set(c.supports.filter((s) => bodyIds.has(s)))] }))
     .filter((c) => c.supports.length > 0);
+  // The claim that names the subject in bold opens the lead, whatever order the model gave.
+  const defining = kept.findIndex((c) => BOLD_OPENING.test(c.text));
+  const lead =
+    defining <= 0 ? kept : [kept[defining] as C, ...kept.filter((_, i) => i !== defining)];
   if (leadKey === undefined || lead.length === 0 || bodyKeys.length === 0) return null;
 
   // Lead claims are numbered first, then the body claims in page order.
