@@ -77,7 +77,7 @@ describe("the generated contribution paragraph (ADR-0012)", () => {
 
   it("states the author's share and their busiest code features", () => {
     expect(contributionParagraph("Ada Lovelace", facts(), titles, docs)).toBe(
-      "Ada Lovelace made 181 of the repository's 181 commits and last changed about 100% of its current lines, most of all in CLI interface, Bot arena and Performance testing.",
+      "Ada Lovelace made 181 of the repository's 181 commits and was the last to change about 100% of the code in it now, most of all in CLI interface, Bot arena and Performance testing.",
     );
   });
 

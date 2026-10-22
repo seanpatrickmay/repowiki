@@ -56,9 +56,10 @@ export function exampleRoutes(deps: Deps): Route[] {
         const found = await index();
         if (found === null) return notFound();
         const projects = [];
-        for (const { slug } of found.projects) {
+        for (const { slug, publishedAt } of found.projects) {
           const entry = await storedEntry(deps.objects, `${EXAMPLE_PREFIX}${slug}/`);
-          if (entry !== null) projects.push({ slug, href: `/example/${slug}/`, entry });
+          if (entry !== null)
+            projects.push({ slug, href: `/example/${slug}/`, entry, publishedAt });
         }
         const asOf =
           found.projects

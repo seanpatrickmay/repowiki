@@ -79,6 +79,8 @@ export interface BiographyProject {
   slug: string;
   href: string;
   entry: BiographyEntry;
+  /** When its current version was published; absent in a preview, before it is. */
+  publishedAt?: string;
 }
 
 export interface Biography {
@@ -135,9 +137,37 @@ export interface Biography {
   categories: string[];
 }
 
-/** How a generated contribution is labelled (ADR-0012). */
-export const GENERATED_LABEL = (sha: string) =>
-  `Generated from the git history at ${sha.slice(0, 7)}; not written by the author.`;
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+/** "4 March 2026", in UTC. */
+const dayMonthYear = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
+
+/**
+ * How a generated contribution is labelled (ADR-0012): who wrote it and who did not, named, so
+ * "the author" is never read as the student's own disclaimer (ADR-0020); once published, when the
+ * student, who must review it first, published it.
+ */
+export const GENERATED_LABEL = (sha: string, name: string, publishedAt?: string) =>
+  `Written by an AI model from the git history at ${sha.slice(0, 7)}, not by ${name}${
+    publishedAt === undefined
+      ? ""
+      : `, who reviewed it and published it on ${dayMonthYear(publishedAt)}`
+  }.`;
 
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
 const numberWord = (n: number) => WORDS[n] ?? String(n);
@@ -433,7 +463,7 @@ export function biography(input: {
           ? []
           : [{ text: sentencesOf(p.entry.lead).slice(0, 2).join(" ") }, treeCite(p)],
       contribution: [{ text: p.entry.contribution }, historyCite(p)],
-      label: GENERATED_LABEL(p.entry.repo.commitSha),
+      label: GENERATED_LABEL(p.entry.repo.commitSha, name, p.publishedAt),
     })),
   });
   const career = [
@@ -544,12 +574,6 @@ export function biography(input: {
           ],
           rows: libraryRows,
         };
-  // A category names a library or framework, never a tool.
-  const libraryRanks = ranked.filter((r) => !isTool(r.tech));
-  const shared = libraryRanks.filter((r) => r.users.length >= 2).slice(0, 3);
-  const developers = (shared.length > 0 ? shared : libraryRanks.slice(0, 2)).map(
-    (r) => `${r.tech.name} developers`,
-  );
 
   const latestLast =
     projects
@@ -583,8 +607,8 @@ export function biography(input: {
     })),
     categories: [
       "Software developers",
+      // Languages only, by lines: a library in a dependency file is not a skill (ADR-0020).
       ...languages.filter((l) => l.share >= 0.1).map((l) => `${l.language} programmers`),
-      ...developers,
     ],
   };
 }

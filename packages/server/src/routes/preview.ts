@@ -315,7 +315,12 @@ export function previewPageRoutes(deps: Deps): Route[] {
           // This revision in place of the project's published version, beside the others.
           const others = (await publishedEntries(deps, owner.id))
             .filter((p) => p.projectId !== project.id)
-            .map((p) => ({ slug: p.slug, href: `/${handle}/${p.slug}/`, entry: p.entry }));
+            .map((p) => ({
+              slug: p.slug,
+              href: `/${handle}/${p.slug}/`,
+              entry: p.entry,
+              publishedAt: p.publishedAt,
+            }));
           const mine = { slug: project.slug, href: wiki, entry };
           const options = { asOf: deps.now(), self: base, preview: true };
           return html(200, biographyPage(deps, owner, [mine, ...others], options), PREVIEW_HEADERS);

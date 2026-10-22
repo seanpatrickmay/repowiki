@@ -29,7 +29,7 @@ describe("the project page (spec 2 §7)", () => {
     const body = String(reply.body);
     expect(body).not.toContain("A tiny demo");
     expect(body).toContain("I wrote the ingest code.");
-    expect(body).toContain("Generated from the git history at");
+    expect(body).toContain("Written by an AI model from the git history at");
     // Nothing on the page is author-written (ADR-0012): no editor and no hide control.
     for (const name of ["tagline", "summary", "contribution", "highlight", "hidden"]) {
       expect(body).not.toContain(`name="${name}"`);

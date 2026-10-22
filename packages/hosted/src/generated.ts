@@ -62,7 +62,7 @@ export function contributionParagraph(
   const lines =
     a.totalLines === 0
       ? ""
-      : ` and last changed about ${share === 0 && a.currentLines > 0 ? "under 1" : share}% of its current lines`;
+      : ` and was the last to change about ${share === 0 && a.currentLines > 0 ? "under 1" : share}% of the code in it now`;
   const busiest = byCommits(
     a.features.filter((f) => f.commits > 0 && !docs.has(f.featureId)).map((f) => f.featureId),
     facts,

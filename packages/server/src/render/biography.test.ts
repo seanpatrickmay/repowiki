@@ -163,8 +163,8 @@ describe("libraries and tools on the biography (ADR-0014)", () => {
       `href="https://github.com/ada/5/blob/${"c".repeat(40)}/api/%3Cx%3E.toml"`,
     );
     expect(page).toContain(`Gamma: api/&lt;x&gt;.toml at commit ${"c".repeat(7)}`);
-    // Docker is a tool: never a category (owner ruling, review).
-    expect(page).toContain("<li>FastAPI developers</li></ul>");
+    // A library in a dependency file is not a skill: never a category (ADR-0020).
+    expect(page).not.toContain("FastAPI developers");
   });
 });
 

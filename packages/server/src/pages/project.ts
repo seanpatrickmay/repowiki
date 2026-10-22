@@ -150,7 +150,7 @@ function content(v: ProjectView): string {
   const { revision, generation } = v;
   if (revision === null || generation === null) return "";
   return `<section class="card"><h2>Draft ${revision.number}</h2><p class="muted">Written by an AI model from the repository and its git history. Your entry shows this paragraph beside the opening of the project's wiki; the preview shows both pages as readers will see them.</p>
-<h3>Contribution</h3><p>${e(revision.content.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha))}</p></section>`;
+<h3>Contribution</h3><p>${e(revision.content.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha, "you"))}</p></section>`;
 }
 
 function reviewSection(v: ProjectView): string {
