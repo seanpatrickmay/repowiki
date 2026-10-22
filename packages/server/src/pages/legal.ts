@@ -145,7 +145,7 @@ const refunds = legal("Refunds", "How to cancel RepoWiki Pro, and when you get m
   [
     "Refunds",
     [
-      "Write to support@repowiki.app within 7 days of your first payment, and we'll refund it in full if you haven't started a build since upgrading.",
+      "Changed your mind before using Pro? Write to support@repowiki.app within 7 days of your first payment and we'll refund it in full. Once you start a build with Pro, that payment can't be refunded.",
       "We also refund any charge made by mistake, such as a renewal after you cancelled or a duplicate charge. Other renewals aren't refunded, but cancelling stops the next one.",
     ],
   ],
