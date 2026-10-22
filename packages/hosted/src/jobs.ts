@@ -135,6 +135,8 @@ export function recoverJob(job: Job, now: string): Result<Job> {
 /** The author retries a retryable failure; money already spent stays counted against the cap. */
 export function retryJob(job: Job): Result<Job> {
   if (job.status !== "failed" || job.refusal === null) return invalid();
+  // A failed correction has forgotten its notes (ADR-0023): the author starts a new one.
+  if (job.kind === "correct") return invalid();
   if (!REFUSALS[job.refusal].retryable || job.attempt >= PLATFORM.jobMaxAttempts) return invalid();
   return ok({
     ...job,

@@ -61,6 +61,9 @@ export const PLATFORM = {
   repositoryGraceDays: 30,
 } as const;
 
+/** One correction job (ADR-0023): at most this many sentences, each note at most this long. */
+export const CORRECTION = { items: 10, noteLength: 500 } as const;
+
 export const DAY_MS = 86_400_000;
 
 /** The UTC calendar month of a timestamp, as "YYYY-MM": the period plan quotas count in. */

@@ -8,6 +8,15 @@ export async function generationById(q: Queryable, id: string): Promise<Generati
   return rows[0] === undefined ? null : parsedBody(Generation, rows[0].body, "generation");
 }
 
+/** A project's generations, newest first. */
+export async function generationsOf(q: Queryable, projectId: string): Promise<Generation[]> {
+  const rows = await q.query<{ body: unknown }>(
+    "SELECT body FROM generations WHERE project_id = $1 ORDER BY body->>'createdAt' DESC, id DESC",
+    [projectId],
+  );
+  return rows.map((r) => parsedBody(Generation, r.body, "generation"));
+}
+
 /** Generations are immutable: inserting an existing id is an error. */
 export async function saveGeneration(q: Queryable, generation: Generation): Promise<void> {
   const body = parsedBody(Generation, generation, "generation");

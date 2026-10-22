@@ -1,5 +1,5 @@
 import { GitSha, Sha256Hex } from "@repowiki/core";
-import { Job, Plan, recordSpend } from "@repowiki/hosted";
+import { CORRECTION, Job, Plan, recordSpend } from "@repowiki/hosted";
 import { z } from "zod";
 import { randomToken, sha256Hex } from "../crypto.ts";
 import type { Queryable } from "../db/db.ts";
@@ -21,6 +21,35 @@ export const JobSpec = z.strictObject({
   }),
   plan: Plan,
   export: z.strictObject({ key: z.string().min(1), hash: Sha256Hex }).nullable(),
+  /**
+   * A correction job's sentences (ADR-0023): the generation corrected, each item's note until the
+   * job ends (then null: saveJob forgets it), and each item's outcome once it succeeded.
+   */
+  correction: z
+    .strictObject({
+      generationId: z.uuid(),
+      items: z
+        .array(
+          z.strictObject({
+            page: z.string().min(1).max(200),
+            claimId: z.string().min(1).max(200),
+            note: z.string().max(CORRECTION.noteLength).nullable(),
+          }),
+        )
+        .min(1)
+        .max(CORRECTION.items),
+      outcomes: z
+        .array(
+          z.strictObject({
+            page: z.string().min(1).max(200),
+            claimId: z.string().min(1).max(200),
+            outcome: z.enum(["rewritten", "removed", "refused"]),
+          }),
+        )
+        .max(CORRECTION.items)
+        .nullable(),
+    })
+    .optional(),
 });
 export type JobSpec = z.infer<typeof JobSpec>;
 
@@ -64,6 +93,16 @@ export async function saveJob(q: Queryable, job: Job): Promise<void> {
        lease_expires_at = excluded.lease_expires_at, body = excluded.body`,
     [body.id, body.projectId, body.status, body.leaseExpiresAt, asJson(body)],
   );
+  // A correction's notes are the student's and live only while it runs (ADR-0023).
+  if (body.kind === "correct" && body.status !== "queued" && body.status !== "running") {
+    await q.query(
+      `UPDATE job_specs SET body = jsonb_set(body, '{correction,items}', (
+         SELECT jsonb_agg(jsonb_set(item, '{note}', 'null'::jsonb))
+         FROM jsonb_array_elements(body->'correction'->'items') item))
+       WHERE job_id = $1 AND body ? 'correction'`,
+      [body.id],
+    );
+  }
 }
 
 export async function saveJobSpec(q: Queryable, jobId: string, spec: JobSpec): Promise<void> {

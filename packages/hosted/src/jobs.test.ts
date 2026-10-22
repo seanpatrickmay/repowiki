@@ -124,6 +124,11 @@ describe("recovering and retrying (Contract spec §6.1)", () => {
     });
   });
 
+  it("never retries a correction, whose notes are forgotten when it fails (ADR-0023)", () => {
+    const failed = aJob({ kind: "correct", status: "failed", refusal: "job-failed" });
+    expect(retryJob(failed)).toMatchObject({ code: "invalid-transition" });
+  });
+
   it("cancels a queued or running job", () => {
     expect(value(cancelJob(aJob(), T1))).toMatchObject({ status: "cancelled", finishedAt: T1 });
     expect(value(cancelJob(running(), T1))).toMatchObject({

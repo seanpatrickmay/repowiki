@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { WikiExport } from "@repowiki/core";
 import {
+  CORRECTION,
   Facts,
   failJob,
   firstRevision,
@@ -24,7 +25,7 @@ import type { Reply, Route, RouteRequest } from "../http/router.ts";
 import { json } from "../http/server.ts";
 import { cancelBatches } from "../proxy/cancel.ts";
 import { accountById } from "../store/accounts.ts";
-import { latestRevision, saveGeneration, saveRevision } from "../store/drafts.ts";
+import { generationById, latestRevision, saveGeneration, saveRevision } from "../store/drafts.ts";
 import {
   jobSpec,
   markLeased,
@@ -53,6 +54,8 @@ export interface WorkerSpec {
   limits: { maxIndexedFiles: number };
   /** The LLM proxy's base URL; the worker's `ANTHROPIC_BASE_URL`. */
   llmUrl: string;
+  /** A correction job's flagged sentences, notes included (ADR-0023). */
+  correction?: { items: { page: string; claimId: string; note: string }[] };
 }
 
 /** A Contract refusal ends the request with 409 and its code. */
@@ -63,13 +66,29 @@ function contract<T>(result: Result<T>): T {
 
 const Heartbeat = z.strictObject({ step: JobStep });
 const Indexed = z.strictObject({ indexedFiles: z.int().nonnegative() });
-const Succeed = z.strictObject({
-  suggestions: Suggestions,
-  facts: Facts,
+const Engine = {
   engineVersion: z.string().min(1).max(64),
   models: z.array(z.string().min(1).max(128)).min(1).max(8),
-});
-const WorkerCode = z.enum(["job-failed", "job-cost-cap", "repo-too-large"]);
+};
+/** A build's success carries its suggestions and facts; a correction's, its parent's (ADR-0023). */
+const Succeed = z.union([
+  z.strictObject({ suggestions: Suggestions, facts: Facts, ...Engine }),
+  z.strictObject({
+    ...Engine,
+    outcomes: z
+      .array(
+        z.strictObject({
+          page: z.string().min(1).max(200),
+          claimId: z.string().min(1).max(200),
+          outcome: z.enum(["rewritten", "removed", "refused"]),
+          detail: z.string().max(200).nullable(),
+        }),
+      )
+      .min(1)
+      .max(CORRECTION.items),
+  }),
+]);
+const WorkerCode = z.enum(["job-failed", "job-cost-cap", "repo-too-large", "correction-unchanged"]);
 const Fail = z.strictObject({ code: WorkerCode });
 type WorkerCode = z.infer<typeof WorkerCode>;
 
@@ -85,7 +104,7 @@ export function internalRoutes(deps: Deps): Route[] {
    * checks the token again (A4: an unauthenticated request never makes the server read a body).
    */
   function route<T>(
-    method: "POST" | "PUT",
+    method: "GET" | "POST" | "PUT",
     path: string,
     read: (request: RouteRequest) => Promise<T>,
     act: (tx: Queryable, held: Held, body: T, ended: string[]) => Promise<Reply>,
@@ -142,8 +161,34 @@ export function internalRoutes(deps: Deps): Route[] {
       author: spec.author,
       limits: { maxIndexedFiles: PLANS[spec.plan].maxIndexedFiles },
       llmUrl: `${deps.config.runner.internalUrl}/llm`,
+      ...(spec.correction === undefined
+        ? {}
+        : {
+            correction: {
+              items: spec.correction.items.map((i) => ({ ...i, note: i.note ?? "" })),
+            },
+          }),
     };
     return json(200, reply);
+  });
+
+  /** The export a correction job corrects: its generation's, as stored (ADR-0023). */
+  const source = route("GET", "source-export", none, async (tx, { job }) => {
+    if (job.kind !== "correct" || job.status !== "running") {
+      throw new HttpError(409, "invalid-transition");
+    }
+    const spec = await jobSpec(tx, job.id);
+    const generation =
+      spec?.correction === undefined
+        ? null
+        : await generationById(tx, spec.correction.generationId);
+    const stored = generation === null ? null : await deps.objects.get(generation.exportKey);
+    if (stored === null) throw new Error("a correction lost the export it corrects");
+    return {
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: stored.body,
+    };
   });
 
   const heartbeat = route(
@@ -211,6 +256,17 @@ export function internalRoutes(deps: Deps): Route[] {
       if (spec?.export?.key !== exportKey(job)) {
         throw new HttpError(409, "Upload the export before succeeding.");
       }
+      const correcting = job.kind === "correct";
+      if (correcting !== "outcomes" in body) {
+        throw new HttpError(400, "The success does not match the job's kind.");
+      }
+      // A correction keeps its parent's suggestions and facts: only sentences changed.
+      const parent =
+        spec.correction === undefined
+          ? null
+          : await generationById(tx, spec.correction.generationId);
+      const built = "outcomes" in body ? parent : body;
+      if (built === null) throw new Error("a correction lost its parent generation");
       const project = await projectById(tx, job.projectId, true);
       if (project === null) throw new Error("job has no project");
       const now = deps.now();
@@ -223,8 +279,8 @@ export function internalRoutes(deps: Deps): Route[] {
         commitSha: job.commitSha,
         exportKey: spec.export.key,
         exportHash: spec.export.hash,
-        suggestions: body.suggestions,
-        facts: body.facts,
+        suggestions: built.suggestions,
+        facts: built.facts,
         engineVersion: body.engineVersion,
         models: body.models,
         spentUsdMicros: done.spentUsdMicros,
@@ -237,8 +293,8 @@ export function internalRoutes(deps: Deps): Route[] {
       if (stored === null || account === null)
         throw new Error("succeed lost its export or account");
       const content = generatedContent({
-        suggestions: body.suggestions,
-        facts: body.facts,
+        suggestions: built.suggestions,
+        facts: built.facts,
         exp: WikiExport.parse(JSON.parse(new TextDecoder().decode(stored.body))),
         authorName: account.displayName || account.login,
       });
@@ -247,6 +303,14 @@ export function internalRoutes(deps: Deps): Route[] {
         latest === null
           ? contract(firstRevision(project, generation, content, now))
           : contract(refreshRevision(project, latest, generation, content, now));
+      if ("outcomes" in body && spec.correction !== undefined) {
+        const outcomes = body.outcomes.map(({ page, claimId, outcome }) => ({
+          page,
+          claimId,
+          outcome,
+        }));
+        await saveJobSpec(tx, job.id, { ...spec, correction: { ...spec.correction, outcomes } });
+      }
       await saveGeneration(tx, generation);
       await saveRevision(tx, revised.revision);
       await saveProject(tx, revised.project);
@@ -267,5 +331,5 @@ export function internalRoutes(deps: Deps): Route[] {
     },
   );
 
-  return [lease, heartbeat, indexed, upload, succeed, failed];
+  return [lease, source, heartbeat, indexed, upload, succeed, failed];
 }

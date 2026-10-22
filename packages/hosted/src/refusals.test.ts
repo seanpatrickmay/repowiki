@@ -3,9 +3,9 @@ import { REFUSAL_CODES, REFUSALS, RefusalCode } from "./refusals.ts";
 import { ok, refused } from "./result.ts";
 
 describe("refusals (Contract spec §11)", () => {
-  it("has exactly the spec's 29 codes (ADR-0023), each with one entry", () => {
-    expect(REFUSAL_CODES).toHaveLength(29);
-    expect(new Set(REFUSAL_CODES).size).toBe(29);
+  it("has exactly the spec's 30 codes (ADR-0023), each with one entry", () => {
+    expect(REFUSAL_CODES).toHaveLength(30);
+    expect(new Set(REFUSAL_CODES).size).toBe(30);
     expect(REFUSAL_CODES).not.toContain("needs-review-flags");
     expect(REFUSAL_CODES).not.toContain("contribution-missing");
     expect(Object.keys(REFUSALS)).toEqual([...REFUSAL_CODES]);

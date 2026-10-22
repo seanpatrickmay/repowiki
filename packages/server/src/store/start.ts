@@ -20,6 +20,7 @@ import {
 import type { Db, Queryable } from "../db/db.ts";
 import type { GitHubRepo } from "../github/api.ts";
 import { appendAudit } from "./audit.ts";
+import { generationById, latestRevision } from "./drafts.ts";
 import { activeJob, issueToken, saveJob, saveJobSpec } from "./jobs.ts";
 import {
   correctionsOf,
@@ -99,20 +100,35 @@ async function lockedProject(
 }
 
 /** Authorize `action`, then create its job and the worker's spec (Contract §6.1, §7.1). */
+/** What a correction job corrects: a generation of the project, and the flagged sentences. */
+export interface CorrectionInput {
+  generationId: string;
+  items: { page: string; claimId: string; note: string }[];
+}
+
+const ACTION: Readonly<Record<JobKind, Action>> = {
+  generate: "job.create",
+  refresh: "job.refresh",
+  correct: "job.correct",
+};
+
 async function start(
   tx: Queryable,
   input: StartInput,
   kind: JobKind,
   existing: Project | null,
+  correction: CorrectionInput | null = null,
 ): Promise<Started> {
   const { account, repo, now } = input;
   const active = existing === null ? null : await activeJob(tx, existing.id, true);
   if (existing && active && active.kind === kind && active.commitSha === input.commitSha) {
     return ok({ project: existing, job: active, created: false, token: null });
   }
-  const action = kind === "generate" ? "job.create" : "job.refresh";
+  const action = ACTION[kind];
   const usage = await usageFor(tx, account.id, now);
-  const estimate = estimateFor(account.plan);
+  // A correction is one small call per article flagged, and a retry (ADR-0023).
+  const estimate =
+    kind === "correct" ? Math.ceil(estimateFor(account.plan) / 10) : estimateFor(account.plan);
   const verdict = authorize(action, {
     now,
     caller: { kind: "account", account },
@@ -188,6 +204,7 @@ async function start(
     },
     plan: account.plan,
     export: null,
+    ...(correction === null ? {} : { correction: { ...correction, outcomes: null } }),
   });
   await audit(tx, input, action, project.id, "allowed");
   // In this transaction, so no sweep can see the job without a token and start a second runner.
@@ -217,6 +234,32 @@ export async function startRefresh(
     const project = await lockedProject(tx, input.account.id, input.project.githubRepoId);
     if (project === null || project.id !== input.project.id) return refusedNotFound();
     return start(tx, input, "refresh", project);
+  });
+}
+
+/**
+ * A correction of the project's latest generation (ADR-0023), at that generation's commit. A
+ * generation that is not the latest revision's is stale.
+ */
+export async function startCorrection(
+  db: Db,
+  input: StartInput & { project: Project; correction: CorrectionInput },
+): Promise<Started> {
+  return db.transaction(async (tx) => {
+    await lockAccount(tx, input.account);
+    const project = await lockedProject(tx, input.account.id, input.project.githubRepoId);
+    if (project === null || project.id !== input.project.id) return refusedNotFound();
+    const latest = await latestRevision(tx, project.id);
+    const generation = await generationById(tx, input.correction.generationId);
+    if (
+      latest === null ||
+      generation === null ||
+      latest.generationId !== generation.id ||
+      generation.commitSha !== input.commitSha
+    ) {
+      return { ok: false, code: "stale-revision" };
+    }
+    return start(tx, input, "correct", project, input.correction);
   });
 }
 
