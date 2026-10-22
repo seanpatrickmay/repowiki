@@ -1,4 +1,4 @@
-import { type Project, profileUrl } from "@repowiki/hosted";
+import { type Project, type ProjectState, profileUrl, projectUrl } from "@repowiki/hosted";
 import { type Deps, logOf, nameOf } from "../app.ts";
 import { type GitHubRepo, githubApi, TokenRevoked } from "../github/api.ts";
 import { eligibilityFacts } from "../github/facts.ts";
@@ -14,31 +14,78 @@ import { projectsOf } from "../store/projects.ts";
 import { startGeneration, startRefresh } from "../store/start.ts";
 import { ownedProject } from "./live.ts";
 
+/** A project's state in the words a student uses (the persona review, ADR-0020). */
+const STATE_WORDS: Record<ProjectState, string> = {
+  draft: "not published yet",
+  published: "published",
+  withdrawn: "taken down",
+  purged: "deleted",
+};
+
+/** Links to paste into a resume: there is no script on the page, so each is shown to copy. */
+function resumeCard(profile: string, published: { slug: string; url: string }[]): string {
+  const shown = new URL(profile);
+  const header = `\\href{${profile}}{${shown.host}${shown.pathname}}`;
+  const items = published
+    .map(
+      (p) =>
+        `<li><strong>${escapeHtml(p.slug)}</strong>: <code>${escapeHtml(p.url)}</code><br>LaTeX, after the project's name: <code>${escapeHtml(`\\href{${p.url}}{$\\nearrow$}`)}</code></li>`,
+    )
+    .join("");
+  return `<section class="card"><h2>Put it on your resume</h2>
+<p>Your entry: <code>${escapeHtml(profile)}</code></p>
+<p>LaTeX, in your header: <code>${escapeHtml(header)}</code> (needs only the hyperref package)</p>
+<ul class="plain">${items}</ul>
+<p>Word or Google Docs: select the project's name, press Ctrl + K (⌘ + K on a Mac) and paste its link.</p>
+<p>LinkedIn: add your entry under Featured, as a link.</p></section>`;
+}
+
 function dashboard(
   session: Session,
   repos: GitHubRepo[],
-  projects: string,
-  profile: string | null,
+  owned: Project[],
+  handle: string | null,
+  publicOrigin: string,
 ): string {
   const csrf = escapeHtml(session.csrf);
+  const byRepo = new Map(owned.map((p) => [p.githubRepoId, p]));
   const choices = repos
+    .map((r) => {
+      const project = byRepo.get(r.id);
+      // A repository with a project is rebuilt from that project's page, not started again.
+      const action =
+        project === undefined
+          ? `<form method="post" action="/projects"><input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="githubRepoId" value="${r.id}"><button>Build its wiki</button></form>`
+          : `<p><a href="/projects/${escapeHtml(project.id)}">Open its project</a></p>`;
+      return `<li class="card"><strong>${escapeHtml(r.full_name)}</strong><p class="muted">${escapeHtml(r.description ?? "")}</p>
+${action}</li>`;
+    })
+    .join("");
+  const projects = owned
     .map(
-      (
-        r,
-      ) => `<li class="card"><strong>${escapeHtml(r.full_name)}</strong><p class="muted">${escapeHtml(r.description ?? "")}</p>
-<form method="post" action="/projects"><input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="githubRepoId" value="${r.id}"><button>Build its wiki</button></form></li>`,
+      (p) =>
+        `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${STATE_WORDS[p.state]}</span></li>`,
     )
     .join("");
+  const published = owned.filter((p) => p.state === "published");
   // The biography exists once a project is published (ADR-0013).
+  const profile = handle !== null && published.length > 0 ? profileUrl(publicOrigin, handle) : null;
   const link =
     profile === null
-      ? `<p class="muted">Your profile appears once you publish a project.</p>`
-      : `<p><a href="${escapeHtml(profile)}">View your profile</a></p>`;
+      ? `<p class="muted">Your entry appears once you publish a project.</p>`
+      : `<p><a href="${escapeHtml(profile)}">View your entry</a></p>`;
+  const card =
+    profile === null || handle === null
+      ? ""
+      : resumeCard(
+          profile,
+          published.map((p) => ({ slug: p.slug, url: projectUrl(publicOrigin, handle, p.slug) })),
+        );
   const plan =
     session.account.plan === "pro"
       ? `<p class="muted">Plan: Pro · <a href="/billing">Billing</a></p>`
       : `<p class="muted">Plan: Free · <a href="/billing">See Pro</a></p>`;
-  return `<h1>Your projects</h1>${plan}${link}${projects || `<p class="muted">No projects yet.</p>`}
+  return `<h1>Your projects</h1>${plan}${link}${projects ? `<ul>${projects}</ul>` : `<p class="muted">No projects yet.</p>`}${card}
 <h2>Your public repositories</h2><p class="muted">RepoWiki builds a wiki for a public repository you can push to and have commits in.</p><ul class="plain">${choices || "<li>No public repositories found.</li>"}</ul>`;
 }
 
@@ -113,17 +160,7 @@ export function projectRoutes(deps: Deps): Route[] {
         }
         const owned = await projectsOf(deps.db, session.account.id);
         const handle = await activeHandle(deps.db, session.account.id);
-        const profile =
-          handle !== null && owned.some((p) => p.state === "published")
-            ? profileUrl(deps.config.publicOrigin, handle)
-            : null;
-        const projects = owned
-          .map(
-            (p) =>
-              `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${escapeHtml(p.state)}</span></li>`,
-          )
-          .join("");
-        const body = dashboard(session, repos, projects && `<ul>${projects}</ul>`, profile);
+        const body = dashboard(session, repos, owned, handle, deps.config.publicOrigin);
         return html(200, page({ title: "Dashboard", body, session: pageSession(session) }));
       },
     },

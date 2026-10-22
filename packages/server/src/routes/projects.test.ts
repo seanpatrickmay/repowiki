@@ -51,7 +51,7 @@ describe("the dashboard (spec 2 §7)", () => {
     const reply = await call(app, { path: "/dashboard", headers: { cookie } });
     expect(String(reply.body)).toContain(`href="${started.headers?.location}"`);
     // No biography until a project is published (ADR-0013).
-    expect(String(reply.body)).not.toContain("View your profile");
+    expect(String(reply.body)).not.toContain("View your entry");
   });
 
   it("links to the biography on the pages origin once a project is published", async () => {
@@ -62,8 +62,41 @@ describe("the dashboard (spec 2 §7)", () => {
     );
     const reply = await call(app, { path: "/dashboard", headers: { cookie } });
     expect(String(reply.body)).toContain(
-      `<a href="${deps.config.publicOrigin}/demo-dev">View your profile</a>`,
+      `<a href="${deps.config.publicOrigin}/demo-dev">View your entry</a>`,
     );
+  });
+});
+
+describe("the dashboard after the persona review", () => {
+  it("offers a repository that already has a project as a link to it, not a second build", async () => {
+    const { cookie, csrf } = await signedInCookie(deps);
+    const started = await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    const body = String((await call(app, { path: "/dashboard", headers: { cookie } })).body);
+    expect(body).not.toContain(`name="githubRepoId" value="${FAKE_REPO.id}"`);
+    expect(body).toContain(`<a href="${started.headers?.location}">Open its project</a>`);
+  });
+
+  it("names a project's state in plain words", async () => {
+    const { cookie, csrf } = await signedInCookie(deps);
+    await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    const body = String((await call(app, { path: "/dashboard", headers: { cookie } })).body);
+    expect(body).toContain("not published yet");
+  });
+
+  it("gives a published entry's links ready to paste into a LaTeX, Word or Docs resume and LinkedIn", async () => {
+    const { cookie, csrf } = await signedInCookie(deps);
+    await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"published","currentVersion":1}'::jsonb`,
+    );
+    const body = String((await call(app, { path: "/dashboard", headers: { cookie } })).body);
+    const page = `${deps.config.publicOrigin}/demo-dev`;
+    const host = new URL(deps.config.publicOrigin).host;
+    expect(body).toContain("Put it on your resume");
+    expect(body).toContain(`\\href{${page}}{${host}/demo-dev}`);
+    expect(body).toContain(`\\href{${page}/demo-repo/}{$\\nearrow$}`);
+    expect(body).toContain(`${page}/demo-repo/`);
+    expect(body).toContain("LinkedIn");
   });
 });
 
