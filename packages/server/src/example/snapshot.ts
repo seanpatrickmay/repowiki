@@ -1,6 +1,7 @@
 import { WikiExport } from "@repowiki/core";
 import { authorize, biographyName } from "@repowiki/hosted";
 import type { Queryable } from "../db/db.ts";
+import { avatarKey } from "../github/avatar.ts";
 import { contentTypeFor, type ObjectStore } from "../objects/store.ts";
 import { type buildTree, ENTRY_FILE } from "../render/build.ts";
 import { hostedExport } from "../render/hosted-export.ts";
@@ -11,6 +12,12 @@ import { generationById, latestRevision, versionOf } from "../store/drafts.ts";
 import { projectsOf } from "../store/projects.ts";
 
 const INDEX_FILE = "index.json";
+const AVATAR_EXTENSIONS = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+} as const;
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 /**
@@ -62,8 +69,20 @@ export async function exampleSnapshot(input: {
   }
   if (projects.length === 0) throw new Error(`${handle} has no published project`);
   projects.sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+  // The avatar the account stored at sign-in, as any biography shows it (ADR-0013).
+  const avatar =
+    account.avatar === undefined ? null : await objects.get(avatarKey(account.avatar.sha256));
+  const avatarFile =
+    account.avatar === undefined || avatar === null
+      ? null
+      : (`avatar.${AVATAR_EXTENSIONS[account.avatar.contentType]}` as const);
+  if (avatar !== null && avatarFile !== null) files.push({ path: avatarFile, bytes: avatar.body });
   const index = ExampleIndex.parse({
-    person: { login: account.login, displayName: account.displayName },
+    person: {
+      login: account.login,
+      displayName: account.displayName,
+      ...(avatarFile === null ? {} : { avatar: avatarFile }),
+    },
     projects,
   });
   files.push({ path: INDEX_FILE, bytes: new TextEncoder().encode(JSON.stringify(index)) });

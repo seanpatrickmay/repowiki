@@ -55,6 +55,31 @@ describe("the example at /example (ADR-0017)", () => {
     expect(html).not.toContain("Preview:");
   });
 
+  it("shows the snapshot's GitHub avatar, served with the snapshot (ADR-0013)", async () => {
+    await storeSnapshot();
+    expect(String((await call(app, { path: "/example" })).body)).toContain(
+      'src="/_app/avatar.svg"',
+    );
+    expect((await call(app, { path: "/example/_avatar" })).status).toBe(404);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    await deps.objects.put(`${EXAMPLE_PREFIX}avatar.png`, png, "image/png");
+    await deps.objects.put(
+      `${EXAMPLE_PREFIX}index.json`,
+      JSON.stringify({
+        person: { login: "repowiki-app", displayName: "Jordan Avery", avatar: "avatar.png" },
+        projects: [{ slug: "alpha", publishedAt: "2026-10-21T12:00:00.000Z" }],
+      }),
+      "application/json",
+    );
+    expect(String((await call(app, { path: "/example" })).body)).toContain(
+      'src="/example/_avatar"',
+    );
+    const image = await call(app, { path: "/example/_avatar" });
+    expect(image.status).toBe(200);
+    expect(image.headers?.["content-type"]).toBe("image/png");
+    expect(new Uint8Array(image.body as Uint8Array)).toEqual(png);
+  });
+
   it("serves each project's wiki under /example/<slug>/ and only the snapshot's projects", async () => {
     await storeSnapshot();
     const wiki = await call(app, { path: "/example/alpha/" });
