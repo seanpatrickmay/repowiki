@@ -160,11 +160,11 @@ export function biographyHtml(bio: Biography, options: BiographyOptions): string
   const categories = bio.categories.map((c) => `<li>${e(c)}</li>`).join("");
   const count = bio.works.length;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${e(bio.name)} - RepoWiki</title><link rel="stylesheet" href="${BIOGRAPHY_STYLE_PATH}"></head><body>${banner}
-<header class="site-header"><a class="site-name" href="${e(options.self)}">RepoWiki<span class="site-tagline">the developer encyclopedia</span></a></header>
+<header class="site-header"><a class="site-name" href="${e(options.self)}">RepoWiki<span class="site-tagline">pages written from code</span></a></header>
 <div class="page"><nav class="site-nav" aria-label="Site"><ul><li><a href="#works">Works</a></li><li><a href="#career">Career</a></li><li><a href="${e(github.href)}">GitHub profile</a></li></ul></nav>
 <main id="content" class="content"><nav class="page-tabs" aria-label="Page"><a href="${e(options.self)}" aria-current="page">Article</a></nav>
 <article class="article">
-<h1 class="page-title">${e(bio.name)}</h1><p class="tagline">From RepoWiki, the developer encyclopedia</p>
+<h1 class="page-title">${e(bio.name)}</h1><p class="tagline">From RepoWiki. Written by an AI model from public code and git history.</p>
 ${infobox(bio, options.avatarUrl)}
 ${bio.lead.map((p) => `<p>${runs(p)}</p>`).join("\n")}
 ${toc(bio)}

@@ -95,7 +95,7 @@ describe("the public site (readiness: marketing pages)", () => {
     expect(refunds).toContain("within 7 days of your first payment");
     expect(refunds).toContain("support@repowiki.app");
     const privacy = await body("/privacy");
-    expect(privacy).toContain("one cookie");
+    expect(privacy).toContain("two cookies");
     expect(privacy).toMatch(/never sell/);
     for (const processor of ["GitHub", "Anthropic", "Stripe", "Fly.io", "Cloudflare", "Neon"]) {
       expect(privacy, processor).toContain(processor);

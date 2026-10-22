@@ -47,11 +47,11 @@ export function sitePage(config: Config, page: SitePage): string {
 const home: SitePage = {
   title: "RepoWiki",
   description:
-    "Cited pages about your GitHub projects, for internship and co-op applications. Every sentence links to the code it came from.",
+    "Cited pages about your GitHub projects, for internship and co-op applications, written from your code and checked against it.",
   body: (config) => `<section class="hero"><div class="wrap"><div>
 <span class="eyebrow">For internship and co-op applications</span>
 <h1>Show recruiters what you actually built.</h1>
-<p class="lead">RepoWiki reads your public GitHub projects and writes a page about each one: what it does, how it works, what it's built with, and which parts you wrote. Every sentence links to the code or commit it came from.</p>
+<p class="lead">RepoWiki reads your public GitHub projects and writes a page about each one: what it does, how it works, what it's built with, and which parts you committed. Its sentences cite the code and commits they describe, so anyone can check them.</p>
 <div class="cta"><a class="button" href="${signIn(config)}">Make my page with GitHub</a><a href="/example">See an example</a></div>${AGREE}
 <p class="fine">Your first project is free. No card. Ready in about 10 to 30 minutes.</p>
 <ul class="ticks"><li>One link for your resume, LinkedIn and application portals</li><li>Your part in group projects, read from git history</li><li>A wiki of your own code to prep for "walk me through a project"</li></ul>
@@ -67,20 +67,20 @@ const home: SitePage = {
 <tr><th scope="row">Price</th><td>Free for one project<br><a href="/pro">Pro</a>: $5 a month, or $15 every 4 months</td></tr>
 </tbody></table>
 <h2>About RepoWiki</h2>
-<p><strong>RepoWiki</strong> turns a university student's public GitHub projects into a cited page for internship and co-op applications, with a wiki for every project. An AI model writes it from the code and git history, and RepoWiki checks that every citation points at real code. The student doesn't write it, so a recruiter can trust what it says, and can click any sentence to see the code behind it.</p>
+<p><strong>RepoWiki</strong> turns a university student's public GitHub projects into a cited page for internship and co-op applications, with a wiki for every project. An AI model writes it from the code and git history, and RepoWiki checks that every citation points at real code. The student doesn't write it, and a reader can follow any cited sentence to the code behind it.</p>
 <p>An entry is one link on a resume, at <code>repowiki.app/&lt;your GitHub name&gt;</code>. It shows what a student built, what they built it with, and which parts of each project were their own work. It describes the code; it never praises it or grades it.</p>
 <h3>The first look</h3>
 <p>A recruiter skims a resume before deciding to read it. A personal project usually gets one line there, and a GitHub link that someone outside engineering won't open. An entry is written for that reader. The opening paragraph and the Works table take about 30 seconds: each project, what it's built with, and the student's part in it. Every row opens into the project's wiki for the engineer who wants more.</p>
 <h3>Group projects</h3>
 <p>Class projects and hackathons are shared work, and a resume line can't show who did what. An entry describes only the student's own work, read from git history rather than claimed, and each teammate can publish their own entry about the same repository.</p>
 <h3>Technical interviews</h3>
-<p>"Walk me through a project you built" is a standard interview question. A project's wiki explains the student's own code back to them, feature by feature, which makes it a study guide for the night before.</p>
+<p>"Walk me through a project you built" is a standard interview question. A project's wiki explains the student's own code back to them, feature by feature, so you can use it to prepare for the interview.</p>
 <h2>Compared with other ways to show a project</h2>
 <div class="scroll"><table class="data"><thead><tr><th scope="col">Approach</th><th scope="col">Quick to skim</th><th scope="col">Checkable</th><th scope="col">Shows your share of team work</th><th scope="col">Effort</th></tr></thead><tbody>
 <tr><th scope="row">Resume bullet</th><td class="y">Yes</td><td class="n">No</td><td class="n">No</td><td class="y">Low</td></tr>
 <tr><th scope="row">GitHub link</th><td class="n">No</td><td class="y">Yes</td><td class="p">Hard to see</td><td class="y">None</td></tr>
 <tr><th scope="row">Portfolio website</th><td class="y">Yes</td><td class="p">Rarely</td><td class="n">No</td><td class="n">High</td></tr>
-<tr><th scope="row">RepoWiki entry</th><td class="y">Yes</td><td class="y">Click any sentence</td><td class="y">Yes</td><td class="y">Minutes</td></tr>
+<tr><th scope="row">RepoWiki entry</th><td class="y">Yes</td><td class="y">Follow the citations</td><td class="y">Yes</td><td class="y">Minutes</td></tr>
 </tbody></table></div>
 <p>An entry doesn't replace a portfolio site. It's the part a portfolio can't do: show the code behind the claims. Link to it from your portfolio.</p>
 <h2>How an entry is made</h2>
@@ -102,7 +102,7 @@ const pro: SitePage = {
   description: "Up to ten projects on your RepoWiki page, refreshed after you push.",
   body: (config) => `<main class="wrap page">
 <span class="eyebrow">RepoWiki Pro</span><h1>Every project you'd put on a resume, on one page</h1>
-<p class="lead">A Free entry shows one project. It's a good first page and a thin one. A Pro entry reads as a body of work: range across languages and libraries, a timeline of what you built, and your part in each.</p>
+<p class="lead">A Free entry shows one project. That's a good start, but it's only one project. A Pro entry shows more of your work: different languages and libraries, a timeline of what you built, and your part in each.</p>
 <div class="scroll"><table class="data"><thead><tr><th scope="col"></th><th scope="col">Free</th><th scope="col">Pro</th></tr></thead><tbody>
 <tr><th scope="row">Price</th><td>$0</td><td>$5 a month, or $15 every 4 months</td></tr>
 <tr><th scope="row">Projects in your entry</th><td>1</td><td>Up to 10</td></tr>
@@ -113,11 +113,12 @@ const pro: SitePage = {
 <tr><th scope="row">GitHub account age</th><td>30 days or more</td><td>Any</td></tr>
 <tr><th scope="row">A failed build</th><td colspan="2">Never counts against your plan</td></tr>
 </tbody></table></div>
+<p class="fine">Pro renews automatically, every month or every 4 months, until you cancel. You pay when you upgrade and then on each renewal date. If you cancel, Pro stays on until the end of the period you paid for.</p>
 <h2>During application season</h2>
 <ul><li><strong>Refresh after you push.</strong> Finish a feature in the middle of applying, refresh the project, and the entry shows it. A Free entry stays at the commit it was built from.</li>
-<li><strong>Lead with the right project.</strong> Add the project that fits each posting: the machine-learning one for a data internship, the web app for a front-end co-op.</li>
+<li><strong>Show the project that fits each job.</strong> Add the project that fits each posting: the machine-learning one for a data internship, the web app for a front-end co-op.</li>
 <li><strong>Document the big one.</strong> Capstones and team projects often pass 1,000 files; Pro covers up to 3,000.</li>
-<li><strong>Pay by the season.</strong> $15 covers four months of applying, a quarter less than paying monthly. Cancel when you sign an offer, and your entry stays up.</li></ul>
+<li><strong>Pay for four months at a time.</strong> $15 covers four months of applying, 25% less than paying monthly. Cancel when you sign an offer, and your entry stays up.</li></ul>
 <p class="cta"><a class="button" href="${signIn(config)}">Start free, upgrade any time</a></p>${AGREE}
 </main>`,
 };
@@ -129,7 +130,7 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "Can I edit what it says?",
-    "No, and that's why a recruiter can trust it: nothing on the page came from you. If a sentence is wrong, don't publish it: rebuild the project once, free, or tell us which sentence at support@repowiki.app.",
+    "No. The page says only what the code and git history show, never what anyone claims about them. If a sentence is wrong, don't publish it: rebuild the project once, free, or tell us which sentence at support@repowiki.app.",
   ],
   [
     "Will it say anything bad about my code?",
@@ -137,7 +138,7 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "It was a group project. What will it say about my part?",
-    "Your entry describes the parts of the project you wrote, read from git history, and each teammate can make their own entry about the same repository. Work that reached the repository under someone else's name, through a squash merge or pair programming, counts for whoever's name is on the commit.",
+    "Your entry describes the parts of the project in commits made under your name, read from git history, and each teammate can make their own entry about the same repository. Work that reached the repository under someone else's name, through a squash merge or pair programming, counts for whoever's name is on the commit.",
   ],
   [
     "Can I use class assignments?",
@@ -153,7 +154,7 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "Who can see my page?",
-    "No one, until you publish it. After that it's a public page at repowiki.app/<your GitHub name>, like a portfolio site, and search engines can find it. Unpublish it any time.",
+    "Only you, until you publish it, and anyone you send a preview link to: each preview link works for one hour. After that it's a public page at repowiki.app/<your GitHub name>, like a portfolio site, and search engines can find it. Unpublish it any time.",
   ],
   [
     "How long does it take?",

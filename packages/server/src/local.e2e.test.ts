@@ -42,7 +42,7 @@ function localSetup() {
   };
 }
 
-const CONTRIBUTION = "wrote 4 of the repository&#39;s 9 commits";
+const CONTRIBUTION = "made 4 of the repository&#39;s 9 commits";
 let server: RunningServer | null = null;
 const logs: object[] = [];
 afterAll(async () => server?.close());

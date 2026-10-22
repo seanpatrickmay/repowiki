@@ -59,7 +59,7 @@ describe("biographyHtml (ADR-0013)", () => {
     const marks = [
       'class="site-header"',
       'class="page-title"',
-      "From RepoWiki, the developer encyclopedia",
+      "From RepoWiki. Written by an AI model from public code and git history.",
       'class="infobox bio"',
       "is a software developer",
       'class="toc"',

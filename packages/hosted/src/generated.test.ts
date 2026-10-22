@@ -77,7 +77,7 @@ describe("the generated contribution paragraph (ADR-0012)", () => {
 
   it("states the author's share and their busiest code features", () => {
     expect(contributionParagraph("Ada Lovelace", facts(), titles, docs)).toBe(
-      "Ada Lovelace wrote 181 of the repository's 181 commits and about 100% of its current lines, most of all in CLI interface, Bot arena and Performance testing.",
+      "Ada Lovelace made 181 of the repository's 181 commits and last changed about 100% of its current lines, most of all in CLI interface, Bot arena and Performance testing.",
     );
   });
 
@@ -90,7 +90,7 @@ describe("the generated contribution paragraph (ADR-0012)", () => {
       features: [{ featureId: "arena", commits: 3, currentLines: 0 }],
     });
     expect(contributionParagraph("ada", few, titles, docs)).toBe(
-      "ada wrote 3 of the repository's 10 commits, most of all in Bot arena.",
+      "ada made 3 of the repository's 10 commits, most of all in Bot arena.",
     );
   });
 
@@ -121,7 +121,7 @@ describe("generatedContent (ADR-0012)", () => {
       exp,
       authorName: "<b>Ada</b>",
     });
-    expect(content.contribution).toMatch(/^< b>Ada< \/b> wrote 181 of/);
+    expect(content.contribution).toMatch(/^< b>Ada< \/b> made 181 of/);
     expect(PortfolioContent.safeParse(content).success).toBe(true);
   });
 });
@@ -130,7 +130,7 @@ describe("generatedContribution (ADR-0012)", () => {
   it("is the content's contribution, callable on its own (a profile's per-project section)", () => {
     const input = { suggestions: suggestions(), facts: facts(), exp, authorName: "Ada Lovelace" };
     expect(generatedContribution(input)).toBe(generatedContent(input).contribution);
-    expect(generatedContribution(input)).toMatch(/^Ada Lovelace wrote 181 of/);
+    expect(generatedContribution(input)).toMatch(/^Ada Lovelace made 181 of/);
   });
 });
 
