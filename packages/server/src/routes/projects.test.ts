@@ -76,6 +76,25 @@ describe("the dashboard after the persona review", () => {
     expect(body).toContain(`<a href="${started.headers?.location}">Open its project</a>`);
   });
 
+  it("shows a first-time student the four steps, and warns about coursework before the repositories", async () => {
+    const { cookie } = await signedInCookie(deps);
+    const body = String((await call(app, { path: "/dashboard", headers: { cookie } })).body);
+    expect(body).toContain("<ol><li>Choose a repository below");
+    const warning = body.indexOf("Check your course policy");
+    expect(warning).toBeGreaterThan(-1);
+    expect(warning).toBeLessThan(body.indexOf("Build its wiki"));
+  });
+
+  it("links a published project to its public page", async () => {
+    const { cookie, csrf } = await signedInCookie(deps);
+    await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"published","currentVersion":1}'::jsonb`,
+    );
+    const body = String((await call(app, { path: "/dashboard", headers: { cookie } })).body);
+    expect(body).toContain(`<a href="${deps.config.publicOrigin}/demo-dev/demo-repo/">See it</a>`);
+  });
+
   it("names a project's state in plain words", async () => {
     const { cookie, csrf } = await signedInCookie(deps);
     await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);

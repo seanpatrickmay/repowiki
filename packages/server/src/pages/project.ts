@@ -153,6 +153,9 @@ function content(v: ProjectView): string {
 <h3>Contribution</h3><p>${e(revision.content.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha, "you"))}</p></section>`;
 }
 
+/** Where a wrong sentence goes, said where the student reads it (the persona review). */
+const CORRECTION = `<p class="muted">Found a sentence that's wrong? Don't publish it: rebuild the project, or write to support@repowiki.app with the sentence.</p>`;
+
 function reviewSection(v: ProjectView): string {
   const { revision, review, project, session } = v;
   if (revision === null) return "";
@@ -160,7 +163,7 @@ function reviewSection(v: ProjectView): string {
     return `<section class="card"><h2>Review</h2><p>You confirmed draft ${revision.number}.</p></section>`;
   }
   const inner = `${field("revision", revision.number)}<label><input type="checkbox" name="attest" value="yes"> ${e(ATTESTATIONS[ATTESTATION_VERSION])}</label><button>Confirm</button>`;
-  return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}</section>`;
+  return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}${CORRECTION}</section>`;
 }
 
 function publishSection(v: ProjectView): string {
@@ -188,7 +191,7 @@ function publishSection(v: ProjectView): string {
           `${field("revision", revision.number)}${field("expectedVersion", current?.version ?? project.currentVersion)}${field("previewHash", preview.siteHash)}<button>Publish what the preview shows</button>`,
         )}`
       : `<p class="muted">Build a preview first: publishing makes public exactly what the preview shows.</p>`;
-  return `<section class="card"><h2>Preview and publish</h2>${live}${build}${ready}</section>`;
+  return `<section class="card"><h2>Preview and publish</h2><p class="muted">The preview shows your pages exactly as readers will see them, at a private link. Publishing puts that version online.</p>${live}${build}${ready}</section>`;
 }
 
 /**
