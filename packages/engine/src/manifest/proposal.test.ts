@@ -441,3 +441,34 @@ describe("proposalProblems title and alias limits", () => {
     expect(found).toEqual([]);
   });
 });
+
+describe("proposalProblems on a feature of only tests (ADR-0019)", () => {
+  const withFiles = [
+    { id: "c01", files: ["src/api/app.py", "src/api/routes.py"] },
+    { id: "c02", files: ["tests/test_app.py", "tests/conftest.py"] },
+    { id: "c03", files: ["web/src/App.tsx"] },
+  ];
+  const TESTS = {
+    id: "test-suite",
+    title: "Test suite",
+    aliases: ["tests", "pytest", "unit tests"],
+  };
+
+  it("refuses a feature whose files are all tests: tests join the feature they test", () => {
+    const tests = proposal({
+      features: [API, WEB, TESTS],
+      clusters: [
+        { cluster: "c01", feature: "http-api", role: "core" },
+        { cluster: "c02", feature: "test-suite", role: "core" },
+        { cluster: "c03", feature: "web-frontend", role: "core" },
+      ],
+    });
+    expect(proposalProblems(tests, withFiles)).toEqual([
+      'feature "test-suite" holds only tests; assign its clusters to the features they test',
+    ]);
+  });
+
+  it("accepts tests that join the feature they serve", () => {
+    expect(proposalProblems(proposal(), withFiles)).toEqual([]);
+  });
+});

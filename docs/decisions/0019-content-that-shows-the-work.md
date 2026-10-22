@@ -63,6 +63,12 @@ fixes come in several changes; this record holds their rulings and grows as each
   each claim cites the lines (a page's lead is not enough) and passes the same numbers rule, and
   the lead states the most telling result when there is one. — The project's headline numbers
   were in its README and appeared nowhere. — Cost if wrong: a section key and prompt text.
+- **No page of only tests.** Ruling: the manifest check refuses a feature whose files are all test
+  files while other features hold code, and the manifest prompt no longer offers "Developer
+  tooling" as an example of a repository-wide feature; a README, lockfiles and `.gitignore` join
+  the closest feature as supporting files. — The example had a page about its test suite and one
+  for its README and lockfile, each saying nothing about what was built. — Cost if wrong: a
+  retried manifest call.
 
 ## Consequences
 
