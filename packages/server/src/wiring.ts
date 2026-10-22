@@ -10,6 +10,7 @@ import { loadAvatar, loadProfile } from "./github/profile.ts";
 import { byHost } from "./http/hosts.ts";
 import type { Route } from "./http/router.ts";
 import { type App, type AppServer, listen } from "./http/server.ts";
+import { startPurger } from "./lifecycle/purge.ts";
 import { objectStoreFor } from "./objects/open.ts";
 import { fakeAnthropicFetch } from "./proxy/fake-anthropic.ts";
 import { buildTree } from "./render/build.ts";
@@ -186,7 +187,7 @@ export function startupFailure(error: unknown): string {
   return `The server failed to start (${error.name}${named}).`;
 }
 
-/** Start the listeners and the sweeper (S1, S16). */
+/** Start the listeners, the sweeper (S1, S16) and the purge (ADR-0018). */
 export async function startServer(
   config: Config,
   overrides: Partial<Deps> = {},
@@ -204,11 +205,13 @@ export async function startServer(
     throw error;
   }
   const stopSweeper = startSweeper(deps, SWEEP_MS);
+  const stopPurger = startPurger({ ...deps, log });
   return {
     deps,
     urls: servers.map((s) => s.url),
     async close() {
       stopSweeper();
+      stopPurger();
       await Promise.all(servers.map((s) => s.close()));
       await deps.db.close();
     },
