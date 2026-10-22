@@ -85,7 +85,7 @@ describe("local profile mode (M14g)", () => {
     const created = await me.go("/projects", { form: { csrf, githubRepoId: "8001" } });
     expect(created.status, created.text).toBe(303);
     const projectPath = created.location ?? "";
-    let page = await waitFor(me, projectPath, "<h2>Revision 1</h2>");
+    let page = await waitFor(me, projectPath, "<h2>Draft 1</h2>");
     const reviewed = await me.go(`${projectPath}/review`, {
       form: { csrf, revision: "1", attest: "yes" },
     });
@@ -116,7 +116,7 @@ describe("local profile mode (M14g)", () => {
     // A second project (Pro) for a repository with no local wiki fails, saying why in the log.
     const second = await me.go("/projects", { form: { csrf, githubRepoId: "8003" } });
     expect(second.status, second.text).toBe(303);
-    await waitFor(me, second.location ?? "", "Generation: failed");
+    await waitFor(me, second.location ?? "", "Building your entry: failed");
     // The worker's stderr is logged when it exits, which can be a moment after the job failed.
     await vi.waitFor(() => expect(JSON.stringify(logs)).toContain("no local wiki for ada/notes"), {
       timeout: 15_000,

@@ -6,10 +6,13 @@ import {
   type Generation,
   JOB_STEPS,
   type Job,
+  type JobStatus,
+  type JobStep,
   PLATFORM,
   type Plan,
   type Preview,
   type Project,
+  type ProjectState,
   type PublishedVersion,
   REFUSALS,
   type Review,
@@ -34,6 +37,35 @@ export interface ProjectView {
   plan: Plan;
   session: PageSession;
 }
+
+/** A project's state in the words a student uses (the persona review). */
+export const STATE_WORDS: Record<ProjectState, string> = {
+  draft: "Not published yet",
+  published: "Published",
+  withdrawn: "Taken down",
+  purged: "Deleted",
+};
+
+/** What each step of a build does, in a student's words rather than the pipeline's. */
+const STEP_WORDS: Record<JobStep, string> = {
+  fetch: "Copying the repository",
+  index: "Reading the code",
+  cluster: "Grouping the files into features",
+  manifest: "Planning the pages",
+  write: "Writing the pages",
+  verify: "Checking the citations",
+  people: "Reading who made which commits",
+  facts: "Working out your part",
+  render: "Building the pages",
+};
+
+const STATUS_WORDS: Record<JobStatus, string> = {
+  queued: "waiting to start",
+  running: "in progress",
+  succeeded: "done",
+  failed: "failed",
+  cancelled: "cancelled",
+};
 
 const field = (name: string, value: string | number) =>
   `<input type="hidden" name="${e(name)}" value="${e(String(value))}">`;
@@ -96,12 +128,12 @@ function jobSection(v: ProjectView): string {
   const steps = JOB_STEPS.map((step) => {
     const done = job.step !== null && JOB_STEPS.indexOf(step) < JOB_STEPS.indexOf(job.step);
     const current = job.step === step && active;
-    const label = current ? `<strong>${e(step)}</strong> …` : e(step);
+    const label = current ? `<strong>${STEP_WORDS[step]}</strong> …` : STEP_WORDS[step];
     return `<li${done ? ' class="muted"' : ""}>${label}</li>`;
   }).join("");
   const why =
     job.refusal === null ? "" : `<p class="notice">${e(REFUSALS[job.refusal].message)}</p>`;
-  const title = `${job.kind === "refresh" ? "Refresh" : "Generation"}: ${job.status}`;
+  const title = `${job.kind === "refresh" ? "Refreshing your entry" : "Building your entry"}: ${STATUS_WORDS[job.status]}`;
   // The page reloads itself only before there is an editor to type into (fresh review I4).
   const progress =
     active && v.revision !== null
@@ -117,7 +149,7 @@ function jobSection(v: ProjectView): string {
 function content(v: ProjectView): string {
   const { revision, generation } = v;
   if (revision === null || generation === null) return "";
-  return `<section class="card"><h2>Revision ${revision.number}</h2><p class="muted">Generated from the repository and its git history. Your biography quotes this contribution beside the first sentences of the wiki's About article; the preview shows both pages as readers will see them.</p>
+  return `<section class="card"><h2>Draft ${revision.number}</h2><p class="muted">Written by an AI model from the repository and its git history. Your entry shows this paragraph beside the opening of the project's wiki; the preview shows both pages as readers will see them.</p>
 <h3>Contribution</h3><p>${e(revision.content.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha))}</p></section>`;
 }
 
@@ -125,9 +157,9 @@ function reviewSection(v: ProjectView): string {
   const { revision, review, project, session } = v;
   if (revision === null) return "";
   if (review !== null && review.revision === revision.number) {
-    return `<section class="card"><h2>Review</h2><p>You reviewed revision ${revision.number}.</p></section>`;
+    return `<section class="card"><h2>Review</h2><p>You confirmed draft ${revision.number}.</p></section>`;
   }
-  const inner = `${field("revision", revision.number)}<label><input type="checkbox" name="attest" value="yes"> ${e(ATTESTATIONS[ATTESTATION_VERSION])}</label><button>Record review</button>`;
+  const inner = `${field("revision", revision.number)}<label><input type="checkbox" name="attest" value="yes"> ${e(ATTESTATIONS[ATTESTATION_VERSION])}</label><button>Confirm</button>`;
   return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}</section>`;
 }
 
@@ -142,20 +174,20 @@ function publishSection(v: ProjectView): string {
   const state = v.previewBuild?.revision === revision.number ? v.previewBuild : null;
   const build =
     state?.kind === "building"
-      ? `<p>Building the preview of revision ${revision.number}. This page refreshes when it is ready.</p>`
+      ? `<p>Building the preview of draft ${revision.number}. This page refreshes when it is ready.</p>`
       : `${state?.kind === "failed" ? `<p class="error">${e(state.message)}</p>` : ""}${form(
           `${base}/preview`,
           session,
-          `${field("revision", revision.number)}<button class="secondary">Build preview of revision ${revision.number}</button>`,
+          `${field("revision", revision.number)}<button class="secondary">${preview?.revision === revision.number ? "Build a new preview" : "Build a preview"}</button>`,
         )}`;
   const ready =
     preview !== null && preview.revision === revision.number
-      ? `${form(`${base}/preview/open`, session, `${field("revision", revision.number)}<button class="secondary">Open the preview of revision ${revision.number}</button>`)}<p class="muted">The preview opens on the public pages' site at a private link that works for an hour.</p>${form(
+      ? `${form(`${base}/preview/open`, session, `${field("revision", revision.number)}<button class="secondary">Open the preview</button>`)}<p class="muted">The preview opens at a private link that works for one hour. Anyone with the link can see it in that hour.</p>${form(
           `${base}/publish`,
           session,
-          `${field("revision", revision.number)}${field("expectedVersion", current?.version ?? project.currentVersion)}${field("previewHash", preview.siteHash)}<button>Publish revision ${revision.number}</button>`,
+          `${field("revision", revision.number)}${field("expectedVersion", current?.version ?? project.currentVersion)}${field("previewHash", preview.siteHash)}<button>Publish what the preview shows</button>`,
         )}`
-      : `<p class="muted">Build a preview of the latest revision before publishing.</p>`;
+      : `<p class="muted">Build a preview first: publishing makes public exactly what the preview shows.</p>`;
   return `<section class="card"><h2>Preview and publish</h2>${live}${build}${ready}</section>`;
 }
 
@@ -172,7 +204,7 @@ export function projectPage(v: ProjectView): string {
       (v.previewBuild?.kind === "building" && v.previewBuild.revision === v.revision?.number)
         ? '<meta http-equiv="refresh" content="3">'
         : "",
-    body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">State: ${e(v.project.state)}</p>${jobSection(v)}${content(v)}${reviewSection(v)}${publishSection(v)}`,
+    body: `<h1>${e(v.project.slug)}</h1>${repo}<p class="muted">${STATE_WORDS[v.project.state]}</p>${jobSection(v)}${content(v)}${reviewSection(v)}${publishSection(v)}`,
     session: v.session,
   });
 }

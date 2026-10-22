@@ -261,13 +261,13 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     expect(answered.status).toBe(303);
     expect(answered.headers?.location).toBe(`/projects/${p.projectId}`);
     const building = String((await get(`/projects/${p.projectId}`)).body);
-    expect(building).toContain("Building the preview of revision 1");
+    expect(building).toContain("Building the preview of draft 1");
     expect(building).toContain('<meta http-equiv="refresh"');
-    expect(building).not.toContain("Build preview of revision 1</button>");
+    expect(building).not.toContain("Build a preview</button>");
     release();
     await until(async () => (await previewOf(deps.db, p.projectId, 1)) !== null);
     const ready = String((await get(`/projects/${p.projectId}`)).body);
-    expect(ready).toContain("Open the preview of revision 1");
+    expect(ready).toContain("Open the preview</button>");
     expect(ready).not.toContain("Building the preview");
   }, 300_000);
 
@@ -288,7 +288,7 @@ describe("previews (spec 2 §7, S13; M14e A1, A3, A5)", () => {
     await until(async () => logged.length > 0);
     const shown = String((await get(`/projects/${p.projectId}`)).body);
     expect(shown).toContain("The preview could not be built. Try again.");
-    expect(shown).toContain("Build preview of revision 1</button>");
+    expect(shown).toContain("Build a preview</button>");
     expect(shown).not.toContain("Building the preview");
     // The log names the error, never its message.
     expect(JSON.stringify(logged)).not.toContain("astro exploded");

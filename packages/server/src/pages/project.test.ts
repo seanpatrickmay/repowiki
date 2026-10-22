@@ -59,8 +59,30 @@ describe("the project page's content (ADR-0013)", () => {
     const body = projectPage(view);
     expect(body).toContain("I wrote the ingest code.");
     expect(body).toContain("not written by the author");
-    expect(body).toContain("biography");
+    expect(body).toContain("your entry");
     for (const gone of ["Tagline", "Summary", "Highlights"]) expect(body).not.toContain(gone);
+  });
+});
+
+describe("the project page's words (the persona review)", () => {
+  it("speaks a student's words, not the pipeline's", () => {
+    const body = projectPage(view);
+    for (const internal of ["Generation:", "manifest", "cluster", "State: draft", "biography"]) {
+      expect(body, internal).not.toContain(internal);
+    }
+    expect(body).toContain("Building your entry: done");
+    expect(body).toContain("Not published yet");
+    expect(body).toContain("Checking the citations");
+  });
+
+  it("names the preview and publish buttons by what they do", () => {
+    const n = view.revision?.number ?? 0;
+    const preview = { projectId: view.project.id, revision: n, siteHash: "a".repeat(64) };
+    const body = projectPage({ ...view, preview } as ProjectView);
+    expect(body).toContain("Build a new preview</button>");
+    expect(body).toContain("Open the preview</button>");
+    expect(body).toContain("Publish what the preview shows</button>");
+    expect(body).toContain("Anyone with the link can see it in that hour.");
   });
 });
 
