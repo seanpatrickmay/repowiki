@@ -30,6 +30,28 @@ fixes come in several changes; this record holds their rulings and grows as each
 - **Every article on the Main Page.** Ruling: an "Articles" box lists every active article by
   title, above the feature map. — A reader sees the whole project's shape in one place, without
   finding All articles. — Cost if wrong: a box.
+- **A Results section.** Ruling: a feature page gains a "Results" section, after Data flow and
+  before History, for what the repository's documents, benchmarks and test outputs measured. The
+  verifier refuses a results claim with a number its cited lines (or cited commit's subject) do
+  not write as a whole number, so a result is quoted, never computed, converted or rounded.
+  Numbers inside code spans are not read. — The review found every measured result missing,
+  including ones the model was shown. — Cost if wrong: a section key; old pages have none and
+  stay valid.
+- **Plain words.** Ruling: "How it works" explains the mechanism in plain words, naming at most
+  two functions, classes or files a claim; a named technique is explained in a few words on first
+  use; intent may come from a cited design document, README or spec, not only a commit subject;
+  hooks are results or design choices, never a date or a commit. — Pages read as lists of
+  identifiers. — Cost if wrong: prompt text.
+- **No talk about the pack.** Ruling: the verifier refuses a claim that mentions the context pack
+  ("the pack shows three specifications in full"). — It is the engine's word, not the reader's. —
+  Cost if wrong: one pattern.
+- **The definition around a change.** Ruling: a pull request's summary pack shows the line that
+  opens the definition a hunk sits in (going up through less-indented lines to one that starts a
+  `def`, `class`, `fn`, `function`, `impl` and the like), and every line down to the hunk when that
+  is 8 lines or fewer; the prompt says a range ends at a gap and that a named function is cited
+  where it is defined or called. — Summaries name the function they describe, and the verifier
+  drops a name its cited lines do not write; without the line the model could only guess it. —
+  Cost if wrong: a few more lines in each summary pack.
 
 ## Consequences
 

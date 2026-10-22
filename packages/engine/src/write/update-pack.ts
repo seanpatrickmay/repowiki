@@ -61,6 +61,7 @@ const SECTION_TITLES: Record<SectionKey, string> = {
   overview: "Overview",
   "how-it-works": "How it works",
   "data-flow": "Data flow",
+  results: "Results",
   history: "History",
   "known-limitations": "Known limitations",
 };

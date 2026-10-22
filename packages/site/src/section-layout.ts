@@ -62,12 +62,13 @@ export type SectionLayout = "paragraphs" | "list" | "list-or-paragraph";
 
 /** How each section of a feature article lays out its claims. The lead is never laid out here. */
 export const ARTICLE_LAYOUTS: Record<
-  "overview" | "how-it-works" | "data-flow" | "history" | "known-limitations",
+  "overview" | "how-it-works" | "data-flow" | "results" | "history" | "known-limitations",
   SectionLayout
 > = {
   overview: "paragraphs",
   "how-it-works": "paragraphs",
   "data-flow": "paragraphs",
+  results: "list-or-paragraph",
   history: "list",
   "known-limitations": "list-or-paragraph",
 };

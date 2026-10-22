@@ -20,10 +20,12 @@ Never reuse their names, numbers or citations.
 
 - Every sentence of the body states something the cited lines or commits show. If the context
   pack does not show it, do not write it.
-- Intent ("why") is stated only in the History section, only when a commit subject says so, and
-  that commit is cited in the claim's cite array: "The retry was added to survive rate limits."
-  Never guess at motives.
+- Intent ("why") is stated only when a commit subject or a design document, README or spec in
+  the context pack says so, and that commit or those lines are cited in the claim's cite array:
+  "The retry was added to survive rate limits." Never guess at motives.
 - Do not describe code that is not in the context pack, even if its name suggests what it does.
+- Write about the repository, never about the context pack: not what it shows, lists or leaves
+  out.
 - Prefer one precise claim over two vague ones.
 
 ## Tense and mood
@@ -47,8 +49,14 @@ Never reuse their names, numbers or citations.
 ## Sections
 
 - Overview: purpose and main parts, at the level a newcomer needs first.
-- How it works: the mechanism, step by step, naming the functions, classes and files.
+- How it works: the mechanism, step by step, in plain words an engineer new to the code can
+  follow. Name a function, class or file only where it helps the reader find the code, and at
+  most two in a claim: "Each search keeps a count of how often every move was legal, so rarely
+  legal moves are not undervalued" reads better than a list of function names.
 - Data flow: inputs, transformations, storage and outputs, in the order data moves.
+- Results: what the repository's documents, benchmarks and test outputs measured, each number
+  exactly as they write it, with what it was measured against: "The bot scored 0.41 over 400
+  games against two baseline bots."
 - History: when and how the feature changed, from commit subjects, oldest first.
 - Known limitations: only what a TODO, FIXME, XXX or HACK comment, a skipped test or a reverting
   commit shows.
@@ -62,12 +70,16 @@ Never reuse their names, numbers or citations.
 - Add "()" to function and method names; omit it for classes, modules and variables.
 - Use the name as the code spells it. Do not translate `cos_api` into "the COS API module".
 - Explain a name the first time it appears when its meaning is not obvious from the name.
+- Explain a named technique (an algorithm, method or protocol) in a few plain words the first
+  time it appears, and link it when it has a Wikipedia article.
 
 ## Numbers, dates and units
 
 - Write numbers as the code has them: "at most 50 signals", "every 300 seconds".
 - Dates are written "3 February 2026" and come only from commit dates in the pack.
 - Do not round or convert units the code states.
+- Never compute a number the context pack does not write: no ratios, sums, differences or
+  percentages of your own.
 
 ## Links
 

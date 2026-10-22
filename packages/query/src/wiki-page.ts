@@ -9,6 +9,7 @@ export const SECTION_TITLES: Readonly<Record<string, string>> = {
   overview: "Overview",
   "how-it-works": "How it works",
   "data-flow": "Data flow",
+  results: "Results",
   history: "History",
   "known-limitations": "Known limitations",
   purpose: "Purpose and features",

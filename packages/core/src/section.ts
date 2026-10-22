@@ -7,6 +7,7 @@ export const SectionKey = z.enum([
   "overview",
   "how-it-works",
   "data-flow",
+  "results",
   "history",
   "known-limitations",
 ]);
