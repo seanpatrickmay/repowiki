@@ -170,6 +170,13 @@ export function revisionHtml(site: SiteModel, revision: Pick<Revision, "sha" | "
   return revision.pr === null ? linked : `${linked} (PR #${revision.pr})`;
 }
 
+/**
+ * Whether an alias is a name a reader says, not code: one with a path, file, call or underscore,
+ * or a single word with a capital inside (`ArenaMain`), is shown as code in its own row.
+ */
+const spokenAlias = (alias: string): boolean =>
+  !/[/_.()]/.test(alias) && (/\s/.test(alias) || !/[a-z][A-Z]/.test(alias));
+
 function infoboxRows(
   site: SiteModel,
   revision: Revision,
@@ -177,7 +184,14 @@ function infoboxRows(
 ): ArticleView["infobox"] {
   const box = revision.infobox;
   const rows = [
-    { label: "Also known as", html: aliases.map(escapeHtml).join(", ") },
+    { label: "Also known as", html: aliases.filter(spokenAlias).map(escapeHtml).join(", ") },
+    {
+      label: "Names in the code",
+      html: aliases
+        .filter((a) => !spokenAlias(a))
+        .map((a) => `<code>${escapeHtml(a)}</code>`)
+        .join(", "),
+    },
     { label: "Files", html: formatNumber(box.files) },
     { label: "Lines of code", html: formatNumber(box.loc) },
     { label: "Languages", html: box.languages.map(escapeHtml).join(", ") },

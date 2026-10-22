@@ -73,7 +73,8 @@ describe("articleView", () => {
 
   it("fills the infobox from the revision and the feature's aliases", () => {
     expect(view.infobox.map((row) => [row.label, row.html])).toEqual([
-      ["Also known as", "signal pipeline, SIGNALS_TABLE, /api/signals"],
+      ["Also known as", "signal pipeline"],
+      ["Names in the code", "<code>SIGNALS_TABLE</code>, <code>/api/signals</code>"],
       ["Files", "4"],
       ["Lines of code", "1,312"],
       ["Languages", "Python, TypeScript"],
@@ -97,6 +98,26 @@ describe("articleView", () => {
     expect(view.lastEdited).toMatch(
       /^An AI model wrote this page from the code as of 10 March 2026, at commit .+\. RepoWiki checked that its citations point at that code\.$/,
     );
+  });
+
+  it.each([
+    ["apply_action", false],
+    ["topology.rs", false],
+    ["/api/games", false],
+    ["ArenaMain", false],
+    ["__main__", false],
+    ["make_bot()", false],
+    ["game rules", true],
+    ["ISMCTS", true],
+    ["fast-loop", true],
+    ["JSettlers arena", true],
+  ])("names %j under Also known as: %s (a code name gets its own row, as code)", (alias, shown) => {
+    const feature = { ...site.features.get("signals"), aliases: [alias] } as never;
+    const features = new Map(site.features).set("signals", feature);
+    const rows = articleView({ ...site, features }, page("signals")).infobox;
+    const row = (label: string) => rows.find((r) => r.label === label)?.html;
+    expect(row("Also known as") === alias).toBe(shown);
+    expect(row("Names in the code") === `<code>${alias}</code>`).toBe(!shown);
   });
 
   it("omits an empty alias row and adds a notice for a retired feature", () => {
