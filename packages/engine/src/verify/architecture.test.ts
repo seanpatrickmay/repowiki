@@ -209,3 +209,31 @@ describe("verifyArchitectureClaim", () => {
     ]);
   });
 });
+
+describe("verifyArchitectureClaim on results (ADR-0019)", () => {
+  const readme = "# Demo\n\nThe bot scored 0.585 over 800 games.\n";
+  const withReadme: ArchitectureContext = {
+    ...ctx,
+    sources: new Map([...ctx.sources, ["README.md", readme]]),
+    shown: new Map([...shown, ["README.md", new Set([1, 2, 3])]]),
+  };
+  const result = (text: string, overrides: Partial<ArchitectureDraftClaim> = {}) =>
+    verifyArchitectureClaim(
+      "results",
+      draft({ text, cite: ["README.md:3-3"], ...overrides }),
+      withReadme,
+    );
+
+  it("keeps a result the cited lines write", () => {
+    expect(result("The bot scored 0.585 over 800 games.").problems).toEqual([]);
+  });
+
+  it("refuses a number the cited lines do not write", () => {
+    expect(result("The bot scored 0.6 over 800 games.").problems.join(" ")).toContain('"0.6"');
+  });
+
+  it("needs a citation: a page's lead is not where a measured result is recorded", () => {
+    const problems = result("The bot is strong.", { cite: [], pages: ["signals"] }).problems;
+    expect(problems.join(" ")).toContain("results claims cite");
+  });
+});

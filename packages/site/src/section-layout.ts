@@ -75,10 +75,11 @@ export const ARTICLE_LAYOUTS: Record<
 
 /** The same for the About article. */
 export const ARCHITECTURE_LAYOUTS: Record<
-  "purpose" | "layers" | "dependencies" | "infrastructure" | "request-paths",
+  "purpose" | "results" | "layers" | "dependencies" | "infrastructure" | "request-paths",
   SectionLayout
 > = {
   purpose: "paragraphs",
+  results: "list-or-paragraph",
   layers: "list",
   dependencies: "list",
   infrastructure: "list",
