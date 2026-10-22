@@ -90,6 +90,23 @@ describe("the public site (readiness: marketing pages)", () => {
     expect([...links]).toEqual(expect.arrayContaining(["/terms", "/privacy", "/refunds"]));
   });
 
+  it("answers what the personas could not find (ADR-0020)", async () => {
+    const privacy = await body("/privacy");
+    expect(privacy).toContain("https://github.com/settings/applications");
+    expect(privacy).toContain("commit subjects");
+    expect(privacy).toContain("sign up again");
+    expect(await body("/terms")).toContain("Delete my account");
+    const pro = await body("/pro");
+    for (const fact of ["US dollars", "within 7 days", "Billing page", "the same day"]) {
+      expect(pro, fact).toContain(fact);
+    }
+    const questions = await body("/questions");
+    for (const fact of ["Rust", "email address", "small"]) expect(questions, fact).toContain(fact);
+    const home = await body("/");
+    expect(home).toContain("Edited by");
+    expect(home).toContain("squash");
+  });
+
   it("states the refund rule and what is stored, in the words of the pages", async () => {
     const refunds = await body("/refunds");
     expect(refunds).toContain("within 7 days of your first payment");
