@@ -1,14 +1,21 @@
-import { type Revision, SCHEMA_VERSION, WikiExport } from "@repowiki/core";
+import { type Architecture, type Revision, SCHEMA_VERSION, WikiExport } from "@repowiki/core";
 import {
   bodyClaim,
   codeCitation,
   leadClaim,
+  makeArchitecture,
   makeManifest,
   makeRevision,
 } from "@repowiki/core/test-fixtures";
 import type { GenerateRequest, Provider } from "@repowiki/llm";
 import { describe, expect, it } from "vitest";
-import { type CorrectionAnswer, correctClaims, MAX_NOTE_LENGTH } from "./correct.ts";
+import {
+  ABOUT_ARTICLE,
+  type AboutCorrectionAnswer,
+  type CorrectionAnswer,
+  correctClaims,
+  MAX_NOTE_LENGTH,
+} from "./correct.ts";
 import { testVerifyContext } from "./test-wiki.ts";
 
 const NOW = "2026-10-22T12:00:00.000Z";
@@ -30,7 +37,7 @@ const page = (): Revision =>
       },
     ],
   });
-const exportOf = (revision: Revision) =>
+const exportOf = (revision: Revision, architecture: Architecture[] = []) =>
   WikiExport.parse({
     schemaVersion: SCHEMA_VERSION,
     repo: "demo",
@@ -39,10 +46,11 @@ const exportOf = (revision: Revision) =>
     manifest: makeManifest(),
     pages: [revision],
     history: { [revision.featureId]: [revision] },
+    architecture,
   });
 
 /** A provider answering each call in turn from `answers`, keeping every request. */
-function scripted(...answers: CorrectionAnswer[]) {
+function scripted(...answers: (CorrectionAnswer | AboutCorrectionAnswer)[]) {
   const requests: GenerateRequest<unknown>[] = [];
   const provider: Provider = {
     async generate<T>(request: GenerateRequest<T>) {
@@ -152,5 +160,82 @@ describe("correcting sentences a student flagged (sentence corrections spec)", (
     expect(prompt).not.toContain("\u202E");
     expect(prompt).toContain("src/signals/ingest.py");
     expect(JSON.stringify(done.exp)).not.toContain("x".repeat(40));
+  });
+
+  it("links a rewrite as a built sentence is linked: known pages kept, unknown ones plain", async () => {
+    const text =
+      "One chunk makes at most 50 signals for [[deliverables|records]] and [[nowhere|others]].";
+    const { provider } = scripted({ claims: [rewrite("c3", text, ["src/signals/ingest.py:7"])] });
+    const done = await run(provider, [{ page: "signals", claimId: "c3", note: "Per chunk." }]);
+    const texts = done.exp.pages[0]?.sections.flatMap((s) => s.claims.map((c) => c.text));
+    expect(texts).toContain(
+      "One chunk makes at most 50 signals for [[deliverables|records]] and others.",
+    );
+  });
+});
+
+describe("correcting the About article (sentence corrections spec)", () => {
+  /** The About article with no edges: the export holds only the signals page. */
+  const about = () => makeArchitecture({ edges: [] });
+  const runAbout = (provider: Provider, claimId: string) =>
+    correctClaims({
+      exp: exportOf(page(), [about()]),
+      requests: [{ page: ABOUT_ARTICLE, claimId, note: "Not what it does." }],
+      ctx: testVerifyContext(),
+      provider,
+      now: NOW,
+    });
+
+  it("rewrites a flagged claim as the article's next revision, under the article's rules", async () => {
+    const { provider } = scripted({
+      claims: [
+        {
+          ...rewrite("a-1", "Signal ingestion turns chunks into signals.", [
+            "src/signals/ingest.py:10-24",
+          ]),
+          pages: ["signals"],
+        },
+      ],
+    });
+    const done = await runAbout(provider, "a-1");
+    expect(done.outcomes).toEqual([
+      { page: ABOUT_ARTICLE, claimId: "a-1", outcome: "rewritten", detail: null },
+    ]);
+    expect(done.exp.architecture.map((a) => a.id)).toEqual([
+      "architecture-aaaaaaaaaaaa-1",
+      "architecture-aaaaaaaaaaaa-2",
+    ]);
+    const article = done.exp.architecture.at(-1);
+    expect(article).toMatchObject({
+      parentId: "architecture-aaaaaaaaaaaa-1",
+      reason: "correction",
+      generatedAt: NOW,
+    });
+    const texts = article?.sections.flatMap((s) => s.claims.map((c) => c.text));
+    expect(texts?.some((t) => t.includes("turns chunks into signals"))).toBe(true);
+    expect(done.exp.pages[0]?.id).toBe("rev-1");
+  });
+
+  it("removes a claim that names a page the wiki lacks twice, keeping the rest", async () => {
+    const bad = { ...rewrite("a-2", "Signals depend on nothing.", []), pages: ["nowhere"] };
+    const { provider, requests } = scripted({ claims: [bad] }, { claims: [bad] });
+    const done = await runAbout(provider, "a-2");
+    expect(requests).toHaveLength(2);
+    expect(done.outcomes[0]?.outcome).toBe("removed");
+    const article = done.exp.architecture.at(-1);
+    expect(article?.sections.map((s) => s.key)).toEqual(["lead", "layers"]);
+  });
+
+  it("refuses a claim of an About article the export doesn't have", async () => {
+    const { provider, requests } = scripted();
+    const done = await correctClaims({
+      exp: exportOf(page()),
+      requests: [{ page: ABOUT_ARTICLE, claimId: "a-1", note: "x" }],
+      ctx: testVerifyContext(),
+      provider,
+      now: NOW,
+    });
+    expect(requests).toEqual([]);
+    expect(done.outcomes[0]?.outcome).toBe("refused");
   });
 });
