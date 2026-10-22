@@ -98,8 +98,10 @@ function gitAsync(
     let size = 0;
     let stderr = "";
     let failure: Error | null = null;
+    const started = performance.now();
+    const timedOut = () => new GitTimeoutError(`git blame timed out after ${timeoutMs} ms`);
     const timer = setTimeout(() => {
-      failure = new GitTimeoutError(`git blame timed out after ${timeoutMs} ms`);
+      failure = timedOut();
       child.kill("SIGKILL");
     }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => {
@@ -118,6 +120,9 @@ function gitAsync(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      // The deadline decides, not which event a busy loop delivers first: a blame that ended
+      // after it ran past its timeout even if its exit was seen before the timer's callback.
+      if (failure === null && performance.now() - started >= timeoutMs) failure = timedOut();
       if (failure !== null) reject(failure);
       else if (code !== 0) reject(blameFailure(repo, stderr));
       else resolve(Buffer.concat(out).toString("utf8"));

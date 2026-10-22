@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BlameSkippedError, blameFile, parseIncrementalBlame } from "./blame.ts";
 import { GitTimeoutError } from "./git.ts";
 import { createTestRepo, type TestRepo } from "./test-repo.ts";
@@ -191,6 +191,19 @@ describe("blameFile (spec v2 #6 R1, R2, R4)", () => {
     await expect(blameFile(repo.dir, head, "b.py", [], { timeoutMs: 1 })).rejects.toBeInstanceOf(
       GitTimeoutError,
     );
+  });
+
+  it("stops it even when a busy loop sees git exit before the timer fires (CI)", async () => {
+    const { head } = history();
+    // With the timer held, only the deadline can say the blame ran past its timeout.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await expect(blameFile(repo.dir, head, "b.py", [], { timeoutMs: 1 })).rejects.toBeInstanceOf(
+        GitTimeoutError,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses a sha or an ignore-rev that is not 40 hex", async () => {
