@@ -90,6 +90,14 @@ describe("the public site (readiness: marketing pages)", () => {
     expect([...links]).toEqual(expect.arrayContaining(["/terms", "/privacy", "/refunds"]));
   });
 
+  it("lets a keyboard reader skip the navigation on every page", async () => {
+    for (const path of Object.keys(SITE_PAGES)) {
+      const html = await body(path);
+      expect(html, path).toContain('<a class="skip" href="#content">Skip to content</a>');
+      expect(html, path).toContain('<div id="content">');
+    }
+  });
+
   it("answers what the personas could not find (ADR-0020)", async () => {
     const privacy = await body("/privacy");
     expect(privacy).toContain("https://github.com/settings/applications");
