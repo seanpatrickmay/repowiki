@@ -82,7 +82,7 @@ describe("review (Contract §6.3, ADR-0012)", () => {
       revision: 1,
       attestationVersion: 2,
     });
-    expect(String((await page()).body)).toContain("You reviewed revision 1.");
+    expect(String((await page()).body)).toContain("You confirmed draft 1.");
   });
 
   it("refuses another account's project as not found, and a missing CSRF token", async () => {

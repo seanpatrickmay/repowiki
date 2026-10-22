@@ -1,4 +1,4 @@
-import { type Project, type ProjectState, profileUrl, projectUrl } from "@repowiki/hosted";
+import { type Project, profileUrl, projectUrl } from "@repowiki/hosted";
 import { type Deps, logOf, nameOf } from "../app.ts";
 import { type GitHubRepo, githubApi, TokenRevoked } from "../github/api.ts";
 import { eligibilityFacts } from "../github/facts.ts";
@@ -7,20 +7,13 @@ import type { Reply, Route } from "../http/router.ts";
 import { html, redirect } from "../http/server.ts";
 import { checkMutation, currentSession, type Session } from "../http/session.ts";
 import { escapeHtml, page } from "../pages/layout.ts";
+import { STATE_WORDS } from "../pages/project.ts";
 import { pageSession, refusalPage } from "../pages/refusal.ts";
 import { activeHandle } from "../store/accounts.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
 import { projectsOf } from "../store/projects.ts";
 import { startGeneration, startRefresh } from "../store/start.ts";
 import { ownedProject } from "./live.ts";
-
-/** A project's state in the words a student uses (the persona review, ADR-0020). */
-const STATE_WORDS: Record<ProjectState, string> = {
-  draft: "not published yet",
-  published: "published",
-  withdrawn: "taken down",
-  purged: "deleted",
-};
 
 /** Links to paste into a resume: there is no script on the page, so each is shown to copy. */
 function resumeCard(profile: string, published: { slug: string; url: string }[]): string {
@@ -64,7 +57,7 @@ ${action}</li>`;
   const projects = owned
     .map(
       (p) =>
-        `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${STATE_WORDS[p.state]}</span></li>`,
+        `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${STATE_WORDS[p.state].toLowerCase()}</span></li>`,
     )
     .join("");
   const published = owned.filter((p) => p.state === "published");
