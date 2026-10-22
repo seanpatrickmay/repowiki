@@ -44,7 +44,8 @@ export function rotation(head: string, length: number): number {
  * "Signals are built." -> "... that signals are built?". Trailing sentence punctuation (also
  * inside a closing quote or bracket) is replaced by one "?"; the first letter is lowercased only
  * before a lowercase letter, or when it is the word "A". Null when no words are left or the claim
- * is more than one sentence, which "... that" cannot carry, so the caller skips the hook.
+ * is more than one sentence, which "... that" cannot carry, or quotes a raw value with five or more
+ * decimal places; the caller then skips the hook.
  */
 export function didYouKnowText(text: string): string | null {
   const stem = text
@@ -53,6 +54,8 @@ export function didYouKnowText(text: string): string | null {
     .replace(/[.!?:\u2026]+(["\u201d\u2019')\]]+)$/, "$1")
     .trimEnd();
   if (!/[\p{L}\p{N}]/u.test(stem) || /[.!?]\s+[A-Z]/.test(stem)) return null;
+  // A raw value such as 0.8450314407467299 tells a first-time reader nothing (the persona review).
+  if (/\d\.\d{5,}/.test(stem)) return null;
   const lowered = /^(?:[A-Z][a-z]|A\s)/.test(stem)
     ? stem.charAt(0).toLowerCase() + stem.slice(1)
     : stem;

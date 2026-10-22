@@ -29,9 +29,12 @@ import {
   SHA_B,
 } from "@repowiki/core/test-fixtures";
 import { openStore, readHistory } from "@repowiki/engine";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILD_LOCK } from "./wiki-cli.ts";
 import { checkWiki } from "./wiki-problems.ts";
+
+// Each test runs a command as a process: seconds on a loaded machine, as in CI.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 /** Damages every stored page body, as a hand-edited or half-migrated store would be. */
 function corruptPages(out: string): void {
