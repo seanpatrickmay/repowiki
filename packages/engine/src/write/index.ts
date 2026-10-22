@@ -25,6 +25,14 @@ export {
 } from "./build.ts";
 export { type Ancestry, ancestry, carriedHistory } from "./carry.ts";
 export {
+  CorrectionAnswer,
+  type CorrectionOutcome,
+  type CorrectionRequest,
+  correctClaims,
+  MAX_CORRECTIONS,
+  MAX_NOTE_LENGTH,
+} from "./correct.ts";
+export {
   buildPack,
   type ContextPack,
   clean,

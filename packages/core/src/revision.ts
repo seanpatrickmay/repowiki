@@ -4,7 +4,8 @@ import { GitSha, IsoDateTime } from "./primitives.ts";
 import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rules.ts";
 import { Section } from "./section.ts";
 
-export const RevisionReason = z.enum(["build", "update", "manifest-change"]);
+/** "correction": a student flagged sentences and they were rewritten or removed (ADR-0023). */
+export const RevisionReason = z.enum(["build", "update", "manifest-change", "correction"]);
 export type RevisionReason = z.infer<typeof RevisionReason>;
 
 const count = z.int().nonnegative();
