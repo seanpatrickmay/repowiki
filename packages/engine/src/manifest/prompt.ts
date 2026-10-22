@@ -9,7 +9,7 @@ You receive clusters of files. Each cluster was computed from the repository's i
 How to group clusters into features:
 - A feature is a capability a reader would look up: "Signal ingestion", "GitHub integration", "Deployment infrastructure". It is not a folder name and not a layer such as "utils" or "models".
 - Prefer focused pages: most clusters become a feature of their own. Merge clusters only when they implement the same capability, and keep them apart when they serve different purposes, even if they share a directory.
-- Tests, fixtures, scripts, configuration, CI and documentation join the feature they serve. Make a separate feature (for example "Continuous integration" or "Developer tooling") only for a cluster that serves the repository as a whole.
+- Tests, fixtures, scripts, configuration, CI and documentation join the feature they serve; a feature made only of tests is refused. Make a separate feature (for example "Continuous integration") only for a cluster that serves the repository as a whole, and never one for repository files such as a README, lockfiles or .gitignore: they join the closest feature as supporting files.
 
 Return two lists.
 

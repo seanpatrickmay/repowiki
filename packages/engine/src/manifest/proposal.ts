@@ -1,6 +1,7 @@
 import { ALIAS_MAX_LENGTH, aliasProblem, controlCharacters, FeatureId } from "@repowiki/core";
 import { z } from "zod";
 import type { Cluster } from "../cluster/index.ts";
+import { isTestFile } from "../link/index.ts";
 
 /**
  * What the manifest call returns: the features, then one assignment per cluster. Assigning each
@@ -96,6 +97,26 @@ export function limitProblems(problems: readonly string[]): string[] {
 }
 
 /**
+ * A feature whose files are all tests, while other features hold code (ADR-0019): its page
+ * would describe tests with nothing to say about what they test.
+ */
+function testOnlyProblems(proposal: ManifestProposal, clusters: readonly Cluster[]): string[] {
+  const filesOf = new Map(clusters.map((c) => [c.id, c.files]));
+  const files = new Map<string, string[]>();
+  for (const { cluster, feature } of proposal.clusters) {
+    files.set(feature, [...(files.get(feature) ?? []), ...(filesOf.get(cluster) ?? [])]);
+  }
+  const testsOnly = (paths: string[]) => paths.length > 0 && paths.every(isTestFile);
+  if (![...files.values()].some((paths) => paths.some((p) => !isTestFile(p)))) return [];
+  return [...files]
+    .filter(([, paths]) => testsOnly(paths))
+    .map(
+      ([id]) =>
+        `feature ${quote(id)} holds only tests; assign its clusters to the features they test`,
+    );
+}
+
+/**
  * Every reason the proposal cannot become a manifest; empty when it can. At most
  * MAX_REPORTED_PROBLEMS are listed, then a final "and N more problems" entry.
  */
@@ -139,5 +160,6 @@ export function proposalProblems(
   }
   for (const id of known)
     if (!assigned.has(id)) problems.push(`cluster ${quote(id)} is not assigned`);
+  problems.push(...testOnlyProblems(proposal, clusters));
   return limitProblems(problems);
 }
