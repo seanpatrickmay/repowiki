@@ -10,6 +10,7 @@ import { generationsOf, latestRevision } from "../store/drafts.ts";
 import { jobById, jobSpec } from "../store/jobs.ts";
 import { projectById } from "../store/projects.ts";
 import { estimateFor, startCorrection } from "../store/start.ts";
+import { draftRoutes } from "./drafts.ts";
 import { internalRoutes } from "./internal.ts";
 import { call, generatedProject, startedJob, testDeps } from "./test-app.ts";
 
@@ -21,10 +22,13 @@ let deps: Deps;
 let app: App;
 let project: Project;
 let account: Account;
+let cookie: string;
 beforeEach(async () => {
   deps = await testDeps();
-  app = createApp(deps, internalRoutes(deps));
-  const { projectId, accountId } = await generatedProject(deps);
+  app = createApp(deps, [...internalRoutes(deps), ...draftRoutes(deps)]);
+  const generated = await generatedProject(deps);
+  const { projectId, accountId } = generated;
+  cookie = generated.cookie;
   project = (await projectById(deps.db, projectId)) as Project;
   account = (await accountById(deps.db, accountId)) as Account;
 });
@@ -138,6 +142,13 @@ describe("a correction job (sentence corrections spec)", () => {
       "SELECT body::text AS t FROM job_specs UNION ALL SELECT body::text FROM audit_events",
     );
     for (const row of stored) expect(row.t).not.toContain(NOTE);
+    // The test clock stands still: the build ran earlier, as it does on a real one.
+    await deps.db.query(
+      `UPDATE jobs SET body = body || '{"createdAt":"2020-01-01T00:00:00.000Z"}'::jsonb WHERE body->>'kind' = 'generate'`,
+    );
+    const page = await call(app, { path: `/projects/${project.id}`, headers: { cookie } });
+    expect(String(page.body)).toContain("1 sentence rewritten from the code.");
+    expect(String(page.body)).not.toContain(NOTE);
   });
 
   it("forgets the notes of a correction that changed nothing, and refuses a build's success", async () => {

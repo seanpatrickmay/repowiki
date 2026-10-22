@@ -75,10 +75,10 @@ describe("the project page's words (the persona review)", () => {
     expect(body).toContain("Checking the citations");
   });
 
-  it("says what the preview is for, and where to report a wrong sentence, beside the buttons", () => {
+  it("says what the preview is for, and how to correct a wrong sentence, beside the buttons", () => {
     const body = projectPage(view);
     expect(body).toContain("The preview shows your pages exactly as readers will see them");
-    expect(body).toContain("support@repowiki.app");
+    expect(body).toContain(`href="/projects/${view.project.id}/corrections"`);
   });
 
   it("names the preview and publish buttons by what they do", () => {
@@ -113,5 +113,27 @@ describe("the project page's rebuild (marketing review)", () => {
     expect(projectPage({ ...view, project: published, plan: "pro" })).toContain(
       "Refresh from the latest commit",
     );
+  });
+});
+
+describe("the project page during and after a correction (ADR-0023)", () => {
+  const correcting = (patch: Partial<Job>) => ({ ...job, kind: "correct", ...patch }) as Job;
+
+  it("names a running correction and its two steps, and offers no correction meanwhile", () => {
+    const body = projectPage({ ...view, job: correcting({ status: "running", step: "write" }) });
+    expect(body).toContain("Correcting sentences: in progress");
+    expect(body).toContain("Rewriting the sentences from the code");
+    expect(body).not.toContain("Grouping the files into features");
+    expect(body).not.toContain(`href="/projects/${view.project.id}/corrections"`);
+  });
+
+  it("says what a finished correction changed", () => {
+    const outcomes = [
+      { page: "signals", claimId: "c1", outcome: "rewritten" as const },
+      { page: "signals", claimId: "c2", outcome: "rewritten" as const },
+      { page: "signals", claimId: "c3", outcome: "removed" as const },
+    ];
+    const body = projectPage({ ...view, job: correcting({ status: "succeeded" }), outcomes });
+    expect(body).toContain("2 sentences rewritten from the code and 1 removed");
   });
 });

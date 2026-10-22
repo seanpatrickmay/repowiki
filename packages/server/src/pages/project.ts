@@ -37,6 +37,8 @@ export interface ProjectView {
   plan: Plan;
   /** The project's succeeded corrections, whose revisions are no rebuilds (rebuildOffer). */
   corrections?: number;
+  /** What the job, when it is a correction that succeeded, did to each sentence (ADR-0023). */
+  outcomes?: { page: string; claimId: string; outcome: "rewritten" | "removed" | "refused" }[];
   session: PageSession;
 }
 
@@ -59,6 +61,18 @@ const STEP_WORDS: Record<JobStep, string> = {
   people: "Reading who made which commits",
   facts: "Working out your part",
   render: "Building the pages",
+};
+
+/** A correction's two steps (ADR-0023): it reads no repository history and plans no pages. */
+const CORRECTION_STEPS: readonly [JobStep, string][] = [
+  ["write", "Rewriting the sentences from the code"],
+  ["render", "Saving the corrected draft"],
+];
+
+const KIND_WORDS: Record<Job["kind"], string> = {
+  generate: "Building your entry",
+  refresh: "Refreshing your entry",
+  correct: "Correcting sentences",
 };
 
 const STATUS_WORDS: Record<JobStatus, string> = {
@@ -127,21 +141,45 @@ function jobSection(v: ProjectView): string {
   const { job } = v;
   if (job === null) return "";
   const active = isActive(job);
-  const steps = JOB_STEPS.map((step) => {
-    const done = job.step !== null && JOB_STEPS.indexOf(step) < JOB_STEPS.indexOf(job.step);
-    const current = job.step === step && active;
-    const label = current ? `<strong>${STEP_WORDS[step]}</strong> …` : STEP_WORDS[step];
-    return `<li${done ? ' class="muted"' : ""}>${label}</li>`;
-  }).join("");
+  const listed: readonly [JobStep, string][] =
+    job.kind === "correct" ? CORRECTION_STEPS : JOB_STEPS.map((s) => [s, STEP_WORDS[s]]);
+  const order = listed.map(([s]) => s);
+  const steps = listed
+    .map(([step, words]) => {
+      const done = job.step !== null && JOB_STEPS.indexOf(step) < JOB_STEPS.indexOf(job.step);
+      const current = job.step === step && active;
+      const label = current ? `<strong>${words}</strong> …` : words;
+      return `<li${done || (job.status === "succeeded" && order.includes(step)) ? ' class="muted"' : ""}>${label}</li>`;
+    })
+    .join("");
   const why =
     job.refusal === null ? "" : `<p class="notice">${e(REFUSALS[job.refusal].message)}</p>`;
-  const title = `${job.kind === "refresh" ? "Refreshing your entry" : "Building your entry"}: ${STATUS_WORDS[job.status]}`;
+  const title = `${KIND_WORDS[job.kind]}: ${STATUS_WORDS[job.status]}`;
   // The page reloads itself only before there is an editor to type into (fresh review I4).
   const progress =
     active && v.revision !== null
-      ? `<p class="muted">Refreshing… <a href="/projects/${e(v.project.id)}">reload</a> to see progress.</p>`
+      ? `<p class="muted">${job.kind === "correct" ? "Correcting" : "Refreshing"}… <a href="/projects/${e(v.project.id)}">reload</a> to see progress.</p>`
       : "";
-  return `<section class="card"><h2>${e(title)}</h2>${progress}<ol>${steps}</ol>${why}${jobActions(v)}</section>`;
+  return `<section class="card"><h2>${e(title)}</h2>${progress}<ol>${steps}</ol>${corrected(v)}${why}${jobActions(v)}</section>`;
+}
+
+/** What a finished correction did, counted; the draft and its preview show the sentences. */
+function corrected(v: ProjectView): string {
+  if (v.job?.kind !== "correct" || v.job.status !== "succeeded" || !v.outcomes) return "";
+  const count = (outcome: string) => v.outcomes?.filter((o) => o.outcome === outcome).length ?? 0;
+  const sentences = (n: number) => `${n} sentence${n === 1 ? "" : "s"}`;
+  const [rewritten, removed, refused] = [count("rewritten"), count("removed"), count("refused")];
+  const parts = [
+    rewritten > 0 ? `${sentences(rewritten)} rewritten from the code` : "",
+    removed > 0
+      ? `${rewritten > 0 ? removed : sentences(removed)} removed because no version of ${removed === 1 ? "it" : "them"} held up`
+      : "",
+  ].filter((p) => p !== "");
+  const left =
+    refused > 0
+      ? ` ${sentences(refused)} could not be corrected and ${refused === 1 ? "is" : "are"} unchanged.`
+      : "";
+  return `<p>${e(parts.join(" and "))}.${e(left)} Build a preview to read the new draft.</p>`;
 }
 
 /**
@@ -155,17 +193,20 @@ function content(v: ProjectView): string {
 <h3>Contribution</h3><p>${e(revision.content.contribution)}</p><p class="muted">${e(GENERATED_LABEL(generation.commitSha, "you"))}</p></section>`;
 }
 
-/** Where a wrong sentence goes, said where the student reads it (the persona review). */
-const CORRECTION = `<p class="muted">Found a sentence that's wrong? Don't publish it: rebuild the project, or write to support@repowiki.app with the sentence.</p>`;
+/** Where a wrong sentence goes, said where the student reads it (ADR-0023); none while a job runs. */
+const correction = (v: ProjectView) =>
+  isActive(v.job)
+    ? ""
+    : `<p class="muted">Found a sentence that's wrong? Don't publish it. <a href="/projects/${e(v.project.id)}/corrections">Correct it</a>: say what's wrong, and RepoWiki rewrites it from the code or removes it.</p>`;
 
 function reviewSection(v: ProjectView): string {
   const { revision, review, project, session } = v;
   if (revision === null) return "";
   if (review !== null && review.revision === revision.number) {
-    return `<section class="card"><h2>Review</h2><p>You confirmed draft ${revision.number}.</p></section>`;
+    return `<section class="card"><h2>Review</h2><p>You confirmed draft ${revision.number}.</p>${correction(v)}</section>`;
   }
   const inner = `${field("revision", revision.number)}<label><input type="checkbox" name="attest" value="yes"> ${e(ATTESTATIONS[ATTESTATION_VERSION])}</label><button>Confirm</button>`;
-  return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}${CORRECTION}</section>`;
+  return `<section class="card"><h2>Review</h2>${form(`/projects/${project.id}/review`, session, inner)}${correction(v)}</section>`;
 }
 
 function publishSection(v: ProjectView): string {
