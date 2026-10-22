@@ -80,17 +80,16 @@ describe("mainPageView", () => {
         "Signal ingestion",
         "... that signals are created from ingested chunks by <code>ingest_chunk</code>?",
       ],
-      ["Signal ingestion", "... that signal ingestion was introduced in PR #45?"],
     ]);
   });
 
-  it("lists recently updated articles newest first, by commit date", () => {
+  it("lists recently updated articles newest first, by each feature's last commit", () => {
     // Redirects (legacy-signals) are left out; the retired exporter and the hostile title are in.
     expect(view.recent).toEqual([
       { href: "/wiki/signals/", title: "Signal ingestion", date: "10 March 2026" },
-      { href: "/wiki/hostile-title/", title: HOSTILE_TITLE, date: "25 February 2026" },
       { href: "/wiki/deliverables/", title: "Deliverables", date: "20 February 2026" },
-      { href: "/wiki/exporter/", title: "CSV exporter", date: "15 January 2026" },
+      { href: "/wiki/exporter/", title: "CSV exporter", date: "3 February 2026" },
+      { href: "/wiki/hostile-title/", title: HOSTILE_TITLE, date: "3 February 2026" },
     ]);
   });
 
@@ -105,7 +104,6 @@ describe("mainPageView", () => {
     expect(rotated.featured?.leadHtml).not.toContain("<img");
     expect(rotated.didYouKnow.map((item) => item.html)).toEqual([
       "... that signals are created from ingested chunks by <code>ingest_chunk</code>?",
-      "... that signal ingestion was introduced in PR #45?",
       "... that deliverables are stored as rows in the <code>deliverables</code> table?",
     ]);
   });
@@ -145,7 +143,10 @@ describe("mainPageView", () => {
     };
     const pages = base.pages.map((page) => ({
       ...page,
-      commitDate: dates[page.featureId] ?? page.commitDate,
+      infobox: {
+        ...page.infobox,
+        lastCommitDate: dates[page.featureId] ?? page.infobox.lastCommitDate,
+      },
     }));
     const recent = mainPageView(buildSiteModel({ ...base, pages }, null)).recent;
     expect(recent.slice(0, 2).map((item) => [item.href, item.date])).toEqual([
@@ -162,7 +163,9 @@ describe("mainPageView", () => {
       return mainPageView(model).recent.map((item) => item.href);
     };
     const pages = base.pages.map((page) =>
-      page.featureId === "hostile-title" ? { ...page, commitDate: tied } : page,
+      page.featureId === "hostile-title"
+        ? { ...page, infobox: { ...page.infobox, lastCommitDate: tied } }
+        : page,
     );
     const expected = [
       "/wiki/signals/",
@@ -212,10 +215,63 @@ describe("mainPageView", () => {
       articleCount: 0,
       architecture: null,
       featured: null,
+      articles: [],
       didYouKnow: [],
       recent: [],
       inProgress: null,
     });
+  });
+});
+
+describe("the Main Page shows what the project is about (ADR-0019)", () => {
+  it("features an article the About lead is built on, rotated among those only", () => {
+    const base = fixtureExport();
+    const [about] = base.architecture;
+    if (about === undefined) throw new Error("fixture");
+    const lead = about.sections.map((section) =>
+      section.key === "lead"
+        ? { ...section, claims: section.claims.map((c) => ({ ...c, supports: ["c5"] })) }
+        : section,
+    );
+    for (const head of [base.head, `00000001${"0".repeat(32)}`, `00000002${"0".repeat(32)}`]) {
+      const exp = { ...base, head, architecture: [{ ...about, sections: lead }] };
+      expect(mainPageView(buildSiteModel(exp, null)).featured?.href, head).toBe(
+        "/wiki/deliverables/",
+      );
+    }
+  });
+
+  it("keeps history claims out of Did you know", () => {
+    const texts = mainPageView(site).didYouKnow.map((item) => item.html);
+    expect(texts.some((t) => t.includes("introduced in PR #45"))).toBe(false);
+  });
+
+  it("ranks Recently updated by each feature's own last commit, not the build's date", () => {
+    const base = fixtureExport();
+    const last: Record<string, string> = {
+      exporter: "2026-03-01T10:00:00Z",
+      signals: "2026-01-02T10:00:00Z",
+    };
+    const pages = base.pages.map((page) => ({
+      ...page,
+      commitDate: "2026-03-10T16:30:00+01:00",
+      infobox: { ...page.infobox, lastCommitDate: last[page.featureId] ?? "2026-02-01T10:00:00Z" },
+    }));
+    const recent = mainPageView(buildSiteModel({ ...base, pages }, null)).recent;
+    expect(recent[0]).toEqual({
+      href: "/wiki/exporter/",
+      title: "CSV exporter",
+      date: "1 March 2026",
+    });
+    expect(recent.at(-1)?.href).toBe("/wiki/signals/");
+  });
+
+  it("lists every article by title", () => {
+    expect(mainPageView(site).articles).toEqual([
+      { href: "/wiki/hostile-title/", title: HOSTILE_TITLE },
+      { href: "/wiki/deliverables/", title: "Deliverables" },
+      { href: "/wiki/signals/", title: "Signal ingestion" },
+    ]);
   });
 });
 

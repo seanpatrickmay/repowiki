@@ -859,19 +859,22 @@ describe("Main Page, Random article and All articles", () => {
     expect(html).toContain("3 articles.");
     expect(html).toContain('(<a href="/wiki/deliverables/">Full article...</a>)');
     expect(html).toContain(
-      '... that signal ingestion was introduced in PR #45?</span> <span class="dyk-source">(<a href="/wiki/signals/">Signal ingestion</a>)</span>',
+      '... that signals are created from ingested chunks by <code>ingest_chunk</code>?</span> <span class="dyk-source">(<a href="/wiki/signals/">Signal ingestion</a>)</span>',
     );
-    expect(html.indexOf("10 March 2026")).toBeLessThan(html.indexOf("25 February 2026"));
-    expect(html.indexOf("25 February 2026")).toBeLessThan(html.indexOf("20 February 2026"));
-    expect(html.indexOf("20 February 2026")).toBeLessThan(html.indexOf("15 January 2026"));
+    // A history claim is never a hook (ADR-0019).
+    expect(html).not.toContain("introduced in PR #45?");
+    // Recently updated, by each feature's own last commit.
+    expect(html.indexOf("10 March 2026")).toBeLessThan(html.indexOf("20 February 2026"));
+    expect(html.indexOf("20 February 2026")).toBeLessThan(html.indexOf(">3 February 2026<"));
   });
 
   it("escapes the hostile feature's title on the Main Page", () => {
     const html = site.read("index.html");
     const title = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &amp; &#39;p&#39;\uE000\uE001";
     expect(html).toContain(
-      `<li><a href="/wiki/hostile-title/">${title}</a> <span class="mp-date">25 February 2026</span></li>`,
+      `<li><a href="/wiki/hostile-title/">${title}</a> <span class="mp-date">3 February 2026</span></li>`,
     );
+    expect(html).toContain(`<li><a href="/wiki/hostile-title/">${title}</a></li>`);
     expect(html).not.toContain("<img src=x");
     expect(html).not.toContain("<i>x</i>");
   });

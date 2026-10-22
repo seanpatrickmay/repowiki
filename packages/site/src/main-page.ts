@@ -20,6 +20,8 @@ export interface MainPageView {
    */
   architecture: { href: string; title: string; leadHtml: string } | null;
   featured: { href: string; leadHtml: string } | null;
+  /** Every active article by title (ADR-0019). */
+  articles: { href: string; title: string }[];
   didYouKnow: { html: string; href: string; title: string }[];
   recent: { href: string; title: string; date: string }[];
   /**
@@ -66,6 +68,23 @@ function activePages(site: SiteModel): Revision[] {
     .sort((a, b) => (a.featureId < b.featureId ? -1 : 1));
 }
 
+/**
+ * The articles the About lead is built on (ADR-0019): the pages its lead's body claims name, which
+ * are what the project is about. Every active article when the export has no About article or
+ * its lead names none.
+ */
+function corePages(site: SiteModel, active: Revision[]): Revision[] {
+  const about = site.architecture;
+  if (about === null) return active;
+  const claims = new Map(about.sections.flatMap((s) => s.claims).map((c) => [c.id, c]));
+  const lead = about.sections.find((s) => s.key === "lead")?.claims ?? [];
+  const named = new Set(
+    lead.flatMap((c) => c.supports).flatMap((id) => claims.get(id)?.pages ?? []),
+  );
+  const core = active.filter((page) => named.has(page.featureId));
+  return core.length > 0 ? core : active;
+}
+
 /** Same-site URLs /random/ may send the reader to, embedded in the page at build time. */
 export function randomTargets(site: SiteModel): string[] {
   return activePages(site).map((page) => articleUrl(page.featureId));
@@ -108,7 +127,8 @@ export function mainPageView(site: SiteModel): MainPageView {
   const links = inlineOptions(site);
   const active = activePages(site);
 
-  const pick = active[rotation(site.wiki.head, active.length)];
+  const core = corePages(site, active);
+  const pick = core[rotation(site.wiki.head, core.length)];
   const featured =
     pick === undefined
       ? null
@@ -118,8 +138,9 @@ export function mainPageView(site: SiteModel): MainPageView {
         };
 
   const hooks = active.flatMap((page) =>
+    // A history claim is a date and a commit subject: no hook for a first-time reader.
     page.sections.flatMap((section) =>
-      section.claims
+      (section.key === "history" ? [] : section.claims)
         .filter((claim) => claim.hook)
         .flatMap((claim) => {
           const text = didYouKnowText(claim.text);
@@ -143,19 +164,30 @@ export function mainPageView(site: SiteModel): MainPageView {
         featureLink(site, page.featureId) !== null &&
         site.features.get(page.featureId)?.status.kind !== "redirect",
     )
+    // By the feature's own last commit: every page of a build carries the build's commit date.
     .sort(
       (a, b) =>
         // The date as written first, so the list never contradicts the dates shown.
-        compareStrings(calendarDate(b.commitDate), calendarDate(a.commitDate)) ||
-        Date.parse(b.commitDate) - Date.parse(a.commitDate) ||
+        compareStrings(
+          calendarDate(b.infobox.lastCommitDate),
+          calendarDate(a.infobox.lastCommitDate),
+        ) ||
+        Date.parse(b.infobox.lastCommitDate) - Date.parse(a.infobox.lastCommitDate) ||
         (a.featureId < b.featureId ? -1 : 1),
     )
     .slice(0, RECENT_COUNT)
     .map((page) => ({
       href: articleUrl(page.featureId),
       title: site.features.get(page.featureId)?.title ?? page.featureId,
-      date: formatDate(page.commitDate),
+      date: formatDate(page.infobox.lastCommitDate),
     }));
+
+  const articles = active
+    .map((page) => ({
+      href: articleUrl(page.featureId),
+      title: site.features.get(page.featureId)?.title ?? page.featureId,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title, "en"));
 
   const lead = site.architecture?.sections.find((s) => s.key === "lead")?.claims ?? [];
   const architecture =
@@ -187,5 +219,13 @@ export function mainPageView(site: SiteModel): MainPageView {
             })),
         };
 
-  return { articleCount: active.length, architecture, featured, didYouKnow, recent, inProgress };
+  return {
+    articleCount: active.length,
+    architecture,
+    featured,
+    articles,
+    didYouKnow,
+    recent,
+    inProgress,
+  };
 }
