@@ -212,6 +212,7 @@ export type LiveCommand =
   | "wiki:replay"
   | "wiki:inflight"
   | "wiki:people"
+  | "wiki:correct"
   | "eval:run";
 
 /** Why a run that needs a call cannot make one; the commands load .env only if present. */
