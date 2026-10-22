@@ -3,7 +3,7 @@ import { memberId } from "@repowiki/core";
 import { describe, expect, it } from "vitest";
 import type { CommitInfo, IndexedFile } from "../index/index.ts";
 import { citedLines } from "../verify/index.ts";
-import { buildPack, type PackInput, signatureLines } from "./pack.ts";
+import { buildPack, DOCUMENT_SHARE, type PackInput, signatureLines } from "./pack.ts";
 import { testWiki } from "./test-wiki.ts";
 
 const input = (overrides: Partial<PackInput> = {}): PackInput => ({
@@ -61,6 +61,59 @@ function bigWiki(extra: number, lines: number) {
   return wiki;
 }
 
+/** bigWiki with a long results document among the signals feature's lightest members. */
+function wikiWithResults() {
+  const wiki = bigWiki(40, 400);
+  const prose = Array.from(
+    { length: 300 },
+    (_, i) => `Some prose without figures, part ${"x".repeat(i % 3)}.`,
+  );
+  const doc = [
+    "# Benchmark results",
+    "",
+    ...prose,
+    "## Win rates",
+    "| bot | score |",
+    "|---|---|",
+    "| search | 0.585 |",
+    "The search ran about 700k simulations per second.",
+  ].join("\n");
+  const path = "docs/results.md";
+  wiki.sources.set(path, `${doc}\n`);
+  wiki.index.files.push({
+    id: memberId(path),
+    path,
+    language: null,
+    bytes: doc.length,
+    loc: doc.split("\n").length,
+    skipped: null,
+    parseError: false,
+    symbols: [],
+  });
+  wiki.manifest.membership[memberId(path)] = { featureId: "signals", weight: 0.05 };
+  return wiki;
+}
+
+describe("buildPack and documents (ADR-0019)", () => {
+  it("shows a long document's headings, tables and lines with numbers when it can't show it all", () => {
+    const pack = buildPack(input(wikiWithResults()));
+    expect(pack.shown).toContainEqual({ path: "docs/results.md", mode: "excerpt" });
+    const { header, lines } = shownLines(pack.text, "docs/results.md");
+    expect(header).toContain("headings, tables and lines with numbers");
+    const texts = lines.map(([, text]) => text);
+    expect(texts).toContain("# Benchmark results");
+    expect(texts).toContain("| search | 0.585 |");
+    expect(texts).toContain("The search ran about 700k simulations per second.");
+    expect(texts.some((t) => t.startsWith("Some prose"))).toBe(false);
+  });
+
+  it("gives documents their own allowance, so code that fills the budget can't crowd them out", () => {
+    const pack = buildPack(input(wikiWithResults()));
+    expect(pack.tokens).toBeLessThanOrEqual(30_000 * (1 + DOCUMENT_SHARE));
+    expect(pack.text.indexOf("### docs/results.md")).toBeGreaterThan(-1);
+  });
+});
+
 describe("buildPack", () => {
   it("shows member files in full with line numbers, heaviest first", () => {
     const pack = buildPack(input());
@@ -101,17 +154,18 @@ describe("buildPack", () => {
   });
 
   it("falls back to signatures past 70% of the budget, then to listing the path", () => {
+    // The document is shown as its excerpt, from the documents' own allowance (ADR-0019).
     expect(buildPack(input({ budgetTokens: 900 })).shown.map((s) => s.mode)).toEqual([
       "full",
       "signatures",
-      "listed",
+      "excerpt",
     ]);
     const pack = buildPack(input({ budgetTokens: 450 }));
-    expect(pack.shown.map((s) => s.mode)).toEqual(["signatures", "signatures", "listed"]);
+    expect(pack.shown.map((s) => s.mode)).toEqual(["signatures", "signatures", "excerpt"]);
     expect(pack.text).toContain(
       '### src/signals/ingest.py (31 lines; signatures only)\n10| def ingest_chunk(chunk):\n11|     """Creates one signal per sentence in the chunk."""\n27| @dataclass\n28| class Signal:',
     );
-    expect(pack.text).toContain("## Other member files (not shown)\n- docs/signals.md");
+    expect(pack.text).toContain("### docs/signals.md (");
   });
 
   it("keeps control characters in source out of the prompt", () => {
@@ -328,7 +382,7 @@ describe("buildPack", () => {
       for (const budgetTokens of [400, 500, 900, 2_000, 30_000]) {
         for (const wiki of [input(), { ...input(), ...bigWiki(30, 200) }]) {
           const pack = buildPack({ ...wiki, budgetTokens });
-          expect(pack.tokens).toBeLessThanOrEqual(budgetTokens);
+          expect(pack.tokens).toBeLessThanOrEqual(budgetTokens * (1 + DOCUMENT_SHARE));
         }
       }
     });
@@ -353,7 +407,9 @@ describe("buildPack", () => {
       const fixed = roomy.length - sourceLength + 2;
 
       const some = build(Math.floor((fixed - 600) / 2.5));
-      expect(some.tokens).toBeLessThanOrEqual(Math.floor((fixed - 600) / 2.5));
+      expect(some.tokens).toBeLessThanOrEqual(
+        Math.floor((fixed - 600) / 2.5) * (1 + DOCUMENT_SHARE),
+      );
       const listedCommits = some.text.match(/^- commit:\w+ \d{4}-\d\d-\d\d chore/gm)?.length ?? 0;
       expect(listedCommits).toBeGreaterThan(20);
       expect(listedCommits).toBeLessThan(39);
@@ -364,7 +420,7 @@ describe("buildPack", () => {
       // Tighter still: every commit goes before any evidence does.
       const tightTokens = Math.floor((fixed - commitsLength + 60) / 2.5);
       const tight = build(tightTokens);
-      expect(tight.tokens).toBeLessThanOrEqual(tightTokens);
+      expect(tight.tokens).toBeLessThanOrEqual(tightTokens * (1 + DOCUMENT_SHARE));
       expect(tight.text).not.toContain("chore: change");
       expect(tight.text).toMatch(/\n- 40 commits not listed\n/);
       expect(tight.text).toContain('- commit:0000000 Revert "feat: x"');
