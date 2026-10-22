@@ -51,12 +51,15 @@ function fakeApi(indexed: "ok" | "too-large" = "ok", lease: () => WorkerSpec = (
       calls.push(`indexed:${n}`);
       return indexed;
     },
+    sourceExport: async () => {
+      throw new Error("a build reads no source export");
+    },
     putExport: async () => {
       calls.push("export");
     },
     succeed: async (body) => {
       calls.push("succeed");
-      succeeded = body;
+      succeeded = body as Succeeded;
     },
     fail: async (code: FailCode) => {
       calls.push(`fail:${code}`);

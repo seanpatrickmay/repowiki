@@ -20,11 +20,14 @@ function fakeApi(indexed: "ok" | "too-large" = "ok") {
       calls.push("indexed");
       return indexed;
     },
+    sourceExport: async () => {
+      throw new Error("a build reads no source export");
+    },
     putExport: async (b) => {
       bytes = b;
     },
     succeed: async (b) => {
-      body = b;
+      body = b as Succeeded;
     },
     fail: async () => {
       calls.push("fail");

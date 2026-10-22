@@ -9,6 +9,7 @@ export const CLI = {
   manifest: "scripts/manifest-build.ts",
   wiki: "scripts/wiki-build.ts",
   people: "scripts/wiki-people.ts",
+  correct: "scripts/wiki-correct.ts",
 } as const;
 
 /**
