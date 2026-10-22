@@ -53,16 +53,18 @@ const author = siteAuthor();
         </>
       )}
     </section>
-    <section class="mp-box" aria-labelledby="mp-dyk">
-      <h2 id="mp-dyk">Did you know...</h2>
-      <ul>
-        {view.didYouKnow.map((item) => (
-          <li>
-            <span set:html={item.html} /> <span class="dyk-source">(<a href={item.href}>{item.title}</a>)</span>
-          </li>
-        ))}
-      </ul>
-    </section>
+    {view.didYouKnow.length > 0 && (
+      <section class="mp-box" aria-labelledby="mp-dyk">
+        <h2 id="mp-dyk">Did you know...</h2>
+        <ul>
+          {view.didYouKnow.map((item) => (
+            <li>
+              <span set:html={item.html} /> <span class="dyk-source">(<a href={item.href}>{item.title}</a>)</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
     <section class="mp-box" aria-labelledby="mp-recent">
       <h2 id="mp-recent">Recently updated</h2>
       <ul>
