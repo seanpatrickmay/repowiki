@@ -420,7 +420,19 @@ describe("biography", () => {
     expect(words(mailbox?.lead ?? [])).toBe(
       "Mailbox is a tool that sorts the mail into folders by sender. It runs every night.",
     );
-    expect(mailbox?.label).toMatch(/^Generated from the git history at [0-9a-f]{7}; not written/);
+    expect(mailbox?.label).toBe(
+      `Written by an AI model from the git history at ${"7".repeat(7)}, not by Ada Lovelace.`,
+    );
+  });
+
+  it("says when the student reviewed and published each project (the persona review)", () => {
+    const [engine, ...rest] = three;
+    const published = { ...(engine as BiographyProject), publishedAt: "2026-03-04T12:00:00Z" };
+    const one = biography({ person: ADA, projects: [published, ...rest], asOf: AS_OF });
+    const label = one.career.flatMap((c) => c.projects).find((p) => p.title === "Engine")?.label;
+    expect(label).toBe(
+      `Written by an AI model from the git history at ${"6".repeat(7)}, not by Ada Lovelace, who reviewed it and published it on 4 March 2026.`,
+    );
   });
 
   it("adds up lines by language for the technical profile and the categories", () => {
@@ -614,11 +626,9 @@ describe("biography", () => {
       expect(withTech.references.every((r) => cited.has(r.n))).toBe(true);
     });
 
-    it("names developer categories for libraries shared by two projects, never tools", () => {
+    it("names no category from a dependency file: a library imported is not a skill (ADR-0020)", () => {
       expect(withTech.categories.filter((c) => c.endsWith("developers"))).toEqual([
         "Software developers",
-        "FastAPI developers",
-        "React developers",
       ]);
       const single = biography({
         person: ADA,
@@ -627,7 +637,6 @@ describe("biography", () => {
       });
       expect(single.categories.filter((c) => c.endsWith(" developers"))).toEqual([
         "Software developers",
-        "React developers",
       ]);
       expect(words(single.technical.libraries?.paragraph ?? [])).toBe(
         "Lovelace's project is built with React, Vite and Docker.",
@@ -662,11 +671,6 @@ describe("biography", () => {
         "React",
         "Pydantic",
         "Alembic",
-      ]);
-      expect(ranked.categories.filter((c) => c.endsWith(" developers")).slice(1)).toEqual([
-        "FastAPI developers",
-        "PyTorch developers",
-        "React developers",
       ]);
       const four = biography({
         person: ADA,

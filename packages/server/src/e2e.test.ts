@@ -93,7 +93,7 @@ describe("the hosted journey in demo mode (spec 2 §11, §13)", () => {
     const profile = await reader.go("/demo-dev");
     expect(profile.status).toBe(200);
     expect(profile.text).toContain("The author wrote most of the ingest and search code");
-    expect(profile.text).toContain("not written by the author");
+    expect(profile.text).toContain(", who reviewed it and published it on ");
     expect(profile.text).toContain('href="/demo-dev/demo-repo/"');
     expect(profile.text).toContain(`href="${base}/"`);
     expect((await reader.go("/demo-dev/demo-repo")).location).toBe("/demo-dev/demo-repo/");

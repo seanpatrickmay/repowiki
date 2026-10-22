@@ -58,7 +58,7 @@ describe("the project page's content (ADR-0013)", () => {
   it("shows the contribution the biography will quote, labelled, and nothing else generated", () => {
     const body = projectPage(view);
     expect(body).toContain("I wrote the ingest code.");
-    expect(body).toContain("not written by the author");
+    expect(body).toContain("not by you.");
     expect(body).toContain("your entry");
     for (const gone of ["Tagline", "Summary", "Highlights"]) expect(body).not.toContain(gone);
   });

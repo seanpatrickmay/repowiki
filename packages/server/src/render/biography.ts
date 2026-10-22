@@ -34,7 +34,7 @@ function infobox(bio: Biography, avatarUrl: string): string {
 <tr><td colspan="2" class="infobox-image"><img src="${e(avatarUrl)}" alt="" width="220" height="220"><div class="infobox-caption">GitHub avatar</div></td></tr>
 ${row("GitHub", `<a class="external" href="${e(i.github.href)}">@${e(i.github.login)}</a>`)}
 ${row("Years active", e(i.yearsActive))}
-${row("Known for", known)}
+${row("Main projects", known)}
 ${i.languages.length === 0 ? "" : row("Languages", e(i.languages.join(", ")))}
 ${i.technologies.length === 0 ? "" : row("Technologies", e(i.technologies.join(", ")))}
 ${row("Projects", e(i.projects))}

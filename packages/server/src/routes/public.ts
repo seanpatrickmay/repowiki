@@ -138,6 +138,7 @@ export function publicRoutes(deps: Deps): Route[] {
           slug: p.slug,
           href: `/${who.handle}/${p.slug}/`,
           entry: p.entry,
+          publishedAt: p.publishedAt,
         }));
         const asOf =
           published
