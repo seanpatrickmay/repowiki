@@ -52,6 +52,12 @@ fixes come in several changes; this record holds their rulings and grows as each
   where it is defined or called. — Summaries name the function they describe, and the verifier
   drops a name its cited lines do not write; without the line the model could only guess it. —
   Cost if wrong: a few more lines in each summary pack.
+- **Documents in a page's pack.** Ruling: a Markdown or reStructuredText member file too long to
+  show in full is shown as an excerpt (its headings, table rows and lines that state a number, at
+  most 120), from an allowance of its own: a quarter of the pack's budget on top of it. — Result
+  write-ups have no symbols, so they fell straight to "listed" once code had used the budget,
+  and the model never saw the numbers. — Cost if wrong: a pack up to a quarter larger, at about
+  a cent a build.
 
 ## Consequences
 

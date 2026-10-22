@@ -171,7 +171,8 @@ describe("the write call's shared prefix", () => {
       featureId: "signals",
       ...testWiki(),
       neighbours: new Map(),
-      budgetTokens: 450,
+      // Small enough that a code file is listed, whatever the documents' own allowance shows.
+      budgetTokens: 300,
     });
     for (const heading of [
       "Source",

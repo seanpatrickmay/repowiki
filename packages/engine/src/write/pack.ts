@@ -23,10 +23,13 @@ export interface PackInput {
 export interface ContextPack {
   featureId: string;
   text: string;
-  /** Estimated tokens of `text`; at most the budget, unless the header and candidates alone exceed it. */
+  /**
+   * Estimated tokens of `text`; at most the budget and the documents' allowance, unless the header
+   * and candidates alone exceed the budget.
+   */
   tokens: number;
-  /** How each member file is shown: in full, as signatures, or only listed. */
-  shown: { path: string; mode: "full" | "signatures" | "listed" }[];
+  /** How each member file is shown: in full, as signatures, as a document's excerpt, or only listed. */
+  shown: { path: string; mode: "full" | "signatures" | "excerpt" | "listed" }[];
   /** All of the feature's commits, newest first; the pack lists the newest 40 that fit. */
   commits: CommitInfo[];
   candidates: DiagramCandidates;
@@ -35,6 +38,15 @@ export interface ContextPack {
 export const DEFAULT_CONTEXT_BUDGET_TOKENS = 30_000;
 /** Full source is included until this share of the budget is used (spec §7.2). */
 export const FULL_SOURCE_SHARE = 0.7;
+/**
+ * Documents too long to show in full get excerpts from an allowance of their own, this share of
+ * the budget on top of it, so code that fills the budget never crowds them out (ADR-0019).
+ */
+export const DOCUMENT_SHARE = 0.25;
+/** Lines of one document's excerpt at most. */
+const MAX_EXCERPT_LINES = 120;
+const DOCUMENT = /\.(?:md|markdown|mdx|rst)$/i;
+const FENCE = /^\s*(?:```|~~~)/;
 const MAX_COMMITS = 40;
 const MAX_EVIDENCE = 30;
 const MAX_NEIGHBOURS = 8;
@@ -242,6 +254,21 @@ export function signatureLines(
   return out;
 }
 
+/**
+ * The lines of a document a reader needs when it can't be shown whole (ADR-0019): its headings,
+ * table rows and lines that state a number, at most MAX_EXCERPT_LINES, as 1-based line numbers.
+ */
+export function documentExcerpt(lines: readonly string[]): number[] {
+  const out: number[] = [];
+  for (const [i, line] of lines.entries()) {
+    const text = line.trim();
+    if (text === "" || FENCE.test(text)) continue;
+    if (/^#{1,6}\s/.test(text) || /^\|.*\|$/.test(text) || /\d/.test(text)) out.push(i + 1);
+    if (out.length >= MAX_EXCERPT_LINES) break;
+  }
+  return out;
+}
+
 /** The feature's commits: every commit that touched one of its member files, newest first. */
 function featureCommits(files: readonly string[], history: readonly CommitInfo[]): CommitInfo[] {
   const mine = new Set(files);
@@ -357,17 +384,20 @@ export function buildPack(input: PackInput): ContextPack {
   let used = fixedLength(nCommits, nEvidence);
   const fullLimit = budgetChars * FULL_SOURCE_SHARE;
   const signatureLimit = budgetChars - OTHER_FILES_RESERVE;
+  const documentLimit = budgetChars * DOCUMENT_SHARE;
+  let documentsUsed = 0;
   const blocks: string[] = [];
   const shown: ContextPack["shown"] = [];
   const listed: string[] = [];
   for (const path of files) {
     const text = sources.get(path);
     const file = indexed.get(path);
+    const isDocument = DOCUMENT.test(path);
     if (
       text === undefined ||
       file === undefined ||
       file.skipped !== null ||
-      used >= signatureLimit
+      (used >= signatureLimit && !isDocument)
     ) {
       listed.push(path);
       shown.push({ path, mode: "listed" });
@@ -391,6 +421,19 @@ export function buildPack(input: PackInput): ContextPack {
       blocks.push(full);
       used += full.length + 2;
       shown.push({ path, mode: "full" });
+      continue;
+    }
+    if (isDocument) {
+      const numbers = documentExcerpt(lines);
+      const excerpt = `### ${clean(path)} (${lines.length} lines; headings, tables and lines with numbers)\n${numbered(lines, numbers, width)}`;
+      if (numbers.length > 0 && documentsUsed + 2 + excerpt.length <= documentLimit) {
+        blocks.push(excerpt);
+        documentsUsed += excerpt.length + 2;
+        shown.push({ path, mode: "excerpt" });
+      } else {
+        listed.push(path);
+        shown.push({ path, mode: "listed" });
+      }
       continue;
     }
     const numbers = [
