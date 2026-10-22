@@ -18,6 +18,7 @@ import { accountRoutes } from "./routes/account.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { billingRoutes } from "./routes/billing.ts";
 import { billingWebhookRoutes } from "./routes/billing-webhook.ts";
+import { correctionRoutes } from "./routes/corrections.ts";
 import { draftRoutes } from "./routes/drafts.ts";
 import { exampleRoutes } from "./routes/example.ts";
 import { internalRoutes } from "./routes/internal.ts";
@@ -119,6 +120,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...authRoutes(deps),
       ...projectRoutes(deps),
       ...draftRoutes(deps),
+      ...correctionRoutes(deps),
       ...jobRoutes(deps),
       ...previewRoutes(deps, buildTree, { waitMs: PREVIEW_WAIT_MS }),
       ...publishRoutes(deps),
