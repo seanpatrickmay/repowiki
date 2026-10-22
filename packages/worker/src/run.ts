@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { WikiExport } from "@repowiki/core";
 import type { JobStep } from "@repowiki/hosted";
 import { createClaudeProvider, createLedger, type Provider, resolveModels } from "@repowiki/llm";
+import { z } from "zod";
 import { ApiError, type FailCode, leaseGone, type WorkerApi, type WorkerSpec } from "./api.ts";
 import { type CloneResult, cloneBare } from "./clone.ts";
 import { CLI, type CliRun, engineEnv, ROOT, rebasedFetch, runCli } from "./engine.ts";
@@ -14,6 +15,21 @@ import type { TreeTechnologies } from "./technologies.ts";
 
 /** One CLI may run this long. */
 export const CLI_TIMEOUT_MS = 90 * 60_000;
+/** A correction indexes the clone and makes a few unbatched calls (ADR-0023). */
+export const CORRECT_TIMEOUT_MS = 15 * 60_000;
+/** What wiki:correct prints: each sentence's outcome, a few hundred bytes each. */
+const CorrectOutput = z.object({
+  outcomes: z
+    .array(
+      z.object({
+        page: z.string(),
+        claimId: z.string(),
+        outcome: z.enum(["rewritten", "removed", "refused"]),
+        detail: z.string().nullable(),
+      }),
+    )
+    .min(1),
+});
 /**
  * wiki-build's `--deadline`, which cancels each Message Batch still running after that many
  * minutes (scripts/wiki-cli.ts): per batch, not per run. A build waits on at most four batches in
@@ -212,6 +228,63 @@ function complete(exp: WikiExport): boolean {
   return exp.architecture.length > 0 && active.every((f) => paged.has(f.id));
 }
 
+/**
+ * A correction job's phase 2 (ADR-0023): wiki:correct over the export it corrects, with the
+ * flagged sentences in a file that is removed as soon as the command ends; then the corrected
+ * export and the outcomes. A correction that changed nothing fails as unchanged, so it counts for
+ * nothing. Notes are never logged: the command never prints them, and a failure logs its stderr.
+ */
+async function correct(
+  deps: PhaseDeps,
+  spec: WorkerSpec,
+  where: ReturnType<typeof paths>,
+  env: Record<string, string>,
+  beat: ReturnType<typeof heartbeater>,
+  lost: AbortController,
+): Promise<boolean> {
+  await beat.step("write");
+  mkdirSync(where.out, { recursive: true });
+  const source = join(where.out, "source.json");
+  const corrected = join(where.out, "corrected.json");
+  const requests = join(where.home, "requests.json");
+  writeFileSync(source, await deps.api.sourceExport());
+  writeFileSync(requests, JSON.stringify(spec.correction?.items ?? []), { mode: 0o600 });
+  let run: CliRun;
+  try {
+    run = await (deps.runCli ?? runCli)({
+      script: join(ROOT, CLI.correct),
+      args: [where.repo, "--export", source, "--requests", requests, "--out", corrected],
+      env,
+      timeoutMs: CORRECT_TIMEOUT_MS,
+      signal: lost.signal,
+      stdoutBytes: 64_000,
+    });
+  } finally {
+    rmSync(requests, { force: true });
+  }
+  if (lost.signal.aborted) throw new LeaseLost();
+  if (run.status !== 0 || typeof run.stdout !== "string") {
+    deps.log({
+      cli: CLI.correct,
+      status: run.status,
+      timedOut: run.timedOut,
+      costCapped: run.costCapped,
+      stderr: redact(run.stderrTail, deps.token).slice(-1000),
+    });
+    throw new CliFailed(run.costCapped ? "job-cost-cap" : "job-failed", "wiki-correct failed");
+  }
+  const { outcomes } = CorrectOutput.parse(JSON.parse(run.stdout));
+  if (outcomes.every((o) => o.outcome === "refused")) {
+    deps.log({ phase: 2, correction: "unchanged" });
+    return reportFailure(deps, "correction-unchanged");
+  }
+  await beat.step("render");
+  await deps.api.putExport(readFileSync(corrected));
+  const models = [resolveModels().write];
+  await deps.api.succeed({ engineVersion: deps.engineVersion, models, outcomes });
+  return true;
+}
+
 /** Phase 2, with the network locked to the server (spec 2 S9): the engine, facts and upload. */
 export async function phase2(deps: PhaseDeps): Promise<boolean> {
   const spec = await leased(deps, 2);
@@ -247,6 +320,7 @@ export async function phase2(deps: PhaseDeps): Promise<boolean> {
   };
   try {
     mkdirSync(where.home, { recursive: true });
+    if (spec.kind === "correct") return await correct(deps, spec, where, env, beat, lost);
     await beat.step("index");
     // A tree far past the file limit is refused on its listing, before the index reads it.
     const listed = await (deps.countTree ?? countTree)(where.repo, spec.commitSha, where.home);

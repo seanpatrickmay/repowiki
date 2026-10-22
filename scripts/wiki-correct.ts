@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, lstatSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { WikiExport } from "@repowiki/core";
 import {
   correctClaims,
@@ -12,7 +12,7 @@ import {
 import { createClaudeProvider, createLedger, type Provider, totalsOf } from "@repowiki/llm";
 import { parseCorrectArgs, readRequests } from "./correct-cli.ts";
 import { CliError, loadModels } from "./manifest-cli.ts";
-import { resolveOutPath } from "./out-path.ts";
+import { resolveOutDir } from "./out-dir.ts";
 import { exitWithError, requireApiKey } from "./wiki-cli.ts";
 
 /**
@@ -28,8 +28,12 @@ async function main(): Promise<void> {
   if (!existsSync(repo) || !statSync(repo).isDirectory()) {
     throw new CliError(`no such repository: ${args.repo}`);
   }
-  const out = resolveOutPath(repo, args.out);
-  if (out === null) {
+  // The directory as a wiki's would be (a bare clone, the worker's, has no work tree), then a
+  // file in it that is no symlink or directory.
+  const dir = resolveOutDir(repo, dirname(resolve(args.out)));
+  const out = dir === null ? null : join(dir, basename(args.out));
+  const existing = out === null ? undefined : lstatSync(out, { throwIfNoEntry: false });
+  if (out === null || existing?.isSymbolicLink() || existing?.isDirectory()) {
     throw new CliError(
       "refusing to write inside the documented repository; choose an --out path elsewhere",
     );

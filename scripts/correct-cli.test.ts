@@ -45,19 +45,10 @@ const requests = (items: unknown) => {
   return path;
 };
 /** The command as a process with no API key: no test reaches the network. */
-const run = (requestsPath: string, out = join(dir, "corrected.json")) =>
+const run = (requestsPath: string, out = join(dir, "corrected.json"), at = repo.dir) =>
   spawnSync(
     process.execPath,
-    [
-      CORRECT,
-      repo.dir,
-      "--export",
-      join(dir, "export.json"),
-      "--requests",
-      requestsPath,
-      "--out",
-      out,
-    ],
+    [CORRECT, at, "--export", join(dir, "export.json"), "--requests", requestsPath, "--out", out],
     { encoding: "utf8", env: { ...process.env, ANTHROPIC_API_KEY: "" } },
   );
 
@@ -123,6 +114,16 @@ describe("pnpm wiki:correct as a process", () => {
     expect(result.stderr).toContain("ANTHROPIC_API_KEY");
     expect(result.stdout + result.stderr).not.toContain(NOTE);
     expect(existsSync(join(dir, "corrected.json"))).toBe(false);
+  });
+
+  it("corrects a bare clone, as the worker's is", () => {
+    const bare = join(dir, "clone.git");
+    spawnSync("git", ["clone", "-q", "--bare", repo.dir, bare]);
+    const out = join(dir, "from-bare.json");
+    const result = run(requests([{ page: "signals", claimId: "c99", note: NOTE }]), out, bare);
+    expect(result.status).toBe(0);
+    expect(existsSync(out)).toBe(true);
+    expect(run(requests([]), join(bare, "inside.json"), bare).status).toBe(2);
   });
 
   it("refuses to write inside the repository it corrects", () => {

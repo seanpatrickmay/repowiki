@@ -138,11 +138,14 @@ function fakeApi(sha: string) {
       calls.push("indexed");
       return "ok";
     },
+    async sourceExport() {
+      throw new Error("an import reads no source export");
+    },
     async putExport(bytes) {
       uploaded = bytes;
     },
     async succeed(body) {
-      succeeded = body;
+      succeeded = body as Succeeded;
     },
     async fail(code) {
       failed = code;

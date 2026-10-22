@@ -7,7 +7,7 @@ const Sha = z.string().regex(/^[0-9a-f]{40}$/);
 export const WorkerSpec = z.object({
   jobId: z.string().min(1),
   attempt: z.int().positive(),
-  kind: z.enum(["generate", "refresh"]),
+  kind: z.enum(["generate", "refresh", "correct"]),
   commitSha: Sha,
   repo: z.object({
     fullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
@@ -26,11 +26,17 @@ export const WorkerSpec = z.object({
   }),
   limits: z.object({ maxIndexedFiles: z.int().positive() }),
   llmUrl: z.string().regex(/^https?:\/\/[^\s]+$/),
+  /** A correction job's flagged sentences (ADR-0023); their notes go only to wiki:correct. */
+  correction: z
+    .object({
+      items: z.array(z.object({ page: z.string(), claimId: z.string(), note: z.string() })),
+    })
+    .optional(),
 });
 export type WorkerSpec = z.infer<typeof WorkerSpec>;
 
 /** The codes a worker may fail its job with (the server's `/internal/job/fail`). */
-export type FailCode = "job-failed" | "job-cost-cap" | "repo-too-large";
+export type FailCode = "job-failed" | "job-cost-cap" | "repo-too-large" | "correction-unchanged";
 
 /** A refusal from the internal API; the message names the route and status, never the token. */
 export class ApiError extends Error {
@@ -53,14 +59,28 @@ export interface Succeeded {
   models: string[];
 }
 
+/** A correction's success: its sentences' outcomes; its facts are its parent's (ADR-0023). */
+export interface Corrected {
+  engineVersion: string;
+  models: string[];
+  outcomes: {
+    page: string;
+    claimId: string;
+    outcome: "rewritten" | "removed" | "refused";
+    detail: string | null;
+  }[];
+}
+
 /** The server's internal API as the worker sees it (spec 2 §6). */
 export interface WorkerApi {
   lease(): Promise<WorkerSpec>;
   heartbeat(step: JobStep): Promise<void>;
   /** "too-large" when the server failed the job for the plan's file limit. */
   indexed(indexedFiles: number): Promise<"ok" | "too-large">;
+  /** The stored export a correction job corrects. */
+  sourceExport(): Promise<Uint8Array>;
   putExport(bytes: Uint8Array): Promise<void>;
-  succeed(body: Succeeded): Promise<void>;
+  succeed(body: Succeeded | Corrected): Promise<void>;
   fail(code: FailCode): Promise<void>;
 }
 
@@ -110,6 +130,11 @@ export function workerApi(
       }
       await expectOk(response, "indexed");
       return "ok";
+    },
+    async sourceExport() {
+      const response = await call("GET", "source-export");
+      if (!response.ok) await expectOk(response, "source-export");
+      return new Uint8Array(await response.arrayBuffer());
     },
     async putExport(bytes) {
       await expectOk(await call("PUT", "export", { bytes }), "export");
