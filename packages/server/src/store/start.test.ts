@@ -148,6 +148,8 @@ describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
       refreshesThisMonth: 0,
       inFlightGenerations: 1,
       inFlightRefreshes: 0,
+      correctionsThisMonth: 0,
+      inFlightCorrections: 0,
       monthUsdMicros: 420_000,
       platformDayUsdMicros: 420_000,
     });
@@ -184,5 +186,42 @@ describe("startGeneration (spec 2 §7, Contract §6.1, §7.1)", () => {
     await startRefresh(recording, { ...input(), project });
     expect(locks.indexOf("jobs")).toBeGreaterThanOrEqual(0);
     expect(locks.indexOf("jobs")).toBeLessThan(locks.indexOf("projects"));
+  });
+});
+
+describe("corrections in the counts (sentence corrections spec)", () => {
+  /** The generation succeeded and a correction of its draft too: revision 2, never published. */
+  async function corrected(): Promise<Project> {
+    await startGeneration(db, input());
+    await db.query(
+      `UPDATE jobs SET status = 'succeeded', body = body || '{"status":"succeeded","finishedAt":"${NOW}"}'::jsonb`,
+    );
+    await db.query(
+      `INSERT INTO jobs (id, project_id, status, lease_expires_at, body)
+       SELECT $1::uuid, project_id, 'succeeded', NULL, body || jsonb_build_object('id', $1::text, 'kind', 'correct')
+       FROM jobs LIMIT 1`,
+      [newId()],
+    );
+    await db.query(
+      `UPDATE projects SET body = body || '{"latestRevision":2,"currentVersion":0}'::jsonb`,
+    );
+    return (await projectFor(db, account.id, FAKE_REPO.id)) as Project;
+  }
+
+  it("counts succeeded corrections this month apart from refreshes", async () => {
+    await corrected();
+    expect(await usageFor(db, account.id, NOW)).toMatchObject({
+      refreshesThisMonth: 0,
+      correctionsThisMonth: 1,
+      inFlightCorrections: 0,
+    });
+  });
+
+  it("leaves Free its one rebuild after a correction added a revision", async () => {
+    const project = await corrected();
+    expect(await startRefresh(db, { ...input(), project })).toMatchObject({
+      ok: true,
+      value: { created: true },
+    });
   });
 });

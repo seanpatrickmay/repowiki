@@ -21,7 +21,14 @@ import type { Db, Queryable } from "../db/db.ts";
 import type { GitHubRepo } from "../github/api.ts";
 import { appendAudit } from "./audit.ts";
 import { activeJob, issueToken, saveJob, saveJobSpec } from "./jobs.ts";
-import { projectById, projectFor, saveProject, saveRepository, usageFor } from "./projects.ts";
+import {
+  correctionsOf,
+  projectById,
+  projectFor,
+  saveProject,
+  saveRepository,
+  usageFor,
+} from "./projects.ts";
 
 /**
  * Measured cost on Haiku 5.5 (AlphaSettler, 120 files: $0.028 for the whole build, against
@@ -113,6 +120,7 @@ async function start(
     facts: input.facts,
     usage,
     estimateUsdMicros: estimate,
+    corrections: existing === null ? 0 : await correctionsOf(tx, existing.id),
   });
   const target = existing?.id ?? `repo:${repo.id}`;
   if (!verdict.ok) {

@@ -22,6 +22,8 @@ const usage = (patch: Partial<Usage> = {}): Usage => ({
   platformDayUsdMicros: 0,
   inFlightGenerations: 0,
   inFlightRefreshes: 0,
+  correctionsThisMonth: 0,
+  inFlightCorrections: 0,
   ...patch,
 });
 const ME = { githubUserId: 101, githubRepoId: 202 };
@@ -476,5 +478,62 @@ describe("rebuildOffer (marketing review)", () => {
 
   it("offers nothing before a first revision exists", () => {
     expect(rebuildOffer("pro", aProject({ state: "draft", latestRevision: 0 }))).toBeNull();
+  });
+});
+
+describe("correcting sentences (sentence corrections spec)", () => {
+  const draft = aProject({ state: "draft", currentVersion: 0, latestRevision: 1 });
+  const proCtx = (patch: Partial<Usage>) =>
+    ctx({
+      caller: signedIn(pro),
+      corrections: 40,
+      usage: usage({ activeProjects: 1, ...patch }),
+    });
+
+  it("lets Free correct a project three times, and Pro twenty times a month", () => {
+    expect(authorize("job.correct", ctx({ project: draft, corrections: 2 }))).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(authorize("job.correct", ctx({ project: draft, corrections: 3 }))).toMatchObject({
+      code: "plan-correction-limit",
+    });
+    expect(authorize("job.correct", proCtx({ correctionsThisMonth: 19 })).ok).toBe(true);
+    expect(
+      authorize("job.correct", proCtx({ correctionsThisMonth: 19, inFlightCorrections: 1 })),
+    ).toMatchObject({ code: "plan-correction-limit" });
+  });
+
+  it("needs a draft to correct, a live eligibility check and room in the month's cost", () => {
+    const building = aProject({ state: "draft", currentVersion: 0, latestRevision: 0 });
+    expect(authorize("job.correct", ctx({ project: building, corrections: 0 }))).toMatchObject({
+      code: "invalid-transition",
+    });
+    const later = ctx({ project: draft, corrections: 0, now: "2026-10-14T12:05:00Z" });
+    expect(authorize("job.correct", later)).toMatchObject({ code: "invalid-input" });
+    const hidden = eligibleFacts({ visibility: "private" });
+    expect(
+      authorize("job.correct", ctx({ project: draft, corrections: 0, facts: hidden })),
+    ).toMatchObject({ code: "repo-private" });
+    const spent = usage({ activeProjects: 1, monthUsdMicros: 1_000_000 });
+    expect(
+      authorize("job.correct", ctx({ project: draft, corrections: 0, usage: spent })),
+    ).toMatchObject({ code: "monthly-cost-ceiling" });
+    const over = ctx({
+      caller: signedIn(pro),
+      corrections: 0,
+      usage: usage({ activeProjects: 11 }),
+    });
+    expect(authorize("job.correct", over)).toMatchObject({ code: "frozen" });
+  });
+
+  it("doesn't let a correction's revision use up Free's one rebuild", () => {
+    const corrected = aProject({ state: "draft", currentVersion: 0, latestRevision: 2 });
+    expect(authorize("job.refresh", ctx({ project: corrected, corrections: 1 }))).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(rebuildOffer("free", corrected, 1)).toBe("rebuild");
+    expect(rebuildOffer("free", corrected)).toBeNull();
   });
 });

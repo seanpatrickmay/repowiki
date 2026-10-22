@@ -102,7 +102,8 @@ export const JOB_STEPS = [
 ] as const;
 export const JobStep = z.enum(JOB_STEPS);
 export type JobStep = z.infer<typeof JobStep>;
-export const JobKind = z.enum(["generate", "refresh"]);
+/** A correction rewrites flagged sentences of a stored generation (sentence corrections spec). */
+export const JobKind = z.enum(["generate", "refresh", "correct"]);
 export type JobKind = z.infer<typeof JobKind>;
 export const JobStatus = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
 export type JobStatus = z.infer<typeof JobStatus>;
@@ -226,6 +227,7 @@ export const ACTIONS = [
   "repos.list",
   "job.create",
   "job.refresh",
+  "job.correct",
   "job.read",
   "job.cancel",
   "job.retry",

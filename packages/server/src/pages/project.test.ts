@@ -99,6 +99,14 @@ describe("the project page's rebuild (marketing review)", () => {
     expect(body).toContain("one rebuild before you publish");
   });
 
+  it("still offers Free its rebuild after a correction added a revision (ADR-0023)", () => {
+    const corrected = { ...view.project, latestRevision: 2 };
+    expect(projectPage({ ...view, project: corrected })).not.toContain("/refresh");
+    expect(projectPage({ ...view, project: corrected, corrections: 1 })).toContain(
+      "one rebuild before you publish",
+    );
+  });
+
   it("offers Free nothing once its project is published, and Pro a refresh", () => {
     const published = { ...view.project, latestRevision: 1, currentVersion: 1 };
     expect(projectPage({ ...view, project: published })).not.toContain("/refresh");
