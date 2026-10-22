@@ -145,13 +145,17 @@ export interface BiographyOptions {
   appOrigin: string;
   /** A preview: a banner says the page is not published. */
   preview: boolean;
+  /** The example (ADR-0017): a banner says the person is made up and the code is real. */
+  example?: boolean;
 }
 
 /** The author's biography page (ADR-0013), in the approved mockup's order; everything escaped. */
 export function biographyHtml(bio: Biography, options: BiographyOptions): string {
   const banner = options.preview
     ? `<div class="preview-banner" role="note">Preview: a private link that expires within an hour. This version is not published.</div>`
-    : "";
+    : options.example
+      ? `<div class="preview-banner" role="note">An example: ${e(bio.name)} is a fictional student. The projects are real code, mirrored on GitHub, and RepoWiki wrote every word. <a href="/">Make your own</a></div>`
+      : "";
   const github = bio.infobox.github;
   const categories = bio.categories.map((c) => `<li>${e(c)}</li>`).join("");
   const count = bio.works.length;

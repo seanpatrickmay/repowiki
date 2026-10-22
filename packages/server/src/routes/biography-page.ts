@@ -71,7 +71,7 @@ export function biographyPage(
   deps: Deps,
   account: Pick<Account, "login" | "displayName" | "avatar">,
   projects: readonly BiographyProject[],
-  options: { asOf: string; self: string; preview: boolean },
+  options: { asOf: string; self: string; preview: boolean; example?: boolean },
 ): string {
   const person = { login: account.login, displayName: account.displayName };
   return biographyHtml(biography({ person, projects, asOf: options.asOf }), {
@@ -79,5 +79,6 @@ export function biographyPage(
     avatarUrl: avatarUrl(account),
     appOrigin: deps.config.appOrigin,
     preview: options.preview,
+    example: options.example ?? false,
   });
 }
