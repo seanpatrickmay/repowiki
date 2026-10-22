@@ -209,6 +209,12 @@ describe("biographyEntry", () => {
 });
 
 describe("nounPhrase", () => {
+  it("takes the sentence that defines the project, wherever the lead puts it (ADR-0019)", () => {
+    const lead =
+      "Its features cover the solver and the live bot. **PokerML** is a research engine for heads-up hold'em. It has a terminal table.";
+    expect(nounPhrase(lead, "PokerML")).toBe("a research engine for heads-up hold'em");
+  });
+
   const alpha =
     "AlphaSettler is a four-player Settlers of Catan bot that combines a Rust rules engine, information-set Monte Carlo tree search over hidden hands, and a graph network trained by self-play.";
 

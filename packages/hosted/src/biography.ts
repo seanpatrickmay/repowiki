@@ -166,16 +166,18 @@ const RELATIVE = / (?:that|which|where|who) /g;
 const MIN_PHRASE = 25;
 
 /**
- * What a project is, from its About lead (ADR-0013): the first sentence without its leading
- * "<Title> is", whole when it fits `max` characters. A longer one whose first comma opens a list
- * ends before the relative clause the list belongs to ("a Catan bot", not "a Catan bot that
- * combines a Rust engine"), unless that leaves under 25 characters; otherwise it ends at the first
- * comma, else at a clause within `max`. Null when the sentence starts otherwise.
+ * What a project is, from its About lead (ADR-0013): the first sentence that opens "<Title> is"
+ * (ADR-0019), without those words, whole when it fits `max` characters. A longer one whose first
+ * comma opens a list ends before the relative clause the list belongs to ("a Catan bot", not "a
+ * Catan bot that combines a Rust engine"), unless that leaves under 25 characters; otherwise it
+ * ends at the first comma, else at a clause within `max`. Null when no sentence opens so.
  */
 export function nounPhrase(lead: string, title: string, max = 110): string | null {
-  const first = sentencesOf(plainWords(lead, 4000).replace(/\s+/g, " "))[0] ?? "";
   const subject = new RegExp(`^(?:the\\s+)?${escapeRe(title)}\\s+(?:is|was|are)\\s+`, "i");
-  if (!subject.test(first)) return null;
+  // The sentence that defines the project, which a lead's claims do not always put first.
+  const sentences = sentencesOf(plainWords(lead, 4000).replace(/\s+/g, " "));
+  const first = sentences.find((sentence) => subject.test(sentence));
+  if (first === undefined) return null;
   const rest = first.replace(subject, "").replace(/[.!?]+$/, "");
   let cut = rest;
   const comma = rest.indexOf(", ", 30);

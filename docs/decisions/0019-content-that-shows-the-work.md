@@ -69,6 +69,11 @@ fixes come in several changes; this record holds their rulings and grows as each
   the closest feature as supporting files. — The example had a page about its test suite and one
   for its README and lockfile, each saying nothing about what was built. — Cost if wrong: a
   retried manifest call.
+- **The defining sentence first.** Ruling: the lead claim that names its subject in bold opens a
+  page's or the About article's lead, whatever order the model returned, and a biography's
+  description of a project comes from the About lead's first sentence that opens "<Title> is",
+  not only its first sentence. — PokerML's Works row read "Its features cover …" because the
+  model put that claim first. — Cost if wrong: one reorder and one search.
 
 ## Consequences
 

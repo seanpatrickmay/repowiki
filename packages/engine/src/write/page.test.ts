@@ -23,6 +23,29 @@ import { testVerifyContext, testWiki } from "./test-wiki.ts";
 const claims = (entries: [SectionKey, ReturnType<typeof bodyClaim>[]][]) => new Map(entries);
 
 describe("pageSections", () => {
+  it("puts the lead claim that names the subject in bold first, as Wikipedia's lead does (ADR-0019)", () => {
+    const sections = pageSections(
+      claims([
+        ["overview", [bodyClaim({ id: "o1" })]],
+        [
+          "lead",
+          [
+            leadClaim({ id: "l1", text: "Its parts are a store and a queue.", supports: ["o1"] }),
+            leadClaim({
+              id: "l2",
+              text: "**Signal ingestion** turns chunks into signals.",
+              supports: ["o1"],
+            }),
+          ],
+        ],
+      ]),
+    );
+    expect(sections?.[0]?.claims.map((c) => c.text)).toEqual([
+      "**Signal ingestion** turns chunks into signals.",
+      "Its parts are a store and a queue.",
+    ]);
+  });
+
   it("orders sections, renumbers claims lead first, and maps supports", () => {
     const sections = pageSections(
       claims([

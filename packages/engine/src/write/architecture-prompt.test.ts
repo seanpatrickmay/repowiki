@@ -166,20 +166,20 @@ describe("the round helpers on an Architecture draft", () => {
   });
 
   it("orders the Architecture article's sections and renumbers its claims", () => {
-    const claim = (id: string, supports: string[] = []) => ({ id, supports });
+    const claim = (id: string, supports: string[] = []) => ({ id, text: id, supports });
     const order = ["lead", "layers", "request-paths", "dependencies", "infrastructure"] as const;
     const sections = orderedSections(
       order,
-      new Map<(typeof order)[number], { id: string; supports: string[] }[]>([
+      new Map<(typeof order)[number], { id: string; text: string; supports: string[] }[]>([
         ["dependencies", [claim("d1")]],
         ["lead", [claim("l1", ["y1", "d1"])]],
         ["layers", [claim("y1")]],
       ]),
     );
     expect(sections).toEqual([
-      { key: "lead", claims: [{ id: "c1", supports: ["c2", "c3"] }] },
-      { key: "layers", claims: [{ id: "c2", supports: [] }] },
-      { key: "dependencies", claims: [{ id: "c3", supports: [] }] },
+      { key: "lead", claims: [{ id: "c1", text: "l1", supports: ["c2", "c3"] }] },
+      { key: "layers", claims: [{ id: "c2", text: "y1", supports: [] }] },
+      { key: "dependencies", claims: [{ id: "c3", text: "d1", supports: [] }] },
     ]);
   });
 });
