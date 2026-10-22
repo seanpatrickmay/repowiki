@@ -94,7 +94,9 @@ describe("articleView", () => {
   });
 
   it("dates the page by its commit, not its generation time", () => {
-    expect(view.lastEdited).toMatch(/^This page was last edited on 10 March 2026, at commit /);
+    expect(view.lastEdited).toMatch(
+      /^An AI model wrote this page from the code as of 10 March 2026, at commit .+\. RepoWiki checked that its citations point at that code\.$/,
+    );
   });
 
   it("omits an empty alias row and adds a notice for a retired feature", () => {

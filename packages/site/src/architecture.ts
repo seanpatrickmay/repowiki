@@ -1,6 +1,6 @@
 import type { ArchitectureClaim, ArchitectureSectionKey } from "@repowiki/core";
 import { anchoredClaim, revisionHtml, type SectionView } from "./article.ts";
-import { formatDate } from "./format.ts";
+import { writtenFrom } from "./format.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
 import { inlineOptions } from "./preview.ts";
@@ -35,7 +35,7 @@ export interface ArchitectureView {
   sections: SectionView[];
   /** Trusted HTML in both `html` and `backlinks`. */
   references: { n: number; html: string; backlinks: string }[];
-  /** Trusted HTML: "This page was last edited on <date>, at commit <sha link>." */
+  /** Trusted HTML: who wrote the page, from which commit and when, and what was checked. */
   lastEdited: string;
 }
 
@@ -94,6 +94,6 @@ export function architectureView(site: SiteModel): ArchitectureView | null {
     ],
     sections,
     references,
-    lastEdited: `This page was last edited on ${formatDate(article.commitDate)}, at commit ${revisionHtml(site, article)}.`,
+    lastEdited: writtenFrom(revisionHtml(site, article), article.commitDate),
   };
 }

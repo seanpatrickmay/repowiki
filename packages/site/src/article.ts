@@ -1,5 +1,5 @@
 import { claimAnchor, contributorsOf, type Revision, type SectionKey } from "@repowiki/core";
-import { formatDate, formatNumber, shortSha } from "./format.ts";
+import { formatDate, formatNumber, shortSha, writtenFrom } from "./format.ts";
 import { type ArticleInflight, IN_PROGRESS_ANCHOR } from "./inflight-article.ts";
 import { escapeHtml, renderInline } from "./inline.ts";
 import { featureLink, type SiteModel } from "./model.ts";
@@ -58,7 +58,7 @@ export interface ArticleView {
   /** `label` is plain text; `html` is trusted HTML. */
   /** `ignore` keeps a computed row out of search (R23's Main contributors). */
   infobox: { label: string; html: string; ignore?: boolean }[];
-  /** Trusted HTML: "This page was last edited on <date>, at commit <sha link>." */
+  /** Trusted HTML: who wrote the page, from which commit and when, and what was checked. */
   lastEdited: string;
   /** The work in flight on a current active article (spec v2 #9 §6.2); absent otherwise. */
   inflight?: ArticleInflight;
@@ -155,7 +155,7 @@ export function articleView(
     seeAlso,
     references,
     infobox: infoboxRows(site, revision, feature?.aliases ?? []),
-    lastEdited: `This page was last edited on ${formatDate(revision.commitDate)}, at commit ${revisionHtml(site, revision)}.`,
+    lastEdited: writtenFrom(revisionHtml(site, revision), revision.commitDate),
     ...(inflight === null ? {} : { inflight }),
   };
 }

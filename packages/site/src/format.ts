@@ -29,3 +29,11 @@ export function formatNumber(n: number): string {
 }
 
 export const shortSha = (sha: string): string => sha.slice(0, 7);
+
+/**
+ * A page's footer line: an AI model wrote it, from which commit and when (the commit's date, not
+ * the build's), and the one thing RepoWiki checked. `commitHtml` is trusted HTML.
+ */
+export function writtenFrom(commitHtml: string, commitDate: string): string {
+  return `An AI model wrote this page from the code as of ${formatDate(commitDate)}, at commit ${commitHtml}. RepoWiki checked that its citations point at that code.`;
+}

@@ -56,7 +56,7 @@ describe("architectureView", () => {
 
   it("names its commit, linked to the repository", () => {
     expect(architectureView(site)?.lastEdited).toBe(
-      'This page was last edited on 10 March 2026, at commit <a class="external" href="https://github.com/acme/demo-repo/commit/cccccccccccccccccccccccccccccccccccccccc"><code>ccccccc</code></a>.',
+      'An AI model wrote this page from the code as of 10 March 2026, at commit <a class="external" href="https://github.com/acme/demo-repo/commit/cccccccccccccccccccccccccccccccccccccccc"><code>ccccccc</code></a>. RepoWiki checked that its citations point at that code.',
     );
   });
 });
