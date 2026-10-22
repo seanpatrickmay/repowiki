@@ -131,6 +131,14 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
     expect((await signInFlow(createApp(invited, authRoutes(invited)))).back.status).toBe(303);
   });
 
+  it("admits anyone new when the allowlist is *, which no GitHub login can be", async () => {
+    const open = {
+      ...deps,
+      config: { ...deps.config, mode: "development" as const, signupAllowlist: ["*"] },
+    };
+    expect((await signInFlow(createApp(open, authRoutes(open)))).back.status).toBe(303);
+  });
+
   it("keeps a GitHub name that is missing or too long from breaking sign-in or a later one", async () => {
     for (const name of [null, "   ", "x".repeat(300)]) {
       const odd: Deps = {
