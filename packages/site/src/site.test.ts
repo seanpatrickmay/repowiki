@@ -542,7 +542,7 @@ describe("hostile fixture content", () => {
     expect(html).toContain(`<h1 class="page-title">${title}</h1>`);
     expect(html).toContain(`<caption>${title}</caption>`);
     expect(html).toContain(`<title>${title} - demo-repo wiki</title>`);
-    expect(html).toContain("<td>&lt;i&gt;x&lt;/i&gt;</td>");
+    expect(html).toContain("<td><code>&lt;i&gt;x&lt;/i&gt;</code></td>");
     expect(html).toContain("She said &quot;hi&quot; and it&#39;s fine");
     expect(html).toContain('<li><a href="#see-also">See also</a></li>');
     expect(html).not.toContain("<img src=x");
@@ -1213,7 +1213,9 @@ describe("search", () => {
     const entry = JSON.parse(site.read("pagefind/pagefind-entry.json"));
     expect(entry.languages.en.page_count).toBe(4);
     const body = site.read("wiki/signals/index.html").split("data-pagefind-body")[1] ?? "";
-    expect(body).toContain("signal pipeline, SIGNALS_TABLE, /api/signals");
+    // A code name is shown as code in its own row, so search still finds the article by it.
+    expect(body).toContain("signal pipeline");
+    expect(body).toContain("<code>SIGNALS_TABLE</code>, <code>/api/signals</code>");
   });
 
   it("loads the Pagefind UI without an inline script, which the Content-Security-Policy forbids", () => {
