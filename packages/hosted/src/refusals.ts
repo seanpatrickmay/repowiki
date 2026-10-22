@@ -21,6 +21,7 @@ export const REFUSAL_CODES = [
   "job-cost-cap",
   "job-interrupted",
   "job-failed",
+  "correction-unchanged",
   "stale-revision",
   "stale-publication",
   "preview-mismatch",
@@ -133,6 +134,12 @@ export const REFUSALS: Readonly<Record<RefusalCode, RefusalInfo>> = {
     status: 500,
     retryable: true,
     message: "Something went wrong while building your draft. Nothing was charged to your quota.",
+  },
+  "correction-unchanged": {
+    status: 422,
+    retryable: false,
+    message:
+      "No sentence could be corrected, so nothing changed and it doesn't count. Say what's wrong in other words, or flag another sentence.",
   },
   "stale-revision": {
     status: 409,

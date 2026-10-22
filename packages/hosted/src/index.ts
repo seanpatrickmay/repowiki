@@ -94,6 +94,7 @@ export {
   succeedJob,
 } from "./jobs.ts";
 export {
+  CORRECTION,
   DAY_MS,
   isFrozen,
   jobCap,
