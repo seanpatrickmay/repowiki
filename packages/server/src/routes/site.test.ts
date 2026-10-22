@@ -112,7 +112,7 @@ describe("the public site (readiness: marketing pages)", () => {
     for (const fact of ["Rust", "email address", "small"]) expect(questions, fact).toContain(fact);
     const home = await body("/");
     expect(home).toContain("Edited by");
-    expect(home).toContain("squash");
+    expect(home).toContain("Co-authored-by");
   });
 
   it("states the refund rule and what is stored, in the words of the pages", async () => {

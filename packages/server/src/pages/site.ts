@@ -73,7 +73,7 @@ const home: SitePage = {
 <h3>The first look</h3>
 <p>A recruiter skims a resume before deciding to read it. A personal project usually gets one line there, and a GitHub link that someone outside engineering won't open. An entry is written for that reader. The opening paragraph and the Works table take about 30 seconds: each project, what it's built with, and the student's part in it. Every row opens into the project's wiki for the engineer who wants more.</p>
 <h3>Group projects</h3>
-<p>Class projects and hackathons are shared work, and a resume line can't show who did what. An entry describes only the student's own commits, read from git history rather than claimed, and each teammate can publish their own entry about the same repository. Credit follows the name on each commit, so work a teammate squash-merged or committed while pairing counts as theirs.</p>
+<p>Class projects and hackathons are shared work, and a resume line can't show who did what. An entry describes only the student's own commits, read from git history rather than claimed, and each teammate can publish their own entry about the same repository. Credit follows the names on each commit: its author, and anyone a <code>Co-authored-by</code> line names, as GitHub writes when it squash-merges a teammate's branch. Pairing with no such line counts for whoever committed.</p>
 <h3>Technical interviews</h3>
 <p>"Walk me through a project you built" is a standard interview question. A project's wiki explains the student's own code back to them, feature by feature, so you can use it to prepare for the interview.</p>
 <h2>Compared with other ways to show a project</h2>
@@ -143,7 +143,7 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "It was a group project. What will it say about my part?",
-    "Your entry describes the parts of the project in commits made under your name, read from git history, and each teammate can make their own entry about the same repository. Work that reached the repository under someone else's name, through a squash merge or pair programming, counts for whoever's name is on the commit.",
+    "Your entry describes the parts of the project in your commits, read from git history, and each teammate can make their own entry about the same repository. A commit counts as yours when you made it, and as co-authored when its message names you in a Co-authored-by line, which GitHub adds when it squash-merges a branch you committed to. Pairing with no such line counts for whoever committed.",
   ],
   [
     "Which languages does it read?",

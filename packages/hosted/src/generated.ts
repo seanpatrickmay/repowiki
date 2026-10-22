@@ -62,7 +62,16 @@ export function contributionParagraph(
   const lines =
     a.totalLines === 0
       ? ""
-      : ` and was the last to change about ${share === 0 && a.currentLines > 0 ? "under 1" : share}% of the code in it now`;
+      : `was the last to change about ${share === 0 && a.currentLines > 0 ? "under 1" : share}% of the code in it now`;
+  // Others' squash merges and pairing name the author in trailers (ADR-0022).
+  const co = a.coAuthored === undefined ? "" : `was named a co-author of ${a.coAuthored} more`;
+  const clauses = [co, lines].filter((c) => c !== "");
+  const more =
+    clauses.length === 0
+      ? ""
+      : clauses.length === 1
+        ? ` and ${clauses[0]}`
+        : `, ${clauses[0]} and ${clauses[1]}`;
   const busiest = byCommits(
     a.features.filter((f) => f.commits > 0 && !docs.has(f.featureId)).map((f) => f.featureId),
     facts,
@@ -72,7 +81,7 @@ export function contributionParagraph(
     .map((id) => plainWords(titles.get(id) ?? "", TITLE_MAX) || id);
   const where = busiest.length === 0 ? "" : `, most of all in ${listed(busiest)}`;
   // "Made" commits, not "wrote" the code: a squash merge credits whoever's name is on it.
-  return `${name} made ${a.commits} of the repository's ${total}${lines}${where}.`;
+  return `${name} made ${a.commits} of the repository's ${total}${more}${where}.`;
 }
 
 export interface ContentInput {

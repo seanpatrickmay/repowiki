@@ -230,6 +230,23 @@ describe("computeSnapshot (spec v2 #6 §7)", () => {
     expect(snapshot.people.find((p) => p.id === "ada-lovelace")?.prsMerged).toEqual([3]);
   });
 
+  it("counts the commits that name a person as a co-author apart from their own (ADR-0022)", async () => {
+    const { snapshot } = await compute({}, false, () => {
+      repo.write("src/signals/intake.py", "a = 1\nb = 2\nc = 4\n");
+      return repo.commit(
+        "perf: faster intake\n\nCo-authored-by: Ada <ada@example.com>\nCo-authored-by: Nobody <nobody@example.com>",
+        "+0000",
+        BOB,
+      );
+    });
+    const ada = snapshot.people.find((p) => p.id === "ada-lovelace");
+    const bob = snapshot.people.find((p) => p.id === "bob-smith");
+    expect(ada?.coAuthored).toBe(1);
+    expect(ada?.commits).toBe(2);
+    expect(bob).not.toHaveProperty("coAuthored");
+    expect(snapshot.people.some((p) => p.name === "Nobody")).toBe(false);
+  });
+
   it("lists the bot with its counts", async () => {
     const { snapshot } = await compute();
     expect(snapshot.people.find((p) => p.id === "dependabot-bot")).toMatchObject({

@@ -40,6 +40,28 @@ export interface AuthoredCommit {
   files: AuthoredFile[];
   /** The pull request that brought the commit in, as readHistory assigns it. */
   pr: number | null;
+  /**
+   * The people its message names in `Co-authored-by:` trailers (ADR-0022), each address once
+   * and lowercased, the author left out; absent when there are none. Untrusted text.
+   */
+  coAuthors?: { name: string; email: string }[];
+}
+
+/** A `Co-authored-by: Name <address>` trailer line, as GitHub writes one on a squash merge. */
+const CO_AUTHOR = /^co-authored-by:\s*(.*?)\s*<([^\s<>@]+@[^\s<>@]+)>\s*$/i;
+
+/** The co-authors a commit message names, each address once, never the author's own. */
+export function coAuthorsOf(body: string, authorEmail: string): { name: string; email: string }[] {
+  const seen = new Set([authorEmail.toLowerCase()]);
+  const found: { name: string; email: string }[] = [];
+  for (const line of body.split("\n")) {
+    const match = CO_AUTHOR.exec(line.trim());
+    const email = match?.[2]?.toLowerCase();
+    if (match === null || email === undefined || seen.has(email)) continue;
+    seen.add(email);
+    found.push({ name: match[1] ?? "", email });
+  }
+  return found;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/;
@@ -200,6 +222,7 @@ export function readAuthorship(
       }
     }
     const merge = parentShas.length > 1;
+    const coAuthors = coAuthorsOf(body, email);
     const titleLine = body.split("\n").find((line) => line.trim() !== "");
     const usable = schemaDate(authorDate);
     // The commit date takes the same form (its offset fixed): an undated commit stands on it.
@@ -217,6 +240,7 @@ export function readAuthorship(
       mergeTitle: merge && titleLine !== undefined ? titleLine.trim() : null,
       files,
       pr: null,
+      ...(coAuthors.length > 0 ? { coAuthors } : {}),
     });
   }
   assignPullRequests(commits);

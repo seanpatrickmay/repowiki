@@ -56,6 +56,21 @@ describe("generation facts (spec 2 §8, Contract §8)", () => {
     });
   });
 
+  it("carries the commits that name the author as a co-author (ADR-0022)", () => {
+    const snapshot = {
+      commits: 20,
+      totalLines: 600,
+      people: [{ id: "author", commits: 4, coAuthored: 3, currentLines: 40, features: [] }],
+    };
+    expect(authorFacts(snapshot, [])).toMatchObject({ commits: 4, coAuthored: 3 });
+    expect(
+      authorFacts(
+        { ...snapshot, people: [{ ...snapshot.people[0], coAuthored: undefined }] } as never,
+        [],
+      ),
+    ).not.toHaveProperty("coAuthored");
+  });
+
   it("gives zeros when there is no snapshot or the author is not in it", () => {
     const zero = { commits: 0, totalCommits: 0, currentLines: 0, totalLines: 0, features: [] };
     expect(authorFacts(null, ["x"])).toEqual(zero);

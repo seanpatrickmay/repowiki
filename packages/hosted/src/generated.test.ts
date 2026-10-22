@@ -81,6 +81,25 @@ describe("the generated contribution paragraph (ADR-0012)", () => {
     );
   });
 
+  it("counts the commits others made naming the author as a co-author (ADR-0022)", () => {
+    const author = {
+      commits: 19,
+      coAuthored: 10,
+      totalCommits: 225,
+      currentLines: 80,
+      totalLines: 1000,
+      features: [{ featureId: "arena", commits: 19, currentLines: 80 }],
+    };
+    const shared = facts(author);
+    expect(contributionParagraph("Jordan Avery", shared, titles, docs)).toBe(
+      "Jordan Avery made 19 of the repository's 225 commits, was named a co-author of 10 more and was the last to change about 8% of the code in it now, most of all in Bot arena.",
+    );
+    const one = facts({ ...author, coAuthored: 1, currentLines: 0, totalLines: 0 });
+    expect(contributionParagraph("Jordan Avery", one, titles, docs)).toBe(
+      "Jordan Avery made 19 of the repository's 225 commits and was named a co-author of 1 more, most of all in Bot arena.",
+    );
+  });
+
   it("drops the lines clause with no lines, and names fewer features when there are fewer", () => {
     const few = facts({
       commits: 3,
