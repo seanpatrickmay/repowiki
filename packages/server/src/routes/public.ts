@@ -124,15 +124,6 @@ export function publicRoutes(deps: Deps): Route[] {
       },
     },
     {
-      // The pages origin's root is the product's own front door (ADR-0012).
-      method: "GET",
-      pattern: "/",
-      handler: async () => ({
-        status: 302,
-        headers: { location: `${deps.config.appOrigin}/` },
-      }),
-    },
-    {
       method: "GET",
       pattern: "/:handle",
       handler: async (request) => {

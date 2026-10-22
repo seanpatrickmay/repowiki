@@ -112,6 +112,9 @@ describe("listeners (spec 2 S1)", () => {
       }
     }
     expect((await call(pub.app, { path: "/", headers: { host: "app.repowiki.dev" } })).status).toBe(
+      302,
+    );
+    expect((await call(pub.app, { path: "/", headers: { host: "repowiki.dev" } })).status).toBe(
       200,
     );
     // No host is a 404; Fly's health check uses /healthz, which answers on any host.
@@ -137,14 +140,15 @@ describe("listeners (spec 2 S1)", () => {
     expect(await status("/internal/job/lease", app, "POST")).toBe(401);
     // The pages host is read-only: no worker route, and no method but GET.
     expect(await status("/internal/job/lease", pages, "POST")).toBe(405);
-    expect(await status("/", app)).toBe(200);
+    expect(await status("/", app)).toBe(302);
     expect(await status("/dashboard", app)).toBe(303);
     expect(await status("/dashboard", pages)).toBe(404);
     expect(await status("/auth/github", pages)).toBe(404);
     expect(await status("/_app/biography.css", pages)).toBe(200);
     expect(await status("/_app/style.css", pages)).toBe(404);
     const root = await call(only.app, { path: "/", headers: pages });
-    expect(root).toMatchObject({ status: 302, headers: { location: "http://127.0.0.1:8787/" } });
+    expect(root.status).toBe(200);
+    expect(String(root.body)).toContain("Show recruiters what you actually built.");
     // A handle is a pages path; on the app host it is no page at all.
     const handle = await call(only.app, { path: "/nobody", headers: app });
     expect(String(handle.body)).toContain("is not a page on RepoWiki");

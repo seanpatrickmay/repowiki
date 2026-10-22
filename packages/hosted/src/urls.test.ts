@@ -44,7 +44,7 @@ describe("handles (Contract spec §9)", () => {
 
   it("are never one of the reserved route names", () => {
     expect(RESERVED_HANDLES.has("api")).toBe(true);
-    expect(RESERVED_HANDLES.size).toBe(33);
+    expect(RESERVED_HANDLES.size).toBe(37);
     // The pages origin's preview links (ADR-0012); no GitHub login has a "_" anyway.
     expect(isReservedHandle("_preview")).toBe(true);
     // Fly's health check, answered on every host before routing (review M5).

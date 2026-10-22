@@ -10,10 +10,12 @@ beforeAll(async () => {
 afterAll(async () => deps.db.close());
 
 describe("the landing page (spec 2 §7)", () => {
-  it("answers signed out with a sign-in link, and is what the health check reads", async () => {
+  it("sends a signed-out visitor to the public home page (ADR-0016)", async () => {
     const reply = await call(createApp(deps, landingRoutes(deps)), { path: "/" });
-    expect(reply.status).toBe(200);
-    expect(String(reply.body)).toContain('href="/auth/github"');
+    expect(reply).toMatchObject({
+      status: 302,
+      headers: { location: `${deps.config.publicOrigin}/` },
+    });
   });
 
   it("sends a signed-in visitor on to the dashboard", async () => {
@@ -22,9 +24,6 @@ describe("the landing page (spec 2 §7)", () => {
       path: "/",
       headers: { cookie },
     });
-    expect(reply.status).toBe(200);
-    expect(String(reply.body)).toContain('href="/dashboard"');
-    // It names the visitor, so no shared cache may keep it.
-    expect(reply.headers?.["cache-control"]).toBe("private, no-store");
+    expect(reply).toMatchObject({ status: 302, headers: { location: "/dashboard" } });
   });
 });

@@ -25,6 +25,7 @@ import { jobRoutes } from "./routes/project-jobs.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { publicRoutes } from "./routes/public.ts";
 import { publishRoutes } from "./routes/publish.ts";
+import { siteRoutes } from "./routes/site.ts";
 import { flyRunner } from "./runner/fly-runner.ts";
 import { localRunner } from "./runner/local-runner.ts";
 import type { JobRunner } from "./runner/runner.ts";
@@ -121,7 +122,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...billingRoutes(deps),
       ...billingWebhookRoutes(deps),
     ],
-    pages: [...previewPageRoutes(deps), ...publicRoutes(deps)],
+    pages: [...siteRoutes(deps), ...previewPageRoutes(deps), ...publicRoutes(deps)],
     worker: [...internalRoutes(deps), ...llmRoutes(deps)],
   };
 }
