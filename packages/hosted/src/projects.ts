@@ -70,6 +70,33 @@ export function accountDeleted(project: Project, now: string): Result<Project> {
 }
 
 /**
+ * The account its deletion withdrew it from came back (ADR-0021): the project is the author's own
+ * withdrawal again, its purge clock stopped, so the author may publish it again or delete it.
+ */
+export function accountReturned(project: Project): Result<Project> {
+  if (project.state !== "withdrawn" || project.withdrawReason !== "account-deleted")
+    return invalid();
+  return ok({ ...project, withdrawReason: "author", unavailableSince: null });
+}
+
+/**
+ * A purged project built again (ADR-0021): a fresh draft with the same id, slug and address. Its
+ * revisions and versions were deleted with it, so the counts start over.
+ */
+export function revive(project: Project): Result<Project> {
+  if (project.state !== "purged") return invalid();
+  return ok({
+    ...project,
+    state: "draft",
+    withdrawReason: null,
+    withdrawnAt: null,
+    unavailableSince: null,
+    latestRevision: 0,
+    currentVersion: 0,
+  });
+}
+
+/**
  * The repository is eligible again within the grace period. A repository withdrawal goes back
  * to where it was; an author withdrawal stays withdrawn with its purge clock stopped. A current
  * version that cannot be served (stored before ADR-0013, with no biography entry) restores to

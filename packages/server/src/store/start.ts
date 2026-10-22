@@ -14,6 +14,7 @@ import {
   type Project,
   type RefusalCode,
   type Result,
+  revive,
   slugFor,
 } from "@repowiki/hosted";
 import type { Db, Queryable } from "../db/db.ts";
@@ -120,7 +121,9 @@ async function start(
   }
   const cap = jobCap(estimate, PLANS[account.plan].monthlyUsdMicros - usage.monthUsdMicros);
   if (!cap.ok) return cap;
-  let project = existing;
+  // A purged project is built again as a fresh draft at its old address (ADR-0021).
+  const revived = existing?.state === "purged" ? revive(existing) : null;
+  let project = revived?.ok ? revived.value : existing;
   if (project === null) {
     const slugs = await tx.query<{ slug: string }>(
       "SELECT slug FROM projects WHERE account_id = $1",

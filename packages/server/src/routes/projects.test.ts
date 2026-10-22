@@ -5,6 +5,7 @@ import type { App } from "../http/server.ts";
 import { recordingRunner, type StartRequest } from "../runner/runner.ts";
 import { saveGitHubToken } from "../store/github-tokens.ts";
 import { jobById, tokenJob } from "../store/jobs.ts";
+import { projectById } from "../store/projects.ts";
 import { projectRoutes } from "./projects.ts";
 import { call, form, signedInCookie, testDeps } from "./test-app.ts";
 
@@ -116,6 +117,29 @@ describe("the dashboard after the persona review", () => {
     expect(body).toContain(`\\href{${page}/demo-repo/}{$\\nearrow$}`);
     expect(body).toContain(`${page}/demo-repo/`);
     expect(body).toContain("LinkedIn");
+  });
+});
+
+describe("building a repository whose project was purged (ADR-0021)", () => {
+  it("starts that project again as a fresh draft at the same address", async () => {
+    const { cookie, csrf } = await signedInCookie(deps);
+    const first = await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    const id = String(first.headers?.location).split("/").pop() ?? "";
+    await deps.db.query(
+      `UPDATE jobs SET status = 'succeeded', body = body || '{"status":"succeeded"}'::jsonb`,
+    );
+    await deps.db.query(
+      `UPDATE projects SET body = body || '{"state":"purged","withdrawReason":"account-deleted","withdrawnAt":"2026-01-01T00:00:00.000Z","latestRevision":2,"currentVersion":1}'::jsonb`,
+    );
+    await deps.db.query(`UPDATE accounts SET body = body || '{"plan":"pro"}'::jsonb`);
+    const again = await build(cookie, `csrf=${csrf}&githubRepoId=${FAKE_REPO.id}`);
+    expect(again.headers?.location).toBe(`/projects/${id}`);
+    expect(await projectById(deps.db, id)).toMatchObject({
+      state: "draft",
+      latestRevision: 0,
+      currentVersion: 0,
+      withdrawReason: null,
+    });
   });
 });
 

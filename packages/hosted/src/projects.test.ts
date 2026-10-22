@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { Project } from "./entities.ts";
 import {
   accountDeleted,
+  accountReturned,
   newProject,
   purge,
   repositoryUnavailable,
   restore,
+  revive,
   takedown,
   unpublish,
 } from "./projects.ts";
@@ -23,6 +25,40 @@ const withdrawn = (reason: Project["withdrawReason"], patch: Partial<Project> = 
     unavailableSince: reason === "repository" ? T0 : null,
     ...patch,
   });
+
+describe("an account that comes back (ADR-0021)", () => {
+  it("gets each project its deletion withdrew back as the author's own withdrawal, its purge clock stopped", () => {
+    const gone = withdrawn("account-deleted", { currentVersion: 2, latestRevision: 3 });
+    expect(accountReturned(gone)).toEqual({
+      ok: true,
+      value: { ...gone, withdrawReason: "author", unavailableSince: null },
+    });
+    const back = accountReturned(gone);
+    if (!back.ok) throw new Error("not returned");
+    expect(purge(back.value, DAY31).ok).toBe(false);
+  });
+
+  it("leaves every other project as it is", () => {
+    for (const project of [published, aProject(), withdrawn("author"), withdrawn("operator")]) {
+      expect(accountReturned(project).ok).toBe(false);
+    }
+  });
+
+  it("starts a purged project again as a fresh draft at the same address", () => {
+    const purged = aProject({
+      state: "purged",
+      withdrawReason: "account-deleted",
+      withdrawnAt: T0,
+      latestRevision: 3,
+      currentVersion: 2,
+    });
+    expect(revive(purged)).toEqual({
+      ok: true,
+      value: { ...aProject(), id: purged.id, slug: purged.slug, createdAt: purged.createdAt },
+    });
+    expect(revive(published).ok).toBe(false);
+  });
+});
 
 describe("projects (Contract spec §6.2)", () => {
   it("start as drafts", () => {

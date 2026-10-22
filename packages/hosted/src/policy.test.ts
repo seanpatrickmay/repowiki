@@ -186,6 +186,17 @@ describe("starting a generation (Contract spec §7.1, §10)", () => {
     expect(create({})).toEqual({ ok: true, value: true });
   });
 
+  it("starts a purged project again as a new one, counted against the plan (ADR-0021)", () => {
+    const purged = aProject({ state: "purged", latestRevision: 2, currentVersion: 1 });
+    expect(create({ project: purged })).toEqual({ ok: true, value: true });
+    expect(create({ project: purged, usage: usage({ activeProjects: 1 }) })).toMatchObject({
+      code: "plan-project-limit",
+    });
+    expect(create({ project: purged, usage: usage({ generationsLifetime: 1 }) })).toMatchObject({
+      code: "plan-generation-limit",
+    });
+  });
+
   it("refuses a stale check, ineligibility, a new GitHub account and a full plan", () => {
     expect(create({ now: "2026-10-14T12:01:01Z" })).toMatchObject({ code: "invalid-input" });
     expect(create({ facts: eligibleFacts({ isFork: true }) })).toMatchObject({ code: "repo-fork" });

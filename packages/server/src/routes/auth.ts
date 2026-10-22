@@ -175,13 +175,6 @@ export function authRoutes(deps: Deps): Route[] {
             plan: deps.config.localPlan,
           },
         );
-        if (signedIn?.account.status === "deleting") {
-          return failure(
-            410,
-            "Account deleted",
-            "This GitHub account's RepoWiki account was deleted, and everything in it is being removed.",
-          );
-        }
         if (signedIn === null) {
           return failure(
             403,

@@ -115,11 +115,13 @@ export {
 } from "./policy.ts";
 export {
   accountDeleted,
+  accountReturned,
   type NewProject,
   newProject,
   purge,
   repositoryUnavailable,
   restore,
+  revive,
   takedown,
   unpublish,
 } from "./projects.ts";
