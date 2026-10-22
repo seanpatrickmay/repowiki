@@ -187,7 +187,9 @@ function withinSizeAndCost(
 function startGeneration(account: Account, ctx: PolicyContext): Result<true> {
   const usage = need(ctx.usage, "usage");
   const { project } = ctx;
-  if (project !== undefined && !(project.state === "draft" && project.latestRevision === 0)) {
+  // A purged project starts again as a new one (ADR-0021): its row and address are all that's left.
+  const fresh = project === undefined || project.state === "purged";
+  if (!fresh && !(project.state === "draft" && project.latestRevision === 0)) {
     return refused("invalid-transition");
   }
   const githubRepoId = project?.githubRepoId ?? need(ctx.githubRepoId, "githubRepoId");
@@ -199,7 +201,7 @@ function startGeneration(account: Account, ctx: PolicyContext): Result<true> {
   if (account.plan === "free" && age < PLATFORM.freeAccountMinAgeDays * DAY_MS) {
     return refused("account-too-new");
   }
-  if (project === undefined && usage.activeProjects >= plan.projects) {
+  if (fresh && usage.activeProjects >= plan.projects) {
     return refused("plan-project-limit");
   }
   const lifetime = usage.generationsLifetime + usage.inFlightGenerations;

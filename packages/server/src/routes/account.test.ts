@@ -65,6 +65,7 @@ describe("deleting an account (Contract §6.2, ADR-0018)", () => {
       (await call(app, { path: "/account", headers: { cookie: me.cookie } })).body,
     );
     expect(page).toContain("We keep only your GitHub user ID and login");
+    expect(page).toContain("your account comes back at the same address, with nothing published");
     expect(page).toContain("The rest of a Pro period you paid for isn't refunded");
   });
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   Account,
+  accountReturned,
   Handle,
   type HandleLookup,
   type HandleRecord,
@@ -10,6 +11,7 @@ import {
 } from "@repowiki/hosted";
 import { type Db, isUniqueViolation, type Queryable } from "../db/db.ts";
 import { appendAudit } from "./audit.ts";
+import { projectById, projectsOf, saveProject } from "./projects.ts";
 import { asJson, parsedBody } from "./rows.ts";
 
 export interface GitHubProfile {
@@ -36,8 +38,8 @@ export interface SignedIn {
 
 /**
  * The account for a GitHub user, created with its handle on first sign-in (Contract §9). Null when
- * the user is new and not allowed to sign up. A deleted account comes back as it is, unrefreshed, for
- * the caller to turn away (ADR-0018). Two concurrent first sign-ins make one account.
+ * the user is new and not allowed to sign up. A deleted account comes back (ADR-0021), whatever the
+ * allowlist says: it was let in once. Two concurrent first sign-ins make one account.
  */
 export async function signIn(
   db: Db,
@@ -50,6 +52,43 @@ export async function signIn(
     if (!isUniqueViolation(error)) throw error;
     return signInOnce(db, profile, options);
   }
+}
+
+/**
+ * A deleted account signing in again (ADR-0021): it gets back its handle (the one for its login,
+ * else its newest), and every project its deletion withdrew comes back as the author's own
+ * withdrawal, unpublished and no longer purged. Its sessions and token went with the deletion; the
+ * sign-in makes new ones. Its usage history was never deleted, so no allowance starts over.
+ */
+async function comeBack(tx: Queryable, accountId: string, login: string, now: string) {
+  const rows = await tx.query<{ body: unknown }>(
+    "SELECT body FROM handles WHERE account_id = $1 FOR UPDATE",
+    [accountId],
+  );
+  const tombstoned = rows
+    .map((row) => parsedBody(Handle, row.body, "handle"))
+    .filter((h) => h.state === "tombstoned")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const back = tombstoned.find((h) => h.handle === login.toLowerCase()) ?? tombstoned[0];
+  if (back !== undefined) {
+    await tx.query("UPDATE handles SET body = $2::jsonb WHERE handle = $1", [
+      back.handle,
+      asJson(parsedBody(Handle, { ...back, state: "active", redirectTo: null }, "handle")),
+    ]);
+  }
+  for (const { id } of await projectsOf(tx, accountId)) {
+    const project = await projectById(tx, id, true);
+    const returned = project === null ? null : accountReturned(project);
+    if (returned?.ok) await saveProject(tx, returned.value);
+  }
+  await appendAudit(tx, {
+    id: randomUUID(),
+    actor: "author",
+    action: "account.return",
+    target: { entity: "account", id: accountId },
+    outcome: "allowed",
+    createdAt: now,
+  });
 }
 
 async function signInOnce(
@@ -65,16 +104,18 @@ async function signInOnce(
     const existing = rows[0];
     if (existing !== undefined) {
       const account = parsedBody(Account, existing.body, "account");
-      if (account.status === "deleting") return { account, handle: "", created: false };
+      const returning = account.status === "deleting";
       const refreshed: Account = {
         ...account,
         login: profile.login,
         displayName: profile.displayName,
+        status: "active",
       };
       await tx.query("UPDATE accounts SET body = $2::jsonb WHERE id = $1", [
         account.id,
         asJson(parsedBody(Account, refreshed, "account")),
       ]);
+      if (returning) await comeBack(tx, account.id, profile.login, options.now);
       return {
         account: refreshed,
         handle: (await activeHandle(tx, account.id)) ?? "",

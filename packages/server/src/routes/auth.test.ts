@@ -1,9 +1,12 @@
+import { newProject } from "@repowiki/hosted";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import { FAKE_USER } from "../github/fake.ts";
 import type { App } from "../http/server.ts";
 import { deleteAccount } from "../store/account-deletion.ts";
+import { accountById, activeHandle } from "../store/accounts.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
+import { projectById, saveProject } from "../store/projects.ts";
 import { authRoutes } from "./auth.ts";
 import { call, setCookie, testDeps } from "./test-app.ts";
 
@@ -140,17 +143,36 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
     expect((await signInFlow(createApp(open, authRoutes(open)))).back.status).toBe(303);
   });
 
-  it("turns away a deleted account and leaves it as it is, with no new session or token", async () => {
+  it("lets a deleted account back in at its old address, its projects unpublished (ADR-0021)", async () => {
     const { back } = await signInFlow();
     expect(back.status).toBe(303);
     const [row] = await deps.db.query<{ id: string }>("SELECT id FROM accounts");
     const id = row?.id ?? "";
+    const project = newProject({
+      id: deps.newId(),
+      accountId: id,
+      githubRepoId: 9090,
+      slug: "demo-repo",
+      now: deps.now(),
+    });
+    await saveProject(deps.db, {
+      ...project,
+      state: "published",
+      currentVersion: 1,
+      latestRevision: 1,
+    });
     await deps.db.transaction((tx) => deleteAccount(tx, { accountId: id, now: deps.now() }));
     const again = await signInFlow();
-    expect(again.back.status).toBe(410);
-    expect(again.session).toBe("");
-    expect(await deps.db.query("SELECT * FROM github_tokens")).toEqual([]);
-    expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
+    expect(again.back.status).toBe(303);
+    expect(again.session).not.toBe("");
+    expect((await accountById(deps.db, id))?.status).toBe("active");
+    expect(await activeHandle(deps.db, id)).toBe(FAKE_USER.login.toLowerCase());
+    expect(await projectById(deps.db, project.id)).toMatchObject({
+      state: "withdrawn",
+      withdrawReason: "author",
+      unavailableSince: null,
+    });
+    expect(await deps.db.query("SELECT id FROM accounts")).toHaveLength(1);
   });
 
   it("keeps a GitHub name that is missing or too long from breaking sign-in or a later one", async () => {

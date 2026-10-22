@@ -102,7 +102,7 @@ describe("the public site (readiness: marketing pages)", () => {
     const privacy = await body("/privacy");
     expect(privacy).toContain("https://github.com/settings/applications");
     expect(privacy).toContain("commit subjects");
-    expect(privacy).toContain("sign up again");
+    expect(privacy).toContain("your account comes back at the same address");
     expect(await body("/terms")).toContain("Delete my account");
     const pro = await body("/pro");
     for (const fact of ["US dollars", "within 7 days", "Billing page", "the same day"]) {
