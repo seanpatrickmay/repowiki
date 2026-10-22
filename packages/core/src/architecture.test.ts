@@ -188,8 +188,22 @@ describe("Architecture", () => {
 });
 
 describe("the project's own article", () => {
-  it("puts Purpose and features right after the lead", () => {
-    expect(ArchitectureSectionKey.options.slice(0, 3)).toEqual(["lead", "purpose", "layers"]);
+  it("puts Purpose and features right after the lead, then Results (ADR-0019)", () => {
+    expect(ArchitectureSectionKey.options.slice(0, 4)).toEqual([
+      "lead",
+      "purpose",
+      "results",
+      "layers",
+    ]);
+  });
+
+  it("needs a citation on a results claim: a page's lead does not record a result", () => {
+    expect(
+      architectureClaimViolations(
+        "results",
+        architectureClaim({ citations: [], pages: ["signals"] }),
+      ),
+    ).toEqual(["results claims cite the lines that record them"]);
   });
 
   it("needs a citation or a page on a purpose claim, like any body claim", () => {

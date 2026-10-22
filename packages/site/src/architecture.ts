@@ -12,6 +12,7 @@ export const ARCHITECTURE_SECTION_TITLES: Record<
   string
 > = {
   purpose: "Purpose and features",
+  results: "Results",
   layers: "Layers",
   "request-paths": "Request paths",
   dependencies: "Feature dependencies",

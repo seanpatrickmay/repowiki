@@ -6,7 +6,13 @@ import {
   MAX_CLAIM_PAGES,
 } from "@repowiki/core";
 import { z } from "zod";
-import { claimTextProblems, quote, resolveCitations, type VerifyContext } from "./claims.ts";
+import {
+  claimTextProblems,
+  quote,
+  resolveCitations,
+  resultNumberProblems,
+  type VerifyContext,
+} from "./claims.ts";
 
 /**
  * A claim of the Architecture article as the model returns it: `cite` as on a feature page, and
@@ -153,5 +159,7 @@ export function verifyArchitectureClaim(
   // The rules need every reference resolved, but not every page: they are judged on the known
   // pages, so the retry round hears about a missing citation or support alongside a bad page.
   if (!unresolved) problems.push(...architectureClaimViolations(key, claim));
+  if (key === "results" && !unresolved)
+    problems.push(...resultNumberProblems(text, resolved.shown));
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };
 }

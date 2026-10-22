@@ -58,6 +58,11 @@ fixes come in several changes; this record holds their rulings and grows as each
   write-ups have no symbols, so they fell straight to "listed" once code had used the budget,
   and the model never saw the numbers. — Cost if wrong: a pack up to a quarter larger, at about
   a cent a build.
+- **Results in the About article.** Ruling: the About article gains a "Results" section after
+  "Purpose and features", for what the README and project documents record the project achieved;
+  each claim cites the lines (a page's lead is not enough) and passes the same numbers rule, and
+  the lead states the most telling result when there is one. — The project's headline numbers
+  were in its README and appeared nowhere. — Cost if wrong: a section key and prompt text.
 
 ## Consequences
 

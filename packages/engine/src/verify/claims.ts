@@ -303,6 +303,16 @@ export function unwrittenNumbers(text: string, cited: string): string[] {
   return [...missing];
 }
 
+/** A results claim's problem when a number in it is not one its citations write (ADR-0019). */
+export function resultNumberProblems(text: string, shown: readonly string[]): string[] {
+  const missing = unwrittenNumbers(text, shown.join("\n"));
+  return missing.length === 0
+    ? []
+    : [
+        `results claims quote each number exactly as the cited lines write it; the cited lines do not write ${missing.map(quote).join(", ")}`,
+      ];
+}
+
 /**
  * Everything wrong with a claim's text alone: empty, too long, a control or line-break
  * character, markup outside the reader's subset, or a citation-shaped token. `text` is trimmed.
@@ -413,14 +423,7 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
     if (violations.length === 0 && key === "known-limitations" && !evidence) {
       problems.push(LIMITATION_EVIDENCE_PROBLEM);
     }
-    if (key === "results") {
-      const missing = unwrittenNumbers(text, shown.join("\n"));
-      if (missing.length > 0) {
-        problems.push(
-          `results claims quote each number exactly as the cited lines write it; the cited lines do not write ${missing.map(quote).join(", ")}`,
-        );
-      }
-    }
+    if (key === "results") problems.push(...resultNumberProblems(text, shown));
   }
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };
 }

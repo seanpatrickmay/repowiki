@@ -8,11 +8,12 @@ import { addSectionStructureIssues, addUpdateParentIssue } from "./revision-rule
 
 /**
  * Sections of the Architecture article (F27), the documented project's own article, in page
- * order: the lead, "Purpose and features", then the four architecture sections.
+ * order: the lead, "Purpose and features", "Results", then the four architecture sections.
  */
 export const ArchitectureSectionKey = z.enum([
   "lead",
   "purpose",
+  "results",
   "layers",
   "request-paths",
   "dependencies",
@@ -56,6 +57,9 @@ export function architectureClaimViolations(
   if (claim.supports.length > 0) violations.push("only lead claims may support other claims");
   if (claim.citations.length === 0 && claim.pages.length === 0) {
     violations.push("body claims need a citation or a feature page");
+  }
+  if (key === "results" && claim.citations.length === 0) {
+    violations.push("results claims cite the lines that record them");
   }
   if (key === "request-paths" && claim.citations.length === 0) {
     violations.push("request-path claims need a code or commit citation");
