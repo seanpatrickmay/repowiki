@@ -100,6 +100,7 @@ const privacy = legal("Privacy", "What RepoWiki keeps about you, and who else ha
     "Your projects",
     [
       "When you add a public repository, a build machine copies it, builds your pages and deletes the copy when the build ends. We keep the pages, the facts from git history they're built from, and a record of each build. A published wiki quotes commit subjects and names the people in the repository's git history by the names on their commits, so read the preview for both before you publish.",
+      "When you correct a sentence, what you write about it goes to the AI model with that article, only to guide the rewrite. It is never shown on a page and is deleted when the correction ends.",
     ],
   ],
   [

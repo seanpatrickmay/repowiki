@@ -26,7 +26,7 @@ import {
   saveReview,
   versionOf,
 } from "../store/drafts.ts";
-import { jobsOf } from "../store/jobs.ts";
+import { jobSpec, jobsOf } from "../store/jobs.ts";
 import { correctionsOf, usageFor } from "../store/projects.ts";
 import { liveEligibility, ownedProject, repoFullName } from "./live.ts";
 import { previewBuildState } from "./preview-state.ts";
@@ -152,6 +152,10 @@ export function draftRoutes(deps: Deps): Route[] {
           current,
           plan: session.account.plan,
           corrections: await correctionsOf(deps.db, project.id),
+          outcomes:
+            jobs[0]?.kind === "correct" && jobs[0].status === "succeeded"
+              ? ((await jobSpec(deps.db, jobs[0].id))?.correction?.outcomes ?? undefined)
+              : undefined,
           session: shown,
         });
         return html(200, body, { "cache-control": "private, no-store" });

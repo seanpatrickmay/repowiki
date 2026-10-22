@@ -135,7 +135,7 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "Can I edit what it says?",
-    "No. The page says only what the code and git history show, never what anyone claims about them. If a sentence is wrong, don't publish it: rebuild the project once, free, or tell us which sentence at support@repowiki.app.",
+    "No, but you can correct it. The page says only what the code and git history show, never what anyone claims about them. If a sentence is wrong, tick it on your project page and say what's wrong: RepoWiki rewrites it from the code it cites and checks it again, or removes it if no version holds up. Free includes 3 corrections for each project, Pro 20 a month.",
   ],
   [
     "Will it say anything bad about my code?",
