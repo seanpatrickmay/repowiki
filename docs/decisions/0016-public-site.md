@@ -28,6 +28,13 @@ and a recruiter persona.
   never names its developer, and it says plainly that an AI model writes each entry. — The owner's
   rulings of 2026-10-21. — Cost if wrong: text.
 
+- **Legal pages.** Ruling: `/terms`, `/privacy` and `/refunds` say in plain words what the code
+  does: what is stored, the one cookie, who processes what, and the refund rule (in full within 7
+  days of a first payment with no build since, and any mistaken charge). The terms name the operator,
+  as the owner ruled legal pages may; no other page does. Account deletion is by request to support
+  until it is a feature. — Stripe reviews these before it activates an account. — Cost if wrong:
+  text, but a promise here is one the product must keep.
+
 ## Consequences
 
 - `repowiki.app/` is a page, not a redirect, so it is what a shared link or a search result shows.
