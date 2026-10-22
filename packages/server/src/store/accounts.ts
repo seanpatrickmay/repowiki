@@ -36,7 +36,8 @@ export interface SignedIn {
 
 /**
  * The account for a GitHub user, created with its handle on first sign-in (Contract §9). Null when
- * the user is new and not allowed to sign up. Two concurrent first sign-ins make one account.
+ * the user is new and not allowed to sign up. A deleted account comes back as it is, unrefreshed, for
+ * the caller to turn away (ADR-0018). Two concurrent first sign-ins make one account.
  */
 export async function signIn(
   db: Db,
@@ -64,6 +65,7 @@ async function signInOnce(
     const existing = rows[0];
     if (existing !== undefined) {
       const account = parsedBody(Account, existing.body, "account");
+      if (account.status === "deleting") return { account, handle: "", created: false };
       const refreshed: Account = {
         ...account,
         login: profile.login,

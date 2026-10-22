@@ -18,8 +18,8 @@ describe("pages (spec 2 §10)", () => {
     expect(signedIn).toContain('action="/auth/signout"');
     expect(signedIn).toContain('value="c&amp;t"');
     expect(signedIn).toContain("&lt;sean&gt;");
-    expect(signedIn).toContain('href="/billing"');
-    expect(signedOut).not.toContain('href="/billing"');
+    expect(signedIn).toContain('href="/account"');
+    expect(signedOut).not.toContain('href="/account"');
   });
 
   it("link the style sheet rather than inline it, so the strict CSP holds (spec 2 S2)", () => {
