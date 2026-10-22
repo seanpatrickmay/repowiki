@@ -13,8 +13,12 @@ const shown = new Map([
 ]);
 const ctx: ArchitectureContext = {
   ...testContext(),
-  pages: new Set(["signals", "deliverables"]),
+  pages: new Set(["signals", "deliverables", "reports"]),
   shown,
+  // ingest.py line 12 imports deliverables code; nothing else crosses a feature.
+  edges: [
+    { from: "signals", to: "deliverables", sites: [{ path: "src/signals/ingest.py", line: 12 }] },
+  ],
 };
 const NOT_SHOWN =
   "which the pack did not show; cite only lines the pack numbers or gives for an edge, or name the feature page instead";
@@ -26,6 +30,47 @@ const draft = (overrides: Partial<ArchitectureDraftClaim> = {}): ArchitectureDra
   pages: [],
   supports: [],
   ...overrides,
+});
+
+describe("a dependency claim (the interviewer's accuracy log, ADR-0020)", () => {
+  const dependency = (overrides: Partial<ArchitectureDraftClaim>) =>
+    verifyArchitectureClaim(
+      "dependencies",
+      draft({
+        text: "Signals depend on deliverables.",
+        pages: ["signals", "deliverables"],
+        ...overrides,
+      }),
+      ctx,
+    ).problems;
+
+  it("holds when its lines hold the import or call between the features it names", () => {
+    expect(dependency({ cite: ["src/signals/ingest.py:10-14"] })).toEqual([]);
+  });
+
+  it("is refused when its lines cross no feature boundary", () => {
+    expect(dependency({ cite: ["src/signals/ingest.py:14-20"] })).toEqual([
+      'the claim cites "src/signals/ingest.py" lines 14-20, which hold no import or call between features; cite the site the pack gives for the edge',
+    ]);
+  });
+
+  it("is refused when it names a page no cited edge reaches", () => {
+    expect(
+      dependency({
+        pages: ["signals", "deliverables", "reports"],
+        cite: ["src/signals/ingest.py:12"],
+      }),
+    ).toEqual([
+      'the claim names "reports", but no line it cites imports or calls between it and another feature; cite that edge\'s site or leave the page out',
+    ]);
+  });
+
+  it("leaves other sections' citations alone", () => {
+    expect(
+      verifyArchitectureClaim("layers", draft({ cite: ["src/signals/ingest.py:14-20"] }), ctx)
+        .problems,
+    ).toEqual([]);
+  });
 });
 
 describe("verifyArchitectureClaim", () => {

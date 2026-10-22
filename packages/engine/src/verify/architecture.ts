@@ -2,6 +2,7 @@ import {
   type ArchitectureClaim,
   ArchitectureSectionKey,
   architectureClaimViolations,
+  type Citation,
   FeatureId,
   MAX_CLAIM_PAGES,
 } from "@repowiki/core";
@@ -50,6 +51,50 @@ export interface ArchitectureContext extends VerifyContext {
   pages: ReadonlySet<string>;
   /** Path to the lines the pack showed (ArchitecturePack.shown): the only lines a claim may cite. */
   shown: ReadonlyMap<string, ReadonlySet<number>>;
+  /** Every cross-feature edge, with the lines that import or call across it. */
+  edges: readonly {
+    from: string;
+    to: string;
+    sites: readonly { path: string; line: number }[];
+  }[];
+}
+
+/**
+ * The problems of a Dependencies claim against the edges (ADR-0020): each code citation must hold
+ * an edge's site, and each page it names must be an end of an edge it cites. Without this, a claim
+ * that "A depends on B" cited lines next to the import, or an import of a third feature.
+ */
+function dependencyProblems(
+  citations: readonly Citation[],
+  pages: readonly string[],
+  ctx: ArchitectureContext,
+): string[] {
+  const problems: string[] = [];
+  const reached = new Set<string>();
+  let cited = false;
+  for (const citation of citations) {
+    if (citation.kind !== "code") continue;
+    cited = true;
+    const { path, startLine, endLine } = citation;
+    const crossing = ctx.edges.filter((e) =>
+      e.sites.some((s) => s.path === path && s.line >= startLine && s.line <= endLine),
+    );
+    if (crossing.length === 0) {
+      problems.push(
+        `the claim cites ${quote(path)} lines ${startLine}-${endLine}, which hold no import or call between features; cite the site the pack gives for the edge`,
+      );
+    }
+    for (const e of crossing) reached.add(e.from).add(e.to);
+  }
+  // Lines that cross nothing are the problem already; the pages are judged on lines that do.
+  if (!cited || reached.size === 0) return problems;
+  for (const id of pages) {
+    if (reached.has(id)) continue;
+    problems.push(
+      `the claim names ${quote(id)}, but no line it cites imports or calls between it and another feature; cite that edge's site or leave the page out`,
+    );
+  }
+  return problems;
 }
 
 /** A path and a line or range, as the pack prints an edge's site or numbers a file's lines. */
@@ -161,5 +206,7 @@ export function verifyArchitectureClaim(
   if (!unresolved) problems.push(...architectureClaimViolations(key, claim));
   if (key === "results" && !unresolved)
     problems.push(...resultNumberProblems(text, resolved.shown));
+  if (key === "dependencies" && !unresolved)
+    problems.push(...dependencyProblems(citations, known, ctx));
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };
 }

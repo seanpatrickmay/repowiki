@@ -54,6 +54,12 @@ are the owner's to decide are listed at the end, not ruled on.
   article's infobox shows code names as code in a "Names in the code" row instead of beside the
   names a reader says. — Pipeline words read as a developer tool to the first-time student. —
   Cost if wrong: copy.
+- **Dependencies claims.** Ruling: on the About article, a Dependencies claim's code citation must
+  hold a site of a cross-feature edge, and every page it names must be an end of an edge it cites.
+  The prompt leaves out Request paths for a project that serves no requests. — The interviewer
+  checked 98 claims against the code; every one of the 4 wrong ones was a "depends on" or
+  "imports" claim citing lines next to the import, or an import of a third feature. — Cost if wrong: a check that
+  drops claims, and a retry round.
 
 ## The owner's decisions (not ruled here)
 

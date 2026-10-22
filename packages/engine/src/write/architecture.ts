@@ -141,6 +141,7 @@ export async function writeArchitecture(
     commits: history,
     pages: pageIds,
     shown: pack.shown,
+    edges,
   };
   const system = architectureSystemPrompt(options.repoName, manifest);
   const state: State = {
