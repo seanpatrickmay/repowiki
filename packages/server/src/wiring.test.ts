@@ -56,6 +56,10 @@ describe("route sets (spec 2 S1)", () => {
     expect(top(sets.pages).has("dashboard")).toBe(false);
     expect(top(sets.pages).has("auth")).toBe(false);
     expect(sets.pages.slice(-2).map((r) => r.pattern)).toEqual(["/:handle/:slug/*", "/:handle/*"]);
+    // The example's paths come before any handle's (ADR-0017).
+    const at = (pattern: string) => sets.pages.findIndex((r) => r.pattern === pattern);
+    expect(at("/example/:slug/*")).toBeGreaterThan(-1);
+    expect(at("/example/:slug/*")).toBeLessThan(at("/:handle/:slug/*"));
     await deps.db.close();
   });
 

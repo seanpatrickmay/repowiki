@@ -270,9 +270,16 @@ export async function publishedStub(
     },
     publishedAt: now,
   });
-  const entry = BiographyEntry.parse({
+  const entry = stubEntry(slug, `demo-dev/${slug}`);
+  await deps.objects.put(`${siteKey}entry.json`, JSON.stringify(entry), "application/json");
+  return id;
+}
+
+/** Test-only: the biography entry of a made-up project at `fullName`. */
+export function stubEntry(slug: string, fullName: string): BiographyEntry {
+  return BiographyEntry.parse({
     title: `Stub ${slug}`,
-    repo: { fullName: `demo-dev/${slug}`, commitSha: "f".repeat(40) },
+    repo: { fullName, commitSha: "f".repeat(40) },
     firstCommitAt: "2025-01-01T00:00:00Z",
     lastCommitAt: "2025-06-01T00:00:00Z",
     articles: 2,
@@ -285,6 +292,4 @@ export async function publishedStub(
       author: { commits: 3, totalCommits: 3, currentLines: 5, totalLines: 5, features: [] },
     },
   });
-  await deps.objects.put(`${siteKey}entry.json`, JSON.stringify(entry), "application/json");
-  return id;
 }

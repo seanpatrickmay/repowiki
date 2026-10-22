@@ -17,6 +17,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { billingRoutes } from "./routes/billing.ts";
 import { billingWebhookRoutes } from "./routes/billing-webhook.ts";
 import { draftRoutes } from "./routes/drafts.ts";
+import { exampleRoutes } from "./routes/example.ts";
 import { internalRoutes } from "./routes/internal.ts";
 import { landingRoutes } from "./routes/landing.ts";
 import { llmRoutes } from "./routes/llm.ts";
@@ -122,7 +123,12 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...billingRoutes(deps),
       ...billingWebhookRoutes(deps),
     ],
-    pages: [...siteRoutes(deps), ...previewPageRoutes(deps), ...publicRoutes(deps)],
+    pages: [
+      ...siteRoutes(deps),
+      ...exampleRoutes(deps),
+      ...previewPageRoutes(deps),
+      ...publicRoutes(deps),
+    ],
     worker: [...internalRoutes(deps), ...llmRoutes(deps)],
   };
 }
