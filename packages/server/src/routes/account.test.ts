@@ -59,6 +59,15 @@ describe("deleting an account (Contract §6.2, ADR-0018)", () => {
     expect((await call(app, { path: "/account" })).headers?.location).toBe("/auth/github");
   });
 
+  it("says before deleting exactly what is kept and what happens to paid Pro time, as /privacy does", async () => {
+    me = await signedInCookie(deps);
+    const page = String(
+      (await call(app, { path: "/account", headers: { cookie: me.cookie } })).body,
+    );
+    expect(page).toContain("We keep only your GitHub user ID and login");
+    expect(page).toContain("The rest of a Pro period you paid for isn't refunded");
+  });
+
   it("deletes nothing unless the login is typed", async () => {
     me = await signedInCookie(deps);
     const reply = await post("/account/delete", "confirm=someone-else");

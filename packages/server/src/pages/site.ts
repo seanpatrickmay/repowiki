@@ -51,7 +51,7 @@ const home: SitePage = {
   body: (config) => `<section class="hero"><div class="wrap"><div>
 <span class="eyebrow">For internship and co-op applications</span>
 <h1>Show recruiters what you actually built.</h1>
-<p class="lead">RepoWiki reads your public GitHub projects and writes a page about each one: what it does, how it works, what it's built with, and which parts you committed. Its sentences cite the code and commits they describe, so anyone can check them.</p>
+<p class="lead">RepoWiki reads your public GitHub projects and writes a page about each one: what it does, how it works, what it's built with, and which parts are in your commits. Its sentences cite the code and commits they describe, so a reader can look at the code behind each one.</p>
 <div class="cta"><a class="button" href="${signIn(config)}">Make my page with GitHub</a><a href="/example">See an example</a></div>${AGREE}
 <p class="fine">Your first project is free. No card. Ready in about 10 to 30 minutes.</p>
 <ul class="ticks"><li>One link for your resume, LinkedIn and application portals</li><li>Your part in group projects, read from git history</li><li>A wiki of your own code to prep for "walk me through a project"</li></ul>
@@ -64,6 +64,7 @@ const home: SitePage = {
 <tr><th scope="row">Written by</th><td>An AI model, from your public code and git history</td></tr>
 <tr><th scope="row">Sources</th><td>Cited to the code and commits it describes</td></tr>
 <tr><th scope="row">Approved by</th><td>You, before anyone sees it</td></tr>
+<tr><th scope="row">Edited by</th><td>No one: you publish it or you don't</td></tr>
 <tr><th scope="row">Price</th><td>Free for one project<br><a href="/pro">Pro</a>: $5 a month, or $15 every 4 months</td></tr>
 </tbody></table>
 <h2>About RepoWiki</h2>
@@ -72,7 +73,7 @@ const home: SitePage = {
 <h3>The first look</h3>
 <p>A recruiter skims a resume before deciding to read it. A personal project usually gets one line there, and a GitHub link that someone outside engineering won't open. An entry is written for that reader. The opening paragraph and the Works table take about 30 seconds: each project, what it's built with, and the student's part in it. Every row opens into the project's wiki for the engineer who wants more.</p>
 <h3>Group projects</h3>
-<p>Class projects and hackathons are shared work, and a resume line can't show who did what. An entry describes only the student's own work, read from git history rather than claimed, and each teammate can publish their own entry about the same repository.</p>
+<p>Class projects and hackathons are shared work, and a resume line can't show who did what. An entry describes only the student's own commits, read from git history rather than claimed, and each teammate can publish their own entry about the same repository. Credit follows the name on each commit, so work a teammate squash-merged or committed while pairing counts as theirs.</p>
 <h3>Technical interviews</h3>
 <p>"Walk me through a project you built" is a standard interview question. A project's wiki explains the student's own code back to them, feature by feature, so you can use it to prepare for the interview.</p>
 <h2>Compared with other ways to show a project</h2>
@@ -113,7 +114,11 @@ const pro: SitePage = {
 <tr><th scope="row">GitHub account age</th><td>30 days or more</td><td>Any</td></tr>
 <tr><th scope="row">A failed build</th><td colspan="2">Never counts against your plan</td></tr>
 </tbody></table></div>
-<p class="fine">Pro renews automatically, every month or every 4 months, until you cancel. You pay when you upgrade and then on each renewal date. If you cancel, Pro stays on until the end of the period you paid for.</p>
+<h2>Paying for Pro</h2>
+<ul><li>You pay on the day you upgrade, then again on the same day of each new period: every month at $5, or every 4 months at $15. Prices are in US dollars and include any sales tax. Stripe takes the card payment.</li>
+<li>Pro renews until you cancel. To cancel, open the Billing page, choose Manage billing, and cancel on Stripe's page. Pro stays on until the end of the period you paid for, and your entry stays up.</li>
+<li>"Up to 10" means at most 10 projects in your entry at once, and at most 10 new ones started in a month.</li>
+<li>We refund your first payment in full if you ask within 7 days and haven't started a build since upgrading. See <a href="/refunds">Refunds</a>.</li></ul>
 <h2>During application season</h2>
 <ul><li><strong>Refresh after you push.</strong> Finish a feature in the middle of applying, refresh the project, and the entry shows it. A Free entry stays at the commit it was built from.</li>
 <li><strong>Show the project that fits each job.</strong> Add the project that fits each posting: the machine-learning one for a data internship, the web app for a front-end co-op.</li>
@@ -139,6 +144,18 @@ const QUESTIONS: [string, string][] = [
   [
     "It was a group project. What will it say about my part?",
     "Your entry describes the parts of the project in commits made under your name, read from git history, and each teammate can make their own entry about the same repository. Work that reached the repository under someone else's name, through a squash merge or pair programming, counts for whoever's name is on the commit.",
+  ],
+  [
+    "Which languages does it read?",
+    "Any. It reads the structure of Python, TypeScript and Rust, so pages about code in those languages can name functions and how they call each other. Code in other languages, JavaScript among them, is still read, cited and described, file by file.",
+  ],
+  [
+    "My projects are small. Is it worth it?",
+    "Yes. A page shows a project at its real size: a small class project gets a short wiki with a few articles, like LecteurAide in the example, which has 8 commits.",
+  ],
+  [
+    "How does it know which commits are mine?",
+    "A commit counts as yours when its email address is one GitHub links to your account. If you've committed from another computer with a different email, add that email to your GitHub account before you build. Repositories in an organisation work if you can push to them.",
   ],
   [
     "Can I use class assignments?",

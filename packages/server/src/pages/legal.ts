@@ -60,7 +60,7 @@ const terms = legal("Terms of service", "The terms for using RepoWiki.", [
   [
     "Ending",
     [
-      "You can unpublish, cancel Pro or ask us to delete your account at any time. We may suspend an account or remove a page that breaks these terms, and we'll tell you why.",
+      "You can unpublish, cancel Pro, or delete your account (Account, then Delete my account) at any time. We may suspend an account or remove a page that breaks these terms, and we'll tell you why.",
     ],
   ],
   [
@@ -93,13 +93,13 @@ const privacy = legal("Privacy", "What RepoWiki keeps about you, and who else ha
   [
     "From GitHub",
     [
-      "When you sign in, GitHub tells us your user ID, login, name, avatar and the date your account was made. RepoWiki asks GitHub for no permissions, so the token it gets reads only public data; it's stored encrypted. We don't get your email address.",
+      "When you sign in, GitHub tells us your user ID, login, name, avatar and the date your account was made. RepoWiki asks GitHub for no permissions, so the token it gets reads only public data. It's stored encrypted, used to list your public repositories, and deleted with your account; you can also revoke it at https://github.com/settings/applications. We don't get your email address.",
     ],
   ],
   [
     "Your projects",
     [
-      "When you add a public repository, a build machine copies it, builds your pages and deletes the copy when the build ends. We keep the pages, the facts from git history they're built from, and a record of each build.",
+      "When you add a public repository, a build machine copies it, builds your pages and deletes the copy when the build ends. We keep the pages, the facts from git history they're built from, and a record of each build. A published wiki quotes commit subjects and names the people in the repository's git history by the names on their commits, so read the preview for both before you publish.",
     ],
   ],
   [
@@ -130,7 +130,7 @@ const privacy = legal("Privacy", "What RepoWiki keeps about you, and who else ha
   [
     "Your choices",
     [
-      "Unpublish any time, and your page stops being shown within a minute. To delete your account, open Account after you sign in and choose Delete my account: your pages come down within a minute, Pro is cancelled, and everything else is deleted within 30 days. We keep only your GitHub user ID and login, so no one else can take your page's address, and Stripe keeps the payment records it must for tax.",
+      "Unpublish any time, and your page stops being shown within a minute. To delete your account, open Account after you sign in and choose Delete my account: your pages come down within a minute, Pro is cancelled, and everything else is deleted within 30 days. We keep only your GitHub user ID and login, so no one else can take your page's address and that GitHub account can't sign up again, and Stripe keeps the payment records it must for tax.",
     ],
   ],
 ]);
@@ -139,7 +139,7 @@ const refunds = legal("Refunds", "How to cancel RepoWiki Pro, and when you get m
   [
     "Cancel any time",
     [
-      "On the Billing page, open the customer portal and cancel. Pro stays on until the end of the period you paid for, then your account is on Free. Your published entry stays up.",
+      "On the Billing page, choose Manage billing and cancel on Stripe's page. Pro stays on until the end of the period you paid for, then your account is on Free. Your published entry stays up.",
     ],
   ],
   [
