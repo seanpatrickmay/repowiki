@@ -25,6 +25,8 @@ export {
 } from "./build.ts";
 export { type Ancestry, ancestry, carriedHistory } from "./carry.ts";
 export {
+  ABOUT_ARTICLE,
+  AboutCorrectionAnswer,
   CorrectionAnswer,
   type CorrectionOutcome,
   type CorrectionRequest,
