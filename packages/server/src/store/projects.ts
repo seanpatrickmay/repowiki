@@ -109,6 +109,15 @@ const IN_FLIGHT = (kind: string) =>
   `j.status IN ('queued', 'running') AND j.body->>'kind' = '${kind}'`;
 const THIS_MONTH = (field: string) => `(j.body->>'${field}')::timestamptz >= $2`;
 
+/** A project's succeeded correction jobs: each added a revision that is no rebuild (ADR-0023). */
+export async function correctionsOf(q: Queryable, projectId: string): Promise<number> {
+  const rows = await q.query<{ n: string | number }>(
+    `SELECT count(*) AS n FROM jobs j WHERE j.project_id = $1 AND ${SUCCEEDED("correct")}`,
+    [projectId],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 /** The Contract's Usage for one account, from the jobs and projects tables (spec 2 S15). */
 export async function usageFor(q: Queryable, accountId: string, now: string): Promise<Usage> {
   const rows = await q.query<Record<string, string | number | null>>(
@@ -119,6 +128,8 @@ export async function usageFor(q: Queryable, accountId: string, now: string): Pr
       count(*) FILTER (WHERE ${SUCCEEDED("refresh")} AND ${THIS_MONTH("finishedAt")}) AS ref_month,
       count(*) FILTER (WHERE ${IN_FLIGHT("generate")}) AS gen_flight,
       count(*) FILTER (WHERE ${IN_FLIGHT("refresh")}) AS ref_flight,
+      count(*) FILTER (WHERE ${SUCCEEDED("correct")} AND ${THIS_MONTH("finishedAt")}) AS cor_month,
+      count(*) FILTER (WHERE ${IN_FLIGHT("correct")}) AS cor_flight,
       COALESCE(sum(${COST("$2::timestamptz", "$3::timestamptz")}), 0) AS month_usd
     FROM projects p JOIN jobs j ON j.project_id = p.id WHERE p.account_id = $1`,
     [accountId, monthStart(now), nextMonthStart(now)],
@@ -133,6 +144,8 @@ export async function usageFor(q: Queryable, accountId: string, now: string): Pr
     refreshesThisMonth: n("ref_month"),
     inFlightGenerations: n("gen_flight"),
     inFlightRefreshes: n("ref_flight"),
+    correctionsThisMonth: n("cor_month"),
+    inFlightCorrections: n("cor_flight"),
     monthUsdMicros: n("month_usd"),
     platformDayUsdMicros: await platformDayUsdMicros(q, now),
   };

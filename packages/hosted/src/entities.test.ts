@@ -138,7 +138,7 @@ describe("entities (Contract spec §5)", () => {
   });
 
   it("audit an action with its actor, target and outcome", () => {
-    expect(ACTIONS).toHaveLength(17);
+    expect(ACTIONS).toHaveLength(18);
     expect(ACTIONS).not.toContain("draft.save");
     const event = {
       id: ids.generation,

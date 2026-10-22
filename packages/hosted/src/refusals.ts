@@ -13,6 +13,7 @@ export const REFUSAL_CODES = [
   "plan-project-limit",
   "plan-generation-limit",
   "plan-refresh-limit",
+  "plan-correction-limit",
   "monthly-cost-ceiling",
   "account-too-new",
   "platform-paused",
@@ -91,6 +92,12 @@ export const REFUSALS: Readonly<Record<RefusalCode, RefusalInfo>> = {
     status: 402,
     retryable: false,
     message: "You have used this month's refreshes, or your plan has none.",
+  },
+  "plan-correction-limit": {
+    status: 402,
+    retryable: false,
+    message:
+      "You have used your plan's corrections: 3 for each project on Free, 20 a month on Pro.",
   },
   "monthly-cost-ceiling": {
     status: 402,

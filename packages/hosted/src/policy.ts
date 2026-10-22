@@ -21,6 +21,9 @@ export interface Usage {
   /** Generate and refresh jobs queued or running now; they count against quotas until they end. */
   inFlightGenerations: number;
   inFlightRefreshes: number;
+  /** Succeeded correction jobs this UTC month, and those queued or running now. */
+  correctionsThisMonth: number;
+  inFlightCorrections: number;
   /** This UTC month: the cap reserved by every unfinished job plus what finished jobs spent (C8). */
   monthUsdMicros: number;
   /** Platform-wide spend this UTC day. */
@@ -41,6 +44,11 @@ export interface PolicyContext {
   facts?: EligibilityFacts | null;
   usage?: Usage;
   estimateUsdMicros?: number;
+  /**
+   * The project's succeeded correction jobs, for `job.correct` and for `job.refresh`: each added
+   * a revision that is no rebuild.
+   */
+  corrections?: number;
 }
 
 /** The GitHub user and repository an eligibility check must be about. */
@@ -145,6 +153,7 @@ export function authorize(action: Action, ctx: PolicyContext): Result<true> {
   const eligible = checkEligibility(ctx.facts, ctx.now, maxAge, subject);
   if (!eligible.ok) return eligible;
   if (action === "job.refresh") return startRefresh(account, eligible.value, usage, ctx);
+  if (action === "job.correct") return startCorrection(account, eligible.value, usage, ctx);
   const reactivates =
     project.state === "withdrawn" &&
     (action === "project.publish" ||
@@ -216,20 +225,30 @@ function startGeneration(account: Account, ctx: PolicyContext): Result<true> {
  * project, or a plan's monthly refreshes; null when neither applies. `authorize` still decides
  * each click, with the live eligibility check and the month's counts.
  */
-export function rebuildOffer(plan: Plan, project: Project): "rebuild" | "refresh" | null {
+export function rebuildOffer(
+  plan: Plan,
+  project: Project,
+  corrections = 0,
+): "rebuild" | "refresh" | null {
   if (project.latestRevision === 0) return null;
   const limits = PLANS[plan];
   if (limits.refreshesPerMonth > 0) return "refresh";
-  return rebuildLeft(limits, project, 0) ? "rebuild" : null;
+  return rebuildLeft(limits, project, 0, corrections) ? "rebuild" : null;
 }
 
 /**
  * Whether a never-published project with a revision has a rebuild left: its revisions past the
- * first are its rebuilds, with those in flight, and a failed one adds no revision.
+ * first, less those its `corrections` added, are its rebuilds, with those in flight, and a failed
+ * one adds no revision.
  */
-function rebuildLeft(limits: PlanLimits, project: Project, inFlight: number): boolean {
+function rebuildLeft(
+  limits: PlanLimits,
+  project: Project,
+  inFlight: number,
+  corrections: number,
+): boolean {
   if (project.latestRevision === 0 || project.currentVersion !== 0) return false;
-  return project.latestRevision - 1 + inFlight < limits.rebuildsBeforePublish;
+  return project.latestRevision - 1 - corrections + inFlight < limits.rebuildsBeforePublish;
 }
 
 function startRefresh(
@@ -240,8 +259,32 @@ function startRefresh(
 ): Result<true> {
   const plan = PLANS[account.plan];
   const project = need(ctx.project, "project");
-  const rebuild = rebuildLeft(plan, project, usage.inFlightRefreshes);
+  const rebuild = rebuildLeft(plan, project, usage.inFlightRefreshes, ctx.corrections ?? 0);
   const used = usage.refreshesThisMonth + usage.inFlightRefreshes;
   if (!rebuild && used >= plan.refreshesPerMonth) return refused("plan-refresh-limit");
+  return withinSizeAndCost(account, facts, usage, ctx);
+}
+
+/**
+ * A correction of a project's draft (sentence corrections spec): within the plan's corrections,
+ * Free's per project and Pro's per month with those in flight, then its size and cost.
+ */
+function startCorrection(
+  account: Account,
+  facts: EligibilityFacts,
+  usage: Usage,
+  ctx: PolicyContext,
+): Result<true> {
+  const plan = PLANS[account.plan];
+  const project = need(ctx.project, "project");
+  if (project.latestRevision === 0) return refused("invalid-transition");
+  const corrections = need(ctx.corrections, "corrections");
+  const month = usage.correctionsThisMonth + usage.inFlightCorrections;
+  if (
+    (plan.correctionsPerProject !== null && corrections >= plan.correctionsPerProject) ||
+    (plan.correctionsPerMonth !== null && month >= plan.correctionsPerMonth)
+  ) {
+    return refused("plan-correction-limit");
+  }
   return withinSizeAndCost(account, facts, usage, ctx);
 }

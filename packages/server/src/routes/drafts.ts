@@ -27,7 +27,7 @@ import {
   versionOf,
 } from "../store/drafts.ts";
 import { jobsOf } from "../store/jobs.ts";
-import { usageFor } from "../store/projects.ts";
+import { correctionsOf, usageFor } from "../store/projects.ts";
 import { liveEligibility, ownedProject, repoFullName } from "./live.ts";
 import { previewBuildState } from "./preview-state.ts";
 
@@ -151,6 +151,7 @@ export function draftRoutes(deps: Deps): Route[] {
           previewBuild: previewBuildState(deps, project.id),
           current,
           plan: session.account.plan,
+          corrections: await correctionsOf(deps.db, project.id),
           session: shown,
         });
         return html(200, body, { "cache-control": "private, no-store" });

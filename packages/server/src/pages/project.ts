@@ -35,6 +35,8 @@ export interface ProjectView {
   current: PublishedVersion | null;
   /** The owner's plan: what the page offers after a build (rebuildOffer). */
   plan: Plan;
+  /** The project's succeeded corrections, whose revisions are no rebuilds (rebuildOffer). */
+  corrections?: number;
   session: PageSession;
 }
 
@@ -76,7 +78,7 @@ const isActive = (job: Job | null) =>
 
 /** The rebuild or refresh the plan offers, as a form; empty when it offers neither. */
 function rebuildForm(v: ProjectView): string {
-  const offer = rebuildOffer(v.plan, v.project);
+  const offer = rebuildOffer(v.plan, v.project, v.corrections ?? 0);
   if (offer === null) return "";
   const action = `/projects/${v.project.id}/refresh`;
   if (offer === "refresh") {

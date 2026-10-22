@@ -13,6 +13,10 @@ export interface PlanLimits {
   refreshesPerMonth: number;
   /** Rebuilds of a project before it is ever published, outside the monthly refreshes (ADR-0015). */
   rebuildsBeforePublish: number;
+  /** Correction jobs a project may ever run, or null when only the monthly limit applies. */
+  correctionsPerProject: number | null;
+  /** Correction jobs an account may run a month, or null when only the per-project one applies. */
+  correctionsPerMonth: number | null;
   maxIndexedFiles: number;
   /** The hard monthly model-cost ceiling. */
   monthlyUsdMicros: number;
@@ -26,6 +30,8 @@ export const PLANS: Readonly<Record<Plan, PlanLimits>> = {
     generationsPerMonth: 1,
     refreshesPerMonth: 0,
     rebuildsBeforePublish: 1,
+    correctionsPerProject: 3,
+    correctionsPerMonth: null,
     maxIndexedFiles: 1000,
     monthlyUsdMicros: 1_000_000,
   },
@@ -35,6 +41,8 @@ export const PLANS: Readonly<Record<Plan, PlanLimits>> = {
     generationsPerMonth: 10,
     refreshesPerMonth: 30,
     rebuildsBeforePublish: 0,
+    correctionsPerProject: null,
+    correctionsPerMonth: 20,
     maxIndexedFiles: 3000,
     monthlyUsdMicros: 4_000_000,
   },
