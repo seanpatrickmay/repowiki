@@ -69,10 +69,13 @@ export function addUpdateParentIssue(
   revision: { reason: string; parentId: string | null },
   ctx: z.RefinementCtx,
 ): void {
-  if (revision.reason === "update" && revision.parentId === null) {
+  if (
+    (revision.reason === "update" || revision.reason === "correction") &&
+    revision.parentId === null
+  ) {
     ctx.addIssue({
       code: "custom",
-      message: "update revisions must have a parent",
+      message: `${revision.reason} revisions must have a parent`,
       path: ["parentId"],
     });
   }
