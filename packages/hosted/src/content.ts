@@ -37,6 +37,8 @@ export type Suggestions = z.infer<typeof Suggestions>;
 export const AuthorFacts = z
   .strictObject({
     commits: count,
+    /** Others' commits naming the author in a Co-authored-by trailer, when any (ADR-0022). */
+    coAuthored: z.int().positive().optional(),
     totalCommits: count,
     currentLines: count,
     totalLines: count,

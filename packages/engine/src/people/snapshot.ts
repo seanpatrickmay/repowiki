@@ -220,11 +220,17 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
   const activity = groups.map(() => new Map<string, ActivityDay>());
   const totals = groups.map(() => ({ commits: 0, added: 0, deleted: 0 }));
   const featureCommits = groups.map(() => new Map<string, number>());
+  const coAuthored = groups.map(() => 0);
   let allCommits = 0;
   for (const commit of commits) {
     if (commit.parents.length > 1) continue;
     allCommits++;
     const g = groupOf(commit);
+    // Each person a trailer names, once per commit, never the author (ADR-0022).
+    const named = new Set(
+      (commit.coAuthors ?? []).map((c) => input.identities.groupOfEmail(c.email)),
+    );
+    for (const c of named) if (c !== -1 && c !== g) coAuthored[c] = (coAuthored[c] ?? 0) + 1;
     if (g === -1) continue;
     const sweep = commit.files.length > maxFiles;
     let added = 0;
@@ -338,6 +344,7 @@ export function computeSnapshot(input: SnapshotInput): ComputedSnapshot {
       firstCommit: group.firstCommit,
       lastCommit: group.lastCommit,
       commits: total.commits,
+      ...((coAuthored[g] ?? 0) > 0 ? { coAuthored: coAuthored[g] } : {}),
       added: total.added,
       deleted: total.deleted,
       currentLines: lines[g] ?? 0,

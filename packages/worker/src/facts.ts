@@ -46,6 +46,7 @@ export interface SnapshotFacts {
   people: readonly {
     id: string;
     commits: number;
+    coAuthored?: number;
     currentLines: number;
     features: readonly { featureId: string; commits: number; currentLines: number }[];
   }[];
@@ -63,6 +64,7 @@ export function authorFacts(
   const known = new Set(featureIds);
   return {
     commits: person?.commits ?? 0,
+    ...((person?.coAuthored ?? 0) > 0 ? { coAuthored: person?.coAuthored } : {}),
     totalCommits: snapshot.commits,
     currentLines: person?.currentLines ?? 0,
     totalLines: snapshot.totalLines,

@@ -156,6 +156,8 @@ export const PersonFacts = z
     lastCommit: IsoDateTime,
     /** Non-merge commits, and their lines added and deleted (R20's exclusions applied). */
     commits: count,
+    /** Others' non-merge commits that name the person in a Co-authored-by trailer (ADR-0022). */
+    coAuthored: z.int().positive().optional(),
     added: count,
     deleted: count,
     /** Lines at the snapshot's sha that blame gives the person (R1). */

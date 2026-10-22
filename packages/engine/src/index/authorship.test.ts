@@ -59,6 +59,40 @@ describe("readAuthorship (spec v2 #6 R5, R6, R20)", () => {
     ]);
   });
 
+  it("reads Co-authored-by trailers, in any case, once each and never the author themself", () => {
+    repo.write("a.py", "x = 1\n");
+    const sha = repo.commit(
+      [
+        "feat: pair on a",
+        "",
+        "Worked out together.",
+        "",
+        "Co-authored-by: bob <Bob@Example.com>",
+        "co-authored-by: Bob again <bob@example.com>",
+        "Co-Authored-By: Ada Lovelace <ada@example.com>",
+        "Co-authored-by: no address",
+        "Co-authored-by: Cy <cy@example.com>",
+      ].join("\n"),
+      "+0000",
+      ADA,
+    );
+    const [commit] = readAuthorship(repo.dir, sha);
+    expect(commit?.coAuthors).toEqual([
+      { name: "bob", email: "bob@example.com" },
+      { name: "Cy", email: "cy@example.com" },
+    ]);
+  });
+
+  it("gives a commit with no trailer no co-author list at all", () => {
+    repo.write("a.py", "x = 1\n");
+    const sha = repo.commit(
+      "feat: a\n\nNot a trailer: Co-authored-by: x <x@example.com>",
+      "+0000",
+      ADA,
+    );
+    expect(readAuthorship(repo.dir, sha)[0]).not.toHaveProperty("coAuthors");
+  });
+
   it("follows a rename, marks a binary change, and gives a merge no files but its title", () => {
     repo.write("old/name.py", "a\nb\nc\nd\n");
     repo.write("logo.png", Buffer.from([0, 1, 2, 3]));

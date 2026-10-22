@@ -113,6 +113,11 @@ export interface ResolvedIdentities {
   groups: IdentityGroup[];
   /** The index in `groups` of the commit author (name, email); -1 for a pair it never saw. */
   groupOf(name: string, email: string): number;
+  /**
+   * The index of the one group that committed under `email` (any case), as a co-author trailer
+   * names it (ADR-0022); -1 for an address no commit used, or one two groups share.
+   */
+  groupOfEmail(email: string): number;
   /** One line each: a key that matched nobody, a pair two entries both claim. No email shown. */
   warnings: string[];
 }
@@ -496,15 +501,20 @@ export function resolveIdentities(input: IdentityInput): ResolvedIdentities {
     if (group.name === "")
       group.name = group.excluded ? "Excluded contributor" : `Contributor ${++unnamed}`;
   const groupIndex = new Map<string, number>();
+  const emailIndex = new Map<string, number>();
   groups.forEach((group, g) => {
     for (const i of group.at) {
       const raw = raws[i] as RawIdentity;
       groupIndex.set(`${raw.name}\0${raw.email}`, g);
+      const email = raw.email.toLowerCase();
+      const was = emailIndex.get(email);
+      emailIndex.set(email, was === undefined || was === g ? g : -1);
     }
   });
   return {
     groups: groups.map(({ at: _at, ...group }) => group),
     groupOf: (name, email) => groupIndex.get(`${name}\0${email}`) ?? -1,
+    groupOfEmail: (email) => emailIndex.get(email.toLowerCase()) ?? -1,
     warnings: warnings.map(withoutEmails),
   };
 }
