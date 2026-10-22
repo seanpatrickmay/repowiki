@@ -5,6 +5,7 @@ export { type Db, isUniqueViolation, type Queryable, withRetries } from "./db/db
 export { type Migration, migrate, migrationFiles, openDatabase } from "./db/migrate.ts";
 export { openPg, type PoolLike, poolDb } from "./db/pg.ts";
 export { openPglite } from "./db/pglite.ts";
+export { exampleSnapshot, uploadExample } from "./example/snapshot.ts";
 export {
   type GitHubApi,
   GitHubError,

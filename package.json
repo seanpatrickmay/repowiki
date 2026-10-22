@@ -35,7 +35,9 @@
     "hosted:demo": "REPOWIKI_MODE=demo node packages/server/src/main.ts",
     "hosted:local": "REPOWIKI_MODE=development DATA_DIR=${DATA_DIR:-$HOME/.repowiki/hosted-local/data} node packages/server/src/main.ts",
     "hosted:worker": "node packages/worker/src/main.ts",
-    "hosted:profile": "node scripts/hosted-profile.ts"
+    "hosted:profile": "node scripts/hosted-profile.ts",
+    "example:snapshot": "node scripts/example-snapshot.ts",
+    "example:upload": "node scripts/example-upload.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
