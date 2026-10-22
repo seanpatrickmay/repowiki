@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import type { App } from "../http/server.ts";
@@ -99,5 +100,27 @@ describe("the example's snapshot (ADR-0017)", () => {
     await expect(
       uploadExample(deps.objects, [{ path: "a/site/index.html", bytes: encode("x") }]),
     ).rejects.toThrow(/index/);
+  });
+
+  it("carries the account's stored GitHub avatar, named in the index (ADR-0013)", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const sha256 = createHash("sha256").update(png).digest("hex");
+    await deps.objects.put(`avatars/${sha256}`, png, "image/png");
+    const avatar = {
+      sha256,
+      contentType: "image/png",
+      source: "https://avatars.githubusercontent.com/u/1?v=4",
+      fetchedAt: "2026-10-22T12:00:00.000Z",
+    };
+    await deps.db.query(
+      "UPDATE accounts SET body = body || jsonb_build_object('avatar', $1::jsonb)",
+      [JSON.stringify(avatar)],
+    );
+    const files = await exampleSnapshot({ ...deps, handle: "demo-dev", build: fakeBuild });
+    expect(files.find((f) => f.path === "avatar.png")?.bytes).toEqual(png);
+    const index = JSON.parse(
+      decode(files.find((f) => f.path === "index.json")?.bytes ?? encode("")),
+    );
+    expect(index.person.avatar).toBe("avatar.png");
   });
 });

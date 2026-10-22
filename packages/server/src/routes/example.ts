@@ -3,6 +3,7 @@ import { Slug } from "@repowiki/hosted";
 import { z } from "zod";
 import type { Deps } from "../app.ts";
 import type { Reply, Route } from "../http/router.ts";
+import { contentTypeFor } from "../objects/store.ts";
 import { SITE_DIR } from "../render/build.ts";
 import { biographyPage, storedEntry } from "./biography-page.ts";
 import { SITE_CSP, serveTreeFile } from "./preview.ts";
@@ -15,6 +16,8 @@ export const ExampleIndex = z.strictObject({
   person: z.strictObject({
     login: z.string().min(1).max(39),
     displayName: z.string().min(1).max(120),
+    /** The account's stored GitHub avatar, as a file of the snapshot (ADR-0013); else the silhouette. */
+    avatar: z.enum(["avatar.png", "avatar.jpg", "avatar.gif", "avatar.webp"]).optional(),
   }),
   projects: z
     .array(z.strictObject({ slug: Slug, publishedAt: IsoDateTime }))
@@ -24,6 +27,8 @@ export const ExampleIndex = z.strictObject({
 export type ExampleIndex = z.infer<typeof ExampleIndex>;
 
 const PUBLIC = { "cache-control": "public, max-age=60" };
+/** Where the example serves its person's avatar. */
+const AVATAR_PATH = "/example/_avatar";
 const notFound = (): Reply => ({
   status: 404,
   headers: { ...PUBLIC, "content-type": "text/plain; charset=utf-8" },
@@ -66,16 +71,34 @@ export function exampleRoutes(deps: Deps): Route[] {
             .map((p) => p.publishedAt)
             .sort()
             .at(-1) ?? deps.now();
-        const body = biographyPage(deps, found.person, projects, {
+        const { login, displayName } = found.person;
+        const body = biographyPage(deps, { login, displayName }, projects, {
           asOf,
           self: "/example",
           preview: false,
           example: true,
+          ...(found.person.avatar === undefined ? {} : { avatarUrl: AVATAR_PATH }),
         });
         return {
           status: 200,
           headers: { ...PUBLIC, "content-type": "text/html; charset=utf-8" },
           body,
+        };
+      },
+    },
+    {
+      method: "GET",
+      // A slug is kebab-case, so no project's path can be this one.
+      pattern: AVATAR_PATH,
+      handler: async () => {
+        const avatar = (await index())?.person.avatar;
+        const stored =
+          avatar === undefined ? null : await deps.objects.get(`${EXAMPLE_PREFIX}${avatar}`);
+        if (avatar === undefined || stored === null) return notFound();
+        return {
+          status: 200,
+          headers: { ...PUBLIC, "content-type": contentTypeFor(avatar) },
+          body: stored.body,
         };
       },
     },

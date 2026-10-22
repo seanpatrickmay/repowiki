@@ -71,12 +71,19 @@ export function biographyPage(
   deps: Deps,
   account: Pick<Account, "login" | "displayName" | "avatar">,
   projects: readonly BiographyProject[],
-  options: { asOf: string; self: string; preview: boolean; example?: boolean },
+  options: {
+    asOf: string;
+    self: string;
+    preview: boolean;
+    example?: boolean;
+    /** Where the avatar is served, for a page whose account isn't stored (the example). */
+    avatarUrl?: string;
+  },
 ): string {
   const person = { login: account.login, displayName: account.displayName };
   return biographyHtml(biography({ person, projects, asOf: options.asOf }), {
     self: options.self,
-    avatarUrl: avatarUrl(account),
+    avatarUrl: options.avatarUrl ?? avatarUrl(account),
     appOrigin: deps.config.appOrigin,
     preview: options.preview,
     example: options.example ?? false,
