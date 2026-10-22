@@ -111,7 +111,7 @@ const privacy = legal("Privacy", "What RepoWiki keeps about you, and who else ha
   [
     "Cookies",
     [
-      "RepoWiki uses one cookie, on app.repowiki.app, to keep you signed in for up to 30 days. Public pages on repowiki.app set no cookies. There are no ads, analytics or tracking scripts.",
+      "RepoWiki uses two cookies, both on app.repowiki.app: one keeps you signed in for up to 30 days, and one lasts 10 minutes while you sign in with GitHub. Public pages on repowiki.app set no cookies. There are no ads, analytics or tracking scripts.",
     ],
   ],
   [
@@ -130,7 +130,7 @@ const privacy = legal("Privacy", "What RepoWiki keeps about you, and who else ha
   [
     "Your choices",
     [
-      "Unpublish any time, and your page stops being shown at once. To delete your account, open Account after you sign in and choose Delete my account: your pages come down at once, Pro is cancelled, and everything else is deleted within 30 days. We keep only your GitHub user ID and login, so no one else can take your page's address, and Stripe keeps the payment records it must for tax.",
+      "Unpublish any time, and your page stops being shown within a minute. To delete your account, open Account after you sign in and choose Delete my account: your pages come down within a minute, Pro is cancelled, and everything else is deleted within 30 days. We keep only your GitHub user ID and login, so no one else can take your page's address, and Stripe keeps the payment records it must for tax.",
     ],
   ],
 ]);
