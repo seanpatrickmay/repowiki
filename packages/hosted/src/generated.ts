@@ -62,7 +62,7 @@ export function contributionParagraph(
   const lines =
     a.totalLines === 0
       ? ""
-      : ` and about ${share === 0 && a.currentLines > 0 ? "under 1" : share}% of its current lines`;
+      : ` and last changed about ${share === 0 && a.currentLines > 0 ? "under 1" : share}% of its current lines`;
   const busiest = byCommits(
     a.features.filter((f) => f.commits > 0 && !docs.has(f.featureId)).map((f) => f.featureId),
     facts,
@@ -71,7 +71,8 @@ export function contributionParagraph(
     // A title is the model's words: made plain and short, so the paragraph is valid content.
     .map((id) => plainWords(titles.get(id) ?? "", TITLE_MAX) || id);
   const where = busiest.length === 0 ? "" : `, most of all in ${listed(busiest)}`;
-  return `${name} wrote ${a.commits} of the repository's ${total}${lines}${where}.`;
+  // "Made" commits, not "wrote" the code: a squash merge credits whoever's name is on it.
+  return `${name} made ${a.commits} of the repository's ${total}${lines}${where}.`;
 }
 
 export interface ContentInput {

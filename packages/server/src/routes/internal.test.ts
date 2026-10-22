@@ -171,7 +171,7 @@ describe("the worker's internal API (spec 2 §6)", () => {
     const blank = { ...success(), suggestions: { ...suggestions, contributionDraft: "" } };
     expect((await post("/internal/job/succeed", job.token, blank)).status).toBe(204);
     expect((await latestRevision(deps.db, job.projectId))?.content.contribution).toBe(
-      `${FAKE_USER.name} wrote 2 of the repository's 2 commits and about 100% of its current lines.`,
+      `${FAKE_USER.name} made 2 of the repository's 2 commits and last changed about 100% of its current lines.`,
     );
   });
 
