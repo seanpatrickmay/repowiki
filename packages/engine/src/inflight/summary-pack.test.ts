@@ -133,6 +133,49 @@ describe("summaryPack (spec v2 #9 §7.1)", () => {
     expect(shown.get("src/signals/ingest.py")?.has(1)).toBe(false);
   });
 
+  it("shows the line that opens the definition around a hunk, so a claim can cite its name", () => {
+    // Head lines 19-21 of ingest.py removed: the hunk sits inside ingest_chunk (line 10).
+    const lines = sourceLines(INGEST_PY);
+    lines.splice(18, 3);
+    const head = `${lines.join("\n")}\n`;
+    const change: FileChange = {
+      ...modified,
+      hunks: [{ oldStart: 19, oldCount: 3, newStart: 18, newCount: 0 }],
+    };
+    const { text, shown } = summaryPack(
+      input({
+        changes: [change],
+        files: [file("src/signals/ingest.py", "signals", "modified")],
+        head: new Map([["src/signals/ingest.py", head]]),
+      }),
+    );
+    // Five lines above the hunk's context: shown through, so a range from line 10 was all seen.
+    expect(text).toContain("  10| def ingest_chunk(chunk):\n  11|");
+    for (let n = 10; n <= 21; n++)
+      expect(shown.get("src/signals/ingest.py")?.has(n), String(n)).toBe(true);
+    expect(shown.get("src/signals/ingest.py")?.has(9)).toBe(false);
+  });
+
+  it("shows only the opening line of a definition far above the hunk, then a gap", () => {
+    const body = Array.from({ length: 30 }, (_, i) => `    x_${i} = ${i}`);
+    const head = `${["def far():", ...body, "    return x_0"].join("\n")}\n`;
+    const change: FileChange = {
+      ...modified,
+      hunks: [{ oldStart: 32, oldCount: 1, newStart: 32, newCount: 1 }],
+    };
+    const { text, shown } = summaryPack(
+      input({
+        changes: [change],
+        files: [file("src/signals/ingest.py", "signals", "modified")],
+        base: new Map([["src/signals/ingest.py", head.replace("return x_0", "return x_1")]]),
+        head: new Map([["src/signals/ingest.py", head]]),
+      }),
+    );
+    expect(text).toContain(" 1| def far():\n…\n");
+    expect(shown.get("src/signals/ingest.py")?.has(1)).toBe(true);
+    expect(shown.get("src/signals/ingest.py")?.has(2)).toBe(false);
+  });
+
   it("shows an added file whole, a deleted one by name and length, in feature order then path", () => {
     const { text, shown } = summaryPack(input());
     const order = [...text.matchAll(/^### `(\S+)`/gm)].map((m) => m[1]);

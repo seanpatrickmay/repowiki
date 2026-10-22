@@ -12,6 +12,7 @@ export const SECTION_TITLES: Record<Exclude<SectionKey, "lead">, string> = {
   overview: "Overview",
   "how-it-works": "How it works",
   "data-flow": "Data flow",
+  results: "Results",
   history: "History",
   "known-limitations": "Known limitations",
 };

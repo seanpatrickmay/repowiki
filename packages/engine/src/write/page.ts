@@ -35,6 +35,7 @@ export const SECTION_ORDER: readonly SectionKey[] = [
   "overview",
   "how-it-works",
   "data-flow",
+  "results",
   "history",
   "known-limitations",
 ];

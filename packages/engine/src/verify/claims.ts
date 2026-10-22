@@ -284,6 +284,25 @@ export type Verified = { claim: Claim; problems: [] } | { claim: null; problems:
 export const LIMITATION_EVIDENCE_PROBLEM =
   "limitation claims must cite evidence: lines with a TODO, FIXME, XXX or HACK comment, a skipped test, or a reverting commit";
 
+/** Talk about the prompt instead of the repository (ADR-0019). */
+const PACK_TALK = /\b(?:context pack|the pack)\b/i;
+const NUMBER = /\d+(?:[.,]\d+)*/g;
+const CODE_SPAN = /`[^`]*`/g;
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The numbers in a results claim's prose that its cited lines do not write as whole numbers
+ * (ADR-0019): a result is quoted as written, never computed, converted or rounded.
+ */
+export function unwrittenNumbers(text: string, cited: string): string[] {
+  const missing = new Set<string>();
+  for (const [n] of text.replace(CODE_SPAN, " ").matchAll(NUMBER)) {
+    const written = new RegExp(`(?<![\\d.,])${escapeRegExp(n)}(?![\\d]|[.,]\\d)`);
+    if (!written.test(cited)) missing.add(n);
+  }
+  return [...missing];
+}
+
 /**
  * Everything wrong with a claim's text alone: empty, too long, a control or line-break
  * character, markup outside the reader's subset, or a citation-shaped token. `text` is trimmed.
@@ -305,6 +324,11 @@ export function claimTextProblems(text: string, ctx: VerifyContext): string[] {
   if (length <= MAX_CLAIM_LENGTH) {
     problems.push(...markupProblems(text));
     problems.push(...citationProblems(text, ctx));
+    if (PACK_TALK.test(text)) {
+      problems.push(
+        "the claim describes the context pack; write about the repository itself, never about what the pack shows or leaves out",
+      );
+    }
   }
   return problems;
 }
@@ -317,6 +341,8 @@ export interface ResolvedCitations {
   unresolved: boolean;
   /** True when a citation is limitation evidence (spec §5 rule 3). */
   evidence: boolean;
+  /** The text every citation shows, in order: the lines a results claim's numbers come from. */
+  shown: string[];
 }
 
 /** Resolves every reference of a cite list at ctx.sha (see resolveReference); duplicates collapse. */
@@ -326,6 +352,7 @@ export function resolveCitations(refs: readonly string[], ctx: VerifyContext): R
     problems: [],
     unresolved: false,
     evidence: false,
+    shown: [],
   };
   const seen = new Set<string>();
   for (const ref of refs) {
@@ -340,6 +367,8 @@ export function resolveCitations(refs: readonly string[], ctx: VerifyContext): R
     seen.add(fingerprint);
     resolved.citations.push(one.citation);
     resolved.evidence ||= isLimitationEvidence(one.citation, one.lines);
+    // A commit shows its subject, which can state a result ("5.3x faster").
+    resolved.shown.push(one.lines ?? (one.citation.kind === "commit" ? one.citation.subject : ""));
   }
   return resolved;
 }
@@ -360,6 +389,7 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
     problems: unresolvable,
     unresolved,
     evidence,
+    shown,
   } = resolveCitations(draft.cite, ctx);
   problems.push(...unresolvable);
   const claim: Claim = {
@@ -382,6 +412,14 @@ export function verifyClaim(key: SectionKey, draft: DraftClaim, ctx: VerifyConte
     problems.push(...violations);
     if (violations.length === 0 && key === "known-limitations" && !evidence) {
       problems.push(LIMITATION_EVIDENCE_PROBLEM);
+    }
+    if (key === "results") {
+      const missing = unwrittenNumbers(text, shown.join("\n"));
+      if (missing.length > 0) {
+        problems.push(
+          `results claims quote each number exactly as the cited lines write it; the cited lines do not write ${missing.map(quote).join(", ")}`,
+        );
+      }
     }
   }
   return problems.length === 0 ? { claim, problems: [] } : { claim: null, problems };

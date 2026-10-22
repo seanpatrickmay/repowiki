@@ -554,3 +554,62 @@ describe("verifyClaim on known limitations (issue #53)", () => {
     ]);
   });
 });
+
+describe("verifyClaim on results (ADR-0019)", () => {
+  const base = testContext();
+  const ctx = {
+    ...base,
+    sources: new Map([
+      ...base.sources,
+      ["docs/results.md", "# Results\n\nAbout 700k simulations/s.\nScore 0.585 over 800 games.\n"],
+    ]),
+  };
+  const result = (text: string, cite = ["docs/results.md:3-4"]) =>
+    verifyClaim("results", draft({ text, cite }), ctx);
+
+  it("accepts a result whose numbers the cited lines write", () => {
+    expect(result("The search runs about 700k simulations per second.").problems).toEqual([]);
+    expect(result("The bot scored 0.585 over 800 games.").claim?.kind).toBe("fact");
+  });
+
+  it("refuses a number the cited lines do not write, so no result is computed or rounded", () => {
+    const { problems } = result("The bot scored 0.585, 2.3 times an even share, over 800 games.");
+    expect(problems.some((p) => p.includes("2.3"))).toBe(true);
+    expect(result("The bot scored 0.59 over 800 games.").problems.join(" ")).toContain("0.59");
+  });
+
+  it("takes a number from a cited commit's subject", () => {
+    const commits = [
+      { ...COMMITS[0], sha: `abcdef9${"0".repeat(33)}`, subject: "perf: 5.3x sims/s" },
+    ];
+    const claim = draft({
+      text: "One change made search 5.3 times faster.",
+      cite: ["commit:abcdef9"],
+    });
+    const withCommit = { ...ctx, commits: commits as typeof COMMITS };
+    expect(verifyClaim("results", claim, withCommit).problems).toEqual([]);
+  });
+
+  it("reads numbers only from the prose, not from code spans", () => {
+    expect(result("`results-3a.md` records about 700k simulations per second.").problems).toEqual(
+      [],
+    );
+  });
+
+  it("holds only results claims to the numbers rule", () => {
+    const overview = verifyClaim("overview", draft({ text: "It has 2.3 parts." }), ctx);
+    expect(overview.problems).toEqual([]);
+  });
+});
+
+describe("verifyClaim on talk about the context pack (ADR-0019)", () => {
+  it("refuses a claim about what the pack shows instead of the repository", () => {
+    for (const text of [
+      "The pack shows three specifications in full.",
+      "The context pack lists no infrastructure files.",
+    ]) {
+      const { problems } = verifyClaim("overview", draft({ text }), testContext());
+      expect(problems.join(" "), text).toContain("context pack");
+    }
+  });
+});

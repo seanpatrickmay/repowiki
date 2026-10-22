@@ -14,7 +14,7 @@ If the code a STALE claim described is gone, or the pack cannot support it, retu
 
 Each claim has:
 - id: the claim's id as the pack shows it, or for a new claim a short id that no claim on the page uses (the pack shows every id on the page), such as "x1". New ids must differ from each other and from every id the pack shows; the engine renames one that does not.
-- section: "lead", "overview", "how-it-works", "data-flow", "history" or "known-limitations".
+- section: "lead", "overview", "how-it-works", "data-flow", "results", "history" or "known-limitations".
 - text: one paragraph with no line breaks, at most 1,000 characters, in the style guide's voice. Markdown is limited to **bold**, *italic*, \`code\` and links. Citations go only in the cite array, never in the text.
 - cite: references from the pack: "path:start-end" for lines of a file as the pack numbers them, or "commit:abc1234" for a commit (at least 7 hex digits). Cite the narrowest lines that show the claim, at most 120 lines, and never lines the pack does not show. Every body claim cites at least one reference; a lead claim cites none.
 - supports: for a lead claim, the ids of the body claims it summarizes (ids as the pack shows them, or your new ids); empty for body claims.
