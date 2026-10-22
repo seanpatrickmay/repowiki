@@ -66,6 +66,32 @@ describe("the public site (readiness: marketing pages)", () => {
     expect(await body("/questions")).toContain("rebuild it once");
   });
 
+  it("links only to pages it serves, the legal pages among them", async () => {
+    const links = new Set<string>();
+    for (const path of Object.keys(SITE_PAGES)) {
+      for (const [, href] of (await body(path)).matchAll(/href="(\/[^"]*)"/g))
+        links.add(href ?? "");
+    }
+    for (const href of links) {
+      if (href === "/example" || href.startsWith("/_app/")) continue;
+      expect(Object.keys(SITE_PAGES), href).toContain(href);
+    }
+    expect([...links]).toEqual(expect.arrayContaining(["/terms", "/privacy", "/refunds"]));
+  });
+
+  it("states the refund rule and what is stored, in the words of the pages", async () => {
+    const refunds = await body("/refunds");
+    expect(refunds).toContain("within 7 days of your first payment");
+    expect(refunds).toContain("support@repowiki.app");
+    const privacy = await body("/privacy");
+    expect(privacy).toContain("one cookie");
+    expect(privacy).toMatch(/never sell/);
+    for (const processor of ["GitHub", "Anthropic", "Stripe", "Fly.io", "Cloudflare", "Neon"]) {
+      expect(privacy, processor).toContain(processor);
+    }
+    expect(await body("/terms")).toContain("Massachusetts");
+  });
+
   it("reserves every site path, so no GitHub login can take it as a handle", () => {
     for (const path of [...Object.keys(SITE_PAGES), "/example"]) {
       if (path === "/") continue;

@@ -1,5 +1,6 @@
 import type { Config } from "../config.ts";
 import { escapeHtml as e } from "./layout.ts";
+import { LEGAL_PAGES } from "./legal.ts";
 
 /**
  * The public site at the pages origin's root (ADR-0016): the home page, Pro and questions, built
@@ -27,7 +28,7 @@ export const SITE_STYLE = `:root{color-scheme:light dark;--paper:#fff;--paper-2:
 .faq h2{font-size:1.25rem}.foot{border-top:1px solid var(--rule-2);margin-top:40px}.foot .wrap{display:flex;gap:16px;flex-wrap:wrap;padding-block:16px;font-size:.88rem;color:var(--ink-2)}
 @media (max-width:860px){.hero .wrap{grid-template-columns:minmax(0,1fr);gap:24px;padding-block:28px}.infobox{float:none;width:100%;margin:12px 0}}`;
 
-interface SitePage {
+export interface SitePage {
   title: string;
   description: string;
   body: (config: Config) => string;
@@ -184,4 +185,5 @@ export const SITE_PAGES: Readonly<Record<string, SitePage>> = {
   "/": home,
   "/pro": pro,
   "/questions": questions,
+  ...LEGAL_PAGES,
 };
