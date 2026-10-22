@@ -478,6 +478,7 @@ export async function writePages(
           claims: withCarried([...state.verified.values()], input.carry?.get(featureId) ?? []),
           diagram: state.draft.diagram,
           pack: state.pack,
+          history,
           neighbours,
           wikipedia: wikipedia.links,
         });

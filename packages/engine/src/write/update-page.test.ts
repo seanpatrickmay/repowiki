@@ -200,7 +200,8 @@ describe("assembleUpdate", () => {
       neighbours: new Map(),
       wikipedia: new Map(),
     });
-    expect(result.revision?.sections[2]?.claims[0]?.text).toBe(
+    const history = result.revision?.sections.find((s) => s.key === "history");
+    expect(history?.claims.map((c) => c.text)).toContain(
       "It fed [[deliverables|Old deliverables]].",
     );
   });

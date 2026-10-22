@@ -97,6 +97,24 @@ export function orderedSections<
   ];
 }
 
+/**
+ * History claims oldest first, by the earliest commit each cites (the model's order drifts). Claims
+ * with the same date keep their order; one whose commits are not in `commits` goes last.
+ */
+export function oldestFirst(claims: readonly Claim[], commits: readonly CommitInfo[]): Claim[] {
+  const when = new Map(commits.map((c) => [c.sha, Date.parse(c.date)]));
+  const first = (claim: Claim): number =>
+    Math.min(
+      ...claim.citations.map((c) =>
+        c.kind === "commit" ? (when.get(c.sha) ?? Infinity) : Infinity,
+      ),
+    );
+  return claims
+    .map((claim) => ({ claim, at: first(claim) }))
+    .sort((a, b) => (a.at === b.at ? 0 : a.at < b.at ? -1 : 1))
+    .map((c) => c.claim);
+}
+
 /** A feature page's sections in SECTION_ORDER (see orderedSections). */
 export function pageSections(claims: ReadonlyMap<SectionKey, readonly Claim[]>): Section[] | null {
   return orderedSections(SECTION_ORDER, claims);
@@ -252,6 +270,8 @@ export interface RevisionParts {
   claims: readonly { key: SectionKey; claim: Claim }[];
   diagram: DraftDiagram;
   pack: ContextPack;
+  /** Every commit reachable from the page's commit: History claims carried from a merged page cite theirs. */
+  history: readonly CommitInfo[];
   neighbours: ReadonlyMap<string, ReadonlyMap<string, number>>;
   /** Normalized Wikipedia title → canonical title, or null for plain text. */
   wikipedia: ReadonlyMap<string, string | null>;
@@ -282,10 +302,8 @@ export function assembleRevision(parts: RevisionParts): Assembled {
 
   const bySection = new Map<SectionKey, Claim[]>();
   for (const key of SECTION_ORDER) {
-    bySection.set(
-      key,
-      parts.claims.filter((v) => v.key === key).map((v) => v.claim),
-    );
+    const mine = parts.claims.filter((v) => v.key === key).map((v) => v.claim);
+    bySection.set(key, key === "history" ? oldestFirst(mine, parts.history) : mine);
   }
   const ordered = pageSections(bySection);
   if (ordered === null) return { revision: null, failure: NO_PAGE };
