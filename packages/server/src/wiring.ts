@@ -13,6 +13,7 @@ import { type App, type AppServer, listen } from "./http/server.ts";
 import { objectStoreFor } from "./objects/open.ts";
 import { fakeAnthropicFetch } from "./proxy/fake-anthropic.ts";
 import { buildTree } from "./render/build.ts";
+import { accountRoutes } from "./routes/account.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { billingRoutes } from "./routes/billing.ts";
 import { billingWebhookRoutes } from "./routes/billing-webhook.ts";
@@ -121,6 +122,7 @@ export function routeSets(deps: Deps): { app: Route[]; pages: Route[]; worker: R
       ...previewRoutes(deps, buildTree, { waitMs: PREVIEW_WAIT_MS }),
       ...publishRoutes(deps),
       ...billingRoutes(deps),
+      ...accountRoutes(deps),
       ...billingWebhookRoutes(deps),
     ],
     pages: [

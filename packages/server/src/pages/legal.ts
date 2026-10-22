@@ -130,7 +130,7 @@ const privacy = legal("Privacy", "What RepoWiki keeps about you, and who else ha
   [
     "Your choices",
     [
-      "Unpublish any time, and your page stops being shown at once. To delete your account and everything in it, write to support@repowiki.app with your GitHub login. We'll confirm the request is yours and delete it all within 30 days, except the payment records Stripe must keep for tax.",
+      "Unpublish any time, and your page stops being shown at once. To delete your account, open Account after you sign in and choose Delete my account: your pages come down at once, Pro is cancelled, and everything else is deleted within 30 days. We keep only your GitHub user ID and login, so no one else can take your page's address, and Stripe keeps the payment records it must for tax.",
     ],
   ],
 ]);

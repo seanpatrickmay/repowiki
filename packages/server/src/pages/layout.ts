@@ -28,6 +28,6 @@ export function page(input: {
   const nav =
     input.session === null
       ? `<a href="/auth/github">Sign in with GitHub</a>`
-      : `<span><a href="/dashboard">${escapeHtml(input.session.login)}</a> <a href="/billing">Billing</a> <form class="inline" method="post" action="/auth/signout"><input type="hidden" name="csrf" value="${escapeHtml(input.session.csrf)}"><button class="secondary">Sign out</button></form></span>`;
+      : `<span><a href="/dashboard">${escapeHtml(input.session.login)}</a> <a href="/account">Account</a> <form class="inline" method="post" action="/auth/signout"><input type="hidden" name="csrf" value="${escapeHtml(input.session.csrf)}"><button class="secondary">Sign out</button></form></span>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(input.title)} · RepoWiki</title><link rel="stylesheet" href="${STYLE_PATH}">${input.head ?? ""}</head><body><header><a href="/">RepoWiki</a>${nav}</header><main>${input.body}</main></body></html>`;
 }

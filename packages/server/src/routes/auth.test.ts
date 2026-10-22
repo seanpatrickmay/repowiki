@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "../app.ts";
 import { FAKE_USER } from "../github/fake.ts";
 import type { App } from "../http/server.ts";
+import { deleteAccount } from "../store/account-deletion.ts";
 import { readGitHubToken } from "../store/github-tokens.ts";
 import { authRoutes } from "./auth.ts";
 import { call, setCookie, testDeps } from "./test-app.ts";
@@ -137,6 +138,19 @@ describe("GitHub sign-in (spec 2 S7, S18)", () => {
       config: { ...deps.config, mode: "development" as const, signupAllowlist: ["*"] },
     };
     expect((await signInFlow(createApp(open, authRoutes(open)))).back.status).toBe(303);
+  });
+
+  it("turns away a deleted account and leaves it as it is, with no new session or token", async () => {
+    const { back } = await signInFlow();
+    expect(back.status).toBe(303);
+    const [row] = await deps.db.query<{ id: string }>("SELECT id FROM accounts");
+    const id = row?.id ?? "";
+    await deps.db.transaction((tx) => deleteAccount(tx, { accountId: id, now: deps.now() }));
+    const again = await signInFlow();
+    expect(again.back.status).toBe(410);
+    expect(again.session).toBe("");
+    expect(await deps.db.query("SELECT * FROM github_tokens")).toEqual([]);
+    expect(await deps.db.query("SELECT * FROM sessions")).toEqual([]);
   });
 
   it("keeps a GitHub name that is missing or too long from breaking sign-in or a later one", async () => {
