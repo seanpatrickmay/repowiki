@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type PeopleSnapshot, WikiExport } from "@repowiki/core";
 import { pathLanguageName } from "@repowiki/engine";
@@ -13,7 +15,7 @@ import { z } from "zod";
 import { ApiError, type WorkerApi, workerApi } from "./api.ts";
 import { authorFacts, type FileFacts, languageShares, pageFeatureIds } from "./facts.ts";
 import { AUTHOR_ID } from "./people-file.ts";
-import { HEARTBEAT_MS, heartbeater } from "./run.ts";
+import { HEARTBEAT_MS, heartbeater, phase1, phase2 } from "./run.ts";
 import { fallbackSuggestions } from "./suggestions.ts";
 
 /**
@@ -207,12 +209,22 @@ const leaseLost = (error: unknown) =>
 export async function runImport(
   api: WorkerApi,
   profile: ImportProfile,
-  options: { stepMs?: number; heartbeatMs?: number; log?: (line: object) => void } = {},
+  options: {
+    stepMs?: number;
+    heartbeatMs?: number;
+    log?: (line: object) => void;
+    /** Runs a correction job as production does: it has no local wiki to upload (ADR-0023). */
+    engine?: () => Promise<boolean>;
+  } = {},
 ): Promise<boolean> {
   const log = options.log ?? (() => {});
   const beats = heartbeater(api, options.heartbeatMs ?? HEARTBEAT_MS, log);
   try {
     const spec = await api.lease();
+    if (spec.kind === "correct") {
+      if (options.engine !== undefined) return await options.engine();
+      throw new Refused("a correction needs the engine");
+    }
     const exp = localWiki(profile, spec.repo.fullName, spec.commitSha);
     const technology = entryFor(profile, spec.repo.fullName)?.technology;
     const facts = exportFacts(exp, profile.user, snapshotTechnologies(technology, log));
@@ -276,5 +288,16 @@ export async function importMain(log: (line: object) => void): Promise<boolean> 
     await api.fail("job-failed").catch(() => {});
     return false;
   }
-  return runImport(api, profile, { log });
+  // A correction clones the repository from GitHub and runs wiki:correct through the server's
+  // LLM proxy, as a production job does.
+  const engine = async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "repowiki-job-"));
+    const deps = { api, token: env.REPOWIKI_JOB_TOKEN, workDir, engineVersion: "import", log };
+    try {
+      return (await phase1(deps)) && (await phase2(deps));
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  };
+  return runImport(api, profile, { log, engine });
 }

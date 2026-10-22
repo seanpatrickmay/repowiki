@@ -106,7 +106,7 @@ describe("matchAuthor", () => {
 });
 
 /** A fake internal API: one lease for `ada/engine` at `sha`, recording every call. */
-function fakeApi(sha: string) {
+function fakeApi(sha: string, kind: WorkerSpec["kind"] = "generate") {
   const calls: string[] = [];
   let succeeded: Succeeded | null = null;
   let failed: FailCode | null = null;
@@ -114,7 +114,7 @@ function fakeApi(sha: string) {
   const spec: WorkerSpec = {
     jobId: "job-1",
     attempt: 1,
-    kind: "generate",
+    kind,
     commitSha: sha,
     repo: {
       fullName: "ada/engine",
@@ -161,6 +161,26 @@ function fakeApi(sha: string) {
 const profileWith = (exportPath: string | null) => ({
   user: { login: "ada", name: "Ada Lovelace" },
   repos: [{ repo: { full_name: "ada/engine" }, export: exportPath }],
+});
+
+describe("runImport for a correction (ADR-0023)", () => {
+  it("hands a correction to the engine, which clones the repository and corrects it", async () => {
+    const fake = fakeApi("a".repeat(40), "correct");
+    const ran: string[] = [];
+    const engine = async () => {
+      ran.push("engine");
+      return true;
+    };
+    expect(await runImport(fake.api, profileWith(null), { stepMs: 0, engine })).toBe(true);
+    expect(ran).toEqual(["engine"]);
+    expect(fake.result().uploaded).toBeNull();
+  });
+
+  it("fails a correction it has no engine for", async () => {
+    const fake = fakeApi("a".repeat(40), "correct");
+    expect(await runImport(fake.api, profileWith(null), { stepMs: 0 })).toBe(false);
+    expect(fake.result()).toMatchObject({ failed: "job-failed", uploaded: null });
+  });
 });
 
 describe("runImport", () => {
