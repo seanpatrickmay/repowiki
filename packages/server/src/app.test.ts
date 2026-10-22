@@ -3,7 +3,7 @@ import { createApp, type Deps } from "./app.ts";
 import { HttpError } from "./http/body.ts";
 import { text } from "./http/server.ts";
 import { currentSession } from "./http/session.ts";
-import { call, testDeps } from "./routes/test-app.ts";
+import { call, signedInCookie, testDeps } from "./routes/test-app.ts";
 import { signIn } from "./store/accounts.ts";
 import { createSession } from "./store/sessions.ts";
 
@@ -34,6 +34,13 @@ describe("createApp (spec 2 §4)", () => {
     expect(String(reply.headers?.["content-type"])).toMatch(/^text\/html/);
     expect(String(reply.body)).toContain("Not found");
     expect(String(reply.body)).not.toContain("<b>");
+  });
+
+  it("keeps the signed-in nav on a not-found page", async () => {
+    const { cookie } = await signedInCookie(deps);
+    const reply = await call(createApp(deps, []), { path: "/nowhere", headers: { cookie } });
+    expect(reply.status).toBe(404);
+    expect(String(reply.body)).toContain('action="/auth/signout"');
   });
 
   it("serves the style sheet", async () => {

@@ -22,6 +22,13 @@ describe("pages (spec 2 §10)", () => {
     expect(signedOut).not.toContain('href="/account"');
   });
 
+  it("end with the legal pages, which the app host sends on to the public site", () => {
+    const html = page({ title: "x", body: "", session: null });
+    expect(html).toContain(
+      '<footer><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a></footer>',
+    );
+  });
+
   it("link the style sheet rather than inline it, so the strict CSP holds (spec 2 S2)", () => {
     const html = page({ title: "x", body: "", session: null });
     expect(html).toContain('<link rel="stylesheet" href="/_app/style.css">');

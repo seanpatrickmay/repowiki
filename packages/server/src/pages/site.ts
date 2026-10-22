@@ -35,6 +35,8 @@ export interface SitePage {
 }
 
 const signIn = (config: Config) => `${e(config.appOrigin)}/auth/github`;
+/** Said beside every sign-in button: signing in is when the Terms start to apply. */
+const AGREE = `<p class="fine">Signing in accepts the <a href="/terms">Terms</a> and the <a href="/privacy">Privacy notice</a>.</p>`;
 
 /** The public site's frame: header, the page, the footer with the legal pages. */
 export function sitePage(config: Config, page: SitePage): string {
@@ -50,7 +52,7 @@ const home: SitePage = {
 <span class="eyebrow">For internship and co-op applications</span>
 <h1>Show recruiters what you actually built.</h1>
 <p class="lead">RepoWiki reads your public GitHub projects and writes a page about each one: what it does, how it works, what it's built with, and which parts you wrote. Every sentence links to the code or commit it came from.</p>
-<div class="cta"><a class="button" href="${signIn(config)}">Make my page with GitHub</a><a href="/example">See an example</a></div>
+<div class="cta"><a class="button" href="${signIn(config)}">Make my page with GitHub</a><a href="/example">See an example</a></div>${AGREE}
 <p class="fine">Your first project is free. No card. Ready in about 10 to 30 minutes.</p>
 <ul class="ticks"><li>One link for your resume, LinkedIn and application portals</li><li>Your part in group projects, read from git history</li><li>A wiki of your own code to prep for "walk me through a project"</li></ul>
 </div><a class="shot" href="/example"><img src="/_app/example-top.jpg" alt="An example RepoWiki page: Jordan Avery, a fictional student, with five projects" width="1280" height="1150"><p><strong>Read the example</strong> · Jordan Avery, a fictional student, and the wiki for AlphaSettler, a Catan AI in Rust</p></a></div></section>
@@ -91,7 +93,7 @@ const home: SitePage = {
 <li>Every citation is checked to point at real code. Whether the code fully supports each sentence isn't checked automatically, which is why you read the entry before it's published.</li>
 <li>Free entries need a GitHub account at least 30 days old.</li>
 <li>Many courses don't allow assignment solutions to be posted publicly. RepoWiki only reads public repositories, so keep those private and it will never see them.</li></ul>
-<p class="cta"><a class="button" href="${signIn(config)}">Make my page with GitHub</a></p>
+<p class="cta"><a class="button" href="${signIn(config)}">Make my page with GitHub</a></p>${AGREE}
 </main>`,
 };
 
@@ -116,7 +118,7 @@ const pro: SitePage = {
 <li><strong>Lead with the right project.</strong> Add the project that fits each posting: the machine-learning one for a data internship, the web app for a front-end co-op.</li>
 <li><strong>Document the big one.</strong> Capstones and team projects often pass 1,000 files; Pro covers up to 3,000.</li>
 <li><strong>Pay by the season.</strong> $15 covers four months of applying, a quarter less than paying monthly. Cancel when you sign an offer, and your entry stays up.</li></ul>
-<p class="cta"><a class="button" href="${signIn(config)}">Start free, upgrade any time</a></p>
+<p class="cta"><a class="button" href="${signIn(config)}">Start free, upgrade any time</a></p>${AGREE}
 </main>`,
 };
 
