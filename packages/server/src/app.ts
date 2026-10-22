@@ -76,6 +76,13 @@ function withRenewal(reply: Reply, cookie: string | undefined): Reply {
   return { ...reply, headers: { ...headers, "cache-control": "private, no-store" } };
 }
 
+/** An app page is about whoever is signed in: no shared cache keeps one, whatever its route says. */
+function privatePage(reply: Reply): Reply {
+  const type = String(reply.headers?.["content-type"] ?? "");
+  if (!type.startsWith("text/html") || reply.headers?.["cache-control"] !== undefined) return reply;
+  return { ...reply, headers: { ...reply.headers, "cache-control": "private, no-store" } };
+}
+
 /** An HttpError as the reply `listen` would send for it. */
 function errorReply(error: HttpError): Reply {
   const base = text(error.status, error.message);
@@ -109,7 +116,7 @@ export function createApp(
         if (!(error instanceof HttpError)) throw error;
         reply = errorReply(error);
       }
-      return withRenewal(reply, renewalCookie(request));
+      return withRenewal(pages ? reply : privatePage(reply), renewalCookie(request));
     }
     if (found.status === 405) return text(405, "Method not allowed.");
     if (pages) return text(404, "Not found.");

@@ -33,6 +33,9 @@ function resumeCard(profile: string, published: { slug: string; url: string }[])
 <p>LinkedIn: add your entry under Featured, as a link.</p></section>`;
 }
 
+/** What a student with no project does, in order (the persona review). */
+const FIRST_STEPS = `<ol><li>Choose a repository below and build its wiki. It takes about 10 to 30 minutes.</li><li>Read what it wrote, and confirm it describes your part.</li><li>Open the preview, then publish what it shows.</li><li>Put your entry's link on your resume: this page gives you the lines to paste.</li></ol>`;
+
 function dashboard(
   session: Session,
   repos: GitHubRepo[],
@@ -55,10 +58,13 @@ ${action}</li>`;
     })
     .join("");
   const projects = owned
-    .map(
-      (p) =>
-        `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${STATE_WORDS[p.state].toLowerCase()}</span></li>`,
-    )
+    .map((p) => {
+      const live =
+        p.state === "published" && handle !== null
+          ? ` · <a href="${escapeHtml(projectUrl(publicOrigin, handle, p.slug))}">See it</a>`
+          : "";
+      return `<li><a href="/projects/${escapeHtml(p.id)}">${escapeHtml(p.slug)}</a> <span class="muted">${STATE_WORDS[p.state].toLowerCase()}</span>${live}</li>`;
+    })
     .join("");
   const published = owned.filter((p) => p.state === "published");
   // The biography exists once a project is published (ADR-0013).
@@ -78,8 +84,8 @@ ${action}</li>`;
     session.account.plan === "pro"
       ? `<p class="muted">Plan: Pro · <a href="/billing">Billing</a></p>`
       : `<p class="muted">Plan: Free · <a href="/billing">See Pro</a></p>`;
-  return `<h1>Your projects</h1>${plan}${link}${projects ? `<ul>${projects}</ul>` : `<p class="muted">No projects yet.</p>`}${card}
-<h2>Your public repositories</h2><p class="muted">RepoWiki builds a wiki for a public repository you can push to and have commits in.</p><ul class="plain">${choices || "<li>No public repositories found.</li>"}</ul>`;
+  return `<h1>Your projects</h1>${plan}${link}${projects ? `<ul>${projects}</ul>` : FIRST_STEPS}${card}
+<h2>Your public repositories</h2><p class="muted">RepoWiki builds a wiki for a public repository you can push to and have commits in.</p><p class="notice">Check your course policy before you choose a class assignment: many courses don't allow solutions to be posted publicly.</p><ul class="plain">${choices || "<li>No public repositories found.</li>"}</ul>`;
 }
 
 /** The dashboard and starting a project (spec 2 §7). */

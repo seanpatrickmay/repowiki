@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type Deps } from "./app.ts";
 import { HttpError } from "./http/body.ts";
-import { text } from "./http/server.ts";
+import { html, text } from "./http/server.ts";
 import { currentSession } from "./http/session.ts";
 import { call, signedInCookie, testDeps } from "./routes/test-app.ts";
 import { signIn } from "./store/accounts.ts";
@@ -34,6 +34,18 @@ describe("createApp (spec 2 §4)", () => {
     expect(String(reply.headers?.["content-type"])).toMatch(/^text\/html/);
     expect(String(reply.body)).toContain("Not found");
     expect(String(reply.body)).not.toContain("<b>");
+  });
+
+  it("never lets a shared cache keep an app page, and leaves the pages host's own caching alone", async () => {
+    const route = {
+      method: "GET" as const,
+      pattern: "/x",
+      handler: async () => html(200, "<p>x</p>"),
+    };
+    const app = await call(createApp(deps, [route]), { path: "/x" });
+    expect(app.headers?.["cache-control"]).toBe("private, no-store");
+    const pages = await call(createApp(deps, [route], { host: "pages" }), { path: "/x" });
+    expect(pages.headers?.["cache-control"]).toBeUndefined();
   });
 
   it("keeps the signed-in nav on a not-found page", async () => {

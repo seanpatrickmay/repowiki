@@ -75,6 +75,12 @@ describe("the project page's words (the persona review)", () => {
     expect(body).toContain("Checking the citations");
   });
 
+  it("says what the preview is for, and where to report a wrong sentence, beside the buttons", () => {
+    const body = projectPage(view);
+    expect(body).toContain("The preview shows your pages exactly as readers will see them");
+    expect(body).toContain("support@repowiki.app");
+  });
+
   it("names the preview and publish buttons by what they do", () => {
     const n = view.revision?.number ?? 0;
     const preview = { projectId: view.project.id, revision: n, siteHash: "a".repeat(64) };
