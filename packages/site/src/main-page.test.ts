@@ -39,11 +39,24 @@ describe("didYouKnowText", () => {
     ["Uses \u201cx.\u201d", "... that uses \u201cx\u201d?"],
     ["Calls (the api.)", "... that calls (the api)?"],
     ["  Padded text.  ", "... that padded text?"],
+    ["A commit cut the run time.", "... that a commit cut the run time?"],
+    ["An engine plays itself.", "... that an engine plays itself?"],
+    ["I/O runs on one thread.", "... that I/O runs on one thread?"],
   ])("turns %j into %j", (text, hook) => {
     expect(didYouKnowText(text)).toBe(hook);
   });
 
-  it.each(["", "   ", ".", "?!", "...", ":", '"."'])("has no hook for %j", (text) => {
+  it.each([
+    "",
+    "   ",
+    ".",
+    "?!",
+    "...",
+    ":",
+    '"."',
+    "It plays itself. Then it learns.",
+    "It scores 0.585! That beats the baseline.",
+  ])("has no hook for %j", (text) => {
     expect(didYouKnowText(text)).toBeNull();
   });
 });
