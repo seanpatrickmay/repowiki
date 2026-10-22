@@ -56,6 +56,7 @@ describe("didYouKnowText", () => {
     '"."',
     "It plays itself. Then it learns.",
     "It scores 0.585! That beats the baseline.",
+    "The table holds 0.8450314407467299 for the key 12 12.",
   ])("has no hook for %j", (text) => {
     expect(didYouKnowText(text)).toBeNull();
   });
