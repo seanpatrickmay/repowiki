@@ -557,6 +557,15 @@ ins {
   margin-bottom: 1rem;
 }
 
+.mp-articles {
+  margin-top: 1rem;
+}
+
+.mp-articles ul {
+  columns: 16rem;
+  column-gap: 2rem;
+}
+
 .page-ref {
   font-size: 0.85em;
   color: var(--text-muted);

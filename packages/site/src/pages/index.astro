@@ -72,6 +72,16 @@ const author = siteAuthor();
       </ul>
     </section>
   </div>
+  {view.articles.length > 0 && (
+    <section class="mp-box mp-articles" aria-labelledby="mp-articles">
+      <h2 id="mp-articles">Articles</h2>
+      <ul>
+        {view.articles.map((item) => (
+          <li><a href={item.href}>{item.title}</a></li>
+        ))}
+      </ul>
+    </section>
+  )}
   {map !== null && (
     <section class="mp-box mp-map" aria-labelledby="mp-map">
       <h2 id="mp-map">Feature map</h2>
