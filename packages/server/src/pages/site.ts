@@ -118,7 +118,7 @@ const pro: SitePage = {
 <ul><li>You pay on the day you upgrade, then again on the same day of each new period: every month at $5, or every 4 months at $15. Prices are in US dollars and include any sales tax. Stripe takes the card payment.</li>
 <li>Pro renews until you cancel. To cancel, open the Billing page, choose Manage billing, and cancel on Stripe's page. Pro stays on until the end of the period you paid for, and your entry stays up.</li>
 <li>"Up to 10" means at most 10 projects in your entry at once, and at most 10 new ones started in a month.</li>
-<li>We refund your first payment in full if you ask within 7 days and haven't started a build since upgrading. See <a href="/refunds">Refunds</a>.</li></ul>
+<li>Changed your mind before using Pro? Ask within 7 days of your first payment for a full refund. Once you start a build with Pro, that payment can't be refunded. See <a href="/refunds">Refunds</a>.</li></ul>
 <h2>During application season</h2>
 <ul><li><strong>Refresh after you push.</strong> Finish a feature in the middle of applying, refresh the project, and the entry shows it. A Free entry stays at the commit it was built from.</li>
 <li><strong>Show the project that fits each job.</strong> Add the project that fits each posting: the machine-learning one for a data internship, the web app for a front-end co-op.</li>

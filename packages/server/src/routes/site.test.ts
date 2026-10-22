@@ -118,6 +118,9 @@ describe("the public site (readiness: marketing pages)", () => {
   it("states the refund rule and what is stored, in the words of the pages", async () => {
     const refunds = await body("/refunds");
     expect(refunds).toContain("within 7 days of your first payment");
+    expect(refunds).toContain(
+      "Once you start a build with Pro, that payment can&#39;t be refunded.",
+    );
     expect(refunds).toContain("support@repowiki.app");
     const privacy = await body("/privacy");
     expect(privacy).toContain("two cookies");
