@@ -6,7 +6,7 @@ import { fakeAuthorizeRoute } from "./github/fake.ts";
 import { HttpError } from "./http/body.ts";
 import { createRouter, type Reply, type Route } from "./http/router.ts";
 import { type App, html, text } from "./http/server.ts";
-import { renewalCookie } from "./http/session.ts";
+import { currentSession, renewalCookie } from "./http/session.ts";
 import type { ObjectStore } from "./objects/store.ts";
 import {
   BIOGRAPHY_STYLE,
@@ -114,6 +114,14 @@ export function createApp(
     if (found.status === 405) return text(405, "Method not allowed.");
     if (pages) return text(404, "Not found.");
     const body = `<h1>Not found</h1><p class="muted">${escapeHtml(request.path)} is not a page on RepoWiki.</p>`;
-    return html(404, page({ title: "Not found", body, session: null }));
+    const session = await currentSession(deps.db, deps.config, request, deps.now());
+    return html(
+      404,
+      page({
+        title: "Not found",
+        body,
+        session: session && { csrf: session.csrf, login: session.account.login },
+      }),
+    );
   };
 }

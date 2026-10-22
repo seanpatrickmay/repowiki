@@ -5,6 +5,12 @@ import { currentSession } from "../http/session.ts";
 
 /** `GET /` on the app host: the dashboard when signed in, else the public home page (ADR-0016). */
 export function landingRoutes(deps: Deps): Route[] {
+  // The legal pages live on the public site; the app's footer links to them by path.
+  const legal: Route[] = ["/terms", "/privacy", "/refunds"].map((pattern) => ({
+    method: "GET",
+    pattern,
+    handler: async () => redirect(`${deps.config.publicOrigin}${pattern}`, 301),
+  }));
   return [
     {
       method: "GET",
@@ -16,5 +22,6 @@ export function landingRoutes(deps: Deps): Route[] {
         return redirect("/dashboard", 302);
       },
     },
+    ...legal,
   ];
 }

@@ -59,6 +59,17 @@ describe("the public site (readiness: marketing pages)", () => {
     expect(await body("/")).toMatch(/internship and co-op/i);
   });
 
+  it("says beside every sign-in button that signing in accepts the Terms and the Privacy notice", async () => {
+    for (const path of Object.keys(SITE_PAGES)) {
+      const html = await body(path);
+      const buttons =
+        html.split(`class="button" href="${deps.config.appOrigin}/auth/github"`).length - 1;
+      const notices = html.split('Signing in accepts the <a href="/terms">Terms</a>').length - 1;
+      expect(notices, path).toBe(buttons);
+    }
+    expect(await body("/")).toContain("Signing in accepts");
+  });
+
   it("shows both Pro prices and the Free rebuild", async () => {
     const pro = await body("/pro");
     expect(pro).toContain("$5 a month");

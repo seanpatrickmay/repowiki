@@ -18,6 +18,17 @@ describe("the landing page (spec 2 §7)", () => {
     });
   });
 
+  it.each(["/terms", "/privacy", "/refunds"])(
+    "sends %s on to the public site, where the legal pages live",
+    async (path) => {
+      const reply = await call(createApp(deps, landingRoutes(deps)), { path });
+      expect(reply).toMatchObject({
+        status: 301,
+        headers: { location: `${deps.config.publicOrigin}${path}` },
+      });
+    },
+  );
+
   it("sends a signed-in visitor on to the dashboard", async () => {
     const { cookie } = await signedInCookie(deps);
     const reply = await call(createApp(deps, landingRoutes(deps)), {
